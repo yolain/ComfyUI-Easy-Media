@@ -1,4 +1,5 @@
 import json
+import re
 
 import torch
 
@@ -88,6 +89,120 @@ CATEGORY = "EasyUse/Media"
 PROMPT_FORMAT_OPTIONS = ["default", "promptRelay"]
 
 # ---------------------------------------------------------------------------
+# prompt_override parsing helpers
+# ---------------------------------------------------------------------------
+
+_IMAGE_REF_RE = re.compile(r'@(?:图像|图片|图|image|img)(\d+)', re.IGNORECASE)
+_AUDIO_REF_RE = re.compile(r'@(?:audio|auido|音频)(\d+)', re.IGNORECASE)
+_FRAME_RANGE_RE = re.compile(r'\[(\d+)-(\d+)(?:,(\w+))?\]')
+
+
+def _parse_override_segments(prompt_override) -> list[dict]:
+    """Parse prompt_override (str with | separators, or list) into segment dicts."""
+    if isinstance(prompt_override, list):
+        parts = [str(p).strip() for p in prompt_override if str(p).strip()]
+    else:
+        parts = [p.strip() for p in str(prompt_override).split('|') if p.strip()]
+
+    segments: list[dict] = []
+    for part in parts:
+        m = _FRAME_RANGE_RE.search(part)
+        if not m:
+            continue
+        start_frame = int(m.group(1))
+        end_frame = int(m.group(2))
+        seg_type = (m.group(3) or 'flf').lower()
+        if seg_type not in ('flf', 'fmlf', 'ref'):
+            seg_type = 'flf'
+
+        image_indices = [int(r.group(1)) for r in _IMAGE_REF_RE.finditer(part)]
+        audio_indices = [int(r.group(1)) for r in _AUDIO_REF_RE.finditer(part)]
+
+        clean = _IMAGE_REF_RE.sub('', part)
+        clean = _AUDIO_REF_RE.sub('', clean)
+        clean = _FRAME_RANGE_RE.sub('', clean)
+        clean = clean.strip()
+
+        segments.append({
+            'start_frame': start_frame,
+            'end_frame': end_frame,
+            'type': seg_type,
+            'text': clean,
+            'image_indices': image_indices,
+            'audio_indices': audio_indices,
+        })
+    return segments
+
+
+def _count_images(image_input) -> int:
+    """Return the number of images in image_input."""
+    if image_input is None:
+        return 0
+    if isinstance(image_input, list):
+        return len(image_input)
+    if isinstance(image_input, torch.Tensor):
+        return image_input.shape[0] if image_input.dim() == 4 else (1 if image_input.dim() == 3 else 0)
+    return 0
+
+
+def _index_image(image_input, idx_one_based: int) -> 'torch.Tensor | None':
+    """Return a [1, H, W, C] tensor for the 1-based image index, or None."""
+    i = idx_one_based - 1
+    if image_input is None:
+        return None
+    if isinstance(image_input, list):
+        if i < len(image_input):
+            t = image_input[i]
+            if isinstance(t, torch.Tensor):
+                return t if t.dim() == 4 else t.unsqueeze(0)
+        return None
+    if isinstance(image_input, torch.Tensor):
+        if image_input.dim() == 4 and i < image_input.shape[0]:
+            return image_input[i : i + 1]
+        if image_input.dim() == 3 and i == 0:
+            return image_input.unsqueeze(0)
+    return None
+
+
+def _index_audio(audio_input, idx_one_based: int) -> 'dict | None':
+    """Return the audio dict for the 1-based index, or None."""
+    i = idx_one_based - 1
+    if audio_input is None:
+        return None
+    if isinstance(audio_input, list):
+        if i < len(audio_input):
+            a = audio_input[i]
+            return a if isinstance(a, dict) and 'waveform' in a else None
+        return None
+    if isinstance(audio_input, dict) and 'waveform' in audio_input:
+        return audio_input if i == 0 else None
+    return None
+
+
+def _merge_audio_batches(audio_input) -> 'dict | None':
+    """With is_input_list=True, a single audio source is split into N batch items.
+    Concatenate all items along the time axis to reconstruct the full audio."""
+    if audio_input is None:
+        return None
+    if isinstance(audio_input, dict) and 'waveform' in audio_input:
+        return audio_input  # already a single audio dict
+    if not isinstance(audio_input, list) or not audio_input:
+        return None
+    valid = [a for a in audio_input if isinstance(a, dict) and 'waveform' in a
+             and isinstance(a['waveform'], torch.Tensor)]
+    if not valid:
+        return None
+    _raw_sr = valid[0].get('sample_rate', 44100)
+    sr = int(_raw_sr[0] if isinstance(_raw_sr, (list, tuple)) else _raw_sr)
+    waveforms = [a['waveform'] for a in valid]  # each [1, C, T_i]
+    # Normalize channel count: up-mix mono to stereo if mixed
+    max_ch = max(w.shape[1] for w in waveforms)
+    if max_ch > 1:
+        waveforms = [w.expand(-1, max_ch, -1) if w.shape[1] < max_ch else w for w in waveforms]
+    combined = torch.cat(waveforms, dim=-1)  # [1, C, sum(T_i)]
+    return {'waveform': combined, 'sample_rate': sr}
+
+# ---------------------------------------------------------------------------
 # Node
 # ---------------------------------------------------------------------------
 
@@ -99,6 +214,7 @@ class TimelineEditor(io.ComfyNode):
             display_name="Timeline Editor",
             category=CATEGORY,
             description="Load a timeline of media items (prompt, image, audio tracks) and outputs structured data.",
+            is_input_list=True,
             inputs=[
                 io.DynamicCombo.Input(
                     "resolution",
@@ -109,6 +225,9 @@ class TimelineEditor(io.ComfyNode):
                 TYPE_TIMELINE.Input(
                     "timeline_data",
                 ),
+                io.String.Input("prompt_override", optional=True, tooltip="If provided, overrides all segment prompts in the timeline.", force_input=True),
+                io.Image.Input("image", optional=True, tooltip="List of images to override images in the timeline."),
+                io.Audio.Input("audio", optional=True, tooltip="List of audio clips to override audio in the timeline."),
             ],
             outputs=[
                 TYPE_TIMELINE_INFO.Output("TIMELINE_INFO"),
@@ -118,36 +237,112 @@ class TimelineEditor(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, resolution, format, timeline_data, **kwargs):
-        # ---- Parse timeline_data ----
-        if isinstance(timeline_data, str):
-            try:
-                data = json.loads(timeline_data)
-            except (json.JSONDecodeError, ValueError):
-                data = {}
-        else:
-            data = dict(timeline_data) if timeline_data else {}
+    def execute(
+        cls,
+        resolution: str | dict,
+        format: str,
+        timeline_data: str | dict,
+        **kwargs: object,
+    ) -> io.NodeOutput:
+        # is_input_list=True: every param arrives as a list; unwrap scalars here
+        if isinstance(resolution, list):
+            resolution = resolution[0]
+        if isinstance(format, list):
+            format = format[0]
+        if isinstance(timeline_data, list):
+            timeline_data = timeline_data[0]
 
-        tracks = data.get("tracks", [])
-        total_length: int = int(data.get("total_length", 121))
-        frame_rate: int = int(data.get("frame_rate", 24))
+        prompt_override = kwargs.get('prompt_override')
+        if isinstance(prompt_override, list) and prompt_override:
+            prompt_override = prompt_override[0]
+        image_input = kwargs.get('image')   # kept as list
+        audio_input = kwargs.get('audio')   # kept as list
 
-        # =========================================================
-        # Collect maintain (main) track segments
-        # =========================================================
-        maintain_segs: list[dict] = []
-        for track in tracks:
-            if track.get("type") != "maintain":
-                continue
-            for seg in sorted(track.get("segments", []), key=lambda s: s.get("start_frame", 0)):
-                content = seg.get("content", {})
+        # Segment parsing override: only needs prompt_override
+        use_prompt_override = prompt_override is not None
+
+        # Audio override: prompt_override + audio (image is NOT required)
+        audio_override = (
+            use_prompt_override
+            and audio_input is not None
+            and (not isinstance(audio_input, list) or len(audio_input) > 0)
+        )
+
+        # Keep use_override as alias for image-loading context (prompt_override active)
+        use_override = use_prompt_override
+
+        # ---- Parse data source ----
+        if use_prompt_override:
+            # Still read frame_rate from timeline_data metadata if available
+            if isinstance(timeline_data, str):
+                try:
+                    _td = json.loads(timeline_data)
+                except json.JSONDecodeError:
+                    _td = {}
+            else:
+                _td = dict(timeline_data) if timeline_data else {}
+            frame_rate: int = int(_td.get('frame_rate', 24))
+
+            override_segs = _parse_override_segments(prompt_override)
+            total_length: int = max((s['end_frame'] for s in override_segs), default=120) + 1
+
+            # Build maintain_segs — images stored as slot refs with _tensor_idx
+            maintain_segs: list[dict] = []
+            for s in override_segs:
+                n_img = len(s['image_indices'])
+                seg_start = s['start_frame']
+                seg_end = s['end_frame']
+                seg_duration = seg_end - seg_start
+                images: list[dict] = []
+                for i, idx_1based in enumerate(s['image_indices']):
+                    img_entry: dict = {
+                        'source_type': 'slot',
+                        'file_name': f'image_{idx_1based}',
+                        '_tensor_idx': idx_1based,
+                    }
+                    if n_img > 1:
+                        img_entry['start_frame'] = round(seg_start + i * seg_duration / n_img)
+                        img_entry['end_frame'] = round(seg_start + (i + 1) * seg_duration / n_img)
+                    images.append(img_entry)
                 maintain_segs.append({
-                    "start_frame": int(seg.get("start_frame", 0)),
-                    "end_frame": int(seg.get("end_frame", 0)),
-                    "text": content.get("text", ""),
-                    "images": content.get("images", []),  # list of ImageItem dicts
-                    "type": content.get("type", "flf"),
+                    'start_frame': seg_start,
+                    'end_frame': seg_end,
+                    'text': s['text'],
+                    'images': images,
+                    'type': s['type'],
+                    '_audio_indices': s['audio_indices'],
                 })
+            tracks: list = []  # not used in override path; defined for audio else-branch
+        else:
+            # ---- Normal path: Parse timeline_data ----
+            if isinstance(timeline_data, str):
+                try:
+                    data = json.loads(timeline_data)
+                except json.JSONDecodeError:
+                    data = {}
+            else:
+                data = dict(timeline_data) if timeline_data else {}
+
+            tracks = data.get("tracks", [])
+            total_length: int = int(data.get("total_length", 121))
+            frame_rate: int = int(data.get("frame_rate", 24))
+
+            # =========================================================
+            # Collect maintain (main) track segments
+            # =========================================================
+            maintain_segs: list[dict] = []
+            for track in tracks:
+                if track.get("type") != "maintain":
+                    continue
+                for seg in sorted(track.get("segments", []), key=lambda s: s.get("start_frame", 0)):
+                    content = seg.get("content", {})
+                    maintain_segs.append({
+                        "start_frame": int(seg.get("start_frame", 0)),
+                        "end_frame": int(seg.get("end_frame", 0)),
+                        "text": content.get("text", ""),
+                        "images": content.get("images", []),  # list of ImageItem dicts
+                        "type": content.get("type", "flf"),
+                    })
 
         # Flat list of all image items from maintain segments, in order
         all_image_items: list[dict] = []
@@ -157,11 +352,17 @@ class TimelineEditor(io.ComfyNode):
         # =========================================================
         # Resolve target dimensions
         # =========================================================
-        _resolution: str = resolution.get("resolution", "")
-        resize_method: str = resolution.get("resize_method", "stretch")
-        resize_to_pixel: int | None = resolution.get("resize_to_pixel", None)
-        width_custom: int | None = resolution.get("width", None)
-        height_custom: int | None = resolution.get("height", None)
+        def _unwrap(v, default=None):
+            """If DynamicCombo sub-value is wrapped as a list (is_input_list side-effect), unwrap it."""
+            if isinstance(v, list):
+                return v[0] if v else default
+            return v if v is not None else default
+
+        _resolution: str = _unwrap(resolution.get("resolution"), "")
+        resize_method: str = _unwrap(resolution.get("resize_method"), "stretch")
+        resize_to_pixel: int | None = _unwrap(resolution.get("resize_to_pixel"), None)
+        width_custom: int | None = _unwrap(resolution.get("width"), None)
+        height_custom: int | None = _unwrap(resolution.get("height"), None)
 
         # Detect mode from resolution string
         if "auto" in _resolution:
@@ -175,16 +376,31 @@ class TimelineEditor(io.ComfyNode):
         else:
             mode = "preset"
 
+        # image_override: True whenever image input is connected, regardless of full override mode
+        image_override = (
+            image_input is not None
+            and (not isinstance(image_input, list) or len(image_input) > 0)
+        )
+
+        # When image_override but timeline has no image items, generate entries from input itself
+        if image_override and not all_image_items:
+            n = _count_images(image_input)
+            all_image_items = [{'source_type': 'slot', '_tensor_idx': i + 1} for i in range(n)]
+
         # Load first image once for dimension inference (auto / longest / shortest)
         first_image_tensor: torch.Tensor | None = None
-        if mode in ("auto", "longest", "shortest") and all_image_items:
-            first = all_image_items[0]
-            first_image_tensor = load_image_tensor(
-                first.get("source_type", "input"),
-                first.get("file_path"),
-                first.get("local_path"),
-                first.get("url"),
-            )
+        if mode in ("auto", "longest", "shortest"):
+            if image_override:
+                # Always infer from the first connected image
+                first_image_tensor = _index_image(image_input, 1)
+            elif all_image_items:
+                first = all_image_items[0]
+                first_image_tensor = load_image_tensor(
+                    first.get("source_type", "input"),
+                    first.get("file_path"),
+                    first.get("local_path"),
+                    first.get("url"),
+                )
 
         target_w: int
         target_h: int
@@ -240,16 +456,24 @@ class TimelineEditor(io.ComfyNode):
         # =========================================================
         image_tensors: list[torch.Tensor] = []
         for idx, item in enumerate(all_image_items):
-            # Reuse already-loaded tensor for the first item (avoid double load)
-            if idx == 0 and first_image_tensor is not None:
-                t = first_image_tensor
+            if image_override:
+                # Use connected image input (positional for normal path, _tensor_idx for override)
+                tensor_idx = item.get('_tensor_idx', idx + 1) if use_override else (idx + 1)
+                if idx == 0 and first_image_tensor is not None:
+                    t = first_image_tensor
+                else:
+                    t = _index_image(image_input, tensor_idx)
             else:
-                t = load_image_tensor(
-                    item.get("source_type", "input"),
-                    item.get("file_path"),
-                    item.get("local_path"),
-                    item.get("url"),
-                )
+                # Load from file path recorded in timeline
+                if idx == 0 and first_image_tensor is not None:
+                    t = first_image_tensor
+                else:
+                    t = load_image_tensor(
+                        item.get("source_type", "input"),
+                        item.get("file_path"),
+                        item.get("local_path"),
+                        item.get("url"),
+                    )
             if t is None:
                 continue
             t = resize_image(t, target_w, target_h, resize_method)
@@ -266,62 +490,126 @@ class TimelineEditor(io.ComfyNode):
         default_sr = 44100
         merged_waveform: torch.Tensor | None = None
 
-        for track in tracks:
-            if track.get("type") != "audio":
-                continue
-            track_parts: list[torch.Tensor] = []
-            prev_end_sec = 0.0
+        if audio_override:
+            # ---- Override audio: build from audio input per segment ----
+            # audio_input is a list from MakeAudioList (is_output_list) where
+            # index N-1 corresponds to @audioN reference in prompt_override.
+            # Detect channel count from first non-silent real audio clip.
             channels = 2
+            for _probe_idx in range(1, 11):
+                _probe = _index_audio(audio_input, _probe_idx)
+                if _probe is not None and _probe['waveform'].any():
+                    channels = _probe['waveform'].shape[1]
+                    _raw_sr = _probe.get('sample_rate', default_sr)
+                    default_sr = int(_raw_sr[0] if isinstance(_raw_sr, (list, tuple)) else _raw_sr)
+                    break
 
-            for seg in sorted(track.get("segments", []), key=lambda s: s.get("start_frame", 0)):
-                start = int(seg.get("start_frame", 0))
-                end = min(int(seg.get("end_frame", 0)), total_length - 1)
-                start_sec = max(0.0, frames_to_seconds(start, frame_rate))
-                end_sec = frames_to_seconds(end, frame_rate)
+            def _extract_clip(a: dict, duration_sec: float) -> torch.Tensor:
+                """Extract from the beginning of audio clip `a`, clip/pad to duration_sec. Returns [C, T]."""
+                _raw = a.get('sample_rate', default_sr)
+                sr = int(_raw[0] if isinstance(_raw, (list, tuple)) else _raw)
+                wav = a['waveform'][0]  # [C, T]
+                # Up-mix mono to stereo if needed
+                if wav.shape[0] < channels:
+                    wav = wav.expand(channels, -1)
+                n_ch = wav.shape[0]
+                target_samples = max(1, int(duration_sec * sr))
+                chunk = wav[:, :target_samples]
+                if chunk.shape[-1] < target_samples:
+                    chunk = torch.cat(
+                        [chunk, torch.zeros(n_ch, target_samples - chunk.shape[-1],
+                                            dtype=chunk.dtype, device=chunk.device)],
+                        dim=-1,
+                    )
+                return chunk[:, :target_samples]
+
+            audio_parts: list[torch.Tensor] = []
+            prev_end_sec = 0.0
+
+            for seg in maintain_segs:
+                start_sec = seg['start_frame'] / frame_rate
+                end_sec = seg['end_frame'] / frame_rate
                 duration_sec = max(0.0, end_sec - start_sec)
 
-                # Trim offset: how far into the source audio this segment starts
-                origin_start = int(seg.get("origin_start_frame", start))
-                # Use plain frame-count division (not frames_to_seconds which applies a -1 offset for indices)
-                trim_offset_sec = max(0.0, (start - origin_start) / frame_rate) if start > origin_start else 0.0
-
-                content = seg.get("content", {})
-                waveform = load_audio_waveform(
-                    content.get("source_type", "input"),
-                    content.get("file_path"),
-                    content.get("local_path"),
-                    content.get("url"),
-                    default_sr,
-                )
-
-                # Determine channel count from loaded audio before adding gap silence,
-                # so the silence tensor has matching channels and torch.cat won't fail.
-                if waveform is not None:
-                    channels = waveform.shape[1]
-
-                # Silence gap before this segment (inserted after channel count is known)
+                # Gap silence before this segment
                 if start_sec > prev_end_sec + 1e-6:
-                    track_parts.append(silence(default_sr, start_sec - prev_end_sec, channels))
+                    audio_parts.append(silence(default_sr, start_sec - prev_end_sec, channels))
 
-                if waveform is not None:
-                    wav = waveform[0]  # [C,T]
-                    # Apply trim offset — skip samples from the start of the source
-                    if trim_offset_sec > 0.0:
-                        offset_samples = int(default_sr * trim_offset_sec)
-                        wav = wav[:, offset_samples:]
-                    target_samples = max(1, int(default_sr * duration_sec))
-                    if wav.shape[-1] > target_samples:
-                        wav = wav[:, :target_samples]
-                    elif wav.shape[-1] < target_samples:
-                        wav = torch.cat([wav, torch.zeros(channels, target_samples - wav.shape[-1])], dim=-1)
-                    track_parts.append(wav.unsqueeze(0))
+                audio_indices = seg.get('_audio_indices', [])
+                if audio_indices:
+                    # @audioN present → use that clip from its beginning
+                    a = _index_audio(audio_input, audio_indices[0])
+                    if a is not None:
+                        chunk = _extract_clip(a, duration_sec)
+                        audio_parts.append(chunk.unsqueeze(0))
+                    else:
+                        audio_parts.append(silence(default_sr, duration_sec, channels))
                 else:
-                    track_parts.append(silence(default_sr, duration_sec, channels))
+                    # No @audio reference → mute this segment
+                    audio_parts.append(silence(default_sr, duration_sec, channels))
 
                 prev_end_sec = end_sec
 
-            if track_parts:
-                merged_waveform = torch.cat(track_parts, dim=-1)
+            if audio_parts:
+                merged_waveform = torch.cat(audio_parts, dim=-1)
+        else:
+            # ---- Normal path: audio from timeline tracks ----
+            for track in tracks:
+                if track.get("type") != "audio":
+                    continue
+                track_parts: list[torch.Tensor] = []
+                prev_end_sec = 0.0
+                channels = 2
+
+                for seg in sorted(track.get("segments", []), key=lambda s: s.get("start_frame", 0)):
+                    start = int(seg.get("start_frame", 0))
+                    end = min(int(seg.get("end_frame", 0)), total_length - 1)
+                    start_sec = max(0.0, frames_to_seconds(start, frame_rate))
+                    end_sec = frames_to_seconds(end, frame_rate)
+                    duration_sec = max(0.0, end_sec - start_sec)
+
+                    # Trim offset: how far into the source audio this segment starts
+                    origin_start = int(seg.get("origin_start_frame", start))
+                    # Use plain frame-count division (not frames_to_seconds which applies a -1 offset for indices)
+                    trim_offset_sec = max(0.0, (start - origin_start) / frame_rate) if start > origin_start else 0.0
+
+                    content = seg.get("content", {})
+                    waveform = load_audio_waveform(
+                        content.get("source_type", "input"),
+                        content.get("file_path"),
+                        content.get("local_path"),
+                        content.get("url"),
+                        default_sr,
+                    )
+
+                    # Determine channel count from loaded audio before adding gap silence,
+                    # so the silence tensor has matching channels and torch.cat won't fail.
+                    if waveform is not None:
+                        channels = waveform.shape[1]
+
+                    # Silence gap before this segment (inserted after channel count is known)
+                    if start_sec > prev_end_sec + 1e-6:
+                        track_parts.append(silence(default_sr, start_sec - prev_end_sec, channels))
+
+                    if waveform is not None:
+                        wav = waveform[0]  # [C,T]
+                        # Apply trim offset — skip samples from the start of the source
+                        if trim_offset_sec > 0.0:
+                            offset_samples = int(default_sr * trim_offset_sec)
+                            wav = wav[:, offset_samples:]
+                        target_samples = max(1, int(default_sr * duration_sec))
+                        if wav.shape[-1] > target_samples:
+                            wav = wav[:, :target_samples]
+                        elif wav.shape[-1] < target_samples:
+                            wav = torch.cat([wav, torch.zeros(channels, target_samples - wav.shape[-1])], dim=-1)
+                        track_parts.append(wav.unsqueeze(0))
+                    else:
+                        track_parts.append(silence(default_sr, duration_sec, channels))
+
+                    prev_end_sec = end_sec
+
+                if track_parts:
+                    merged_waveform = torch.cat(track_parts, dim=-1)
 
         total_sec = (total_length - 1) / frame_rate
         channels = 2
@@ -428,11 +716,16 @@ class TimelineInfoOutput(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, timeline_info, prompt_format, **kwargs):
+    def execute(
+        cls,
+        timeline_info: str | dict,
+        prompt_format: str,
+        **kwargs: object,
+    ) -> io.NodeOutput:
         if isinstance(timeline_info, str):
             try:
                 info = json.loads(timeline_info)
-            except (json.JSONDecodeError, ValueError):
+            except json.JSONDecodeError:
                 info = {}
         else:
             info = dict(timeline_info) if timeline_info else {}
@@ -510,11 +803,18 @@ class TimelineSegmentOutput(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, timeline_info, prompt_format, segment_index, images=None, audio=None, **kwargs):
+    def execute(
+        cls,
+        timeline_info: str | dict,
+        prompt_format: str,
+        segment_index: int,
+        images: 'torch.Tensor | None' = None,
+        audio: dict | None = None,
+    ) -> io.NodeOutput:
         if isinstance(timeline_info, str):
             try:
                 info = json.loads(timeline_info)
-            except (json.JSONDecodeError, ValueError):
+            except json.JSONDecodeError:
                 info = {}
         else:
             info = dict(timeline_info) if timeline_info else {}
@@ -620,17 +920,103 @@ class TimelineSegmentCount(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, timeline_info, **kwargs):
+    def execute(cls, timeline_info: str | dict) -> io.NodeOutput:
         if isinstance(timeline_info, str):
             try:
                 info = json.loads(timeline_info)
-            except (json.JSONDecodeError, ValueError):
+            except json.JSONDecodeError:
                 info = {}
         else:
             info = dict(timeline_info) if timeline_info else {}
 
         count: int = len(info.get("segments", []))
         return io.NodeOutput(count)
+
+# ---------------------------------------------------------------------------
+# Tuple builder nodes
+# ---------------------------------------------------------------------------
+
+class MakeImageList(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="easy makeImageList",
+            display_name="Make Image List",
+            category=CATEGORY,
+            description="Combine up to 10 optional image inputs into an images list.",
+            inputs=[
+                io.Boolean.Input("skip_empty", default=False, label_on="Skip", label_off="Fill"),
+                io.Image.Input("image1", optional=True),
+                io.Image.Input("image2", optional=True),
+                io.Image.Input("image3", optional=True),
+                io.Image.Input("image4", optional=True),
+                io.Image.Input("image5", optional=True),
+                io.Image.Input("image6", optional=True),
+                io.Image.Input("image7", optional=True),
+                io.Image.Input("image8", optional=True),
+                io.Image.Input("image9", optional=True),
+                io.Image.Input("image10", optional=True),
+            ],
+            outputs=[
+                io.Image.Output("IMAGE", is_output_list=True),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, skip_empty: bool, **kwargs: object) -> io.NodeOutput:
+        images: list[torch.Tensor] = []
+        for i in range(1, 11):
+            key = f"image{i}"
+            v = kwargs.get(key)
+            if v is not None:
+                images.append(v)
+            elif not skip_empty:
+                empty = torch.zeros(1, 1, 4, dtype=torch.float32, device="cpu")
+                images.append(empty)
+
+        return io.NodeOutput(images)
+
+
+class MakeAudioList(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="easy makeAudioList",
+            display_name="Make Audio List",
+            category=CATEGORY,
+            description="Combine up to 10 optional audio inputs into an audio list.",
+            inputs=[
+                io.Boolean.Input("skip_empty", default=False, label_on="Skip", label_off="Fill"),
+                io.Audio.Input("audio1", optional=True),
+                io.Audio.Input("audio2", optional=True),
+                io.Audio.Input("audio3", optional=True),
+                io.Audio.Input("audio4", optional=True),
+                io.Audio.Input("audio5", optional=True),
+                io.Audio.Input("audio6", optional=True),
+                io.Audio.Input("audio7", optional=True),
+                io.Audio.Input("audio8", optional=True),
+                io.Audio.Input("audio9", optional=True),
+                io.Audio.Input("audio10", optional=True),
+            ],
+            outputs=[
+                io.Audio.Output("AUDIO", is_output_list=True),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, skip_empty: bool, **kwargs: object) -> io.NodeOutput:
+        audios: list[dict] = []
+        for i in range(1, 11):
+            key = f"audio{i}"
+            v = kwargs.get(key)
+            if v is not None:
+                audios.append(v)
+            elif not skip_empty:
+                empty = silence(16000, 0.001, 1)
+                audios.append({"waveform": empty, "sample_rate": 16000})
+
+        return io.NodeOutput(audios)
+
 
 class ImageIndexesToIntList(io.ComfyNode):
     @classmethod
@@ -649,7 +1035,7 @@ class ImageIndexesToIntList(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, image_indexes, **kwargs):
+    def execute(cls, image_indexes: str) -> io.NodeOutput:
         if not image_indexes:
             indexes: list[int] = []
         else:

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { Music2 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -18,10 +18,11 @@ import { SegmentBlock } from './SegmentBlock'
 import { TrackRow } from './TrackRow'
 import { AudioWaveform } from './AudioWaveform'
 import type { Track, AudioSegment, Segment, Marker, TimeDisplayFormat } from '@/types/timeline'
+import type { SlotItem } from '@/lib/timeline-utils'
 import { useT } from '@/lib/i18n'
 import { uuid } from '@/lib/uuid'
 import { CUSTOM_NODE_CLASS } from '@/lib/constants'
-import { secondsToAudioFrames } from '@/lib/timeline-utils'
+import { secondsToAudioFrames, computeSlotItems } from '@/lib/timeline-utils'
 
 interface AudioTrackProps {
   track: Track
@@ -33,6 +34,8 @@ interface AudioTrackProps {
   onSelectedIdChange: (id: string | null) => void
   onTrackChange: (patch: Partial<Track>) => void
   onSegmentsChange: (segments: Segment[]) => void
+  node?: any
+  app?: any
 }
 
 /** Map segment source_type to the MediaSelector tab */
@@ -57,6 +60,8 @@ export function AudioTrack({
   onSelectedIdChange,
   onTrackChange,
   onSegmentsChange,
+  node,
+  app,
 }: Readonly<AudioTrackProps>) {
   const t = useT()
   const containerRef = useRef<HTMLElement>(null)
@@ -70,6 +75,23 @@ export function AudioTrack({
   const [selectorValue, setSelectorValue] = useState('')
   const [rightClickedId, setRightClickedId] = useState<string | null>(null)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
+  // Keep refs to temporary Audio elements so we can clean up event listeners
+  const tempAudioRefs = useRef<HTMLAudioElement[]>([])
+
+  // Recompute slot items when popover opens to get fresh graph data
+  const slotItems = useMemo(() => computeSlotItems(node, app, 'audio'), [node, app, popoverOpen])
+
+  // Cleanup temporary Audio elements on unmount
+  useEffect(() => {
+    return () => {
+      tempAudioRefs.current.forEach((audio) => {
+        audio.removeEventListener('loadedmetadata', () => {})
+        audio.removeEventListener('error', () => {})
+        audio.src = ''
+      })
+      tempAudioRefs.current = []
+    }
+  }, [])
 
   // When an overlay is open:
   //   1. Elevate the widget container above the dismiss backdrop (z-9999 > z-9997)
@@ -114,6 +136,90 @@ export function AudioTrack({
 
   function handleSelectorChange(filePath: string) {
     setSelectorValue(filePath)
+
+    if (filePath.startsWith('__slot__:')) {
+      const slotName = filePath.slice('__slot__:'.length)
+      // Get slot item info - audio_name from LoadAudio for playback
+      const slotItem = slotItems.find((item: SlotItem) => item.value === filePath)
+      const audioName = slotItem?.audio_name
+      // Build url from audio_name similar to input files (from input directory)
+      const url = audioName ? `/api/view?filename=${encodeURIComponent(audioName)}&type=input` : undefined
+
+      if (editingSegId) {
+        onSegmentsChange(
+          segments.map((s) =>
+            s.id === editingSegId
+              ? { ...s, content: { source_type: 'slot', slot_name: slotName, file_name: slotName, url } }
+              : s,
+          ),
+        )
+        setPopoverOpen(false)
+        return
+      }
+
+      // For new segments, get actual duration from audio
+      if (url) {
+        const tempAudio = new Audio(url)
+        tempAudio.preload = 'metadata'
+        tempAudioRefs.current.push(tempAudio)
+        tempAudio.addEventListener('loadedmetadata', () => {
+          const actualDuration = tempAudio.duration
+          const cursor = lastOccupied >= 0 ? lastOccupied + 1 : 0
+          if (cursor >= totalFrames) return
+          const actualFrames = Math.ceil(actualDuration * frameRate)
+          const segEnd = Math.min(totalFrames - 1, cursor + actualFrames - 1)
+          const newSeg: AudioSegment = {
+            id: uuid(),
+            start_frame: cursor,
+            end_frame: segEnd,
+            origin_start_frame: cursor,
+            origin_end_frame: cursor + actualFrames - 1,
+            content: { source_type: 'slot', slot_name: slotName, file_name: slotName, url },
+            color: track.color,
+            markers: [],
+          }
+          onSegmentsChange([...segments, newSeg].toSorted((a, b) => a.start_frame - b.start_frame))
+          setEditingSegId(newSeg.id)
+        })
+        tempAudio.addEventListener('error', () => {
+          const cursor = lastOccupied >= 0 ? lastOccupied + 1 : 0
+          if (cursor >= totalFrames) return
+          const fallbackEnd = Math.min(totalFrames - 1, cursor + secondsToAudioFrames(5, frameRate) - 1)
+          const newSeg: AudioSegment = {
+            id: uuid(),
+            start_frame: cursor,
+            end_frame: fallbackEnd,
+            origin_start_frame: cursor,
+            origin_end_frame: fallbackEnd,
+            content: { source_type: 'slot', slot_name: slotName, file_name: slotName, url },
+            color: track.color,
+            markers: [],
+          }
+          onSegmentsChange([...segments, newSeg].toSorted((a, b) => a.start_frame - b.start_frame))
+          setEditingSegId(newSeg.id)
+        })
+      } else {
+        // Fallback if no url available
+        const cursor = lastOccupied >= 0 ? lastOccupied + 1 : 0
+        if (cursor >= totalFrames) { setPopoverOpen(false); return }
+        const fallbackEnd = Math.min(totalFrames - 1, cursor + secondsToAudioFrames(5, frameRate) - 1)
+        const newSeg: AudioSegment = {
+          id: uuid(),
+          start_frame: cursor,
+          end_frame: fallbackEnd,
+          origin_start_frame: cursor,
+          origin_end_frame: fallbackEnd,
+          content: { source_type: 'slot', slot_name: slotName, file_name: slotName, url },
+          color: track.color,
+          markers: [],
+        }
+        onSegmentsChange([...segments, newSeg].toSorted((a, b) => a.start_frame - b.start_frame))
+        setEditingSegId(newSeg.id)
+      }
+      setPopoverOpen(false)
+      return
+    }
+
     const fileName = filePath.split('/').pop() ?? filePath
     const isUrl = filePath.startsWith('http')
 
@@ -140,6 +246,7 @@ export function AudioTrack({
       // Create temporary audio to get actual duration
       const tempAudio = new Audio(src)
       tempAudio.preload = 'metadata'
+      tempAudioRefs.current.push(tempAudio)
 
       tempAudio.addEventListener('loadedmetadata', () => {
         const actualDuration = tempAudio.duration
@@ -239,6 +346,7 @@ export function AudioTrack({
         const duration = await new Promise<number>((resolve) => {
           const audio = new Audio(src)
           audio.preload = 'metadata'
+          tempAudioRefs.current.push(audio)
           audio.addEventListener('loadedmetadata', () => resolve(audio.duration))
           audio.addEventListener('error', () => resolve(5))
         })
@@ -530,6 +638,7 @@ export function AudioTrack({
             onChange={handleSelectorChange}
             mediaType="audio"
             defaultTab={popoverDefaultTab}
+            slotItems={slotItems}
           />
         </PopoverContent>
       </Popover>

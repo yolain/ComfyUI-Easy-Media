@@ -6,7 +6,7 @@ import nodes as _nodes
 from typing_extensions import override
 from comfy_api.latest import ComfyExtension, io
 from aiohttp import web
-from .nodes import TimelineEditor, TimelineInfoOutput, TimelineSegmentOutput, TimelineSegmentCount, ImageIndexesToIntList, LTXVAddGuidesFromBatchIndexes, EasySaveVideo, EasyMergeVideos, EasyMergeVideosFromPaths
+from .nodes import *
 from .routes import *
 
 # Define the path
@@ -18,16 +18,16 @@ config_path = os.path.join(root_path, "config.yaml")
 if os.path.isfile(config_path):
     with open(config_path, 'r') as f:
         data = yaml.load(f, Loader=yaml.FullLoader)
-        if data and "WEB_VERSION" in data:
-            dist_path = f"dist/{data['WEB_VERSION']}"
-            with open(config_path, 'w') as f:
-                yaml.dump(data, f)
-        else:
-            dist_path = f"dist/{web_default_version}"
-    if not os.path.exists(os.path.join(root_path, dist_path)):
-        print(f"web root {data['WEB_VERSION']} not found, using default")
+    if data and "WEB_VERSION" in data:
+        dist_path = f"dist/{data['WEB_VERSION']}"
+    else:
         dist_path = f"dist/{web_default_version}"
 else:
+    dist_path = f"dist/{web_default_version}"
+
+web_version = data.get("WEB_VERSION", web_default_version) if data else web_default_version
+if not os.path.exists(os.path.join(root_path, dist_path)):
+    print(f"web root {web_version} not found, using default")
     dist_path = f"dist/{web_default_version}"
     
 dist_path = os.path.join(root_path, dist_path)
@@ -51,6 +51,8 @@ class EasyMediaExtension(ComfyExtension):
             TimelineSegmentOutput,
             TimelineSegmentCount,
             ImageIndexesToIntList,
+            MakeImageList,
+            MakeAudioList,
             # LTXV
             LTXVAddGuidesFromBatchIndexes,
             # Video

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { Plus } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -11,6 +11,8 @@ import { useT } from '@/lib/i18n'
 import { uuid } from '@/lib/uuid'
 import { TimelineRuler } from './TimelineRuler'
 import { imageItemFromPath, imageItemFromUrl, tiledImageBackground } from '@/lib/image-utils'
+import { computeSlotItems } from '@/lib/timeline-utils'
+import type { SlotItem } from '@/lib/timeline-utils'
 
 interface EditPanelProps {
   segment: MaintainSegment
@@ -23,6 +25,8 @@ interface EditPanelProps {
   trackColor: string
   onContentChange: (patch: Partial<MaintainContent>) => void
   onAllSegmentsChange: (segs: Segment[]) => void
+  node?: any
+  app?: any
 }
 
 // ── Sub-block types ──────────────────────────────────────────────────────────
@@ -405,10 +409,14 @@ export function EditPanel({
   canvasScale,
   onContentChange,
   onAllSegmentsChange,
+  node,
+  app,
 }: Readonly<EditPanelProps>) {
   const t = useT()
   const span = segment.end_frame - segment.start_frame + 1
   const [promptMode, setPromptMode] = useState<'combined' | 'individual'>('individual')
+
+  // Recompute slot items when popover opens to get fresh graph data
 
   // Sub-block state: positions within this segment (0..span-1)
   const [subBlocks, setSubBlocks] = useState<SubBlock[]>(() =>
@@ -441,6 +449,9 @@ export function EditPanel({
   const [anchorPos, setAnchorPos] = useState({ x: 8, y: 8 })
   const trackAreaRef = useRef<HTMLDivElement>(null)
 
+  // Recompute slot items when popover opens to get fresh graph data
+  const slotItems = useMemo(() => computeSlotItems(node, app, 'image'), [node, app, popoverOpen])
+
   function openPopover(
     e: React.MouseEvent | null,
     blockId: string | null,
@@ -461,8 +472,27 @@ export function EditPanel({
   }
 
   function handleSelectorChange(value: string) {
-    const isUrl = /^https?:\/\//i.test(value)
-    const newItem: ImageItem = isUrl ? imageItemFromUrl(value) : imageItemFromPath(value)
+    const isSlot = value.startsWith('__slot__:')
+    const isUrl = !isSlot && /^https?:\/\//i.test(value)
+    const slotName = isSlot ? value.slice('__slot__:'.length) : undefined
+
+    // Get img src from slotItems if available
+    const slotItem = slotItems.find((item: SlotItem) => item.value === value)
+    const imgSrc = slotItem?.img
+
+    let newItem: ImageItem
+    if (isSlot) {
+      newItem = {
+        source_type: 'slot',
+        slot_name: slotName,
+        file_name: slotName ?? value,
+        url: imgSrc,
+      }
+    } else if (isUrl) {
+      newItem = imageItemFromUrl(value)
+    } else {
+      newItem = imageItemFromPath(value)
+    }
 
     if (editingBlockId === null) {
       // Add new block
@@ -631,6 +661,7 @@ export function EditPanel({
               onChange={handleSelectorChange}
               mediaType="image"
               defaultTab={popoverTab}
+              slotItems={slotItems}
             />
           </PopoverContent>
         </Popover>

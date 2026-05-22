@@ -14,6 +14,10 @@
     "deleteSegment": "删除选中片段",
     "zoom": "缩放"
   },
+  "timeline": {
+    "defaultTrackName": "主轨 {n}",
+    "defaultAudioTrackName": "音频轨 {n}"
+  },
   "trackRow": {
     "trackColor": "轨道颜色"
   },
@@ -100,6 +104,12 @@
     "urlErrorTitle": "URL 错误",
     "urlErrorNotFound": "未找到文件，或服务器拒绝访问。",
     "empty": "未找到文件",
-    "error": "加载失败：{msg}"
+    "error": "加载失败：{msg}",
+    "tabSlot": "插槽",
+    "slotNotConnected": "未连接输入",
+    "slotEmpty": "暂无内容",
+    "slotList": "列表",
+    "slotImage": "图像 {n}",
+    "slotAudio": "音频 {n}"
   }
 }

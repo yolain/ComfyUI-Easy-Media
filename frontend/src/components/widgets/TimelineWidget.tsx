@@ -10,6 +10,19 @@ import { EditPanel } from './timeline/EditPanel'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { LocaleContext } from '@/lib/i18n'
 
+/** Minimal type for an input slot to check connection status */
+interface InputSlot {
+  name: string
+  link: number | null
+}
+
+/** Check if an input slot is connected (has a non-null link) */
+function isInputConnected(node: any, inputName: string): boolean {
+  if (!node?.inputs) return false
+  const slot = (node.inputs as InputSlot[]).find((i) => i.name === inputName)
+  return slot?.link !== null && slot?.link !== undefined
+}
+
 function ensureDefaults(raw: unknown): TimelineData {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
     const d = raw as Partial<TimelineData>
@@ -27,6 +40,7 @@ function audioUrl(seg: AudioSegment): string | null {
   if (source_type === 'input' && file_path) {
     return `/api/view?filename=${encodeURIComponent(file_path)}&type=input`
   }
+  if (source_type === 'slot' && url) return url
   if (source_type === 'local' && local_path) {
     return `file://${local_path}`
   }
@@ -75,7 +89,7 @@ function syncOneAudio(
   }
 }
 
-export function TimelineWidget({ value, onChange, app, node }: Readonly<ReactWidgetProps<TimelineData>>) {
+export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<ReactWidgetProps<TimelineData>>) {
   const data = ensureDefaults(value)
   const [displayFormat, setDisplayFormat] = useState<TimeDisplayFormat>('seconds')
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -121,6 +135,26 @@ export function TimelineWidget({ value, onChange, app, node }: Readonly<ReactWid
   useEffect(() => {
     playbackRef.current.frame = playheadFrame
   }, [playheadFrame])
+
+  // Track prompt_override connection status
+  useEffect(() => {
+    const updateConnectionStatus = () => {
+      widget.disabled = isInputConnected(node, 'prompt_override')
+    }
+    updateConnectionStatus()
+
+    // Listen for connection changes on this node using LiteGraph callback
+    if (node) {
+      const prevOnConnectionsChange = node.onConnectionsChange?.bind(node)
+      node.onConnectionsChange = (...args: unknown[]) => {
+        prevOnConnectionsChange?.(...args)
+        updateConnectionStatus()
+      }
+      return () => {
+        node.onConnectionsChange = prevOnConnectionsChange ?? undefined
+      }
+    }
+  }, [node, widget])
 
   /**
    * Ensure audio HTMLElements exist for every audio segment.
@@ -472,6 +506,8 @@ export function TimelineWidget({ value, onChange, app, node }: Readonly<ReactWid
                       onSelectedIdChange={setSelectedId}
                       onTrackChange={(patch) => updateTrack(track.id, patch)}
                       onSegmentsChange={(segs) => updateSegments(track.id, segs)}
+                      node={node}
+                      app={app}
                     />
                   )
                 }
@@ -494,6 +530,8 @@ export function TimelineWidget({ value, onChange, app, node }: Readonly<ReactWid
             trackColor={maintainTrack.color}
             onContentChange={handleContentChange}
             onAllSegmentsChange={(segs) => updateSegments(maintainTrack.id, segs)}
+            node={node}
+            app={app}
           />
         )}
       </div>
