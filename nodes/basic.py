@@ -258,6 +258,15 @@ class TimelineEditor(io.ComfyNode):
         image_input = kwargs.get('image')   # kept as list
         audio_input = kwargs.get('audio')   # kept as list
 
+        # Unwrap double-wrapped list from is_input_list (list of audio lists)
+        # When audio comes from MakeAudioList (is_output_list=True), it's already a list.
+        # With is_input_list=True, that list gets wrapped again → [[audio1, audio2, ...]]
+        # We need to unwrap to get the original list of audio dicts.
+        if isinstance(audio_input, list) and len(audio_input) == 1:
+            inner = audio_input[0]
+            if isinstance(inner, list):
+                audio_input = inner
+
         # Segment parsing override: only needs prompt_override
         use_prompt_override = prompt_override is not None
 
@@ -490,7 +499,28 @@ class TimelineEditor(io.ComfyNode):
         default_sr = 44100
         merged_waveform: torch.Tensor | None = None
 
-        if audio_override:
+        # ---- Single audio as whole timeline: clip/pad to total duration ----
+        if prompt_override != '' and "@audio" not in prompt_override and "@音频" not in prompt_override and audio_input is not None and len(audio_input) == 1:
+            a = audio_input[0]  # Extract from single-element list
+            channels = a['waveform'].shape[1] if 'waveform' in a else 2
+            _raw_sr = a.get('sample_rate', default_sr)
+            sr = int(_raw_sr[0] if isinstance(_raw_sr, (list, tuple)) else _raw_sr)
+            if sr != default_sr:
+                default_sr = sr
+
+            total_sec = (total_length - 1) / frame_rate
+            wav = a['waveform'][0]  # [C, T]
+            target_samples = max(1, int(total_sec * sr))
+            chunk = wav[:, :target_samples]
+            if chunk.shape[-1] < target_samples:
+                chunk = torch.cat([
+                    chunk,
+                    torch.zeros(channels, target_samples - chunk.shape[-1],
+                                dtype=chunk.dtype, device=chunk.device)
+                ], dim=-1)
+            merged_waveform = chunk.unsqueeze(0)
+        elif audio_override:
+            
             # ---- Override audio: build from audio input per segment ----
             # audio_input is a list from MakeAudioList (is_output_list) where
             # index N-1 corresponds to @audioN reference in prompt_override.
@@ -537,8 +567,11 @@ class TimelineEditor(io.ComfyNode):
 
                 audio_indices = seg.get('_audio_indices', [])
                 if audio_indices:
-                    # @audioN present → use that clip from its beginning
+                    # @audioN present → try list indexing first, fall back to single audio
                     a = _index_audio(audio_input, audio_indices[0])
+                    if a is None and not isinstance(audio_input, list):
+                        # Single audio input (not a list) — use it directly
+                        a = audio_input
                     if a is not None:
                         chunk = _extract_clip(a, duration_sec)
                         audio_parts.append(chunk.unsqueeze(0))
@@ -551,7 +584,7 @@ class TimelineEditor(io.ComfyNode):
                 prev_end_sec = end_sec
 
             if audio_parts:
-                merged_waveform = torch.cat(audio_parts, dim=-1)
+                merged_waveform = torch.cat(audio_parts, dim=-1)            
         else:
             # ---- Normal path: audio from timeline tracks ----
             for track in tracks:
