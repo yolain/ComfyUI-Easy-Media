@@ -1,4 +1,4 @@
-export type MediaSourceType = 'input' | 'local' | 'url'
+export type MediaSourceType = 'input' | 'local' | 'url' | 'slot'
 
 export interface Marker {
   id: string
@@ -30,6 +30,7 @@ export interface AudioContent {
   file_path?: string
   local_path?: string
   url?: string
+  slot_name?: string
   file_name: string
   duration?: number
 }
@@ -47,6 +48,7 @@ export interface ImageContent {
   file_path?: string
   local_path?: string
   url?: string
+  slot_name?: string
   file_name: string
 }
 
@@ -75,6 +77,7 @@ export interface ImageItem {
   file_path?: string
   local_path?: string
   url?: string
+  slot_name?: string
   file_name: string
   /** Optional position within the parent segment's frame span (0-based, relative to segment start) */
   start_frame?: number

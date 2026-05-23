@@ -10,6 +10,7 @@ import {
   File,
   Folder,
   ChevronRight,
+  Link2,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -18,13 +19,14 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { useT } from '@/lib/i18n'
 import { $error } from '@/lib/comfy-api'
+import type { SlotItem } from '@/lib/timeline-utils'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export type MediaType = 'all' | 'image' | 'audio' | 'video'
-export type MediaTab = 'inputs' | 'outputs' | 'local' | 'url'
+export type MediaTab = 'inputs' | 'outputs' | 'local' | 'url' | 'slot'
 type ViewMode = 'grid' | 'list'
 type SortBy = 'name' | 'date' | 'size'
 
@@ -53,6 +55,8 @@ export interface MediaSelectorProps {
   mediaType?: MediaType
   /** Which tab to show initially */
   defaultTab?: MediaTab
+  /** Slot items computed from the connected node graph (only for image/audio media types) */
+  slotItems?: SlotItem[]
 }
 
 // ---------------------------------------------------------------------------
@@ -340,7 +344,7 @@ function RemoteFileList({
 
   function renderGrid() {
     return (
-      <div className="grid grid-cols-4 gap-2 p-2 overflow-y-auto">
+      <div className="grid grid-cols-4 gap-2 p-2 overflow-y-auto flex-1">
         {filteredDirs.map((dir) => (
           <button
             key={dir.path}
@@ -380,7 +384,7 @@ function RemoteFileList({
 
   function renderList() {
     return (
-      <div className="flex flex-col overflow-y-auto">
+      <div className="flex flex-col overflow-y-auto flex-1">
         {filteredDirs.map((dir) => (
           <button
             key={dir.path}
@@ -441,7 +445,7 @@ function RemoteFileList({
   }
 
   return (
-    <div className="flex flex-col overflow-hidden">
+    <div className="flex flex-col flex-1 overflow-hidden">
       <Breadcrumb subfolder={subfolder} onNavigate={setSubfolder} />
       {isEmpty && (
         <div className="flex items-center justify-center h-24 text-muted-foreground text-xs">
@@ -463,8 +467,10 @@ export function MediaSelector({
   onChange,
   mediaType = 'all',
   defaultTab = 'inputs',
+  slotItems = [],
 }: Readonly<MediaSelectorProps>) {
   const t = useT()
+  const showSlotTab = mediaType === 'image' || mediaType === 'audio'
   const [activeTab, setActiveTab] = useState<MediaTab>(defaultTab)
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [sortBy, setSortBy] = useState<SortBy>('name')
@@ -528,10 +534,10 @@ export function MediaSelector({
   }
 
   return (
-    <div data-media-selector="" className="flex flex-col w-72 text-xs select-none">
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as MediaTab)}>
+    <div data-media-selector="" className="flex flex-col w-72 h-80 text-xs select-none">
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as MediaTab)} className="flex flex-col flex-1 overflow-hidden">
         {/* Tab header */}
-        <TabsList className="w-full rounded-none rounded-t-md h-7 p-0.5 gap-0.5">
+        <TabsList className="w-full rounded-none rounded-t-md h-7 p-0.5 gap-0.5 shrink-0">
           <TabsTrigger value="inputs" className="flex-1 h-full text-[11px] px-1">
             {t('mediaSelector.tabInputs')}
           </TabsTrigger>
@@ -544,11 +550,16 @@ export function MediaSelector({
           <TabsTrigger value="url" className="flex-1 h-full text-[11px] px-1">
             {t('mediaSelector.tabUrl')}
           </TabsTrigger>
+          {showSlotTab && (
+            <TabsTrigger value="slot" className="flex-1 h-full text-[11px] px-1">
+              {t('mediaSelector.tabSlot')}
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* Search + view controls (shared across inputs/outputs/local) */}
-        {activeTab !== 'url' && (
-          <div className="flex items-center gap-1 px-2 py-1 border-b border-border">
+        {activeTab !== 'url' && activeTab !== 'slot' && (
+          <div className="flex items-center gap-1 px-2 py-1 border-b border-border shrink-0">
             <div className="relative flex-1">
               <Search className="absolute left-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
               <Input
@@ -589,7 +600,7 @@ export function MediaSelector({
         )}
 
         {/* Tab panels */}
-        <TabsContent value="inputs" className="mt-0 max-h-64 overflow-hidden flex flex-col">
+        <TabsContent value="inputs" className="mt-0 flex-1 overflow-hidden flex flex-col">
           <RemoteFileList
             source="inputs"
             mediaType={mediaType}
@@ -602,7 +613,7 @@ export function MediaSelector({
           />
         </TabsContent>
 
-        <TabsContent value="outputs" className="mt-0 max-h-64 overflow-hidden flex flex-col">
+        <TabsContent value="outputs" className="mt-0 flex-1 overflow-hidden flex flex-col">
           <RemoteFileList
             source="outputs"
             mediaType={mediaType}
@@ -615,7 +626,7 @@ export function MediaSelector({
           />
         </TabsContent>
 
-        <TabsContent value="local" className="mt-0 max-h-64 overflow-hidden flex flex-col">
+        <TabsContent value="local" className="mt-0 flex-1 overflow-hidden flex flex-col">
           {/* Local path input */}
           <div className="flex gap-1 px-2 pt-1 pb-1 border-b border-border">
             <Input
@@ -637,7 +648,7 @@ export function MediaSelector({
           />
         </TabsContent>
 
-        <TabsContent value="url" className="mt-0 p-2">
+        <TabsContent value="url" className="mt-0 flex-1 p-2">
           <div className="space-y-2">
             <p className="text-muted-foreground text-[11px]">{t('mediaSelector.urlHint')}</p>
             <Input
@@ -657,6 +668,59 @@ export function MediaSelector({
             </Button>
           </div>
         </TabsContent>
+
+        {showSlotTab && (
+          <TabsContent value="slot" className="mt-0 flex-1 overflow-hidden flex flex-col">
+            {slotItems.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center text-muted-foreground text-[11px]">
+                {t('mediaSelector.slotEmpty')}
+              </div>
+            ) : (
+              <div className="flex flex-col overflow-y-auto flex-1">
+                {slotItems.map((item, idx) => {
+                  const selected = value === item.value
+                  const isImage = item.value.startsWith('__slot__:image')
+                  const isAudio = item.value.startsWith('__slot__:audio')
+                  const displayLabel = isImage
+                    ? t('mediaSelector.slotImage', { n: idx + 1 })
+                    : t('mediaSelector.slotAudio', { n: idx + 1 })
+                  return (
+                    <button
+                      key={item.value}
+                      type="button"
+                      className={cn(
+                        'flex items-center gap-2 px-2 py-1 text-left hover:bg-accent transition-colors',
+                        selected && 'bg-accent',
+                      )}
+                      onClick={() => onChange(item.value)}
+                    >
+                      {item.img ? (
+                        <img
+                          src={item.img}
+                          alt={displayLabel}
+                          className="w-8 h-8 object-cover rounded shrink-0 bg-muted"
+                        />
+                      ) : isAudio ? (
+                        <div className="w-8 h-8 rounded flex items-center justify-center bg-[#34d399] shrink-0">
+                          <FileAudio className="w-4 h-4 text-white" />
+                        </div>
+                      ) : (
+                        <Link2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                      )}
+                      <span className="flex-1 text-xs truncate min-w-0">{displayLabel}</span>
+                      {isAudio && item.audio_name && (
+                        <span className="text-[10px] text-muted-foreground truncate max-w-24" title={item.audio_name}>
+                          {item.audio_name}
+                        </span>
+                      )}
+                      {selected && <CheckCircle2 className="w-3.5 h-3.5 text-primary shrink-0" />}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   )
