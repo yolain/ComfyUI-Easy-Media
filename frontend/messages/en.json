@@ -14,6 +14,10 @@
     "deleteSegment": "Delete selected segment",
     "zoom": "Zoom"
   },
+  "timeline": {
+    "defaultTrackName": "Track {n}",
+    "defaultAudioTrackName": "Audio Track {n}"
+  },
   "trackRow": {
     "trackColor": "Track color"
   },
@@ -70,7 +74,7 @@
   "maintainTrack": {
     "dropZone": "Maintain track drop zone",
     "segmentLabel": "Segment {n}",
-    "segmentPlaceholder": "Click segment to Write the prompt...",
+    "segmentPlaceholder": "Click segment to write the prompt...",
     "promptPlaceholder": "Prompt text...",
     "addImage": "Add image",
     "tabCombined": "Combined",
@@ -100,6 +104,12 @@
     "urlErrorTitle": "URL Error",
     "urlErrorNotFound": "File not found or access denied.",
     "empty": "No files found",
-    "error": "Failed to load: {msg}"
+    "error": "Failed to load: {msg}",
+    "tabSlot": "Slot",
+    "slotNotConnected": "No connected input",
+    "slotEmpty": "No content available",
+    "slotList": "list",
+    "slotImage": "Image {n}",
+    "slotAudio": "Audio {n}"
   }
 }
