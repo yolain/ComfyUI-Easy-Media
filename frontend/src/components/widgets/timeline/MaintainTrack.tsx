@@ -545,7 +545,6 @@ export function MaintainTrack({
       onExtendTimeline(updated, lastNewSeg.end_frame + 1)
     }
     setPendingDropFrame(null)
-    setPendingDropFrame(null)
   }
 
   // ── Render ────────────────────────────────────────────────────────────────

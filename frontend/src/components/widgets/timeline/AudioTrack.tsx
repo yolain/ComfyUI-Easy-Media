@@ -263,7 +263,7 @@ export function AudioTrack({
         }
       }
 
-      onSegmentsChange(currentSegments.toSorted((a, b) => a.start_frame - b.start_frame))
+      onSegmentsChange([...currentSegments].sort((a, b) => a.start_frame - b.start_frame))
       if (currentSegments.length > segments.length) {
         setEditingSegId(currentSegments[currentSegments.length - 1].id)
       }
