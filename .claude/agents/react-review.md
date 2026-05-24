@@ -28,7 +28,6 @@ You are a React/TypeScript code reviewer specializing in ComfyUI frontend extens
 - [ ] Expensive computations wrapped in `useMemo` / `useCallback` where appropriate
 
 ### shadcn/ui Compliance
-- [ ] **Never** use raw `<button>`, `<input>`, `<textarea>`, `<select>` for interactive controls
 - [ ] Use shadcn/ui equivalents: `<Button>`, `<Input>`, `<Textarea>`, `<Select>`
 - [ ] Exception: files inside `src/components/ui/**` (the primitives themselves)
 - [ ] Tailwind classes use v4 syntax (CSS variables, not `tailwind.config.js` theme keys)

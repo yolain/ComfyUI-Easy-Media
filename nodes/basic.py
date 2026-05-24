@@ -391,11 +391,6 @@ class TimelineEditor(io.ComfyNode):
             and (not isinstance(image_input, list) or len(image_input) > 0)
         )
 
-        # When image_override but timeline has no image items, generate entries from input itself
-        if image_override and not all_image_items:
-            n = _count_images(image_input)
-            all_image_items = [{'source_type': 'slot', '_tensor_idx': i + 1} for i in range(n)]
-
         # Load first image once for dimension inference (auto / longest / shortest)
         first_image_tensor: torch.Tensor | None = None
         if mode in ("auto", "longest", "shortest"):
@@ -486,6 +481,9 @@ class TimelineEditor(io.ComfyNode):
             if t is None:
                 continue
             t = resize_image(t, target_w, target_h, resize_method)
+            # Normalize to RGB (3 channels) — drop alpha channel if present
+            if t.shape[-1] == 4:
+                t = t[..., :3]
             image_tensors.append(t)
 
         if image_tensors:
