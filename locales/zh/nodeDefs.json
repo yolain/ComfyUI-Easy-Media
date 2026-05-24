@@ -96,6 +96,18 @@
       "timeline_data": {
         "name": "时间轴数据",
         "tooltip": "包含轨道、片段和媒体项目的JSON时间轴数据。"
+      },
+      "prompt_override": {
+        "name": "提示词覆盖",
+        "tooltip": "如果提供，将覆盖时间轴中所有片段的提示词。使用格式: @image1 @audio1 提示词内容 [0-120] | @image2 @audio2 提示词内容 [121-296]"
+      },
+      "image": {
+        "name": "图像列表",
+        "tooltip": "要覆盖时间轴中图像的图像列表。建议使用 '创建图像列表' 节点创建。"
+      },
+      "audio": {
+        "name": "音频列表",
+        "tooltip": "要覆盖时间轴中音频的音频列表。建议使用 '创建音频列表' 节点创建。"
       }
     },
     "outputs": {
@@ -220,6 +232,124 @@
     "outputs": {
       "0": {
         "name": "索引列表"
+      }
+    }
+  },
+  "easy makeImageList": {
+    "display_name": "创建图像列表",
+    "description": "将多个可选的图像输入组合成图像列表。",
+    "inputs": {
+      "skip_empty": {
+        "name": "跳过空输入",
+        "tooltip": "启用时跳过未连接的输入；禁用时用空占位符填充。",
+        "options": {
+          "true": "跳过",
+          "false": "填充"
+        }
+      },
+      "image1": {
+        "name": "图像 1",
+        "tooltip": "图像列表中的第一个图像（可选）。"
+      },
+      "image2": {
+        "name": "图像 2",
+        "tooltip": "图像列表中的第二个图像（可选）。"
+      },
+      "image3": {
+        "name": "图像 3",
+        "tooltip": "图像列表中的第三个图像（可选）。"
+      },
+      "image4": {
+        "name": "图像 4",
+        "tooltip": "图像列表中的第四个图像（可选）。"
+      },
+      "image5": {
+        "name": "图像 5",
+        "tooltip": "图像列表中的第五个图像（可选）。"
+      },
+      "image6": {
+        "name": "图像 6",
+        "tooltip": "图像列表中的第六个图像（可选）。"
+      },
+      "image7": {
+        "name": "图像 7",
+        "tooltip": "图像列表中的第七个图像（可选）。"
+      },
+      "image8": {
+        "name": "图像 8",
+        "tooltip": "图像列表中的第八个图像（可选）。"
+      },
+      "image9": {
+        "name": "图像 9",
+        "tooltip": "图像列表中的第九个图像（可选）。"
+      },
+      "image10": {
+        "name": "图像 10",
+        "tooltip": "图像列表中的第十个图像（可选）。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "图像列表"
+      }
+    }
+  },
+  "easy makeAudioList": {
+    "display_name": "创建音频列表",
+    "description": "将多个可选的音频输入组合成音频列表。",
+    "inputs": {
+      "skip_empty": {
+        "name": "跳过空输入",
+        "tooltip": "启用时跳过未连接的输入；禁用时用空占位符填充。",
+        "options": {
+          "true": "跳过",
+          "false": "填充"
+        }
+      },
+      "audio1": {
+        "name": "音频 1",
+        "tooltip": "音频列表中的第一个音频（可选）。"
+      },
+      "audio2": {
+        "name": "音频 2",
+        "tooltip": "音频列表中的第二个音频（可选）。"
+      },
+      "audio3": {
+        "name": "音频 3",
+        "tooltip": "音频列表中的第三个音频（可选）。"
+      },
+      "audio4": {
+        "name": "音频 4",
+        "tooltip": "音频列表中的第四个音频（可选）。"
+      },
+      "audio5": {
+        "name": "音频 5",
+        "tooltip": "音频列表中的第五个音频（可选）。"
+      },
+      "audio6": {
+        "name": "音频 6",
+        "tooltip": "音频列表中的第六个音频（可选）。"
+      },
+      "audio7": {
+        "name": "音频 7",
+        "tooltip": "音频列表中的第七个音频（可选）。"
+      },
+      "audio8": {
+        "name": "音频 8",
+        "tooltip": "音频列表中的第八个音频（可选）。"
+      },
+      "audio9": {
+        "name": "音频 9",
+        "tooltip": "音频列表中的第九个音频（可选）。"
+      },
+      "audio10": {
+        "name": "音频 10",
+        "tooltip": "音频列表中的第十个音频（可选）。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "音频列表"
       }
     }
   },
