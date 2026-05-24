@@ -33,6 +33,8 @@ interface MaintainTrackProps {
   onSegmentsChange: (segments: Segment[]) => void
   /** Callback to extend both segments and total length in one update */
   onExtendTimeline?: (segments: Segment[], newTotalLength: number) => void
+  /** flex-grow value for proportional height sizing */
+  grow?: number
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -162,6 +164,7 @@ export function MaintainTrack({
   onTrackChange,
   onSegmentsChange,
   onExtendTimeline,
+  grow,
 }: Readonly<MaintainTrackProps>) {
   const t = useT()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -550,7 +553,7 @@ export function MaintainTrack({
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <TrackRow track={track} onTrackChange={onTrackChange} height={MAINTAIN_TRACK_HEIGHT}>
+    <TrackRow track={track} onTrackChange={onTrackChange} height={grow === undefined ? MAINTAIN_TRACK_HEIGHT : undefined} grow={grow}>
       <ContextMenu>
         <ContextMenuTrigger className="relative block w-full h-full" asChild>
           <section

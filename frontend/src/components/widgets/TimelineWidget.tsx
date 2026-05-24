@@ -102,7 +102,21 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
   const [zoom, setZoom] = useState(1)
   const isNodeV2 = app?.ui?.settings?.settingsValues?.['Comfy.VueNodes.Enabled']
   const locale = app?.ui?.settings?.settingsValues?.['Comfy.Locale']
-  const canvasScale = app?.canvas?.ds.scale ?? 1
+  // Track canvas scale reactively so the EditPanel overlay recomputes when the user zooms
+  const [canvasScale, setCanvasScale] = useState<number>(() => app?.canvas?.ds.scale ?? 1)
+  useEffect(() => {
+    if (!app?.canvas) return
+    const canvas = app.canvas
+    const origOnDrawForeground = canvas.onDrawForeground?.bind(canvas)
+    canvas.onDrawForeground = (ctx: unknown, visibleArea: unknown) => {
+      origOnDrawForeground?.(ctx, visibleArea)
+      const s: number = canvas.ds?.scale ?? 1
+      setCanvasScale((prev) => (prev !== s ? s : prev))
+    }
+    return () => {
+      canvas.onDrawForeground = origOnDrawForeground
+    }
+  }, [app])
   // Refs for playback loop (avoid stale closures)
   const playbackRef = useRef<{
     rafId: number | null
@@ -438,127 +452,152 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
     setSelectedId(null)
   }
 
+  // Clamp the inverse-scale applied to the EditPanel overlay so it stays usable
+  // at extreme canvas zoom levels (range: 0.5× – 2.0× of its natural size).
+  const EDIT_PANEL_SCALE_MIN = 0.8
+  const EDIT_PANEL_SCALE_MAX = 1.5
+  const editPanelScale = Math.min(EDIT_PANEL_SCALE_MAX, Math.max(EDIT_PANEL_SCALE_MIN, 1 / canvasScale))
+  // DOM width so the panel's visual width always equals the widget's screen width
+  const editPanelDomWidth = contentWidth / editPanelScale
+
   return (
     <LocaleContext.Provider value={locale}>
     <TooltipProvider>
+      {/* Root: relative so the EditPanel overlay can position against it; no overflow-hidden here */}
       <div
-        className={`flex flex-col w-full text-foreground rounded overflow-hidden font-sans text-xs select-none${isNodeV2 ? ' nodeNew' : ''}`}
+        className={`relative flex flex-col h-full w-full text-foreground font-sans text-xs select-none${isNodeV2 ? ' nodeNew' : ''}`}
         onContextMenu={handleContextMenu}
         onClick={handleGlobalClick}
       >
-        {/* Toolbar */}
-        <Toolbar
-          totalLength={data.total_length}
-          frameRate={data.frame_rate}
-          displayFormat={displayFormat}
-          onTotalLengthChange={(frames) => update({ total_length: frames })}
-          onFrameRateChange={(fps) => update({ frame_rate: fps })}
-          onDisplayFormatChange={setDisplayFormat}
-          isPlaying={isPlaying}
-          onPlayPause={handlePlayPause}
-          hasSelection={selectedId !== null}
-          canDelete={selectedId !== null && (
-            data.tracks.some((t) => t.type !== 'maintain' && t.segments.some((s) => s.id === selectedId)) ||
-            (maintainTrack?.segments.length ?? 0) > 0
-          )}
-          onDeleteSelected={handleDeleteSelected}
-          zoom={zoom}
-          onZoomChange={setZoom}
-          selectedSegment={selectedSegment}
-          onSelectedSegmentDurationChange={handleSegmentDurationChange}
-        />
+        {/* Inner container: clips track content, fills remaining height */}
+        <div className="flex flex-col flex-1 min-h-0 rounded overflow-hidden">
+          {/* Toolbar */}
+          <Toolbar
+            totalLength={data.total_length}
+            frameRate={data.frame_rate}
+            displayFormat={displayFormat}
+            onTotalLengthChange={(frames) => update({ total_length: frames })}
+            onFrameRateChange={(fps) => update({ frame_rate: fps })}
+            onDisplayFormatChange={setDisplayFormat}
+            isPlaying={isPlaying}
+            onPlayPause={handlePlayPause}
+            hasSelection={selectedId !== null}
+            canDelete={selectedId !== null && (
+              data.tracks.some((t) => t.type !== 'maintain' && t.segments.some((s) => s.id === selectedId)) ||
+              (maintainTrack?.segments.length ?? 0) > 0
+            )}
+            onDeleteSelected={handleDeleteSelected}
+            zoom={zoom}
+            onZoomChange={setZoom}
+            selectedSegment={selectedSegment}
+            onSelectedSegmentDurationChange={handleSegmentDurationChange}
+          />
 
-        {/* Shared horizontal scroll container for ruler + tracks */}
-        <div ref={scrollContainerRef} className="overflow-x-auto">
-          <div style={{ width: scaledWidth, minWidth: '100%' }}>
-            {/* Ruler row */}
-            <div className="border-t shrink-0">
-              <TimelineRuler
-                totalFrames={data.total_length}
-                frameRate={data.frame_rate}
-                displayFormat={displayFormat}
-                width={scaledWidth}
-                canvasScale={canvasScale}
-                playheadFrame={playheadFrame}
-                showLabel={showSeekLabel || isPlaying}
-                onSeek={handleSeek}
-              />
-            </div>
-
-            {/* Track rows — wrapped in relative so the global playhead overlay works */}
-            <div className="relative flex flex-col overflow-y-auto">
-              {/* Global playhead line spanning all tracks */}
-              {playheadFrame !== undefined && scaledWidth > 0 && (
-                <div
-                  className="absolute top-0 h-full w-px bg-red-400 pointer-events-none z-30"
-                  style={{ left: (playheadFrame / Math.max(data.total_length - 1, 1)) * scaledWidth }}
+          {/* Shared horizontal scroll container for ruler + tracks */}
+          <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden">
+            <div className="h-full flex flex-col" style={{ width: scaledWidth, minWidth: '100%' }}>
+              {/* Ruler row — fixed height */}
+              <div className="border-t shrink-0">
+                <TimelineRuler
+                  totalFrames={data.total_length}
+                  frameRate={data.frame_rate}
+                  displayFormat={displayFormat}
+                  width={scaledWidth}
+                  canvasScale={canvasScale}
+                  playheadFrame={playheadFrame}
+                  showLabel={showSeekLabel || isPlaying}
+                  onSeek={handleSeek}
                 />
-              )}
-              {data.tracks.map((track) => {
-                if (track.type === 'maintain') {
-                  return (
-                    <MaintainTrack
-                      key={track.id}
-                      track={track}
-                      totalFrames={data.total_length}
-                      frameRate={data.frame_rate}
-                      displayFormat={displayFormat}
-                      areaWidth={scaledWidth}
-                      selectedId={selectedId}
-                      onSelectedIdChange={setSelectedId}
-                      onTrackChange={(patch) => updateTrack(track.id, patch)}
-                      onSegmentsChange={(segs) => updateSegments(track.id, segs)}
-                      onExtendTimeline={(segs, newLength) => {
-                        update({
-                          tracks: data.tracks.map((t) =>
-                            t.type === 'maintain' ? { ...t, segments: segs } : t
-                          ),
-                          total_length: newLength,
-                        })
-                      }}
-                    />
-                  )
-                }
-                if (track.type === 'audio') {
-                  return (
-                    <AudioTrack
-                      key={track.id}
-                      track={track}
-                      totalFrames={data.total_length}
-                      frameRate={data.frame_rate}
-                      displayFormat={displayFormat}
-                      areaWidth={scaledWidth}
-                      selectedId={selectedId}
-                      onSelectedIdChange={setSelectedId}
-                      onTrackChange={(patch) => updateTrack(track.id, patch)}
-                      onSegmentsChange={(segs) => updateSegments(track.id, segs)}
-                      node={node}
-                      app={app}
-                    />
-                  )
-                }
-                return null
-              })}
+              </div>
 
+              {/* Track rows — fill remaining height with proportional flex-grow */}
+              <div className="relative flex-1 min-h-0 flex flex-col">
+                {/* Global playhead line spanning all tracks */}
+                {playheadFrame !== undefined && scaledWidth > 0 && (
+                  <div
+                    className="absolute top-0 h-full w-px bg-red-400 pointer-events-none z-30"
+                    style={{ left: (playheadFrame / Math.max(data.total_length - 1, 1)) * scaledWidth }}
+                  />
+                )}
+                {data.tracks.map((track) => {
+                  if (track.type === 'maintain') {
+                    return (
+                      <MaintainTrack
+                        key={track.id}
+                        track={track}
+                        totalFrames={data.total_length}
+                        frameRate={data.frame_rate}
+                        displayFormat={displayFormat}
+                        areaWidth={scaledWidth}
+                        selectedId={selectedId}
+                        onSelectedIdChange={setSelectedId}
+                        onTrackChange={(patch) => updateTrack(track.id, patch)}
+                        onSegmentsChange={(segs) => updateSegments(track.id, segs)}
+                        onExtendTimeline={(segs, newLength) => {
+                          update({
+                            tracks: data.tracks.map((t) =>
+                              t.type === 'maintain' ? { ...t, segments: segs } : t
+                            ),
+                            total_length: newLength,
+                          })
+                        }}
+                        grow={2}
+                      />
+                    )
+                  }
+                  if (track.type === 'audio') {
+                    return (
+                      <AudioTrack
+                        key={track.id}
+                        track={track}
+                        totalFrames={data.total_length}
+                        frameRate={data.frame_rate}
+                        displayFormat={displayFormat}
+                        areaWidth={scaledWidth}
+                        selectedId={selectedId}
+                        onSelectedIdChange={setSelectedId}
+                        onTrackChange={(patch) => updateTrack(track.id, patch)}
+                        onSegmentsChange={(segs) => updateSegments(track.id, segs)}
+                        node={node}
+                        app={app}
+                        grow={1}
+                      />
+                    )
+                  }
+                  return null
+                })}
+              </div>
             </div>
           </div>
         </div>
-        {/* EditPanel for selected maintain segment */}
+
+        {/* EditPanel overlay — positioned below the widget, counter-scaled so it appears
+            at a consistent pixel size regardless of canvas zoom level */}
         {selectedSegment && maintainTrack && (
-          <EditPanel
-            segment={selectedSegment}
-            allSegments={maintainTrack.segments as MaintainSegment[]}
-            totalFrames={data.total_length}
-            frameRate={data.frame_rate}
-            displayFormat={displayFormat}
-            areaWidth={contentWidth}
-            canvasScale={canvasScale}
-            trackColor={maintainTrack.color}
-            onContentChange={handleContentChange}
-            onAllSegmentsChange={(segs) => updateSegments(maintainTrack.id, segs)}
-            node={node}
-            app={app}
-          />
+          <div
+            className="absolute left-0 z-50"
+            style={{
+              top: '100%',
+              transformOrigin: 'top left',
+              transform: `scale(${editPanelScale})`,
+              width: editPanelDomWidth,
+            }}
+          >
+            <EditPanel
+              segment={selectedSegment}
+              allSegments={maintainTrack.segments as MaintainSegment[]}
+              totalFrames={data.total_length}
+              frameRate={data.frame_rate}
+              displayFormat={displayFormat}
+              areaWidth={editPanelDomWidth}
+              canvasScale={canvasScale * editPanelScale}
+              trackColor={maintainTrack.color}
+              onContentChange={handleContentChange}
+              onAllSegmentsChange={(segs) => updateSegments(maintainTrack.id, segs)}
+              node={node}
+              app={app}
+            />
+          </div>
         )}
       </div>
     </TooltipProvider>

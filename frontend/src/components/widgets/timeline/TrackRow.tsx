@@ -27,9 +27,11 @@ interface TrackRowProps {
   onTrackChange: (patch: Partial<Track>) => void
   toolSlots?: ToolSlots
   height?: number
+  /** When set, use flex-grow instead of fixed height (for proportional sizing) */
+  grow?: number
 }
 
-export function TrackRow({ track, children, onTrackChange, toolSlots, height }: Readonly<TrackRowProps>) {
+export function TrackRow({ track, children, onTrackChange, toolSlots, height, grow }: Readonly<TrackRowProps>) {
   const t = useT()
   const [colorInput, setColorInput] = useState(track.color)
   const rowHeight = height ?? TRACK_HEIGHT
@@ -45,7 +47,9 @@ export function TrackRow({ track, children, onTrackChange, toolSlots, height }: 
   return (
     <div
       className="flex border-b border-border"
-      style={{ height: rowHeight, minHeight: rowHeight }}
+      style={grow !== undefined
+        ? { flexGrow: grow, minHeight: 0 }
+        : { height: rowHeight, minHeight: rowHeight }}
     >
       {/* Left sidebar */}
       {/* <div

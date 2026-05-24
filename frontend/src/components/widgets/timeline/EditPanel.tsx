@@ -196,10 +196,24 @@ interface SubImageBlockProps {
   frameRate: number
   displayFormat: TimeDisplayFormat
   trackColor: string
+  selected?: boolean
+  onSelect?: (id: string) => void
   onMoveEnd: (id: string, newStart: number, newEnd: number) => void
   onResizeEnd: (id: string, newStart: number, newEnd: number) => void
   onEdit: () => void
   onRemove: () => void
+}
+
+/** Returns a slightly lighter border color from a hex color */
+function lightenColor(hex: string, amount: number = 0.3): string {
+  if (!hex.startsWith('#') || hex.length < 7) return 'var(--border)'
+  const r = Number.parseInt(hex.slice(1, 3), 16)
+  const g = Number.parseInt(hex.slice(3, 5), 16)
+  const b = Number.parseInt(hex.slice(5, 7), 16)
+  const newR = Math.round(r + (255 - r) * amount)
+  const newG = Math.round(g + (255 - g) * amount)
+  const newB = Math.round(b + (255 - b) * amount)
+  return `#${newR.toString(16).padStart(2, '0')}${newG.toString(16).padStart(2, '0')}${newB.toString(16).padStart(2, '0')}`
 }
 
 function SubImageBlock({
@@ -209,6 +223,8 @@ function SubImageBlock({
   frameRate,
   displayFormat,
   trackColor,
+  selected = false,
+  onSelect,
   onMoveEnd,
   onResizeEnd,
   onEdit,
@@ -218,6 +234,7 @@ function SubImageBlock({
   const [localStart, setLocalStart] = useState(block.start_frame)
   const [localEnd, setLocalEnd] = useState(block.end_frame)
   const [labelVisible, setLabelVisible] = useState(false)
+  const [isResizing, setIsResizing] = useState(false)
 
   const localStartRef = useRef(block.start_frame)
   const localEndRef = useRef(block.end_frame)
@@ -289,6 +306,7 @@ function SubImageBlock({
       e.preventDefault()
       e.stopPropagation()
       isDraggingRef.current = true
+      setIsResizing(true)
       showLabel()
       const startX = e.clientX
       const origStart = block.start_frame
@@ -309,6 +327,7 @@ function SubImageBlock({
       }
 
       function onMouseUp() {
+        setIsResizing(false)
         hideLabelAfterDelay()
         onResizeEnd(block.id, localStartRef.current, localEndRef.current)
         globalThis.removeEventListener('mousemove', onMouseMove)
@@ -321,6 +340,8 @@ function SubImageBlock({
   }
 
   const images = [block.item]
+  const borderColor = isResizing ? '#eab308' : selected ? 'var(--foreground)' : lightenColor(trackColor)
+  const bgColor =  isResizing ? '#eab308' : selected ? 'var(--foreground)' : 'transparent'
 
   return (
     <div
@@ -332,7 +353,7 @@ function SubImageBlock({
         width: blockWidth,
         backgroundColor: trackColor,
         opacity: 0.9,
-        border: '1px solid rgba(255,255,255,0.2)',
+        border: `1px solid ${borderColor}`,
         borderRadius: 3,
         overflow: 'hidden',
         cursor: 'grab',
@@ -341,9 +362,13 @@ function SubImageBlock({
       onClick={(e) => {
         if (didMoveRef.current) return
         e.stopPropagation()
+        onSelect?.(block.id)
+      }}
+      onDoubleClick={() => {
+        onSelect?.(block.id)
         onEdit()
       }}
-      onKeyDown={(e) => { if (e.key === 'Enter') onEdit() }}
+      onKeyDown={(e) => { if (e.key === 'Enter') { onSelect?.(block.id); onEdit() } }}
     >
       {/* Tiled image background */}
       {images.length > 0 && (
@@ -357,15 +382,16 @@ function SubImageBlock({
       <button
         type="button"
         aria-label="Resize start"
-        className="absolute left-0 top-0 h-full w-2 cursor-ew-resize z-10 hover:bg-white/20 bg-transparent border-0 p-0"
+        className="absolute left-0 top-0 h-full w-0.5 cursor-ew-resize z-10 border-0 p-0"
+        style={{ background: bgColor }}
         onMouseDown={makeResizeMouseDown('start')}
       />
-
       {/* Right resize handle */}
       <button
         type="button"
         aria-label="Resize end"
-        className="absolute right-0 top-0 h-full w-2 cursor-ew-resize z-10 hover:bg-white/20 bg-transparent border-0 p-0"
+        className="absolute right-0 top-0 h-full w-0.5 cursor-ew-resize z-10  border-0 p-0"
+        style={{ background: bgColor }}
         onMouseDown={makeResizeMouseDown('end')}
       />
 
@@ -444,6 +470,7 @@ export function EditPanel({
   // Image selector popover
   const [popoverOpen, setPopoverOpen] = useState(false)
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null)
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null)
   const [selectorValue, setSelectorValue] = useState('')
   const [popoverTab, setPopoverTab] = useState<MediaTab>('inputs')
   const [anchorPos, setAnchorPos] = useState({ x: 8, y: 8 })
@@ -551,8 +578,8 @@ export function EditPanel({
   return (
     <div
       data-edit-panel=""
-      className="bg-card border border-border rounded shadow-lg overflow-hidden mt-2"
-      style={{ width: areaWidth, }}
+      className="bg-card border border-border rounded shadow-lg overflow-hidden"
+      style={{ width: areaWidth }}
     >
       {promptMode === 'combined' ? (
         <div className="p-2 border-border">
@@ -616,6 +643,8 @@ export function EditPanel({
                 frameRate={frameRate}
                 displayFormat={displayFormat}
                 trackColor={trackColor}
+                selected={selectedBlockId === block.id}
+                onSelect={setSelectedBlockId}
                 onMoveEnd={updateSubBlockPosition}
                 onResizeEnd={updateSubBlockPosition}
                 onEdit={() =>

@@ -36,6 +36,8 @@ interface AudioTrackProps {
   onSegmentsChange: (segments: Segment[]) => void
   node?: any
   app?: any
+  /** flex-grow value for proportional height sizing */
+  grow?: number
 }
 
 /** Map segment source_type to the MediaSelector tab */
@@ -62,6 +64,7 @@ export function AudioTrack({
   onSegmentsChange,
   node,
   app,
+  grow,
 }: Readonly<AudioTrackProps>) {
   const t = useT()
   const containerRef = useRef<HTMLElement>(null)
@@ -451,7 +454,7 @@ export function AudioTrack({
   ]
 
   return (
-    <TrackRow track={track} onTrackChange={onTrackChange} toolSlots={toolSlots}>
+    <TrackRow track={track} onTrackChange={onTrackChange} toolSlots={toolSlots} grow={grow}>
       <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
         <ContextMenu open={contextMenuOpen} onOpenChange={setContextMenuOpen}>
           <ContextMenuTrigger className="relative block w-full h-full" asChild>
