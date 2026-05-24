@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-if git diff --cached --name-only | grep -q "^frontend/.*\.\(tsx\?|css\)$"; then
+if git diff --cached --name-only | /usr/bin/grep -Eq "^frontend/.*\.(tsx?|css)$"; then
   echo "Frontend changes detected, rebuilding..."
   cd frontend && bun run build:release && cd ..
   git add dist/
