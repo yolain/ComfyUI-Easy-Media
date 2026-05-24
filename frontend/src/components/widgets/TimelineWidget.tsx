@@ -91,7 +91,7 @@ function syncOneAudio(
 
 export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<ReactWidgetProps<TimelineData>>) {
   const data = ensureDefaults(value)
-  const [displayFormat, setDisplayFormat] = useState<TimeDisplayFormat>('seconds')
+  const [displayFormat, setDisplayFormat] = useState<TimeDisplayFormat>('frames')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const [contentWidth, setContentWidth] = useState(0)
@@ -343,7 +343,12 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
 
       const segments = t.segments as MaintainSegment[]
       const idx = segments.findIndex((s) => s.id === selectedId)
-      if (idx === -1 || segments.length <= 1) return t
+      if (idx === -1) return t
+
+      // Allow deleting the last segment (empty track allowed)
+      if (segments.length === 1) {
+        return { ...t, segments: [] }
+      }
 
       const removed = segments[idx]
       const span = removed.end_frame - removed.start_frame + 1
@@ -391,19 +396,32 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
     const oldDuration = seg.end_frame - seg.start_frame + 1
     if (newDuration === oldDuration) return
 
-    const updated = [...segments]
-    const next = updated[idx + 1]
+    const delta = newDuration - oldDuration
+    const newEndFrame = seg.end_frame + delta
 
-    // Adjacent principle: resize the current segment's end frame and adjust
-    // the next segment's start frame to stay contiguous — same as drag-resize.
-    const maxEnd = next ? next.end_frame - 1 : data.total_length - 1
-    const minEnd = seg.start_frame // at least 1 frame
-    const newEnd = Math.max(minEnd, Math.min(maxEnd, seg.start_frame + newDuration - 1))
+    // Update this segment and shift all subsequent segments
+    const updated = segments.map((s, i) => {
+      if (i < idx) return s
+      if (i === idx) return { ...s, end_frame: newEndFrame }
+      // Shift subsequent segments
+      return {
+        ...s,
+        start_frame: s.start_frame + delta,
+        end_frame: s.end_frame + delta,
+      }
+    })
 
-    updated[idx] = { ...seg, end_frame: newEnd }
-    if (next) updated[idx + 1] = { ...next, start_frame: newEnd + 1 }
+    // Calculate new total length needed
+    const maxEndFrame = updated.reduce((max, s) => Math.max(max, s.end_frame), 0)
+    const newTotalLength = Math.max(data.total_length, maxEndFrame + 1)
 
-    updateSegments(maintainTrack.id, updated)
+    // Update segments and total length
+    update({
+      tracks: data.tracks.map((t) =>
+        t.type === 'maintain' ? { ...t, segments: updated } : t,
+      ),
+      total_length: newTotalLength,
+    })
   }
 
   function handleGlobalClick(e: React.MouseEvent) {
@@ -441,7 +459,7 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
           hasSelection={selectedId !== null}
           canDelete={selectedId !== null && (
             data.tracks.some((t) => t.type !== 'maintain' && t.segments.some((s) => s.id === selectedId)) ||
-            (maintainTrack?.segments.length ?? 0) !== 1
+            (maintainTrack?.segments.length ?? 0) > 0
           )}
           onDeleteSelected={handleDeleteSelected}
           zoom={zoom}
@@ -490,6 +508,14 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
                       onSelectedIdChange={setSelectedId}
                       onTrackChange={(patch) => updateTrack(track.id, patch)}
                       onSegmentsChange={(segs) => updateSegments(track.id, segs)}
+                      onExtendTimeline={(segs, newLength) => {
+                        update({
+                          tracks: data.tracks.map((t) =>
+                            t.type === 'maintain' ? { ...t, segments: segs } : t
+                          ),
+                          total_length: newLength,
+                        })
+                      }}
                     />
                   )
                 }

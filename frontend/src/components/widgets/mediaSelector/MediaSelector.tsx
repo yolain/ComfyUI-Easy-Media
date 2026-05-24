@@ -11,6 +11,7 @@ import {
   Folder,
   ChevronRight,
   Link2,
+  Plus,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -248,6 +249,7 @@ function RemoteFileList({
   searchQuery,
   value,
   onChange,
+  onAddLocalFile,
 }: Readonly<{
   source: 'inputs' | 'outputs' | 'local'
   mediaType: MediaType
@@ -257,6 +259,7 @@ function RemoteFileList({
   searchQuery: string
   value: string
   onChange: (v: string) => void
+  onAddLocalFile?: () => void
 }>) {
   const t = useT()
   const [items, setItems] = useState<MediaItem[]>([])
@@ -345,6 +348,22 @@ function RemoteFileList({
   function renderGrid() {
     return (
       <div className="grid grid-cols-4 gap-2 p-2 overflow-y-auto flex-1">
+        {/* Local file button */}
+        {onAddLocalFile && (
+          <button
+            key="__add_local__"
+            type="button"
+            className="flex flex-col gap-1 text-left hover:opacity-80 transition-opacity"
+            onClick={onAddLocalFile}
+          >
+            <div className="relative w-full aspect-square rounded overflow-hidden bg-muted flex items-center justify-center border-2 border-dashed border-muted-foreground/50">
+              <Plus className="w-6 h-6 text-muted-foreground" />
+            </div>
+            <span className="text-[10px] truncate leading-tight max-w-full text-muted-foreground">
+              {t('mediaSelector.addLocal')}
+            </span>
+          </button>
+        )}
         {filteredDirs.map((dir) => (
           <button
             key={dir.path}
@@ -385,6 +404,22 @@ function RemoteFileList({
   function renderList() {
     return (
       <div className="flex flex-col overflow-y-auto flex-1">
+        {/* Local file button */}
+        {onAddLocalFile && (
+          <button
+            key="__add_local__"
+            type="button"
+            className="flex items-center gap-2 px-2 py-1 text-left hover:bg-accent transition-colors text-muted-foreground"
+            onClick={onAddLocalFile}
+          >
+            <div className="w-4 h-4 rounded flex items-center justify-center bg-muted shrink-0">
+              <Plus className="w-3 h-3" />
+            </div>
+            <span className="flex-1 text-xs truncate min-w-0">
+              {t('mediaSelector.addLocal')}
+            </span>
+          </button>
+        )}
         {filteredDirs.map((dir) => (
           <button
             key={dir.path}
@@ -533,6 +568,63 @@ export function MediaSelector({
     }
   }
 
+  function handleAddLocalFile() {
+    const input = document.createElement('input')
+    input.type = 'file'
+    const accept = mediaType === 'image'
+      ? 'image/*'
+      : mediaType === 'audio'
+        ? 'audio/*'
+        : mediaType === 'video'
+          ? 'video/*'
+          : '*/*'
+    input.accept = accept
+    input.multiple = true
+    input.onchange = async () => {
+      if (!input.files || input.files.length === 0) return
+
+      // For single file, select it directly
+      if (input.files.length === 1) {
+        const file = input.files[0]
+        try {
+          const uploaded = await uploadFile(file)
+          onChange(uploaded)
+        } catch (err) {
+          console.error('[MediaSelector] upload failed:', err)
+        }
+        return
+      }
+
+      // For multiple files, select all of them (caller handles distribution)
+      const paths: string[] = []
+      for (const file of input.files) {
+        try {
+          const uploaded = await uploadFile(file)
+          paths.push(uploaded)
+        } catch (err) {
+          console.error('[MediaSelector] upload failed:', err)
+        }
+      }
+      if (paths.length > 0) {
+        // Select first file for single selection, but indicate multiple were uploaded
+        onChange(paths.join('|MULTIPLE|'))
+      }
+    }
+    input.click()
+  }
+
+  async function uploadFile(file: File): Promise<string> {
+    const form = new FormData()
+    form.append('image', file)
+    form.append('type', 'input')
+    form.append('overwrite', 'false')
+    const res = await fetch('/upload/image', { method: 'POST', body: form })
+    if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
+    const json = await res.json() as { name: string; subfolder?: string }
+    const sub = json.subfolder ? `${json.subfolder}/` : ''
+    return `${sub}${json.name}`
+  }
+
   return (
     <div data-media-selector="" className="flex flex-col w-72 h-80 text-xs select-none">
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as MediaTab)} className="flex flex-col flex-1 overflow-hidden">
@@ -610,6 +702,7 @@ export function MediaSelector({
             searchQuery={searchQuery}
             value={value}
             onChange={onChange}
+            onAddLocalFile={handleAddLocalFile}
           />
         </TabsContent>
 

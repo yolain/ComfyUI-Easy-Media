@@ -75,6 +75,8 @@
     "dropZone": "Maintain track drop zone",
     "segmentLabel": "Segment {n}",
     "segmentPlaceholder": "Click segment to write the prompt...",
+    "placeholder": "Add segment",
+    "placeholderHint": "Double-click to add segment",
     "promptPlaceholder": "Prompt text...",
     "addImage": "Add image",
     "tabCombined": "Combined",
@@ -84,6 +86,7 @@
     "contextAdd": "Add segment",
     "contextDelete": "Delete segment",
     "contextDistribute": "Distribute evenly",
+    "addMedia": "Add media",
     "flf": "First Last frames",
     "fmlf": "Multiple frames",
     "ref": "Reference frames"
@@ -110,6 +113,7 @@
     "slotEmpty": "No content available",
     "slotList": "list",
     "slotImage": "Image {n}",
-    "slotAudio": "Audio {n}"
+    "slotAudio": "Audio {n}",
+    "addLocal": "Add local file"
   }
 }

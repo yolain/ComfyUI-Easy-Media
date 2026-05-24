@@ -152,7 +152,8 @@ export function Toolbar({
             onChange={handleDurationChange}
             min={1}
             max={2000}
-            step={displayFormat === 'seconds' ? 0.1 : 4}
+            step={displayFormat === 'seconds' ? 1 : 4}
+            commitOnBlur={true}
             className="h-6 w-18"
           />
           <Select
@@ -176,6 +177,7 @@ export function Toolbar({
             min={1}
             max={60}
             step={1}
+            commitOnBlur={true}
             className="h-6 w-14"
           />
           <span className="text-muted-foreground">{t('toolbar.fps')}</span>

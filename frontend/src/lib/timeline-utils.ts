@@ -184,15 +184,7 @@ export function createDefaultTimelineData(t?: (path: string, params?: Record<str
       color: TRACK_DEFAULT_COLORS.maintain,
       muted: false,
       locked: false,
-      segments: [
-        {
-          id: uuid(),
-          start_frame: 0,
-          end_frame: total_length,
-          content: { text: '', images: [], type: 'flf' },
-          color: TRACK_DEFAULT_COLORS.maintain,
-        },
-      ],
+      segments: [],
     },
     {
       id: uuid(),

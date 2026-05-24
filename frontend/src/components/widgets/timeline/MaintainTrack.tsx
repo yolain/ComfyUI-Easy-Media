@@ -7,9 +7,10 @@ import {
 } from '@/components/ui/context-menu'
 import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
-import { imageItemFromPath, tiledImageBackground } from '../../../lib/image-utils'
+import { tiledImageBackground } from '../../../lib/image-utils'
 import { SegmentBlock } from './SegmentBlock'
 import { TrackRow, MAINTAIN_TRACK_HEIGHT } from './TrackRow'
+import { Plus } from 'lucide-react'
 import type {
   Track,
   MaintainSegment,
@@ -30,9 +31,21 @@ interface MaintainTrackProps {
   onSelectedIdChange: (id: string | null) => void
   onTrackChange: (patch: Partial<Track>) => void
   onSegmentsChange: (segments: Segment[]) => void
+  /** Callback to extend both segments and total length in one update */
+  onExtendTimeline?: (segments: Segment[], newTotalLength: number) => void
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Calculate segment duration using formula: (fps * multiplier) + 1
+ * Multiplier is based on totalFrames to give proportional segment sizes.
+ * For 24fps, this gives approximately 0.5s to 5s segments depending on totalFrames.
+ */
+function calcSegmentDuration(totalFrames: number, frameRate: number): number {
+  // const multiplier = Math.max(1, Math.floor(totalFrames / frameRate / 2))
+  return frameRate * 1 + 1
+}
 
 /** Evenly distribute all segments across total span. Extra frames go to front segments (前大后小). */
 function distributeEvenly(segs: Segment[], totalFrames: number): Segment[] {
@@ -148,6 +161,7 @@ export function MaintainTrack({
   onSelectedIdChange,
   onTrackChange,
   onSegmentsChange,
+  onExtendTimeline,
 }: Readonly<MaintainTrackProps>) {
   const t = useT()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -171,14 +185,10 @@ export function MaintainTrack({
     if (!rect) return
     const x = e.clientX - rect.left
     if (segments.length === 0) {
-      const newRect = containerRef.current?.getBoundingClientRect()
-      setAddAnchorPos({
-        x: 0,
-        y: newRect?.height ?? 0,
-      })
-      setSelectorValue('')
-      setAddPopoverOpen(true)
-    } else if (!getSegmentAtX(x)) {
+      // Do nothing on click when empty - only double-click or right-click
+      return
+    }
+    if (!getSegmentAtX(x)) {
       onSelectedIdChange(null)
     }
   }
@@ -312,6 +322,7 @@ export function MaintainTrack({
 
   function addSegment() {
     if (segments.length === 0) {
+      // Empty track: add segment with full duration
       onSegmentsChange([{
         id: uuid(),
         start_frame: 0,
@@ -336,26 +347,37 @@ export function MaintainTrack({
       ].sort((a, b) => a.start_frame - b.start_frame))
       return
     }
-    // No gap — split the last segment at its midpoint
+    // No gap (full timeline): extend after last segment with calculated duration
     const last = segments.at(-1)!
-    const mid = Math.floor((last.start_frame + last.end_frame) / 2)
-    onSegmentsChange([
-      ...segments.slice(0, -1),
-      { ...last, end_frame: mid },
-      {
-        id: uuid(),
-        start_frame: mid + 1,
-        end_frame: last.end_frame,
-        content: { text: '', images: [], type: 'flf' },
-        color: track.color,
-      },
-    ])
+    const segDuration = calcSegmentDuration(totalFrames, frameRate)
+    const newSegStart = last.end_frame + 1
+    const newSegEnd = newSegStart + segDuration - 1
+    const newSegment = {
+      id: uuid(),
+      start_frame: newSegStart,
+      end_frame: newSegEnd,
+      content: { text: '', images: [], type: 'flf' as const },
+      color: track.color,
+    }
+
+    onSegmentsChange([...segments, newSegment])
+    // Extend total length if needed (use combined callback to avoid batching issues)
+    if (onExtendTimeline) {
+      onExtendTimeline([...segments, newSegment], newSegEnd + 1)
+    }
   }
 
   function deleteSegment(id: string) {
-    if (segments.length <= 1) return
     const idx = segments.findIndex((s) => s.id === id)
     if (idx === -1) return
+
+    // If this is the last segment, just remove it (allow empty track)
+    if (segments.length === 1) {
+      onSegmentsChange([])
+      if (selectedId === id) onSelectedIdChange(null)
+      return
+    }
+
     const removed = segments[idx]
     const span = removed.end_frame - removed.start_frame + 1
 
@@ -407,84 +429,122 @@ export function MaintainTrack({
     })
     if (files.length === 0) { setPendingDropFrame(null); return }
 
-    const rect = e.currentTarget.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const dropFrame = Math.round((x / areaWidth) * (totalFrames - 1))
-
-    const newItems: ImageItem[] = []
+    // Upload all files first
+    const paths: string[] = []
     for (const file of files) {
       try {
         const path = await uploadImageFile(file)
-        newItems.push(imageItemFromPath(path))
+        paths.push(path)
       } catch (err) {
         console.error('[MaintainTrack] upload failed:', err)
       }
     }
-    if (newItems.length === 0) { setPendingDropFrame(null); return }
+    if (paths.length === 0) { setPendingDropFrame(null); return }
 
-    const safeDropFrame = Number.isFinite(dropFrame) ? dropFrame : Math.floor(totalFrames / 2)
+    // If empty track: create one segment with all images distributed evenly
+    if (segments.length === 0) {
+      const segDuration = Math.floor(totalFrames / paths.length)
+      const remainder = totalFrames % paths.length
+      const newSegments: MaintainSegment[] = []
+      let currentStart = 0
 
-    // 1. Check if the drop landed in a gap — fill the gap (same as double-click on empty area)
-    const sorted = [...segments].sort((a, b) => a.start_frame - b.start_frame)
-    let gapStart: number | null = null
-    let gapEnd: number | null = null
-    for (let i = 0; i <= sorted.length; i++) {
-      const gs = i === 0 ? 0 : sorted[i - 1].end_frame + 1
-      const ge = i === sorted.length ? totalFrames - 1 : sorted[i].start_frame - 1
-      if (gs <= ge && safeDropFrame >= gs && safeDropFrame <= ge) {
-        gapStart = gs
-        gapEnd = ge
-        break
-      }
-    }
-
-    if (gapStart !== null && gapEnd !== null) {
-      onSegmentsChange([
-        ...segments,
-        {
+      for (let i = 0; i < paths.length; i++) {
+        const span = segDuration + (i < remainder ? 1 : 0)
+        const newItems: ImageItem[] = [{
+          source_type: 'input' as const,
+          file_path: paths[i],
+          file_name: paths[i].split('/').pop() ?? paths[i],
+        }]
+        newSegments.push({
           id: uuid(),
-          start_frame: gapStart,
-          end_frame: gapEnd,
-          content: { text: '', images: newItems, type: 'flf' },
+          start_frame: currentStart,
+          end_frame: currentStart + span - 1,
+          content: { text: '', images: newItems, type: 'flf' as const },
           color: track.color,
+        })
+        currentStart += span
+      }
+
+      onSegmentsChange(newSegments)
+      setPendingDropFrame(null)
+      return
+    }
+
+    // Check if there's a gap
+    const gap = findFirstGap()
+    const segDuration = calcSegmentDuration(totalFrames, frameRate)
+
+    if (gap) {
+      // Fill gap with first image, extend with remaining (same as addSegment logic)
+      const newSegments: MaintainSegment[] = []
+      let currentEndFrame = gap.start
+
+      for (const path of paths) {
+        if (currentEndFrame > totalFrames - 1) break
+        const span = Math.min(segDuration, totalFrames - currentEndFrame)
+        newSegments.push({
+          id: uuid(),
+          start_frame: currentEndFrame,
+          end_frame: currentEndFrame + span - 1,
+          content: {
+            text: '',
+            images: [{
+              source_type: 'input' as const,
+              file_path: path,
+              file_name: path.split('/').pop() ?? path,
+            }],
+            type: 'flf' as const,
+          },
+          color: track.color,
+        })
+        currentEndFrame += segDuration
+      }
+
+      const updated = [...segments, ...newSegments].sort((a, b) => a.start_frame - b.start_frame)
+      onSegmentsChange(updated)
+
+      // Extend total length if needed
+      const lastSeg = newSegments[newSegments.length - 1]
+      if (lastSeg && onExtendTimeline) {
+        onExtendTimeline(updated, lastSeg.end_frame + 1)
+      }
+      setPendingDropFrame(null)
+      return
+    }
+
+    // No gap (full timeline): extend after last segment - same logic as addSegment
+    const lastSeg = segments[segments.length - 1]
+    const newSegments: MaintainSegment[] = []
+    let currentEndFrame = lastSeg.end_frame + 1
+
+    for (const path of paths) {
+      newSegments.push({
+        id: uuid(),
+        start_frame: currentEndFrame,
+        end_frame: currentEndFrame + segDuration - 1,
+        content: {
+          text: '',
+          images: [{
+            source_type: 'input' as const,
+            file_path: path,
+            file_name: path.split('/').pop() ?? path,
+          }],
+          type: 'flf' as const,
         },
-      ].sort((a, b) => a.start_frame - b.start_frame))
-      setPendingDropFrame(null)
-      return
+        color: track.color,
+      })
+      currentEndFrame += segDuration
     }
 
-    // 2. Drop landed on an existing segment — split it at its midpoint
-    const targetIdx = segments.findIndex(
-      (s) => safeDropFrame >= s.start_frame && safeDropFrame <= s.end_frame,
-    )
-    const targetSeg = targetIdx >= 0 ? segments[targetIdx] : segments.at(-1)
-    if (!targetSeg) { setPendingDropFrame(null); return }
-
-    const segSpan = targetSeg.end_frame - targetSeg.start_frame
-    if (segSpan < 2) {
-      // Segment too small to split — replace its images
-      onSegmentsChange(
-        segments.map((s) =>
-          s.id === targetSeg.id ? { ...s, content: { ...s.content, images: newItems } } : s,
-        ),
-      )
-      setPendingDropFrame(null)
-      return
-    }
-
-    const mid = Math.floor((targetSeg.start_frame + targetSeg.end_frame) / 2)
-    const leftSeg: MaintainSegment = { ...targetSeg, end_frame: mid }
-    const rightSeg: MaintainSegment = {
-      id: uuid(),
-      start_frame: mid + 1,
-      end_frame: targetSeg.end_frame,
-      content: { text: '', images: newItems, type: targetSeg.content.type },
-      color: targetSeg.color,
-      markers: [],
-    }
-    const updated = [...segments]
-    updated.splice(targetIdx, 1, leftSeg, rightSeg)
+    const updated = [...segments, ...newSegments]
     onSegmentsChange(updated)
+
+    // Extend total length using combined callback
+    const lastNewSeg = newSegments[newSegments.length - 1]
+    if (onExtendTimeline) {
+      onExtendTimeline(updated, lastNewSeg.end_frame + 1)
+    }
+    setPendingDropFrame(null)
     setPendingDropFrame(null)
   }
 
@@ -532,6 +592,38 @@ export function MaintainTrack({
               </SegmentBlock>
             ))}
 
+            {/* Empty state with its own context menu */}
+            {segments.length === 0 ? (
+              <ContextMenu>
+                <ContextMenuTrigger asChild>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground select-none opacity-40">
+                    <div className="flex items-center gap-1">
+                      <Plus className="w-3 h-3" />
+                      <span className="text-[11px]">
+                        {t('maintainTrack.placeholder')}
+                      </span>
+                    </div>
+                    <span className="text-[10px]">{t('maintainTrack.placeholderHint')}</span>
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                  <ContextMenuItem onClick={addSegment}>{t('maintainTrack.contextAdd')}</ContextMenuItem>
+                  <ContextMenuItem
+                    onClick={() => {
+                      setAddAnchorPos({ x: 0, y: 60 })
+                      setSelectorValue('')
+                      setAddPopoverOpen(true)
+                    }}
+                  >
+                    {t('maintainTrack.addMedia')}
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
+            ) : (
+              /* Placeholder for non-empty state (hidden) */
+              <div className="hidden" />
+            )}
+
             {/* Drop indicator */}
             {pendingDropFrame !== null && (
               <div
@@ -550,14 +642,11 @@ export function MaintainTrack({
           </ContextMenuItem>
           <ContextMenuItem onClick={addSegment}>{t('maintainTrack.contextAdd')}</ContextMenuItem>
           {rightClickedId && (
-            <>
-              <ContextMenuItem
-                onClick={() => { deleteSegment(rightClickedId); setRightClickedId(null) }}
-                disabled={segments.length <= 1}
-              >
-                {t('maintainTrack.contextDelete')}
-              </ContextMenuItem>
-            </>
+            <ContextMenuItem
+              onClick={() => { deleteSegment(rightClickedId); setRightClickedId(null) }}
+            >
+              {t('maintainTrack.contextDelete')}
+            </ContextMenuItem>
           )}
         </ContextMenuContent>
       </ContextMenu>
@@ -580,28 +669,133 @@ export function MaintainTrack({
           <MediaSelector
             value={selectorValue}
             onChange={(filePath) => {
-              if (filePath) {
-                const fileName = filePath.split('/').pop() ?? filePath
-                const isUrl = filePath.startsWith('http')
-                onSegmentsChange([
-                  ...segments,
-                  {
+              if (!filePath) {
+                setAddPopoverOpen(false)
+                return
+              }
+
+              const isMultiFile = filePath.includes('|MULTIPLE|')
+              const paths = isMultiFile ? filePath.split('|MULTIPLE|') : [filePath]
+
+              // If empty track: create new segments distributed across totalFrames
+              if (segments.length === 0) {
+                const newSegments: MaintainSegment[] = []
+                let currentEndFrame = 0
+
+                for (let i = 0; i < paths.length; i++) {
+                  const path = paths[i]
+                  const fileName = path.split('/').pop() ?? path
+                  const isUrl = path.startsWith('http')
+
+                  // Calculate segment span (evenly distribute remaining frames, 前大后小)
+                  const remainingFrames = totalFrames - currentEndFrame
+                  const remainingSlots = paths.length - i
+                  const baseSpan = Math.floor(remainingFrames / remainingSlots)
+                  const remainder = remainingFrames % remainingSlots
+                  const span = baseSpan + (i < remainder ? 1 : 0)
+
+                  const seg: MaintainSegment = {
                     id: uuid(),
-                    start_frame: segments.length > 0 ? (segments.at(-1)?.end_frame ?? -1) + 1 : 0,
-                    end_frame: totalFrames - 1,
+                    start_frame: currentEndFrame,
+                    end_frame: Math.min(currentEndFrame + span - 1, totalFrames - 1),
                     content: {
                       text: '',
                       images: [{
                         source_type: isUrl ? 'url' : 'input',
-                        file_path: isUrl ? undefined : filePath,
-                        url: isUrl ? filePath : undefined,
+                        file_path: isUrl ? undefined : path,
+                        url: isUrl ? path : undefined,
                         file_name: fileName,
                       }],
                       type: 'flf',
                     },
                     color: track.color,
+                  }
+                  newSegments.push(seg)
+                  currentEndFrame = seg.end_frame + 1
+                }
+
+                onSegmentsChange(newSegments)
+                setAddPopoverOpen(false)
+                return
+              }
+
+              // If has segments: check if there's a gap to fill first
+              const gap = findFirstGap()
+              if (gap) {
+                // Fill gap with first image, extend with remaining
+                const segDuration = calcSegmentDuration(totalFrames, frameRate)
+                const newSegments: MaintainSegment[] = []
+                let currentEndFrame = gap.start
+
+                for (let i = 0; i < paths.length; i++) {
+                  if (currentEndFrame > totalFrames - 1) break
+                  const path = paths[i]
+                  const fileName = path.split('/').pop() ?? path
+                  const isUrl = path.startsWith('http')
+
+                  const span = Math.min(segDuration, totalFrames - currentEndFrame)
+                  newSegments.push({
+                    id: uuid(),
+                    start_frame: currentEndFrame,
+                    end_frame: currentEndFrame + span - 1,
+                    content: {
+                      text: '',
+                      images: [{
+                        source_type: isUrl ? 'url' : 'input',
+                        file_path: isUrl ? undefined : path,
+                        url: isUrl ? path : undefined,
+                        file_name: fileName,
+                      }],
+                      type: 'flf',
+                    },
+                    color: track.color,
+                  })
+                  currentEndFrame += segDuration
+                }
+
+                onSegmentsChange([...segments, ...newSegments].sort((a, b) => a.start_frame - b.start_frame))
+                setAddPopoverOpen(false)
+                return
+              }
+
+              // No gap (filled): extend after last segment with calculated duration for each image
+              const lastSeg = segments[segments.length - 1]
+              const segDuration = calcSegmentDuration(totalFrames, frameRate)
+              const newSegments: MaintainSegment[] = []
+              let currentEndFrame = lastSeg.end_frame + 1
+
+              for (let i = 0; i < paths.length; i++) {
+                const path = paths[i]
+                const fileName = path.split('/').pop() ?? path
+                const isUrl = path.startsWith('http')
+
+                newSegments.push({
+                  id: uuid(),
+                  start_frame: currentEndFrame,
+                  end_frame: currentEndFrame + segDuration - 1,
+                  content: {
+                    text: '',
+                    images: [{
+                      source_type: isUrl ? 'url' : 'input',
+                      file_path: isUrl ? undefined : path,
+                      url: isUrl ? path : undefined,
+                      file_name: fileName,
+                    }],
+                    type: 'flf',
                   },
-                ])
+                  color: track.color,
+                })
+                currentEndFrame += segDuration
+              }
+
+              onSegmentsChange([...segments, ...newSegments])
+
+              // Extend total length if needed (use combined callback to avoid batching issues)
+              if (onExtendTimeline) {
+                const lastNewSeg = newSegments[newSegments.length - 1]
+                if (lastNewSeg) {
+                  onExtendTimeline([...segments, ...newSegments], lastNewSeg.end_frame + 1)
+                }
               }
               setAddPopoverOpen(false)
             }}

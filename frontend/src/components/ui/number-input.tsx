@@ -12,6 +12,7 @@ interface NumberInputProps {
   step?: number
   className?: string
   disabled?: boolean
+  commitOnBlur?: boolean
 }
 
 export function NumberInput({
@@ -22,44 +23,110 @@ export function NumberInput({
   step = 1,
   className,
   disabled,
+  commitOnBlur = false,
 }: NumberInputProps) {
-  const handleIncrement = React.useCallback(() => {
-    const newValue = Math.min(max, value + step)
-    onChange(newValue)
-  }, [value, step, max, onChange])
+  const inputRef = React.useRef<HTMLInputElement>(null)
+  const blurOnEnterRef = React.useRef(false)
+  const [draftValue, setDraftValue] = React.useState<string>(String(value))
 
-  const handleDecrement = React.useCallback(() => {
-    const newValue = Math.max(min, value - step)
-    onChange(newValue)
-  }, [value, step, min, onChange])
+  // Sync draftValue when value prop changes (for parent updates)
+  React.useEffect(() => {
+    if (!commitOnBlur) return
+    setDraftValue(String(value))
+  }, [value, commitOnBlur])
 
-  const handleInputChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const rawValue = e.currentTarget.value
+  const clamp = React.useCallback(
+    (val: number): number => {
+      return Math.min(max, Math.max(min, val))
+    },
+    [min, max]
+  )
+
+  const parseAndCommit = React.useCallback(
+    (rawValue: string) => {
       if (rawValue === "") {
-        onChange(0)
+        onChange(clamp(0))
         return
       }
       const parsed = Number.parseFloat(rawValue)
       if (!Number.isNaN(parsed)) {
-        const clamped = Math.min(max, Math.max(min, parsed))
-        onChange(clamped)
+        onChange(clamp(parsed))
       }
     },
-    [onChange, min, max]
+    [onChange, clamp]
   )
+
+  const handleIncrement = React.useCallback(() => {
+    // Buttons always commit immediately
+    const newValue = Math.min(max, value + step)
+    onChange(newValue)
+    if (commitOnBlur) {
+      setDraftValue(String(newValue))
+    }
+  }, [commitOnBlur, value, step, max, onChange])
+
+  const handleDecrement = React.useCallback(() => {
+    // Buttons always commit immediately
+    const newValue = Math.max(min, value - step)
+    onChange(newValue)
+    if (commitOnBlur) {
+      setDraftValue(String(newValue))
+    }
+  }, [commitOnBlur, value, step, min, onChange])
+
+  const handleInputChange = React.useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const rawValue = e.currentTarget.value
+      if (commitOnBlur) {
+        setDraftValue(rawValue)
+      } else {
+        if (rawValue === "") {
+          onChange(0)
+          return
+        }
+        const parsed = Number.parseFloat(rawValue)
+        if (!Number.isNaN(parsed)) {
+          onChange(clamp(parsed))
+        }
+      }
+    },
+    [commitOnBlur, onChange, clamp]
+  )
+
+  const handleBlur = React.useCallback(() => {
+    if (commitOnBlur && !blurOnEnterRef.current) {
+      parseAndCommit(draftValue)
+      setDraftValue(String(value))
+    }
+    blurOnEnterRef.current = false
+  }, [commitOnBlur, parseAndCommit, draftValue, value])
 
   const handleKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === "ArrowUp") {
         e.preventDefault()
-        handleIncrement()
+        // Arrow keys always commit immediately
+        const newValue = Math.min(max, value + step)
+        onChange(newValue)
+        if (commitOnBlur) {
+          setDraftValue(String(newValue))
+        }
       } else if (e.key === "ArrowDown") {
         e.preventDefault()
-        handleDecrement()
+        // Arrow keys always commit immediately
+        const newValue = Math.max(min, value - step)
+        onChange(newValue)
+        if (commitOnBlur) {
+          setDraftValue(String(newValue))
+        }
+      } else if (commitOnBlur && e.key === "Enter") {
+        e.preventDefault()
+        blurOnEnterRef.current = true
+        parseAndCommit(draftValue)
+        inputRef.current?.blur()
       }
     },
-    [handleIncrement, handleDecrement]
+    [commitOnBlur, value, step, min, max, onChange, parseAndCommit, draftValue]
   )
 
   return (
@@ -71,9 +138,11 @@ export function NumberInput({
     >
       <input
         type="number"
-        value={value}
+        value={commitOnBlur ? draftValue : value}
         onChange={handleInputChange}
         onKeyDown={handleKeyDown}
+        onBlur={handleBlur}
+        ref={inputRef}
         min={min}
         max={max}
         step={step}

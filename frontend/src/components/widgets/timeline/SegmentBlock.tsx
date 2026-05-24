@@ -3,6 +3,10 @@ import type { Segment, TimeDisplayFormat } from '@/types/timeline'
 import { cn } from '@/lib/utils'
 import { useT } from '@/lib/i18n'
 
+/** Resize trigger zone: 8px normally, 20px when selected */
+const RESIZE_ZONE_DEFAULT = 8
+const RESIZE_ZONE_SELECTED = 12
+
 interface SegmentBlockProps {
   segment: Segment
   totalFrames: number
@@ -11,6 +15,8 @@ interface SegmentBlockProps {
   interactive?: boolean
   /** Hide the left resize handle */
   hideLeftHandle?: boolean
+  /** Minimum start frame for left resize (default: 0) */
+  minStart?: number
   selected?: boolean
   onClick?: (segment: Segment) => void
   onDoubleClick?: (segment: Segment) => void
@@ -18,7 +24,7 @@ interface SegmentBlockProps {
   onContextMenu?: (e: React.MouseEvent, segment: Segment) => void
   /** Called on every drag move; origStart is the frame position at mousedown */
   onDragEnd?: (segmentId: string, deltaFrames: number, origStart: number) => void
-  onResizeEnd?: (segmentId: string, edge: 'start' | 'end', deltaFrames: number) => void
+  onResizeEnd?: (segmentId: string, edge: 'start' | 'end', deltaFrames: number, minStart?: number) => void
   children?: React.ReactNode
   /** Absolutely-positioned background content (e.g. thumbnail image) */
   backgroundSlot?: React.ReactNode
@@ -58,6 +64,7 @@ export const SegmentBlock = React.forwardRef<HTMLDivElement, SegmentBlockProps>(
   areaWidth,
   interactive = true,
   hideLeftHandle = false,
+  minStart = 0,
   selected = false,
   onClick,
   onDoubleClick,
@@ -96,6 +103,31 @@ export const SegmentBlock = React.forwardRef<HTMLDivElement, SegmentBlockProps>(
   // Track whether a drag actually happened so we can suppress the click
   const didDrag = useRef(false)
   const [isResizing, setIsResizing] = useState(false)
+  // Hover state for cursor change - larger zone when selected
+  const [cursorStyle, setCursorStyle] = useState<'ew-resize' | 'grab' | null>(null)
+
+  function getResizeZone(): number {
+    return selected ? RESIZE_ZONE_SELECTED : RESIZE_ZONE_DEFAULT
+  }
+
+  function handleMouseMove(e: React.MouseEvent) {
+    if (!interactive) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const relX = e.clientX - rect.left
+    const zone = getResizeZone()
+    const nearStart = relX <= zone
+    const nearEnd = relX >= rect.width - zone
+
+    if (nearStart || nearEnd) {
+      setCursorStyle('ew-resize')
+    } else {
+      setCursorStyle('grab')
+    }
+  }
+
+  function handleMouseLeave() {
+    setCursorStyle(null)
+  }
 
   function handleMouseDown(e: React.MouseEvent) {
     if (!interactive) return
@@ -106,8 +138,9 @@ export const SegmentBlock = React.forwardRef<HTMLDivElement, SegmentBlockProps>(
     const origStart = segment.start_frame
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const relX = e.clientX - rect.left
-    const isResizingStart = relX <= 8
-    const isResizingEnd = relX >= rect.width - 8
+    const zone = getResizeZone()
+    const isResizingStart = relX <= zone
+    const isResizingEnd = relX >= rect.width - zone
     // Detect initial resize intent based on where the click started
     let resizeMode: 'start' | 'end' | 'move' = 'move'
     if (isResizingStart) {
@@ -124,7 +157,7 @@ export const SegmentBlock = React.forwardRef<HTMLDivElement, SegmentBlockProps>(
       if (deltaFrames !== 0) didDrag.current = true
 
       if (resizeMode === 'start' && onResizeEnd) {
-        onResizeEnd(segment.id, 'start', deltaFrames)
+        onResizeEnd(segment.id, 'start', deltaFrames, minStart)
       } else if (resizeMode === 'end' && onResizeEnd) {
         onResizeEnd(segment.id, 'end', deltaFrames)
       } else if (resizeMode === 'move' && onDragEnd) {
@@ -156,7 +189,7 @@ export const SegmentBlock = React.forwardRef<HTMLDivElement, SegmentBlockProps>(
 
       function onMove(ev: MouseEvent) {
         const deltaFrames = Math.round((ev.clientX - startX) / scale)
-        onResizeEnd?.(segment.id, edge, deltaFrames)
+        onResizeEnd?.(segment.id, edge, deltaFrames, edge === 'start' ? minStart : undefined)
       }
 
       function onUp() {
@@ -183,12 +216,14 @@ export const SegmentBlock = React.forwardRef<HTMLDivElement, SegmentBlockProps>(
         width,
         backgroundColor: segment.color,
         // opacity: 1,
-        cursor: interactive ? 'grab' : 'default',
         border: isResizing ? '1px solid #eab308' : selected ? '1px solid var(--foreground)' : `1px solid ${lightenColor(segment.color)}`,
+        cursor: cursorStyle ?? (interactive ? 'grab' : 'default'),
         // outlineOffset: selected ? '-1px' : '0px',
         ...bgStyle,
       }}
       onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
       onClick={(e) => {
         if (didDrag.current) return
         e.stopPropagation()
@@ -224,7 +259,8 @@ export const SegmentBlock = React.forwardRef<HTMLDivElement, SegmentBlockProps>(
         <button
           type="button"
           aria-label={t('segmentBlock.resizeStart')}
-          className="absolute left-0 top-0 h-full w-1 cursor-ew-resize bg-transparent -z-1"
+          className="absolute left-0 top-0 h-full w-0.5 cursor-ew-resize z-20"
+          style={{ background: isResizing ? '#eab308' : selected ? 'var(--foreground)' : 'transparent' }}
           onMouseDown={(e) => {
             // e.stopPropagation()
             makeResizeHandler('start')(e)
@@ -242,7 +278,8 @@ export const SegmentBlock = React.forwardRef<HTMLDivElement, SegmentBlockProps>(
         <button
           type="button"
           aria-label={t('segmentBlock.resizeEnd')}
-          className="absolute right-0 top-0 h-full w-1 cursor-ew-resize bg-transparent -z-1"
+          className="absolute right-0 top-0 h-full w-0.5 cursor-ew-resize z-20"
+          style={{ background: isResizing ? '#eab308' : selected ? 'var(--foreground)' : 'transparent' }}
           onMouseDown={(e) => {
             e.stopPropagation()
             makeResizeHandler('end')(e)

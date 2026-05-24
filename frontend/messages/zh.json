@@ -75,6 +75,8 @@
     "dropZone": "主轨拖放区域",
     "segmentLabel": "片段 {n}",
     "segmentPlaceholder": "点击片段修改提示...",
+    "placeholder": "添加片段",
+    "placeholderHint": "双击添加片段",
     "promptPlaceholder": "提示词...",
     "addImage": "添加图片",
     "tabCombined": "整体编辑",
@@ -84,6 +86,7 @@
     "contextAdd": "添加片段",
     "contextDelete": "删除片段",
     "contextDistribute": "均匀分布",
+    "addMedia": "添加媒体",
     "flf": "首尾帧",
     "fmlf": "多帧",
     "ref": "参考帧"
@@ -110,6 +113,7 @@
     "slotEmpty": "暂无内容",
     "slotList": "列表",
     "slotImage": "图像 {n}",
-    "slotAudio": "音频 {n}"
+    "slotAudio": "音频 {n}",
+    "addLocal": "添加本地文件"
   }
 }

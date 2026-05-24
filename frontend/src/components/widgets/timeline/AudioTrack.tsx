@@ -22,7 +22,7 @@ import type { SlotItem } from '@/lib/timeline-utils'
 import { useT } from '@/lib/i18n'
 import { uuid } from '@/lib/uuid'
 import { CUSTOM_NODE_CLASS } from '@/lib/constants'
-import { secondsToAudioFrames, computeSlotItems } from '@/lib/timeline-utils'
+import { computeSlotItems } from '@/lib/timeline-utils'
 
 interface AudioTrackProps {
   track: Track
@@ -137,37 +137,110 @@ export function AudioTrack({
   function handleSelectorChange(filePath: string) {
     setSelectorValue(filePath)
 
-    if (filePath.startsWith('__slot__:')) {
-      const slotName = filePath.slice('__slot__:'.length)
-      // Get slot item info - audio_name from LoadAudio for playback
-      const slotItem = slotItems.find((item: SlotItem) => item.value === filePath)
-      const audioName = slotItem?.audio_name
-      // Build url from audio_name similar to input files (from input directory)
-      const url = audioName ? `/api/view?filename=${encodeURIComponent(audioName)}&type=input` : undefined
+    // Handle multiple files
+    const isMultiFile = filePath.includes('|MULTIPLE|')
+    const paths = isMultiFile ? filePath.split('|MULTIPLE|') : [filePath]
 
-      if (editingSegId) {
-        onSegmentsChange(
-          segments.map((s) =>
-            s.id === editingSegId
-              ? { ...s, content: { source_type: 'slot', slot_name: slotName, file_name: slotName, url } }
-              : s,
-          ),
-        )
-        setPopoverOpen(false)
-        return
+    // For editing mode, only use the first file
+    if (editingSegId) {
+      const path = paths[0]
+      const fileName = path.split('/').pop() ?? path
+      const isUrl = path.startsWith('http')
+      onSegmentsChange(
+        segments.map((s) =>
+          s.id === editingSegId
+            ? {
+                ...s,
+                content: isUrl
+                  ? { source_type: 'url', url: path, file_name: fileName }
+                  : { source_type: 'input', file_path: path, file_name: fileName },
+              }
+            : s,
+        ),
+      )
+      setPopoverOpen(false)
+      return
+    }
+
+    // For adding mode - handle multiple files
+    async function processAudioFile(
+      path: string,
+      cursor: number,
+      currentSegments: AudioSegment[],
+    ): Promise<{ newSeg: AudioSegment | null; nextCursor: number; updatedSegments: AudioSegment[] }> {
+      const fileName = path.split('/').pop() ?? path
+      const isUrl = path.startsWith('http')
+
+      // Build source URL
+      let src = path
+      if (!isUrl) {
+        src = `/api/view?filename=${encodeURIComponent(path)}&type=input`
       }
 
-      // For new segments, get actual duration from audio
-      if (url) {
-        const tempAudio = new Audio(url)
-        tempAudio.preload = 'metadata'
-        tempAudioRefs.current.push(tempAudio)
-        tempAudio.addEventListener('loadedmetadata', () => {
-          const actualDuration = tempAudio.duration
-          const cursor = lastOccupied >= 0 ? lastOccupied + 1 : 0
-          if (cursor >= totalFrames) return
+      const actualDuration = await new Promise<number>((resolve) => {
+        const audio = new Audio(src)
+        tempAudioRefs.current.push(audio)
+        audio.preload = 'metadata'
+        audio.addEventListener('loadedmetadata', () => resolve(audio.duration))
+        audio.addEventListener('error', () => resolve(5)) // fallback to 5 seconds
+      })
+
+      const actualFrames = Math.ceil(actualDuration * frameRate)
+      const segEnd = Math.min(totalFrames - 1, cursor + actualFrames - 1)
+
+      // If audio exceeds remaining space, truncate it
+      if (cursor >= totalFrames) {
+        return { newSeg: null, nextCursor: cursor, updatedSegments: currentSegments }
+      }
+
+      const newSeg: AudioSegment = {
+        id: uuid(),
+        start_frame: cursor,
+        end_frame: segEnd,
+        origin_start_frame: cursor,
+        origin_end_frame: cursor + actualFrames - 1,
+        content: isUrl
+          ? { source_type: 'url', url: path, file_name: fileName }
+          : { source_type: 'input', file_path: path, file_name: fileName },
+        color: track.color,
+        markers: [],
+      }
+
+      return {
+        newSeg,
+        nextCursor: segEnd + 1,
+        updatedSegments: [...currentSegments, newSeg],
+      }
+    }
+
+    async function processAllFiles() {
+      let cursor = lastOccupied >= 0 ? lastOccupied + 1 : 0
+      let currentSegments = [...segments]
+
+      for (const path of paths) {
+        if (cursor >= totalFrames) break
+
+        if (path.startsWith('__slot__:')) {
+          const slotName = path.slice('__slot__:'.length)
+          const slotItem = slotItems.find((item: SlotItem) => item.value === path)
+          const audioName = slotItem?.audio_name
+          const url = audioName ? `/api/view?filename=${encodeURIComponent(audioName)}&type=input` : undefined
+
+          const actualDuration = await new Promise<number>((resolve) => {
+            if (url) {
+              const audio = new Audio(url)
+              tempAudioRefs.current.push(audio)
+              audio.preload = 'metadata'
+              audio.addEventListener('loadedmetadata', () => resolve(audio.duration))
+              audio.addEventListener('error', () => resolve(5))
+            } else {
+              resolve(5)
+            }
+          })
+
           const actualFrames = Math.ceil(actualDuration * frameRate)
           const segEnd = Math.min(totalFrames - 1, cursor + actualFrames - 1)
+
           const newSeg: AudioSegment = {
             id: uuid(),
             start_frame: cursor,
@@ -178,124 +251,26 @@ export function AudioTrack({
             color: track.color,
             markers: [],
           }
-          onSegmentsChange([...segments, newSeg].toSorted((a, b) => a.start_frame - b.start_frame))
-          setEditingSegId(newSeg.id)
-        })
-        tempAudio.addEventListener('error', () => {
-          const cursor = lastOccupied >= 0 ? lastOccupied + 1 : 0
-          if (cursor >= totalFrames) return
-          const fallbackEnd = Math.min(totalFrames - 1, cursor + secondsToAudioFrames(5, frameRate) - 1)
-          const newSeg: AudioSegment = {
-            id: uuid(),
-            start_frame: cursor,
-            end_frame: fallbackEnd,
-            origin_start_frame: cursor,
-            origin_end_frame: fallbackEnd,
-            content: { source_type: 'slot', slot_name: slotName, file_name: slotName, url },
-            color: track.color,
-            markers: [],
+
+          currentSegments = [...currentSegments, newSeg]
+          cursor = segEnd + 1
+        } else {
+          const result = await processAudioFile(path, cursor, currentSegments)
+          if (result.newSeg) {
+            cursor = result.nextCursor
+            currentSegments = result.updatedSegments
           }
-          onSegmentsChange([...segments, newSeg].toSorted((a, b) => a.start_frame - b.start_frame))
-          setEditingSegId(newSeg.id)
-        })
-      } else {
-        // Fallback if no url available
-        const cursor = lastOccupied >= 0 ? lastOccupied + 1 : 0
-        if (cursor >= totalFrames) { setPopoverOpen(false); return }
-        const fallbackEnd = Math.min(totalFrames - 1, cursor + secondsToAudioFrames(5, frameRate) - 1)
-        const newSeg: AudioSegment = {
-          id: uuid(),
-          start_frame: cursor,
-          end_frame: fallbackEnd,
-          origin_start_frame: cursor,
-          origin_end_frame: fallbackEnd,
-          content: { source_type: 'slot', slot_name: slotName, file_name: slotName, url },
-          color: track.color,
-          markers: [],
         }
-        onSegmentsChange([...segments, newSeg].toSorted((a, b) => a.start_frame - b.start_frame))
-        setEditingSegId(newSeg.id)
+      }
+
+      onSegmentsChange(currentSegments.toSorted((a, b) => a.start_frame - b.start_frame))
+      if (currentSegments.length > segments.length) {
+        setEditingSegId(currentSegments[currentSegments.length - 1].id)
       }
       setPopoverOpen(false)
-      return
     }
 
-    const fileName = filePath.split('/').pop() ?? filePath
-    const isUrl = filePath.startsWith('http')
-
-    if (editingSegId) {
-      onSegmentsChange(
-        segments.map((s) =>
-          s.id === editingSegId
-            ? {
-                ...s,
-                content: isUrl
-                  ? { source_type: 'url', url: filePath, file_name: fileName }
-                  : { source_type: 'input', file_path: filePath, file_name: fileName },
-              }
-            : s,
-        ),
-      )
-    } else {
-      // Build source URL
-      let src = filePath
-      if (!isUrl) {
-        src = `/api/view?filename=${encodeURIComponent(filePath)}&type=input`
-      }
-
-      // Create temporary audio to get actual duration
-      const tempAudio = new Audio(src)
-      tempAudio.preload = 'metadata'
-      tempAudioRefs.current.push(tempAudio)
-
-      tempAudio.addEventListener('loadedmetadata', () => {
-        const actualDuration = tempAudio.duration
-        console.log(`[AudioTrack] Actual audio duration: ${actualDuration.toFixed(3)}s`)
-
-        const cursor = lastOccupied >= 0 ? lastOccupied + 1 : 0
-        if (cursor >= totalFrames) return
-
-        const actualFrames = Math.ceil(actualDuration * frameRate)
-        const segStart = cursor
-        const segEnd = Math.min(totalFrames - 1, cursor + actualFrames - 1)
-        const newSeg: AudioSegment = {
-          id: uuid(),
-          start_frame: segStart,
-          end_frame: segEnd,
-          origin_start_frame: segStart,
-          origin_end_frame: cursor + actualFrames - 1,
-          content: isUrl
-            ? { source_type: 'url', url: filePath, file_name: fileName }
-            : { source_type: 'input', file_path: filePath, file_name: fileName },
-          color: track.color,
-          markers: [],
-        }
-        onSegmentsChange([...segments, newSeg].toSorted((a, b) => a.start_frame - b.start_frame))
-        setEditingSegId(newSeg.id)
-      })
-
-      tempAudio.addEventListener('error', () => {
-        console.error(`[AudioTrack] Failed to load audio: ${src}`)
-        const cursor = lastOccupied >= 0 ? lastOccupied + 1 : 0
-        if (cursor >= totalFrames) return
-        const fallbackEnd = Math.min(totalFrames - 1, cursor + secondsToAudioFrames(5, frameRate) - 1)
-        const newSeg: AudioSegment = {
-          id: uuid(),
-          start_frame: cursor,
-          end_frame: fallbackEnd,
-          origin_start_frame: cursor,
-          origin_end_frame: fallbackEnd,
-          content: isUrl
-            ? { source_type: 'url', url: filePath, file_name: fileName }
-            : { source_type: 'input', file_path: filePath, file_name: fileName },
-          color: track.color,
-          markers: [],
-        }
-        onSegmentsChange([...segments, newSeg].toSorted((a, b) => a.start_frame - b.start_frame))
-        setEditingSegId(newSeg.id)
-      })
-    }
-    setPopoverOpen(false)
+    processAllFiles()
   }
 
   function handleDeleteSegment(segId: string) {
@@ -377,7 +352,7 @@ export function AudioTrack({
     setPendingDropFrame(null)
   }
 
-  function handleResizeEnd(segmentId: string, edge: 'start' | 'end', deltaFrames: number) {
+  function handleResizeEnd(segmentId: string, edge: 'start' | 'end', deltaFrames: number, minStart = 0) {
     if (track.locked) return
     const seg = segments.find((s) => s.id === segmentId)
     if (!seg) return
@@ -387,7 +362,7 @@ export function AudioTrack({
     let newStart = seg.start_frame
     let newEnd = seg.end_frame
     if (edge === 'start') {
-      newStart = Math.max(originStart, seg.start_frame + deltaFrames)
+      newStart = Math.max(minStart, Math.max(originStart, seg.start_frame + deltaFrames))
       const prev = others.findLast((s) => s.end_frame < seg.end_frame)
       if (prev) newStart = Math.max(newStart, prev.end_frame + 1)
       newStart = Math.min(newStart, seg.end_frame - 1)
@@ -521,6 +496,7 @@ export function AudioTrack({
                     totalFrames={totalFrames}
                     areaWidth={areaWidth}
                     interactive={!track.locked}
+                    minStart={0}
                     selected={selectedId === seg.id}
                     onSelect={(s) => {
                       onSelectedIdChange(selectedId === s.id ? null : s.id)

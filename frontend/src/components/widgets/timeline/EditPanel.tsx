@@ -372,7 +372,7 @@ function SubImageBlock({
       {/* Delete button */}
       <button
         type="button"
-        className="absolute top-0 right-2 w-3.5 h-3.5 z-20 rounded-sm bg-destructive text-white text-[9px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+        className="absolute top-0.5 right-0.5 w-3 h-3 z-20 rounded-sm bg-destructive text-white text-[9px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
         onClick={(e) => { e.stopPropagation(); onRemove() }}
         title={t('common.delete')}
       >
@@ -633,7 +633,7 @@ export function EditPanel({
             {/* Add button */}
             <button
               type="button"
-              className="absolute right-1 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded border border-dashed border-border hover:bg-accent transition-colors text-muted-foreground z-30"
+              className="absolute right-1 top-1/2 w-5 h-5 flex items-center justify-center rounded border border-dashed border-border bg-card transition-colors text-muted-foreground z-30 cursor-pointer"
               onClick={(e) => { e.stopPropagation(); openPopover(e, null, '', 'inputs') }}
               title={t('maintainTrack.addImage')}
             >
