@@ -28,7 +28,7 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 
 | Date (estimated) | Status                 | Version |
 | ---------------- | ---------------------- | ------- |
-| May 24-25       | (Register)            | v1.0.0  |
+| May 24-25        | (Register)             | v1.0.0  |
 | May 21-24 🚩     | Improve                | -       |
 | May 17-18        | Pre-release & Debug    | -       |
 | May 13-16        | Development            | -       |
@@ -39,6 +39,7 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 - **Important Changes** `Duration and frame rate` input only takes effect after `blur` (i.e., press Enter or click outside to confirm changes, reducing errors)
 - **Important Changes** Duration input step changes: `4` when format is frames, `1` when format is seconds
 - **Important Changes** Segment duration editing no longer affects other segments; if the total exceeds the timeline length, the timeline will auto-expand to fit all segments
+- The automatic height adjustment of tracks in the Timeline Editor has been adjusted; users must now double-click image and audio clips to open the media selection interface, thereby preventing frequent pop-ups caused by accidental operations.
 - Added dynamic parameter injection support for prompt template format + media input using the timeline editor
 
 ## Features
