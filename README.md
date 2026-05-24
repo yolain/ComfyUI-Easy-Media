@@ -34,7 +34,12 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 | May 13-16        | Development            | -       |
 | May 11-12        | Architecture Design    | -       |
 
+### v1.0.0
 
+- **Important Changes** `Duration and frame rate` input only takes effect after `blur` (i.e., press Enter or click outside to confirm changes, reducing errors)
+- **Important Changes** Duration input step changes: `4` when format is frames, `1` when format is seconds
+- **Important Changes** Segment duration editing no longer affects other segments; if the total exceeds the timeline length, the timeline will auto-expand to fit all segments
+- Added dynamic parameter injection support for prompt template format + media input using the timeline editor
 
 ## Features
 
