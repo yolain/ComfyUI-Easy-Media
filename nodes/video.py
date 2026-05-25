@@ -3,6 +3,7 @@ from __future__ import annotations
 import io as _io
 import logging
 import os
+import shutil
 import tempfile
 import urllib.request
 from fractions import Fraction
@@ -14,7 +15,7 @@ from comfy_api.latest import Input, InputImpl, Types, io, ui
 from comfy.utils import ProgressBar
 from server import PromptServer
 
-from ..utils.video import extract_merge_spec, ffmpeg_concat, ffmpeg_replace_audio, normalize_video_images, validate_merge_compatibility
+from ..utils.video import extract_merge_spec, ffmpeg_concat, ffmpeg_concat_with_fade, ffmpeg_replace_audio, ffmpeg_supports_xfade, normalize_video_images, tensor_crossfade_audio, tensor_crossfade_images, validate_merge_compatibility
 
 logger = logging.getLogger(__name__)
 
@@ -305,6 +306,142 @@ class EasyMergeVideos(io.ComfyNode):
         return io.NodeOutput(merged_video)
 
 
+def _tensor_crossfade_video_files(
+    sources: list[str],
+    fade_duration: float,
+    total: int,
+    progress: "callable[[int, str], None]",
+):
+    """Load video files and merge with a tensor-based linear crossfade (no FFmpeg required)."""
+    progress(total, "Loading clips for tensor crossfade…")
+    videos = []
+    for i, source in enumerate(sources, start=1):
+        progress(total, f"Loading clip {i}/{total}")
+        videos.append(InputImpl.VideoFromFile(source))
+
+    specs = [extract_merge_spec(v) for v in videos]
+    validate_merge_compatibility(specs)
+
+    fps = float(specs[0].fps)
+    fade_frames = max(1, int(round(fade_duration * fps)))
+    progress(total + 1, f"Blending transitions ({fade_frames} frames each)…")
+
+    all_images = [v.get_components().images for v in videos]
+    merged_images = tensor_crossfade_images(all_images, fade_frames)
+
+    merged_audio: dict | None = None
+    if specs[0].has_audio:
+        waveforms: list[torch.Tensor] = []
+        sample_rate: int | None = None
+        for v in videos:
+            wf, sr = _extract_audio_waveform(v.get_components().audio)
+            if wf is not None:
+                waveforms.append(wf)
+            if sample_rate is None and sr is not None:
+                sample_rate = sr
+        if waveforms and sample_rate:
+            fade_samples = max(1, int(round(fade_duration * sample_rate)))
+            merged_audio = {
+                "waveform": tensor_crossfade_audio(waveforms, fade_samples),
+                "sample_rate": sample_rate,
+            }
+
+    return InputImpl.VideoFromComponents(
+        Types.VideoComponents(
+            images=merged_images,
+            audio=merged_audio,
+            frame_rate=specs[0].fps,
+        )
+    )
+
+
+def _extract_audio_waveform(audio: object) -> "tuple[torch.Tensor | None, int | None]":
+    """Return (waveform, sample_rate) from a ComfyUI audio dict, or (None, None)."""
+    if not isinstance(audio, dict):
+        return None, None
+    waveform = audio.get("waveform")
+    sr = audio.get("sample_rate")
+    return waveform, int(sr) if sr is not None else None
+
+
+def _collect_video_components(
+    videos: list,
+    has_audio: bool,
+) -> "tuple[torch.Tensor, dict | None]":
+    """Extract and concatenate image frames (and optionally audio) from video objects."""
+    all_images: list[torch.Tensor] = []
+    all_waveforms: list[torch.Tensor] = []
+    sample_rate: int | None = None
+
+    for video in videos:
+        components = video.get_components()
+        all_images.append(components.images)
+        if has_audio and components.audio is not None:
+            waveform, sr = _extract_audio_waveform(components.audio)
+            if waveform is not None:
+                all_waveforms.append(waveform)
+            if sample_rate is None and sr is not None:
+                sample_rate = sr
+
+    merged_audio: dict | None = None
+    if has_audio and all_waveforms:
+        merged_audio = {"waveform": torch.cat(all_waveforms, dim=2), "sample_rate": sample_rate}
+
+    return torch.cat(all_images, dim=0), merged_audio
+
+
+def _tensor_merge_video_files(
+    sources: list[str],
+    total: int,
+    progress: "callable[[int, str], None]",
+):
+    """Load video files and merge them frame-by-frame using torch.cat (tensor fallback)."""
+    progress(total, "Loading clips for tensor merge…")
+    videos = []
+    for i, source in enumerate(sources, start=1):
+        progress(total, f"Loading clip {i}/{total}")
+        videos.append(InputImpl.VideoFromFile(source))
+
+    specs = [extract_merge_spec(v) for v in videos]
+    validate_merge_compatibility(specs)
+
+    progress(total + 1, "Merging frames…")
+    merged_images, merged_audio = _collect_video_components(videos, specs[0].has_audio)
+
+    return InputImpl.VideoFromComponents(
+        Types.VideoComponents(
+            images=merged_images,
+            audio=merged_audio,
+            frame_rate=specs[0].fps,
+        )
+    )
+
+
+def _parse_path_list(paths: "str | list[str]") -> list[str]:
+    """Parse a newline/comma-separated path string into a list of non-empty paths."""
+    lines = paths if isinstance(paths, list) else paths.replace(",", "\n").splitlines()
+    return [line.strip() for line in lines if line.strip()]
+
+
+_FFMPEG_INSTALL_URL = "https://ffmpeg.org/download.html"
+
+
+def _log_ffmpeg_unavailable_hint(tag: str, need_xfade: bool = False) -> None:
+    """Log an actionable install hint when FFmpeg (or xfade) is not available."""
+    if not shutil.which("ffmpeg"):
+        logger.warning(
+            "%s FFmpeg not installed — using tensor fallback (slower). "
+            "Install FFmpeg for faster video processing: %s",
+            tag, _FFMPEG_INSTALL_URL,
+        )
+    elif need_xfade and not ffmpeg_supports_xfade():
+        logger.warning(
+            "%s xfade filter not available in this FFmpeg build (requires FFmpeg 4.3+) — "
+            "Upgrade to a full FFmpeg build: %s",
+            tag, _FFMPEG_INSTALL_URL,
+        )
+
+
 def _resolve_video_path(raw: str) -> str | _io.BytesIO:
     """Resolve a raw path string to a local file path or BytesIO buffer.
 
@@ -358,7 +495,6 @@ def _resolve_video_path(raw: str) -> str | _io.BytesIO:
 
     raise FileNotFoundError(f"Cannot resolve video path: {raw!r}")
 
-
 class EasyMergeVideosFromPaths(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -381,6 +517,15 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
                         "Accepts ComfyUI output/temp filenames, absolute paths, or URLs."
                     ),
                 ),
+                # io.Combo.Input("transition", default="None", options=['None', 'Fade'], tooltip="Transition type to apply between clips."),
+                # io.Float.Input(
+                #     "transition_duration",
+                #     default=0.5,
+                #     min=0.1,
+                #     max=10.0,
+                #     step=0.1,
+                #     tooltip="Duration of the cross-fade transition in seconds.",
+                # ),
             ],
             hidden=[io.Hidden.unique_id],
             outputs=[
@@ -389,17 +534,13 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, paths: str) -> io.NodeOutput:
-        # Parse path list: split by newlines and commas, strip blanks
-        raw_paths: list[str] = []
-        lines = paths if isinstance(paths, list) else paths.replace(",", "\n").splitlines()
-        for line in lines:
-            line = line.strip()
-            if line:
-                raw_paths.append(line)
+    def execute(cls, paths: str,) -> io.NodeOutput:
+        raw_paths = _parse_path_list(paths)
+        if len(raw_paths) == 0:
+            raise ValueError("At least 1 video path is required.")
 
-        if len(raw_paths) < 2:
-            raise ValueError("At least 2 video paths are required for merging.")
+        use_transition = False
+        fade_duration = 0.5
 
         node_id: str = str(cls.hidden.unique_id or "")
         total = len(raw_paths)
@@ -410,77 +551,104 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
             if node_id:
                 PromptServer.instance.send_progress_text(msg, node_id)
 
+        if len(raw_paths) == 1:
+            _progress(1, f"Loading single video: {raw_paths[0]}")
+            source = _resolve_video_path(raw_paths[0])
+            if isinstance(source, _io.BytesIO):
+                source.seek(0)
+                ext = os.path.splitext(raw_paths[0])[1] or ".mp4"
+                tmp_fd, tmp_path = tempfile.mkstemp(suffix=ext, dir=folder_paths.get_temp_directory())
+                os.write(tmp_fd, source.read())
+                os.close(tmp_fd)
+                source = tmp_path
+            merged_video = InputImpl.VideoFromFile(source)
+            _progress(2, "Done — loaded single video")
+            return io.NodeOutput(merged_video)
+
         _progress(0, f"Resolving {total} paths…")
-        resolved: list[str] = []
+        resolved: list[str | _io.BytesIO] = []
+        temp_files: list[str] = []  # Track temp files to clean up
         for i, raw in enumerate(raw_paths, start=1):
             _progress(i - 1, f"Resolving {i}/{total}: {raw}")
             try:
                 source = _resolve_video_path(raw)
             except (FileNotFoundError, ValueError) as exc:
                 raise ValueError(f"Clip {i}: {exc}") from exc
+
+            # Convert BytesIO to temp file for FFmpeg compatibility
+            if isinstance(source, _io.BytesIO):
+                source.seek(0)
+                ext = os.path.splitext(raw)[1] or ".mp4"
+                tmp_fd, tmp_path = tempfile.mkstemp(suffix=ext, dir=folder_paths.get_temp_directory())
+                os.write(tmp_fd, source.read())
+                os.close(tmp_fd)
+                source = tmp_path
+                temp_files.append(tmp_path)
+
             resolved.append(source)
 
-        # --- Fast path: FFmpeg concat (stream copy preferred) ---
-        ext = os.path.splitext(resolved[0])[1] or ".mp4"
+        # Get output extension from first resolved path
+        string_paths = [p for p in resolved if isinstance(p, str)]
+        ext = os.path.splitext(string_paths[0])[1] if string_paths else ".mp4"
         tmp_fd, tmp_path = tempfile.mkstemp(suffix=ext, dir=folder_paths.get_temp_directory())
         os.close(tmp_fd)
+
+        tag = "[EasyMergeVideosFromPaths]"
+        # logger.info("%s transition=%s, clips=%d", tag, transition, total)
+
         try:
-            _progress(total, f"Merging {total} clips via FFmpeg…")
-            success = ffmpeg_concat(
-                resolved,
-                tmp_path,
-                progress_callback=lambda msg: _progress(total, msg),
-            )
-            if success:
-                merged_video = InputImpl.VideoFromFile(tmp_path)
-                _progress(total + 2, f"Done — merged {total} clips")
-                return io.NodeOutput(merged_video)
-        except RuntimeError as exc:
-            logger.warning("[EasyMergeVideosFromPaths] FFmpeg failed: %s — falling back to tensor merge.", exc)
+            if use_transition:
+                # --- Fade transition: FFmpeg xfade filter (re-encode) ---
+                try:
+                    _progress(total, f"Merging {total} clips with fade transition…")
+                    success = ffmpeg_concat_with_fade(
+                        resolved,
+                        tmp_path,
+                        fade_duration=fade_duration,
+                        progress_callback=lambda msg: _progress(total, msg),
+                    )
+                    if success:
+                        logger.info(
+                            "%s backend=ffmpeg-xfade, transition=fade(%.2fs) ✓", tag, fade_duration
+                        )
+                        merged_video = InputImpl.VideoFromFile(tmp_path)
+                        _progress(total + 2, f"Done — merged {total} clips with fade")
+                        return io.NodeOutput(merged_video)
+                    _log_ffmpeg_unavailable_hint(tag, need_xfade=True)
+                except RuntimeError as exc:
+                    logger.warning(
+                        "%s ffmpeg xfade failed: %s — falling back to no transition.", tag, exc
+                    )
 
-        # --- Slow fallback: tensor-based merge ---
-        _progress(total, "Loading clips for tensor merge…")
-        videos = []
-        for i, source in enumerate(resolved, start=1):
-            _progress(total, f"Loading clip {i}/{total}")
-            videos.append(InputImpl.VideoFromFile(source))
+            # --- No transition: FFmpeg concat (stream copy preferred, fastest) ---
+            try:
+                _progress(total, f"Merging {total} clips via FFmpeg…")
+                success = ffmpeg_concat(
+                    resolved,
+                    tmp_path,
+                    progress_callback=lambda msg: _progress(total, msg),
+                )
+                if success:
+                    logger.info("%s backend=ffmpeg-concat (stream copy), transition=none ✓", tag)
+                    merged_video = InputImpl.VideoFromFile(tmp_path)
+                    _progress(total + 2, f"Done — merged {total} clips")
+                    return io.NodeOutput(merged_video)
+                _log_ffmpeg_unavailable_hint(tag)
+            except RuntimeError as exc:
+                logger.warning(
+                    "%s ffmpeg concat failed: %s — falling back to tensor merge.", tag, exc
+                )
 
-        specs = [extract_merge_spec(v) for v in videos]
-        validate_merge_compatibility(specs)
-
-        _progress(total + 1, "Merging frames…")
-        all_images: list[torch.Tensor] = []
-        all_waveforms: list[torch.Tensor] = []
-        sample_rate: int | None = None
-        has_audio = specs[0].has_audio
-
-        for video in videos:
-            components = video.get_components()
-            all_images.append(components.images)
-            if has_audio and components.audio is not None:
-                audio = components.audio
-                if isinstance(audio, dict):
-                    waveform = audio.get("waveform")
-                    if waveform is not None:
-                        all_waveforms.append(waveform)
-                    if sample_rate is None:
-                        sample_rate = audio.get("sample_rate")
-
-        merged_images = torch.cat(all_images, dim=0)
-        merged_audio: dict | None = None
-        if has_audio and all_waveforms:
-            merged_audio = {
-                "waveform": torch.cat(all_waveforms, dim=2),
-                "sample_rate": sample_rate,
-            }
-
-        merged_video = InputImpl.VideoFromComponents(
-            Types.VideoComponents(
-                images=merged_images,
-                audio=merged_audio,
-                frame_rate=specs[0].fps,
-            )
-        )
-        _progress(total + 2, f"Done — merged {total} clips")
-        return io.NodeOutput(merged_video)
+            # --- Slow fallback: tensor-based merge (no transition) ---
+            logger.info("%s backend=tensor-merge, transition=none (ffmpeg unavailable)", tag)
+            merged_video = _tensor_merge_video_files(resolved, total, _progress)
+            _progress(total + 2, f"Done — merged {total} clips")
+            return io.NodeOutput(merged_video)
+        finally:
+            # Clean up downloaded temp files (but not the output tmp_path which is returned)
+            for f in temp_files:
+                try:
+                    os.unlink(f)
+                except OSError:
+                    pass
 

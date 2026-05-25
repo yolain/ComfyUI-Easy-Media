@@ -862,6 +862,9 @@ class TimelineSegmentOutput(io.ComfyNode):
         end_frame = seg.get("end_frame", 0)
         no_images = len(seg_images) == 0
 
+        seg_type_str = seg.get("type", "flf")
+        seg_type = TYPE_MAP.get(seg_type_str, 0)
+
         raw_prompt = seg.get("prompt", "") or ""
         if prompt_format == "promptRelay" and raw_prompt.strip():
             parts = [p.strip() for p in raw_prompt.split("|") if p.strip()]
@@ -875,9 +878,8 @@ class TimelineSegmentOutput(io.ComfyNode):
                         prompt_parts.append(f"{p} [{int(img_start)}-{int(img_end)}]")
             prompt = " | ".join(prompt_parts)
         else:
-            prompt = raw_prompt
-        seg_type_str = seg.get("type", "flf")
-        seg_type = TYPE_MAP.get(seg_type_str, 0)
+            prompt = raw_prompt.split('|') if len(seg_images) == 1 and seg_type <= 1 and "|" in raw_prompt else raw_prompt
+
 
         audio_segments = info.get("audio", {}).get("segments", [])
         frame_rate = info.get("frame_rate", 30)
