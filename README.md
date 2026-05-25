@@ -11,14 +11,10 @@ A ComfyUI custom node package for streamlined media loading and video pipeline a
 
 ## Installation
 
-The code has not yet been added to the registry; currently, only manual installation is supported:
 
-```bash
 cd Your_ComfyUI_Path/custom_nodes
 git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 ```
-
-Then restart ComfyUI.
 
 ## Example Workflows
 
@@ -28,7 +24,7 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 
 | Date (estimated) | Status                 | Version |
 | ---------------- | ---------------------- | ------- |
-| May 24-25        | (Register)             | v1.0.0  |
+| May 24-25        | Release                | v1.0.0  |
 | May 21-24 🚩     | Improve                | -       |
 | May 17-18        | Pre-release & Debug    | -       |
 | May 13-16        | Development            | -       |
@@ -49,7 +45,7 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 > I believe the media timeline editor component is better suited as a standalone module node for greater versatility. This node focuses on media import/editing and timeline-related functionality, providing better support for video pipeline creation across different models.<br>
 The editor can be used for single video segment generation (e.g., combined with PromptRelay), as well as segmented generation. Each segment can be combined with different model video pipelines for text-only generation, single image generation, first/last frame generation, multi-frame generation, reference-based generation, etc.
 
-![timelineEditor](https://github.com/user-attachments/assets/a6481c26-22e4-4170-bd1f-26b217bc4cba)
+![timelineEditor](https://github.com/user-attachments/assets/d7c9e894-6e7e-488c-90fb-d3aa8310419d)
 
 #### Track Types
 
@@ -73,7 +69,7 @@ The editor can be used for single video segment generation (e.g., combined with 
 **Prompt Example**:
 
 ```text
-@image1 @audio1镜头晃动，老者正望着光亮处神色慌张地喊话：别学那玩意，别连线啊。[0-120]|@image2 @audio2 镜头缓慢推进，男人正在操作电脑，说道：有意思，这ComfyUI能火，我指定得学它 [121-296]
+@image1 @audio1 镜头晃动，老者正望着光亮处神色慌张地喊话：别学那玩意，别连线啊。[0-120]|@image2 @audio2 镜头缓慢推进，男人正在操作电脑，说道：有意思，这ComfyUI能火，我指定得学它 [121-296]
 ```
 
 - `[0-120]` and `[121-296]` represent the start and end frame ranges of segments on the timeline, in frames. If no time range is specified, the total duration set on the original timeline editor will be equally distributed.
@@ -92,6 +88,28 @@ The editor can be used for single video segment generation (e.g., combined with 
 ![SaveVideo](https://github.com/user-attachments/assets/30e2dcc3-9ed3-4d5f-bb15-69e50c3e8fca)
 > Integrated and enhanced the video saving node from the SaveVideoRGBA node package. Supports video export with customizable output path, filename prefix, frame rate, and other parameters.
 
+### Merge Videos From Paths
+
+> Load video files from a list of file paths (or URLs) and concatenate them into a single video output. Supports an optional **Fade** transition between clips.
+
+**Transition options**:
+- `None`: No transition — direct cut. Prioritizes FFmpeg stream copy (zero re-encode, fastest possible); falls back to PyTorch tensor merge if FFmpeg is unavailable.
+- `Fade`: Cross-fade between clips with a configurable duration (seconds). Prioritizes FFmpeg `xfade` filter; automatically falls back to PyTorch linear blend if unavailable — same visual effect, slightly slower.
+
+**Installing FFmpeg** is recommended for best performance and transition quality:
+
+```bash
+# macOS (Homebrew)
+brew install ffmpeg
+
+# Windows — download a full build (includes xfade filter):
+# https://ffmpeg.org/download.html
+# Recommended: BtbN or gyan.dev full builds
+
+# Linux (Ubuntu/Debian)
+sudo apt install ffmpeg
+```
+
 ### MultiTrack Editor
 
 > Planned...
@@ -108,7 +126,7 @@ WEB_VERSION: dev
 2. Navigate to the frontend directory and compile the development code for debugging:
 
 ```shell
-cd frontend && bun run dev
+cd frontend && bun install && bun run dev
 ```
 
 3. After modifying the code, compile for production:

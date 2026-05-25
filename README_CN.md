@@ -11,14 +11,10 @@
 
 ## 安装
 
-代码还没有上注册表，目前仅支持手动安装：
-
 ```bash
 cd 你的ComfyUI路径/custom_nodes
 git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 ```
-
-然后重启 ComfyUI 即可。
 
 ## 示例工作流
 
@@ -28,8 +24,8 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 | 日期(预估)    | 状态                 | 版本号发布 |
 | ------------- | ---------------------- | -------------- |
-| 5月 24-25     | (注册)                  | (v1.0.0)       | 
-| 5月 21-24 🚩  | 改进                    | -              | 
+| 5月 24-25     | 发布                   |  v1.0.0        | 
+| 5月 21-24 🚩   | 改进                    | -              | 
 | 5月 17-18     | 预发布 & 调试            | -              | 
 | 5月 13-16     | 开发                    | -              | 
 | 5月 11-12     | 完成新架构设计            | -              |
@@ -49,7 +45,7 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 > 我认为媒体时间线编辑器组件更适合作为单独的模块节点来使用，会更具有通用性。此节点更聚焦于媒体的导入/编辑、时间轴相关的功能与交互，可以更好地为不同模型的视频流水线创作提供有利的帮助。<br>
 编辑器可用于视频单段的生成（如结合PromptRealy），也可用作分段生成，每一段可结合不同模型的视频流水线进行纯文本生成、单图生成、首尾帧生成、多帧生成、参考生成等）
 
-![timelineEditor](https://github.com/user-attachments/assets/a6481c26-22e4-4170-bd1f-26b217bc4cba)
+![timelineEditor](https://github.com/user-attachments/assets/d7c9e894-6e7e-488c-90fb-d3aa8310419d)
 
 #### 动态参数注入 (05-23)
 
@@ -86,7 +82,25 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 ### 从路径合并视频 MergeVideoFromPath
 
-> 该节点可以从指定路径加载视频文件，并将它们合并成一个视频输出。
+> 该节点可以从指定路径加载视频文件，并将它们合并成一个视频输出。支持可选的 **过渡效果（Fade）**，在每段视频之间添加淡入淡出转场。
+
+**转场选项**：
+- `None`：无转场，直接拼接。优先使用 FFmpeg 流复制（stream copy）方式，速度最快、零重编码；若 FFmpeg 不可用则回退到纯 PyTorch 张量合并。
+- `Fade`：淡入淡出转场，可设置转场时长（秒）。优先使用 FFmpeg `xfade` 滤镜；若不可用则自动回退到 PyTorch 线性混合实现，效果等效。
+
+**推荐安装 FFmpeg** 以获得最佳性能和转场质量：
+
+```bash
+# macOS (Homebrew)
+brew install ffmpeg
+
+# Windows — 下载完整构建版（包含 xfade 滤镜）：
+# https://ffmpeg.org/download.html
+# 推荐使用 BtbN 或 gyan.dev 提供的完整版（full build）
+
+# Linux (Ubuntu/Debian)
+sudo apt install ffmpeg
+```
 
 
 ### 保存视频 SaveVideo
@@ -112,7 +126,7 @@ WEB_VERSION: dev
 2. 进入前端目录编译开发环境代码进行调试：
 
 ```shell
-cd frontend && bun run dev
+cd frontend && bun install && bun run dev
 ```
 
 3. 修改代码后，编译正式环境：
