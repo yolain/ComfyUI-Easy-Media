@@ -229,9 +229,6 @@ export function MaintainTrack({
   }
 
   function handleTrackAreaDoubleClick(e: React.MouseEvent) {
-    // If double-click was on a segment, SegmentBlock handles it and sets this flag
-    if (lastDoubleClickedSegId.current) return
-
     const rect = containerRef.current?.getBoundingClientRect()
     if (!rect || track.locked) return
     const x = e.clientX - rect.left
@@ -680,7 +677,7 @@ export function MaintainTrack({
                   <div
                     className="absolute pointer-events-auto"
                     style={{
-                      left: selIdx == 0 ? leftBtnX + 6 : leftBtnX,
+                      left: selIdx == 0 ? leftBtnX + 8 : leftBtnX,
                       top: -16,
                       transform: 'translate(-50%, 0)',
                       zIndex: 25,
@@ -696,7 +693,7 @@ export function MaintainTrack({
                   <div
                     className="absolute pointer-events-auto"
                     style={{
-                      left: selIdx >= segments.length - 1 ? rightBtnX - 6 :  rightBtnX,
+                      left: selIdx >= segments.length - 1 || segments.length == 1 ? rightBtnX - 8 : rightBtnX,
                       top: -16,
                       transform: 'translate(-50%, 0)',
                       zIndex: 25,
