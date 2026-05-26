@@ -20,15 +20,12 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 After installing, open ComfyUI and find the bundled example workflows in the **Templates** panel on the left sidebar — look for entries under **ComfyUI-Easy-Media**.
 
-## Roadmap 2026
+## Changelog
 
-| Date (estimated) | Status                 | Version |
-| ---------------- | ---------------------- | ------- |
-| May 24-25 🚩     | Release                | v1.0.0  |
-| May 21-24        | Improve                | -       |
-| May 17-18        | Pre-release & Debug    | -       |
-| May 13-16        | Development            | -       |
-| May 11-12        | Architecture Design    | -       |
+### v1.0.1
+
+- **[Frontend Optimization]** Added + button to insert segments before or after the selected segment, and fixed some known bugs
+- **[Bug Fix]** Fixed incorrect image import paths from output and subdirectories, which caused images and outputs to be filtered out in the editor
 
 ### v1.0.0
 
