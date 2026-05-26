@@ -298,22 +298,50 @@ export function MaintainTrack({
     if (idx === -1) return
     const seg = segments[idx]
     const updated = [...segments]
+
     if (edge === 'end') {
-      const next = updated[idx + 1]
-      const minEnd = seg.start_frame + 1
-      const maxEnd = next ? next.end_frame - 1 : totalFrames - 1
-      const newEnd = Math.max(minEnd, Math.min(maxEnd, seg.end_frame + deltaFrames))
-      updated[idx] = { ...seg, end_frame: newEnd }
-      if (next) updated[idx + 1] = { ...next, start_frame: newEnd + 1 }
+      handleResizeEndEdge(updated, idx, seg, deltaFrames)
     } else {
-      const prev = updated[idx - 1]
-      const maxStart = seg.end_frame - 1
-      const minStart = prev ? prev.start_frame + 1 : 0
-      const newStart = Math.max(minStart, Math.min(maxStart, seg.start_frame + deltaFrames))
-      updated[idx] = { ...seg, start_frame: newStart }
-      if (prev) updated[idx - 1] = { ...prev, end_frame: newStart - 1 }
+      handleResizeStartEdge(updated, idx, seg, deltaFrames)
     }
     onSegmentsChange(updated)
+  }
+
+  function handleResizeEndEdge(updated: MaintainSegment[], idx: number, seg: MaintainSegment, delta: number) {
+    const next = updated[idx + 1]
+    const minEnd = seg.start_frame + 1
+    const newEnd = Math.max(minEnd, Math.min(seg.end_frame + delta, totalFrames - 1))
+    updated[idx] = { ...seg, end_frame: newEnd }
+
+    // 当有后续片段时，让它们跟随到当前片段后面（无论拉伸还是缩减）
+    if (next) {
+      const expectedStart = newEnd + 1
+      if (next.start_frame !== expectedStart) {
+        const shift = expectedStart - next.start_frame
+        updated[idx + 1] = { ...next, start_frame: expectedStart, end_frame: next.end_frame + shift }
+        for (let i = idx + 2; i < updated.length; i++) {
+          updated[i] = { ...updated[i], start_frame: updated[i].start_frame + shift, end_frame: updated[i].end_frame + shift }
+        }
+      }
+    }
+  }
+
+  function handleResizeStartEdge(updated: MaintainSegment[], idx: number, seg: MaintainSegment, delta: number) {
+    const prev = updated[idx - 1]
+    const maxStart = seg.end_frame - 1
+    const minStart = prev ? prev.start_frame + 1 : 0
+    const newStart = Math.max(minStart, Math.min(maxStart, seg.start_frame + delta))
+    updated[idx] = { ...seg, start_frame: newStart }
+    if (prev) updated[idx - 1] = { ...prev, end_frame: newStart - 1 }
+
+    // 让后续片段跟随到当前片段后面
+    for (let i = idx + 1; i < updated.length; i++) {
+      const expectedStart = updated[i - 1].end_frame + 1
+      if (updated[i].start_frame !== expectedStart) {
+        const shift = expectedStart - updated[i].start_frame
+        updated[i] = { ...updated[i], start_frame: expectedStart, end_frame: updated[i].end_frame + shift }
+      }
+    }
   }
 
   /**
@@ -677,7 +705,7 @@ export function MaintainTrack({
                   <div
                     className="absolute pointer-events-auto"
                     style={{
-                      left: selIdx == 0 ? leftBtnX + 8 : leftBtnX,
+                      left: selIdx == 0 ? leftBtnX + 10 : leftBtnX,
                       top: -16,
                       transform: 'translate(-50%, 0)',
                       zIndex: 25,
@@ -693,7 +721,7 @@ export function MaintainTrack({
                   <div
                     className="absolute pointer-events-auto"
                     style={{
-                      left: selIdx >= segments.length - 1 || segments.length == 1 ? rightBtnX - 8 : rightBtnX,
+                      left: selIdx >= segments.length - 1 || segments.length == 1 ? rightBtnX - 10 : rightBtnX,
                       top: -16,
                       transform: 'translate(-50%, 0)',
                       zIndex: 25,
