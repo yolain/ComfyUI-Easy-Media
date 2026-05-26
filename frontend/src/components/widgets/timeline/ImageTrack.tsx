@@ -27,7 +27,8 @@ function getSegmentImageSrc(content: ImageSegment['content']): string | null {
   if (content.url) return content.url
   if (content.file_path) {
     const relPath = content.file_path
-    const lastSlash = relPath.lastIndexOf('/')
+    // Handle both forward slash and backslash as path separator
+    const lastSlash = Math.max(relPath.lastIndexOf('/'), relPath.lastIndexOf('\\'))
     const filename = lastSlash >= 0 ? relPath.slice(lastSlash + 1) : relPath
     const subfolder = lastSlash >= 0 ? relPath.slice(0, lastSlash) : ''
     const typeParam = content.source_type === 'output' ? 'output' : 'input'
