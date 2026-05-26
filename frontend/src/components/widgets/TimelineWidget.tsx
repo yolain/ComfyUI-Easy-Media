@@ -476,7 +476,56 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
             totalLength={data.total_length}
             frameRate={data.frame_rate}
             displayFormat={displayFormat}
-            onTotalLengthChange={(frames) => update({ total_length: frames })}
+            onTotalLengthChange={(newTotal: number) => {
+              const oldTotal = data.total_length
+
+              // Only trim clips if we're shortening the timeline
+              if (newTotal < oldTotal && maintainTrack) {
+                const segments = maintainTrack.segments as MaintainSegment[]
+                let updated = segments.map((seg) => {
+                  // If segment ends beyond new total, truncate it
+                  if (seg.end_frame >= newTotal) {
+                    return { ...seg, end_frame: newTotal - 1 }
+                  }
+                  return seg
+                })
+
+                // Remove segments that become < 5 frames after truncation
+                // Process from the last segment backwards to safely remove
+                const minFrames = 5
+                for (let i = updated.length - 1; i >= 0; i--) {
+                  const seg = updated[i]
+                  const segDuration = seg.end_frame - seg.start_frame + 1
+                  if (segDuration < minFrames) {
+                    // Shift subsequent segments' start positions
+                    const removedSpan = segDuration
+                    updated = updated.map((s, idx) => {
+                      if (idx === i) return null
+                      const result = { ...s }
+                      if (idx > i) {
+                        result.start_frame = Math.max(0, s.start_frame - removedSpan)
+                        result.end_frame = Math.max(0, s.end_frame - removedSpan)
+                      }
+                      return result
+                    }).filter((s): s is MaintainSegment => s !== null)
+
+                    // Connect the gap: make previous segment extend to removed segment's start
+                    if (i > 0) {
+                      updated[i - 1] = { ...updated[i - 1], end_frame: seg.start_frame - 1 }
+                    }
+                  }
+                }
+
+                update({
+                  tracks: data.tracks.map((t) =>
+                    t.type === 'maintain' ? { ...t, segments: updated } : t,
+                  ),
+                  total_length: newTotal,
+                })
+              } else {
+                update({ total_length: newTotal })
+              }
+            }}
             onFrameRateChange={(fps) => update({ frame_rate: fps })}
             onDisplayFormatChange={setDisplayFormat}
             isPlaying={isPlaying}
