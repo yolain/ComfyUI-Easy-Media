@@ -10,14 +10,15 @@ export function getImageSrc(img: ImageItem): string | null {
     const lastSlash = img.file_path.lastIndexOf('/')
     const filename = lastSlash >= 0 ? img.file_path.slice(lastSlash + 1) : img.file_path
     const subfolder = lastSlash >= 0 ? img.file_path.slice(0, lastSlash) : ''
-    return `/view?filename=${encodeURIComponent(filename)}&type=input&subfolder=${encodeURIComponent(subfolder)}`
+    const typeParam = img.source_type === 'output' || img.source_type === 'local' ? img.source_type : 'input'
+    return `/view?filename=${encodeURIComponent(filename)}&type=${typeParam}&subfolder=${encodeURIComponent(subfolder)}`
   }
   return null
 }
 
-export function imageItemFromPath(filePath: string): ImageItem {
+export function imageItemFromPath(filePath: string, sourceType: 'input' | 'output' | 'local' = 'input'): ImageItem {
   return {
-    source_type: 'input',
+    source_type: sourceType,
     file_path: filePath,
     file_name: filePath.split('/').pop() ?? filePath,
   }

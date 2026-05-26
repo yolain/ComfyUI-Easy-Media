@@ -91,6 +91,10 @@
     "fmlf": "多帧",
     "ref": "参考帧"
   },
+  "insertButton": {
+    "insertBefore": "在此之前插入片段",
+    "insertAfter": "在此之后插入片段"
+  },
   "mediaSelector": {
     "tabInputs": "输入",
     "tabOutputs": "输出",

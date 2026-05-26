@@ -306,11 +306,20 @@ export function AudioTrack({
 
   async function handleDrop(e: React.DragEvent) {
     e.preventDefault()
-    const files = e.dataTransfer.files
-    if (!files || !canImport) return
+    const AUDIO_EXTS = new Set(['.mp3', '.wav', '.flac', '.ogg', '.m4a', '.aac', '.opus', '.wma'])
+    const files = Array.from(e.dataTransfer.files).filter((f) => {
+      if (f.type.startsWith('audio/')) return true
+      const ext = `.${f.name.split('.').pop()?.toLowerCase() ?? ''}`
+      return AUDIO_EXTS.has(ext)
+    })
+    if (files.length === 0) {
+      setPendingDropFrame(null)
+      return
+    }
+    if (!canImport) return
     const updated = [...segments]
     let cursor = pendingDropFrame ?? (lastOccupied >= 0 ? lastOccupied + 1 : 0)
-    for (const file of Array.from(files)) {
+    for (const file of files) {
       if (cursor >= totalFrames) break
       try {
         const form = new FormData()

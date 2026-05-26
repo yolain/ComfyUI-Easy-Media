@@ -15,6 +15,8 @@ interface SegmentBlockProps {
   interactive?: boolean
   /** Hide the left resize handle */
   hideLeftHandle?: boolean
+  /** Disable left resize functionality (handle still visible if not hidden) */
+  disableLeftResize?: boolean
   /** Minimum start frame for left resize (default: 0) */
   minStart?: number
   selected?: boolean
@@ -64,6 +66,7 @@ export const SegmentBlock = React.forwardRef<HTMLDivElement, SegmentBlockProps>(
   areaWidth,
   interactive = true,
   hideLeftHandle = false,
+  disableLeftResize = false,
   minStart = 0,
   selected = false,
   onClick,
@@ -115,7 +118,7 @@ export const SegmentBlock = React.forwardRef<HTMLDivElement, SegmentBlockProps>(
     const rect = e.currentTarget.getBoundingClientRect()
     const relX = e.clientX - rect.left
     const zone = getResizeZone()
-    const nearStart = relX <= zone
+    const nearStart = relX <= zone && !disableLeftResize
     const nearEnd = relX >= rect.width - zone
 
     if (nearStart || nearEnd) {
@@ -139,7 +142,7 @@ export const SegmentBlock = React.forwardRef<HTMLDivElement, SegmentBlockProps>(
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const relX = e.clientX - rect.left
     const zone = getResizeZone()
-    const isResizingStart = relX <= zone
+    const isResizingStart = relX <= zone && !disableLeftResize
     const isResizingEnd = relX >= rect.width - zone
     // Detect initial resize intent based on where the click started
     let resizeMode: 'start' | 'end' | 'move' = 'move'
@@ -262,7 +265,7 @@ export const SegmentBlock = React.forwardRef<HTMLDivElement, SegmentBlockProps>(
           className="absolute left-0 top-0 h-full w-0.5 cursor-ew-resize z-20"
           style={{ background: isResizing ? '#eab308' : selected ? 'var(--foreground)' : 'transparent' }}
           onMouseDown={(e) => {
-            // e.stopPropagation()
+            if (disableLeftResize) return
             makeResizeHandler('start')(e)
           }}
         />

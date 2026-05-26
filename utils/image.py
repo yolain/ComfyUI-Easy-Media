@@ -21,13 +21,17 @@ def load_image_tensor(source_type: str, file_path: str | None, local_path: str |
         except Exception:
             return None
     else:
-        if source_type == "input" and file_path:
+        img_path: str | None = None
+        if source_type == "output" and file_path:
+            # output files use subfolder/filename format, need to join with output directory
+            output_dir = folder_paths.get_output_directory()
+            img_path = os.path.join(output_dir, file_path)
+        elif source_type == "input" and file_path:
             img_path = folder_paths.get_annotated_filepath(file_path)
         elif source_type == "local" and local_path:
             img_path = local_path
-        else:
-            return None
-        if not os.path.isfile(img_path):
+
+        if not img_path or not os.path.isfile(img_path):
             return None
         try:
             pil_img = Image.open(img_path).convert("RGB")

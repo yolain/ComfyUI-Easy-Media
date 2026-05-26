@@ -50,9 +50,15 @@ interface MediaFileEntry {
 
 type MediaItem = MediaDirEntry | MediaFileEntry
 
+interface MediaSelectorChangeEvent {
+  filePath: string
+  sourceType: 'input' | 'output' | 'local'
+}
+
 export interface MediaSelectorProps {
   value: string
-  onChange: (value: string) => void
+  onChange: (value: string, source?: 'input' | 'output' | 'local') => void
+  onSourceChange?: (event: MediaSelectorChangeEvent) => void
   mediaType?: MediaType
   /** Which tab to show initially */
   defaultTab?: MediaTab
@@ -258,7 +264,7 @@ function RemoteFileList({
   sortBy: SortBy
   searchQuery: string
   value: string
-  onChange: (v: string) => void
+  onChange: (v: string, source: 'input' | 'output' | 'local') => void
   onAddLocalFile?: () => void
 }>) {
   const t = useT()
@@ -384,7 +390,7 @@ function RemoteFileList({
             key={file.path}
             type="button"
             className="flex flex-col gap-1 text-left hover:opacity-80 transition-opacity"
-            onClick={() => onChange(file.path)}
+            onClick={() => onChange(file.path, source === 'outputs' ? 'output' : 'input')}
           >
             <FileThumbnail file={file} mediaType={mediaType} isSelected={value === file.path} />
             <span className="text-[10px] truncate leading-tight max-w-full" title={file.name}>
@@ -448,7 +454,7 @@ function RemoteFileList({
                 'flex items-center gap-2 px-2 py-1 text-left hover:bg-accent transition-colors',
                 selected && 'bg-accent',
               )}
-              onClick={() => onChange(file.path)}
+              onClick={() => onChange(file.path, source === 'outputs' ? 'output' : 'input')}
             >
               {showThumb && (
                 <div className="w-4 h-4 rounded overflow-hidden shrink-0 bg-muted">
@@ -500,6 +506,7 @@ function RemoteFileList({
 export function MediaSelector({
   value,
   onChange,
+  onSourceChange,
   mediaType = 'all',
   defaultTab = 'inputs',
   slotItems = [],
@@ -526,6 +533,11 @@ export function MediaSelector({
       if (prev === 'date') return 'size'
       return 'name'
     })
+  }
+
+  function handleFileChange(filePath: string, source: 'input' | 'output' | 'local') {
+    onChange(filePath, source)
+    onSourceChange?.({ filePath, sourceType: source })
   }
 
   async function handleUrlConfirm() {
@@ -701,7 +713,7 @@ export function MediaSelector({
             sortBy={sortBy}
             searchQuery={searchQuery}
             value={value}
-            onChange={onChange}
+            onChange={(path) => handleFileChange(path, 'input')}
             onAddLocalFile={handleAddLocalFile}
           />
         </TabsContent>
@@ -715,7 +727,7 @@ export function MediaSelector({
             sortBy={sortBy}
             searchQuery={searchQuery}
             value={value}
-            onChange={onChange}
+            onChange={(path) => handleFileChange(path, 'output')}
           />
         </TabsContent>
 
@@ -737,7 +749,7 @@ export function MediaSelector({
             sortBy={sortBy}
             searchQuery={searchQuery}
             value={value}
-            onChange={onChange}
+            onChange={(path) => handleFileChange(path, 'local')}
           />
         </TabsContent>
 

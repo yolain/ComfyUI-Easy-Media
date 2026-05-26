@@ -529,6 +529,7 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
                         frameRate={data.frame_rate}
                         displayFormat={displayFormat}
                         areaWidth={scaledWidth}
+                        canvasScale={canvasScale}
                         selectedId={selectedId}
                         onSelectedIdChange={setSelectedId}
                         onTrackChange={(patch) => updateTrack(track.id, patch)}

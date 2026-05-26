@@ -1,4 +1,4 @@
-export type MediaSourceType = 'input' | 'local' | 'url' | 'slot'
+export type MediaSourceType = 'input' | 'local' | 'url' | 'slot' | 'output'
 
 export interface Marker {
   id: string

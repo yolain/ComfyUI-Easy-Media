@@ -8,6 +8,7 @@ import {
 import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
 import { tiledImageBackground } from '../../../lib/image-utils'
+import { InsertButton } from './InsertButton'
 import { SegmentBlock } from './SegmentBlock'
 import { TrackRow, MAINTAIN_TRACK_HEIGHT } from './TrackRow'
 import { Plus } from 'lucide-react'
@@ -27,6 +28,7 @@ interface MaintainTrackProps {
   frameRate: number
   displayFormat: TimeDisplayFormat
   areaWidth: number
+  canvasScale?: number
   selectedId: string | null
   onSelectedIdChange: (id: string | null) => void
   onTrackChange: (patch: Partial<Track>) => void
@@ -46,7 +48,7 @@ interface MaintainTrackProps {
  */
 function calcSegmentDuration(totalFrames: number, frameRate: number): number {
   // const multiplier = Math.max(1, Math.floor(totalFrames / frameRate / 2))
-  return frameRate * 1 + 1
+  return frameRate * 2 + 1
 }
 
 /** Evenly distribute all segments across total span. Extra frames go to front segments (前大后小). */
@@ -92,6 +94,33 @@ export function segmentRect(start: number, end: number, total: number, areaW: nu
   const left = start * scale
   const right = Math.min((end + 1) * scale, areaW)
   return { left, width: Math.max(right - left, 2) }
+}
+
+/** Find the gap containing the given frame. Returns null if frame is on a segment or no valid gap exists. */
+function findGapAtFrame(sortedSegs: MaintainSegment[], frame: number, totalFrames: number): { start: number; end: number } | null {
+  if (sortedSegs.length === 0) return null
+
+  // Check gap before first segment
+  if (frame < sortedSegs[0].start_frame) {
+    return { start: 0, end: sortedSegs[0].start_frame - 1 }
+  }
+
+  // Check gaps between segments
+  for (let i = 0; i < sortedSegs.length - 1; i++) {
+    const gapStart = sortedSegs[i].end_frame + 1
+    const gapEnd = sortedSegs[i + 1].start_frame - 1
+    if (frame >= gapStart && frame <= gapEnd) {
+      return { start: gapStart, end: gapEnd }
+    }
+  }
+
+  // Check gap after last segment
+  const lastSeg = sortedSegs[sortedSegs.length - 1]
+  if (frame > lastSeg.end_frame && lastSeg.end_frame < totalFrames - 1) {
+    return { start: lastSeg.end_frame + 1, end: totalFrames - 1 }
+  }
+
+  return null
 }
 
 // ── Sub-components ───────────────────────────────────────────────────────────
@@ -159,6 +188,7 @@ export function MaintainTrack({
   frameRate,
   displayFormat,
   areaWidth,
+  canvasScale = 1,
   selectedId,
   onSelectedIdChange,
   onTrackChange,
@@ -178,6 +208,8 @@ export function MaintainTrack({
   const [addPopoverOpen, setAddPopoverOpen] = useState(false)
   const [addAnchorPos, setAddAnchorPos] = useState({ x: 0, y: 0 })
   const [selectorValue, setSelectorValue] = useState('')
+  // Track which segment was just double-clicked to prevent section handler from adding empty segment
+  const lastDoubleClickedSegId = useRef<string | null>(null)
 
   const segments = track.segments as MaintainSegment[]
 
@@ -197,6 +229,9 @@ export function MaintainTrack({
   }
 
   function handleTrackAreaDoubleClick(e: React.MouseEvent) {
+    // If double-click was on a segment, SegmentBlock handles it and sets this flag
+    if (lastDoubleClickedSegId.current) return
+
     const rect = containerRef.current?.getBoundingClientRect()
     if (!rect || track.locked) return
     const x = e.clientX - rect.left
@@ -215,38 +250,21 @@ export function MaintainTrack({
       return
     }
 
+    // Check if clicked on a segment - if so, don't add empty segment
+    const clickedSeg = segments.find((s) => frame >= s.start_frame && frame <= s.end_frame)
+    if (clickedSeg) return
+
     // Find the gap containing the clicked frame
-    let insertStart = 0
-    let insertEnd = totalFrames - 1
-    let foundGap = false
+    const sortedSegs = [...segments].sort((a, b) => a.start_frame - b.start_frame)
+    const gap = findGapAtFrame(sortedSegs, frame, totalFrames)
+    if (!gap) return
 
-    for (let i = 0; i <= segments.length; i++) {
-      const segStart = i === 0 ? 0 : segments[i - 1].end_frame + 1
-      const segEnd = i === segments.length ? totalFrames - 1 : segments[i].start_frame - 1
-
-      if (frame >= segStart && frame <= segEnd) {
-        insertStart = segStart
-        insertEnd = segEnd
-        foundGap = true
-        break
-      }
-    }
-
-    if (!foundGap) {
-      // Clicked after the last segment
-      insertStart = segments.at(-1)!.end_frame + 1
-      insertEnd = totalFrames - 1
-    }
-
-    if (insertStart > insertEnd) return
-
-    // Add segment covering the gap
     onSegmentsChange([
       ...segments,
       {
         id: uuid(),
-        start_frame: insertStart,
-        end_frame: insertEnd,
+        start_frame: gap.start,
+        end_frame: gap.end,
         content: { text: '', images: [], type: 'flf' },
         color: track.color,
       },
@@ -321,6 +339,52 @@ export function MaintainTrack({
     const afterLast = sorted.at(-1)!.end_frame + 1
     if (afterLast <= totalFrames - 1) return { start: afterLast, end: totalFrames - 1 }
     return null
+  }
+
+  function handleInsertSegment(position: 'left' | 'right') {
+    const idx = segments.findIndex((s) => s.id === selectedId)
+    if (idx === -1) return
+
+    const seg = segments[idx]
+    const segDuration = calcSegmentDuration(totalFrames, frameRate)
+
+    // For 'left': new segment occupies [seg.start_frame, seg.start_frame + segDuration - 1],
+    //   the selected segment and all after it shift right by segDuration.
+    // For 'right': new segment occupies [seg.end_frame + 1, seg.end_frame + segDuration],
+    //   all segments after the selected one shift right by segDuration.
+    const insertStart = position === 'left' ? seg.start_frame : seg.end_frame + 1
+    const shiftFromIdx = position === 'left' ? idx : idx + 1
+
+    const newSegment: MaintainSegment = {
+      id: uuid(),
+      start_frame: insertStart,
+      end_frame: insertStart + segDuration - 1,
+      content: { text: '', images: [], type: 'flf' as const },
+      color: track.color,
+    }
+
+    // Shift all segments from shiftFromIdx onwards right by segDuration
+    const shifted = segments.map((s, i) => {
+      if (i < shiftFromIdx) return s
+      return { ...s, start_frame: s.start_frame + segDuration, end_frame: s.end_frame + segDuration }
+    })
+
+    const newSegments = [
+      ...shifted.slice(0, shiftFromIdx),
+      newSegment,
+      ...shifted.slice(shiftFromIdx),
+    ]
+
+    const lastSeg = newSegments.at(-1)!
+    const newTotalLength = lastSeg.end_frame + 1
+
+    if (newTotalLength > totalFrames && onExtendTimeline) {
+      onExtendTimeline(newSegments, newTotalLength)
+    } else {
+      onSegmentsChange(newSegments)
+    }
+
+    onSelectedIdChange(newSegment.id)
   }
 
   function addSegment() {
@@ -417,7 +481,7 @@ export function MaintainTrack({
     if (e.dataTransfer.types.includes('Files')) {
       e.preventDefault()
       const rect = e.currentTarget.getBoundingClientRect()
-      const x = e.clientX - rect.left
+      const x = (e.clientX - rect.left) / canvasScale
       setPendingDropFrame(Math.round((x / areaWidth) * (totalFrames - 1)))
     }
   }
@@ -573,7 +637,8 @@ export function MaintainTrack({
                 totalFrames={totalFrames}
                 areaWidth={areaWidth}
                 interactive={!track.locked}
-                hideLeftHandle={index === 0}
+                hideLeftHandle={false}
+                disableLeftResize={index === 0}
                 selected={selectedId === seg.id}
                 onSelect={(s) => onSelectedIdChange(selectedId === s.id ? null : s.id)}
                 onDragEnd={handleDragEnd}
@@ -584,6 +649,12 @@ export function MaintainTrack({
                   setRightClickedId(s.id)
                   onSelectedIdChange(s.id)
                 }}
+                onDoubleClick={(s) => {
+                  // Set flag to prevent section from adding empty segment
+                  lastDoubleClickedSegId.current = s.id
+                  // Clear after a short delay
+                  setTimeout(() => { lastDoubleClickedSegId.current = null }, 100)
+                }}
                 backgroundSlot={
                   seg.content.images.length > 0
                     ? <SegmentImageBackground images={seg.content.images} />
@@ -593,6 +664,52 @@ export function MaintainTrack({
                 <SegmentBlockContent seg={seg} index={index} />
               </SegmentBlock>
             ))}
+
+            {/* Insert buttons for selected segment */}
+            {selectedId && !track.locked && (() => {
+              const selIdx = segments.findIndex((s) => s.id === selectedId)
+              if (selIdx === -1) return null
+              const selSeg = segments[selIdx]
+
+              const leftBtnX = (selSeg.start_frame / Math.max(totalFrames - 1, 1)) * areaWidth
+              const rightBtnX = ((selSeg.end_frame + 1) / Math.max(totalFrames - 1, 1)) * areaWidth
+
+              return (
+                <>
+                  {/* Left insert button — hidden for the first segment */}
+                  <div
+                    className="absolute pointer-events-auto"
+                    style={{
+                      left: selIdx == 0 ? leftBtnX + 6 : leftBtnX,
+                      top: -16,
+                      transform: 'translate(-50%, 0)',
+                      zIndex: 25,
+                    }}
+                  >
+                    <InsertButton
+                      position="left"
+                      onClick={() => handleInsertSegment('left')}
+                    />
+                  </div>
+
+                  {/* Right insert button */}
+                  <div
+                    className="absolute pointer-events-auto"
+                    style={{
+                      left: selIdx >= segments.length - 1 ? rightBtnX - 6 :  rightBtnX,
+                      top: -16,
+                      transform: 'translate(-50%, 0)',
+                      zIndex: 25,
+                    }}
+                  >
+                    <InsertButton
+                      position="right"
+                      onClick={() => handleInsertSegment('right')}
+                    />
+                  </div>
+                </>
+              )
+            })()}
 
             {/* Empty state with its own context menu */}
             {segments.length === 0 ? (
@@ -670,7 +787,7 @@ export function MaintainTrack({
         >
           <MediaSelector
             value={selectorValue}
-            onChange={(filePath) => {
+            onChange={(filePath, source) => {
               if (!filePath) {
                 setAddPopoverOpen(false)
                 return
@@ -678,6 +795,7 @@ export function MaintainTrack({
 
               const isMultiFile = filePath.includes('|MULTIPLE|')
               const paths = isMultiFile ? filePath.split('|MULTIPLE|') : [filePath]
+              const currentSourceType = source ?? 'input'
 
               // If empty track: create new segments distributed across totalFrames
               if (segments.length === 0) {
@@ -703,7 +821,7 @@ export function MaintainTrack({
                     content: {
                       text: '',
                       images: [{
-                        source_type: isUrl ? 'url' : 'input',
+                        source_type: isUrl ? 'url' : currentSourceType,
                         file_path: isUrl ? undefined : path,
                         url: isUrl ? path : undefined,
                         file_name: fileName,
@@ -743,7 +861,7 @@ export function MaintainTrack({
                     content: {
                       text: '',
                       images: [{
-                        source_type: isUrl ? 'url' : 'input',
+                        source_type: isUrl ? 'url' : currentSourceType,
                         file_path: isUrl ? undefined : path,
                         url: isUrl ? path : undefined,
                         file_name: fileName,
@@ -778,7 +896,7 @@ export function MaintainTrack({
                   content: {
                     text: '',
                     images: [{
-                      source_type: isUrl ? 'url' : 'input',
+                      source_type: isUrl ? 'url' : currentSourceType,
                       file_path: isUrl ? undefined : path,
                       url: isUrl ? path : undefined,
                       file_name: fileName,

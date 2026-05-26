@@ -498,7 +498,7 @@ export function EditPanel({
     setPopoverOpen(true)
   }
 
-  function handleSelectorChange(value: string) {
+  function handleSelectorChange(value: string, source?: 'input' | 'output' | 'local') {
     const isSlot = value.startsWith('__slot__:')
     const isUrl = !isSlot && /^https?:\/\//i.test(value)
     const slotName = isSlot ? value.slice('__slot__:'.length) : undefined
@@ -518,7 +518,7 @@ export function EditPanel({
     } else if (isUrl) {
       newItem = imageItemFromUrl(value)
     } else {
-      newItem = imageItemFromPath(value)
+      newItem = imageItemFromPath(value, source)
     }
 
     if (editingBlockId === null) {

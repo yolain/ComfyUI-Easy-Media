@@ -660,20 +660,46 @@ class TimelineEditor(io.ComfyNode):
 
         # =========================================================
         # Build audio segment info from maintain segment boundaries
-        # Segment n+1 start == segment n end; last segment end == total time
+        # Collect audio sources from tracks for output in timeline_info
         # =========================================================
         audio_seg_info: list[dict] = []
+        audio_sources: list[dict] = []  # Track audio sources with their frame ranges
+        for track in tracks:
+            if track.get("type") != "audio":
+                continue
+            for seg in sorted(track.get("segments", []), key=lambda s: s.get("start_frame", 0)):
+                content = seg.get("content", {})
+                audio_sources.append({
+                    "start_frame": int(seg.get("start_frame", 0)),
+                    "end_frame": int(seg.get("end_frame", 0)),
+                    "source_type": content.get("source_type", "input"),
+                    "file_path": content.get("file_path", ""),
+                    "local_path": content.get("local_path", ""),
+                    "url": content.get("url", ""),
+                    "file_name": content.get("file_name", ""),
+                })
+
         for i, seg in enumerate(maintain_segs):
             start_sec = seg["start_frame"] / frame_rate
             if i < len(maintain_segs) - 1:
                 end_sec = maintain_segs[i + 1]["start_frame"] / frame_rate
             else:
                 end_sec = min(seg["end_frame"], total_length - 1) / frame_rate
-            audio_seg_info.append({
+            audio_entry: dict = {
                 "start_sec": round(start_sec, 4),
                 "end_sec": round(end_sec, 4),
                 "duration": round(end_sec - start_sec, 4),
-            })
+            }
+            # Find audio source that overlaps with this maintain segment
+            for src in audio_sources:
+                if (src["start_frame"] >= seg["start_frame"] and src["start_frame"] <= seg["end_frame"]) or \
+                   (src["end_frame"] >= seg["start_frame"] and src["end_frame"] <= seg["end_frame"]):
+                    if src.get("file_path"):
+                        audio_entry["file_path"] = src["file_path"]
+                    if src.get("source_type"):
+                        audio_entry["source_type"] = src["source_type"]
+                    break
+            audio_seg_info.append(audio_entry)
 
         # =========================================================
         # Build per-segment info for timeline_info
@@ -686,6 +712,8 @@ class TimelineEditor(io.ComfyNode):
                     "source_type": img.get("source_type", "input"),
                     "file_name": img.get("file_name", ""),
                 }
+                if img.get("file_path"):
+                    entry["file_path"] = img["file_path"]
                 if img.get("start_frame") is not None:
                     entry["start_frame"] = img["start_frame"]
                 if img.get("end_frame") is not None:

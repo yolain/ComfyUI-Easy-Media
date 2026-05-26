@@ -91,6 +91,10 @@
     "fmlf": "Multiple frames",
     "ref": "Reference frames"
   },
+  "insertButton": {
+    "insertBefore": "Insert segment before",
+    "insertAfter": "Insert segment after"
+  },
   "mediaSelector": {
     "tabInputs": "Inputs",
     "tabOutputs": "Outputs",

@@ -27,6 +27,10 @@ def load_audio_waveform(source_type, file_path, local_path, url, target_sr: int)
                     audio_path = tmp.name
         except Exception:
             return None
+    elif source_type == "output" and file_path:
+        # output files use subfolder/filename format, need to join with output directory
+        output_dir = folder_paths.get_output_directory()
+        audio_path = os.path.join(output_dir, file_path)
     elif source_type == "input" and file_path:
         audio_path = folder_paths.get_annotated_filepath(file_path)
     elif source_type == "local" and local_path:
