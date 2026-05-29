@@ -95,23 +95,35 @@ PROMPT_FORMAT_OPTIONS = ["default", "promptRelay"]
 _IMAGE_REF_RE = re.compile(r'@(?:图像|图片|图|image|img)(\d+)', re.IGNORECASE)
 _AUDIO_REF_RE = re.compile(r'@(?:audio|auido|音频)(\d+)', re.IGNORECASE)
 _FRAME_RANGE_RE = re.compile(r'\[(\d+)-(\d+)(?:,(\w+))?\]')
+_SLOT_ZERO_BASED_INDEX_RE = re.compile(r'_(\d+)$')
+_SLOT_ONE_BASED_INDEX_RE = re.compile(r'(?:image|audio)(\d+)$', re.IGNORECASE)
 
 
-def _parse_override_segments(prompt_override) -> list[dict]:
+def _parse_override_segments(prompt_override, total_length: int = 121) -> list[dict]:
     """Parse prompt_override (str with | separators, or list) into segment dicts."""
     if isinstance(prompt_override, list):
-        parts = [str(p).strip() for p in prompt_override if str(p).strip()]
+        parts = [
+            part.strip()
+            for item in prompt_override
+            for part in str(item).split('|')
+            if part.strip()
+        ]
     else:
         parts = [p.strip() for p in str(prompt_override).split('|') if p.strip()]
 
     segments: list[dict] = []
-    for part in parts:
+    safe_total_length = max(1, int(total_length))
+    part_count = max(1, len(parts))
+    for part_idx, part in enumerate(parts):
         m = _FRAME_RANGE_RE.search(part)
-        if not m:
-            continue
-        start_frame = int(m.group(1))
-        end_frame = int(m.group(2))
-        seg_type = (m.group(3) or 'flf').lower()
+        if m:
+            start_frame = int(m.group(1))
+            end_frame = int(m.group(2))
+            seg_type = (m.group(3) or 'flf').lower()
+        else:
+            start_frame = round(part_idx * safe_total_length / part_count)
+            end_frame = round((part_idx + 1) * safe_total_length / part_count) - 1
+            seg_type = 'flf'
         if seg_type not in ('flf', 'fmlf', 'ref'):
             seg_type = 'flf'
 
@@ -132,6 +144,108 @@ def _parse_override_segments(prompt_override) -> list[dict]:
             'audio_indices': audio_indices,
         })
     return segments
+
+
+def _is_valid_audio(audio) -> bool:
+    if not isinstance(audio, dict):
+        return False
+    waveform = audio.get('waveform')
+    if not isinstance(waveform, torch.Tensor):
+        return False
+    try:
+        return bool(waveform.any())
+    except (RuntimeError, TypeError, ValueError):
+        return False
+
+
+def _single_valid_audio(audio_input) -> 'dict | None':
+    """Return the only valid audio dict from input, ignoring empty list items."""
+    if audio_input is None:
+        return None
+    if _is_valid_audio(audio_input):
+        return audio_input
+    if not isinstance(audio_input, list):
+        return None
+    valid = [
+        audio
+        for audio in audio_input
+        if _is_valid_audio(audio)
+    ]
+    return valid[0] if len(valid) == 1 else None
+
+
+def _slot_index(slot_name: str | None) -> int:
+    if not slot_name:
+        return 0
+    slot_text = str(slot_name)
+    m = _SLOT_ZERO_BASED_INDEX_RE.search(slot_text)
+    if m:
+        return int(m.group(1))
+    m = _SLOT_ONE_BASED_INDEX_RE.search(slot_text)
+    if m:
+        return max(0, int(m.group(1)) - 1)
+    return 0
+
+
+def _unwrap_slot_input(value):
+    if isinstance(value, list) and len(value) == 1 and isinstance(value[0], list):
+        return value[0]
+    return value
+
+
+def _index_slot_image(image_input, slot_name: str | None) -> 'torch.Tensor | None':
+    idx = _slot_index(slot_name)
+    image_input = _unwrap_slot_input(image_input)
+    if image_input is None:
+        return None
+    if isinstance(image_input, list):
+        if idx < len(image_input) and isinstance(image_input[idx], torch.Tensor):
+            tensor = image_input[idx]
+            return tensor if tensor.dim() == 4 else tensor.unsqueeze(0)
+        return None
+    if isinstance(image_input, torch.Tensor) and idx == 0:
+        return image_input if image_input.dim() == 4 else image_input.unsqueeze(0)
+    return None
+
+
+def _index_slot_audio(audio_input, slot_name: str | None) -> 'dict | None':
+    idx = _slot_index(slot_name)
+    audio_input = _unwrap_slot_input(audio_input)
+    if audio_input is None:
+        return None
+    if isinstance(audio_input, list):
+        if idx < len(audio_input):
+            audio = audio_input[idx]
+            return audio if isinstance(audio, dict) and 'waveform' in audio else None
+        return None
+    if isinstance(audio_input, dict) and 'waveform' in audio_input and idx == 0:
+        return audio_input
+    return None
+
+
+def _resolve_timeline_image_item(item: dict, image_input, image_loader=load_image_tensor) -> 'torch.Tensor | None':
+    if item.get("source_type") == "slot":
+        return _index_slot_image(image_input, item.get("slot_name") or item.get("file_name"))
+    return image_loader(
+        item.get("source_type", "input"),
+        item.get("file_path"),
+        item.get("local_path"),
+        item.get("url"),
+    )
+
+
+def _sort_timeline_images(images: list[dict]) -> list[dict]:
+    return sorted(
+        images,
+        key=lambda item: int(item.get("start_frame", 0) or 0),
+    )
+
+
+def _collect_timeline_image_items(maintain_segs: list[dict]) -> list[dict]:
+    all_image_items: list[dict] = []
+    for seg in maintain_segs:
+        all_image_items.extend(_sort_timeline_images(seg.get("images", [])))
+    return all_image_items
 
 
 def _count_images(image_input) -> int:
@@ -253,7 +367,7 @@ class TimelineEditor(io.ComfyNode):
             timeline_data = timeline_data[0]
 
         prompt_override = kwargs.get('prompt_override')
-        if isinstance(prompt_override, list) and prompt_override:
+        if isinstance(prompt_override, list) and len(prompt_override) == 1:
             prompt_override = prompt_override[0]
         image_input = kwargs.get('image')   # kept as list
         audio_input = kwargs.get('audio')   # kept as list
@@ -291,9 +405,11 @@ class TimelineEditor(io.ComfyNode):
             else:
                 _td = dict(timeline_data) if timeline_data else {}
             frame_rate: int = int(_td.get('frame_rate', 24))
+            total_length = int(_td.get('total_length', 121))
 
-            override_segs = _parse_override_segments(prompt_override)
-            total_length: int = max((s['end_frame'] for s in override_segs), default=120) + 1
+            override_segs = _parse_override_segments(prompt_override, total_length=total_length)
+            if any(_FRAME_RANGE_RE.search(str(part)) for part in str(prompt_override).split('|')):
+                total_length = max((s['end_frame'] for s in override_segs), default=120) + 1
 
             # Build maintain_segs — images stored as slot refs with _tensor_idx
             maintain_segs: list[dict] = []
@@ -349,14 +465,12 @@ class TimelineEditor(io.ComfyNode):
                         "start_frame": int(seg.get("start_frame", 0)),
                         "end_frame": int(seg.get("end_frame", 0)),
                         "text": content.get("text", ""),
-                        "images": content.get("images", []),  # list of ImageItem dicts
+                        "images": _sort_timeline_images(content.get("images", [])),  # list of ImageItem dicts
                         "type": content.get("type", "flf"),
                     })
 
         # Flat list of all image items from maintain segments, in order
-        all_image_items: list[dict] = []
-        for seg in maintain_segs:
-            all_image_items.extend(seg["images"])
+        all_image_items = _collect_timeline_image_items(maintain_segs)
 
         # =========================================================
         # Resolve target dimensions
@@ -394,17 +508,11 @@ class TimelineEditor(io.ComfyNode):
         # Load first image once for dimension inference (auto / longest / shortest)
         first_image_tensor: torch.Tensor | None = None
         if mode in ("auto", "longest", "shortest"):
-            if image_override:
-                # Always infer from the first connected image
+            if use_override and image_override:
                 first_image_tensor = _index_image(image_input, 1)
             elif all_image_items:
                 first = all_image_items[0]
-                first_image_tensor = load_image_tensor(
-                    first.get("source_type", "input"),
-                    first.get("file_path"),
-                    first.get("local_path"),
-                    first.get("url"),
-                )
+                first_image_tensor = _resolve_timeline_image_item(first, image_input)
 
         target_w: int
         target_h: int
@@ -460,24 +568,18 @@ class TimelineEditor(io.ComfyNode):
         # =========================================================
         image_tensors: list[torch.Tensor] = []
         for idx, item in enumerate(all_image_items):
-            if image_override:
+            if use_override and image_override:
                 # Use connected image input (positional for normal path, _tensor_idx for override)
-                tensor_idx = item.get('_tensor_idx', idx + 1) if use_override else (idx + 1)
+                tensor_idx = item.get('_tensor_idx', idx + 1)
                 if idx == 0 and first_image_tensor is not None:
                     t = first_image_tensor
                 else:
                     t = _index_image(image_input, tensor_idx)
             else:
-                # Load from file path recorded in timeline
                 if idx == 0 and first_image_tensor is not None:
                     t = first_image_tensor
                 else:
-                    t = load_image_tensor(
-                        item.get("source_type", "input"),
-                        item.get("file_path"),
-                        item.get("local_path"),
-                        item.get("url"),
-                    )
+                    t = _resolve_timeline_image_item(item, image_input)
             if t is None:
                 continue
             t = resize_image(t, target_w, target_h, resize_method)
@@ -498,8 +600,9 @@ class TimelineEditor(io.ComfyNode):
         merged_waveform: torch.Tensor | None = None
 
         # ---- Single audio as whole timeline: clip/pad to total duration ----
-        if prompt_override and prompt_override != '' and "@audio" not in prompt_override and "@音频" not in prompt_override and audio_input is not None and len(audio_input) == 1:
-            a = audio_input[0]  # Extract from single-element list
+        single_timeline_audio = _single_valid_audio(audio_input) if prompt_override else None
+        if prompt_override and prompt_override != '' and "@audio" not in prompt_override and "@音频" not in prompt_override and single_timeline_audio is not None:
+            a = single_timeline_audio
             channels = a['waveform'].shape[1] if 'waveform' in a else 2
             _raw_sr = a.get('sample_rate', default_sr)
             sr = int(_raw_sr[0] if isinstance(_raw_sr, (list, tuple)) else _raw_sr)
@@ -518,7 +621,6 @@ class TimelineEditor(io.ComfyNode):
                 ], dim=-1)
             merged_waveform = chunk.unsqueeze(0)
         elif audio_override:
-            
             # ---- Override audio: build from audio input per segment ----
             # audio_input is a list from MakeAudioList (is_output_list) where
             # index N-1 corresponds to @audioN reference in prompt_override.
@@ -582,7 +684,7 @@ class TimelineEditor(io.ComfyNode):
                 prev_end_sec = end_sec
 
             if audio_parts:
-                merged_waveform = torch.cat(audio_parts, dim=-1)            
+                merged_waveform = torch.cat(audio_parts, dim=-1)
         else:
             # ---- Normal path: audio from timeline tracks ----
             for track in tracks:
@@ -605,13 +707,23 @@ class TimelineEditor(io.ComfyNode):
                     trim_offset_sec = max(0.0, (start - origin_start) / frame_rate) if start > origin_start else 0.0
 
                     content = seg.get("content", {})
-                    waveform = load_audio_waveform(
-                        content.get("source_type", "input"),
-                        content.get("file_path"),
-                        content.get("local_path"),
-                        content.get("url"),
-                        default_sr,
+                    slot_audio = None
+                    if content.get("source_type") == "slot":
+                        slot_audio = _index_slot_audio(audio_input, content.get("slot_name") or content.get("file_name"))
+                    waveform = (
+                        slot_audio.get("waveform")
+                        if slot_audio is not None
+                        else load_audio_waveform(
+                            content.get("source_type", "input"),
+                            content.get("file_path"),
+                            content.get("local_path"),
+                            content.get("url"),
+                            default_sr,
+                        )
                     )
+                    if slot_audio is not None:
+                        _raw_sr = slot_audio.get('sample_rate', default_sr)
+                        default_sr = int(_raw_sr[0] if isinstance(_raw_sr, (list, tuple)) else _raw_sr)
 
                     # Determine channel count from loaded audio before adding gap silence,
                     # so the silence tensor has matching channels and torch.cat won't fail.
@@ -1106,4 +1218,3 @@ class ImageIndexesToIntList(io.ComfyNode):
                 raise ValueError(f"Invalid image_indexes input: {image_indexes}. Must be a comma-separated string of integers.")
 
         return io.NodeOutput(indexes)
-
