@@ -24,6 +24,12 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 
 ## Changelog
 
+### v1.0.2
+
+- **[Timeline Editor: App Mode]** Fixed an issue where, if `prompt_override` was not written strictly according to the prompt format, the default duration was not evenly distributed across clips
+- **[Timeline Editor: App Mode]** Fixed an issue where filling the entire timeline with a single audio clip required filtering out empty audio before making a determination
+- **[Timeline Editor: UI Mode]** Fixed an issue where the output resources and sorting were incorrect when a single clip contained different formats
+
 ### v1.0.1
 
 - **[Workflow]** Added wan2.2 loop segment example workflow
