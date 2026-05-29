@@ -95,7 +95,6 @@ PROMPT_FORMAT_OPTIONS = ["default", "promptRelay"]
 _IMAGE_REF_RE = re.compile(r'@(?:图像|图片|图|image|img)(\d+)', re.IGNORECASE)
 _AUDIO_REF_RE = re.compile(r'@(?:audio|auido|音频)(\d+)', re.IGNORECASE)
 _FRAME_RANGE_RE = re.compile(r'\[(\d+)-(\d+)(?:,(\w+))?\]')
-_SLOT_ZERO_BASED_INDEX_RE = re.compile(r'_(\d+)$')
 _SLOT_ONE_BASED_INDEX_RE = re.compile(r'(?:image|audio)(\d+)$', re.IGNORECASE)
 
 
@@ -178,9 +177,6 @@ def _slot_index(slot_name: str | None) -> int:
     if not slot_name:
         return 0
     slot_text = str(slot_name)
-    m = _SLOT_ZERO_BASED_INDEX_RE.search(slot_text)
-    if m:
-        return int(m.group(1))
     m = _SLOT_ONE_BASED_INDEX_RE.search(slot_text)
     if m:
         return max(0, int(m.group(1)) - 1)
@@ -200,12 +196,42 @@ def _index_slot_image(image_input, slot_name: str | None) -> 'torch.Tensor | Non
         return None
     if isinstance(image_input, list):
         if idx < len(image_input) and isinstance(image_input[idx], torch.Tensor):
-            tensor = image_input[idx]
-            return tensor if tensor.dim() == 4 else tensor.unsqueeze(0)
+            tensor = _normalize_image_tensor(image_input[idx])
+            if tensor is None:
+                return None
+            if _is_empty_slot_image(tensor):
+                return None
+            return tensor
         return None
     if isinstance(image_input, torch.Tensor) and idx == 0:
-        return image_input if image_input.dim() == 4 else image_input.unsqueeze(0)
+        tensor = _normalize_image_tensor(image_input)
+        if tensor is None:
+            return None
+        if _is_empty_slot_image(tensor):
+            return None
+        return tensor
     return None
+
+
+def _normalize_image_tensor(tensor: torch.Tensor) -> 'torch.Tensor | None':
+    if tensor.dim() == 3:
+        if tensor.shape[0] in (1, 3, 4) and tensor.shape[-1] not in (1, 3, 4):
+            tensor = tensor.permute(1, 2, 0)
+        tensor = tensor.unsqueeze(0)
+    elif tensor.dim() == 4:
+        if tensor.shape[1] in (1, 3, 4) and tensor.shape[-1] not in (1, 3, 4):
+            tensor = tensor.permute(0, 2, 3, 1)
+    else:
+        return None
+    return tensor
+
+
+def _is_empty_slot_image(tensor: torch.Tensor) -> bool:
+    if tensor.dim() == 3:
+        return tensor.shape[0] == 1 and tensor.shape[1] == 1
+    if tensor.dim() == 4:
+        return tensor.shape[1] == 1 and tensor.shape[2] == 1
+    return False
 
 
 def _index_slot_audio(audio_input, slot_name: str | None) -> 'dict | None':
@@ -246,6 +272,13 @@ def _collect_timeline_image_items(maintain_segs: list[dict]) -> list[dict]:
     for seg in maintain_segs:
         all_image_items.extend(_sort_timeline_images(seg.get("images", [])))
     return all_image_items
+
+
+def _select_dimension_image_item(image_items: list[dict]) -> 'dict | None':
+    for item in image_items:
+        if item.get("source_type") != "slot":
+            return item
+    return image_items[0] if image_items else None
 
 
 def _count_images(image_input) -> int:
@@ -505,14 +538,15 @@ class TimelineEditor(io.ComfyNode):
             and (not isinstance(image_input, list) or len(image_input) > 0)
         )
 
-        # Load first image once for dimension inference (auto / longest / shortest)
-        first_image_tensor: torch.Tensor | None = None
+        # Load one image for dimension inference (auto / longest / shortest)
+        dimension_image_tensor: torch.Tensor | None = None
         if mode in ("auto", "longest", "shortest"):
             if use_override and image_override:
-                first_image_tensor = _index_image(image_input, 1)
+                dimension_image_tensor = _index_image(image_input, 1)
             elif all_image_items:
-                first = all_image_items[0]
-                first_image_tensor = _resolve_timeline_image_item(first, image_input)
+                dimension_item = _select_dimension_image_item(all_image_items)
+                if dimension_item is not None:
+                    dimension_image_tensor = _resolve_timeline_image_item(dimension_item, image_input)
 
         target_w: int
         target_h: int
@@ -525,15 +559,15 @@ class TimelineEditor(io.ComfyNode):
                     target_w, target_h = int(w), int(h)
                     break
         elif mode == "auto":
-            if first_image_tensor is not None:
-                target_h = first_image_tensor.shape[1]
-                target_w = first_image_tensor.shape[2]
+            if dimension_image_tensor is not None:
+                target_h = dimension_image_tensor.shape[1]
+                target_w = dimension_image_tensor.shape[2]
             else:
                 target_w, target_h = 544, 960
         elif mode in ("longest", "shortest"):
-            if first_image_tensor is not None:
-                img_h = first_image_tensor.shape[1]
-                img_w = first_image_tensor.shape[2]
+            if dimension_image_tensor is not None:
+                img_h = dimension_image_tensor.shape[1]
+                img_w = dimension_image_tensor.shape[2]
                 pix = int(resize_to_pixel) if resize_to_pixel else 960
                 aspect = img_w / img_h  # width / height
                 if mode == "longest":
@@ -571,21 +605,22 @@ class TimelineEditor(io.ComfyNode):
             if use_override and image_override:
                 # Use connected image input (positional for normal path, _tensor_idx for override)
                 tensor_idx = item.get('_tensor_idx', idx + 1)
-                if idx == 0 and first_image_tensor is not None:
-                    t = first_image_tensor
+                if idx == 0 and dimension_image_tensor is not None:
+                    t = dimension_image_tensor
                 else:
                     t = _index_image(image_input, tensor_idx)
             else:
-                if idx == 0 and first_image_tensor is not None:
-                    t = first_image_tensor
-                else:
-                    t = _resolve_timeline_image_item(item, image_input)
+                t = _resolve_timeline_image_item(item, image_input)
             if t is None:
                 continue
             t = resize_image(t, target_w, target_h, resize_method)
             # Normalize to RGB (3 channels) — drop alpha channel if present
-            if t.shape[-1] == 4:
+            if t.shape[-1] == 1:
+                t = t.expand(-1, -1, -1, 3)
+            elif t.shape[-1] == 4:
                 t = t[..., :3]
+            elif t.shape[-1] != 3:
+                continue
             image_tensors.append(t)
 
         if image_tensors:
