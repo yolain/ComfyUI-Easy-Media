@@ -1,6 +1,8 @@
-import { addStylesheet } from "@/lib/add-stylesheet";
+import { addInlineStyles } from "@/lib/add-stylesheet";
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 import type { TimelineData } from '@/types/timeline'
+
+declare const __COMFY_EASY_MEDIA_GLOBAL_CSS__: string;
 
 declare global {
   // eslint-disable-next-line no-var
@@ -19,7 +21,10 @@ globalThis.comfyAPI!.app.app.registerExtension({
   name: 'Comfy.EasyMedia.widgets',
 
   async setup() {
-    addStylesheet(`/${import.meta.env.PROJECT_NAME}/globals.css`);
+    addInlineStyles(
+      __COMFY_EASY_MEDIA_GLOBAL_CSS__,
+      `${import.meta.env.PROJECT_NAME}-globals`,
+    );
   },
 
   getCustomWidgets() {
@@ -33,5 +38,4 @@ globalThis.comfyAPI!.app.app.registerExtension({
     }
   },
 })
-
 

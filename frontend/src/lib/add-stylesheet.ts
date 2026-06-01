@@ -1,16 +1,14 @@
 /**
- * Load a stylesheet into the document head with proper deduplication.
+ * Inject stylesheet contents into the document head with proper deduplication.
  */
-export function addStylesheet(href: string): HTMLLinkElement | null {
-  // Avoid loading the same stylesheet twice
-  if (document.querySelector(`link[href="${href}"]`)) {
+export function addInlineStyles(css: string, id: string): HTMLStyleElement | null {
+  if (document.getElementById(id)) {
     return null;
   }
 
-  const link = document.createElement("link");
-  link.rel = "stylesheet";
-  link.type = "text/css";
-  link.href = href;
-  document.head.appendChild(link);
-  return link;
+  const style = document.createElement("style");
+  style.id = id;
+  style.textContent = css;
+  document.head.appendChild(style);
+  return style;
 }
