@@ -26,17 +26,17 @@ class LTXVAddGuidesFromBatchIndexes(LTXVAddGuide):
         return io.Schema(
             node_id="LTXVAddGuidesFromBatchIndexes",
             category="conditioning/ltxv",
-            description="Adds multiple guide images from a batch to the latent at specified frame indices. Non-black images in the batch are used as guides.",
+            description="Adds guide images or an image sequence from a batch to the latent at specified frame indices. Batches with 9 or more images are treated as one image sequence.",
             inputs=[
                 io.Conditioning.Input("positive"),
                 io.Conditioning.Input("negative"),
                 io.Vae.Input("vae"),
                 io.Latent.Input("latent"),
-                io.Image.Input("images", tooltip="Batch of images - non-black images will be used as guides"),
+                io.Image.Input("images", tooltip="Batch of images. Batches with 9 or more images are treated as one image sequence."),
                 io.Int.Input(
                     id="img_compression", default=18, min=0, max=100, tooltip="Amount of compression to apply on image."
                 ),
-                io.String.Input("image_indexes", default="", tooltip="Comma-separated frame indices for each image in the batch, e.g. '0,61,121'. If fewer indices than images, remaining images are skipped."),
+                io.String.Input("image_indexes", default="", tooltip="Comma-separated frame indices, e.g. '0,61,121'. For image sequences, the first index is used as the sequence start frame."),
                 io.Float.Input("strength", default=1.0, min=0.0, max=1.0, step=0.01),
             ],
             outputs=[
@@ -75,6 +75,35 @@ class LTXVAddGuidesFromBatchIndexes(LTXVAddGuide):
                 output_images.append(preprocess(images[i], img_compression))
 
         batch_size = images.shape[0]
+
+        if batch_size >= 9:
+            if images.max() > 0.001:
+                f_idx = parsed_indexes[0] if parsed_indexes else 0
+
+                image_1, t = cls.encode(vae, latent_width, latent_height, images, scale_factors)
+
+                frame_idx, latent_idx = cls.get_latent_index(positive, latent_length, len(image_1), f_idx, scale_factors)
+
+                if latent_idx + t.shape[2] <= latent_length:
+                    positive, negative, latent_image, noise_mask = cls.append_keyframe(
+                        positive,
+                        negative,
+                        frame_idx,
+                        latent_image,
+                        noise_mask,
+                        t,
+                        strength,
+                        scale_factors,
+                    )
+
+                    # Track this guide sequence for per-reference attention control.
+                    pre_filter_count = t.shape[2] * t.shape[3] * t.shape[4]
+                    guide_latent_shape = list(t.shape[2:])  # [F, H, W]
+                    positive, negative = _append_guide_attention_entry(positive, negative, pre_filter_count, guide_latent_shape, strength=strength)
+                else:
+                    logging.warning("Skipping guide sequence - conditioning frames exceed latent sequence length")
+
+            return io.NodeOutput(positive, negative, {"samples": latent_image, "noise_mask": noise_mask})
 
         for i in range(batch_size):
             if i >= len(parsed_indexes):

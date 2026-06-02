@@ -24,6 +24,10 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 ## 更新日志
 
+### v1.0.3
+
+- **【LTXV制作参考视频】** 针对于多参考Lora[模型地址](https://huggingface.co/LiconStudio/LTX-2.3-Multiple-Subject-Reference)新添加的节点
+
 ### v1.0.2
 
 - **【时间线编辑器：App模式】** 修复当 prompt_override 未严格按照提示词格式书写时，理应按片段均分默认时长

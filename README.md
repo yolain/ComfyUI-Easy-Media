@@ -24,6 +24,10 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 
 ## Changelog
 
+### v1.0.3
+
+- **[LTXV Reference Video]** New node for multi-reference LoRA [model_url](https://huggingface.co/LiconStudio/LTX-2.3-Multiple-Subject-Reference)
+
 ### v1.0.2
 
 - **[Timeline Editor: App Mode]** Fixed an issue where, if `prompt_override` was not written strictly according to the prompt format, the default duration was not evenly distributed across clips
