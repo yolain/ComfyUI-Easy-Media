@@ -56,7 +56,7 @@ resolution_strings = [f"{w} x {h} ({r})" for w, h, r in BASE_RESOLUTIONS]
 resize_method_input = io.Combo.Input(
     "resize_method",
     default="stretch",
-    options=["stretch", "resize", "pad", "crop"],
+    options=["stretch", "resize", "pad", "pad (white)", "pad_edge", "pad_edge_pixel", "crop", "pillarbox_blur"],
 )
 resolution_combo_options = [
     io.DynamicCombo.Option(
