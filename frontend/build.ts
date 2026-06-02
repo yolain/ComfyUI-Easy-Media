@@ -13,6 +13,10 @@ const project_name = path.basename(rootDir);
 
 fs.mkdirSync(outdir, { recursive: true });
 
+function scopeTailwindThemeVariables(css: string, widgetClass: string): string {
+  return css.replace(/:root\s*,\s*:host\s*\{/g, `.${widgetClass}{`);
+}
+
 async function buildJS(globalCss: string) {
   // Clear stale chunks from previous builds before writing new ones
   const chunksDir = path.join(outdir, "chunks");
@@ -56,7 +60,10 @@ async function buildCSS(): Promise<string> {
     const widgetClass = project_name.toLowerCase();
     const css = fs.readFileSync(cssOut, "utf-8");
     fs.rmSync(path.join(outdir, "globals.css"), { force: true });
-    return css.replaceAll("__CUSTOM_NODE_CLASS__", widgetClass);
+    return scopeTailwindThemeVariables(
+      css.replaceAll("__CUSTOM_NODE_CLASS__", widgetClass),
+      widgetClass,
+    );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
