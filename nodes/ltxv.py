@@ -18,7 +18,7 @@ except ImportError:
 device = mm.get_torch_device()
 import latent_preview
 
-# code inspired by https://github.com/kijai/ComfyUI-KJNodes/blob/main/nodes/ltxv_nodes.py#L21
+# code based on https://github.com/kijai/ComfyUI-KJNodes/blob/main/nodes/ltxv_nodes.py#L21
 class LTXVAddGuidesFromBatchIndexes(LTXVAddGuide):
 
     @classmethod
@@ -114,3 +114,53 @@ class LTXVAddGuidesFromBatchIndexes(LTXVAddGuide):
                     logging.warning("Skipping guide at index %s - conditioning frames exceed latent sequence length", i)
 
         return io.NodeOutput(positive, negative, {"samples": latent_image, "noise_mask": noise_mask})
+
+# code based on https://github.com/liconstudio/ComfyUI-Licon-MSR/blob/main/licon_msr.py
+class LTXVMakeICLoRAReferenceVideo(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="LTXVMakeRefVideo",
+            display_name="LTXVMakeRefVideo",
+            category="image/ltxv",
+            description="Expands a batch of reference images into a reference video for IC-LoRA.",
+            inputs=[
+                io.Image.Input("images"),
+                io.Int.Input("frame_count", default=17, min=17, step=8),
+            ],
+            outputs=[
+                io.Image.Output("IMAGE"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, images: torch.Tensor, frame_count: int) -> io.NodeOutput:
+        try:
+            frames = cls._expand_frames(images, frame_count)
+        except Exception as exc:
+            raise RuntimeError("Failed to create IC-LoRA reference video frames") from exc
+
+        return io.NodeOutput(frames)
+
+    @staticmethod
+    def _expand_frames(images: torch.Tensor, frame_count: int) -> torch.Tensor:
+        if images.ndim != 4:
+            raise ValueError("images must be an IMAGE batch tensor with shape [B, H, W, C]")
+
+        image_count = images.shape[0]
+        if image_count <= 0:
+            raise ValueError("images batch must contain at least one image")
+
+        base_count = frame_count // image_count
+        remainder = frame_count % image_count
+
+        frames: list[torch.Tensor] = []
+        for index in range(image_count):
+            repeats = base_count + (1 if index < remainder else 0)
+            if repeats > 0:
+                frames.append(images[index:index + 1].repeat(repeats, 1, 1, 1))
+
+        if not frames:
+            raise ValueError("frame_count must produce at least one frame")
+
+        return torch.cat(frames, dim=0)
