@@ -10,7 +10,6 @@
 
 这是一个用于简化媒体加载和视频处理管道构建的 ComfyUI 自定义节点包。它提供了直观的节点，通过用户友好的参数简化媒体资源的编辑与加载，从而更轻松地构建和配置视频处理工作流。
 
-
 ## 安装
 
 ```bash
@@ -26,6 +25,7 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 ### v1.0.3
 
+- **【时间线编辑器：UI模式】** 修复节点和轨道高度自适应的问题，右键菜单新增`克隆片段`，以方便 wan2的`berinini`和 `LTX2.3 R2V` 使用
 - **【LTXV制作参考视频】** 针对于多参考Lora[模型地址](https://huggingface.co/LiconStudio/LTX-2.3-Multiple-Subject-Reference)新添加的节点
 
 ### v1.0.2
