@@ -412,6 +412,50 @@ export function MaintainTrack({
     onSelectedIdChange(newSegment.id)
   }
 
+  function cloneSegment(id: string) {
+    if (track.locked) return
+    const sortedSegments = [...segments].sort((a, b) => a.start_frame - b.start_frame)
+    const idx = sortedSegments.findIndex((s) => s.id === id)
+    if (idx === -1) return
+
+    const seg = sortedSegments[idx]
+    const duration = seg.end_frame - seg.start_frame + 1
+    const cloneStart = seg.end_frame + 1
+    const clonedSegment: MaintainSegment = {
+      ...structuredClone(seg),
+      id: uuid(),
+      start_frame: cloneStart,
+      end_frame: cloneStart + duration - 1,
+      color: track.color,
+    }
+
+    const subsequentSegments: MaintainSegment[] = []
+    let nextStart = clonedSegment.end_frame + 1
+    for (const nextSegment of sortedSegments.slice(idx + 1)) {
+      const nextDuration = nextSegment.end_frame - nextSegment.start_frame + 1
+      subsequentSegments.push({
+        ...nextSegment,
+        start_frame: nextStart,
+        end_frame: nextStart + nextDuration - 1,
+      })
+      nextStart += nextDuration
+    }
+
+    const newSegments = [
+      ...sortedSegments.slice(0, idx + 1),
+      clonedSegment,
+      ...subsequentSegments,
+    ]
+    const newTotalLength = totalFrames + duration
+
+    if (onExtendTimeline) {
+      onExtendTimeline(newSegments, newTotalLength)
+    } else {
+      onSegmentsChange(newSegments)
+    }
+    onSelectedIdChange(clonedSegment.id)
+  }
+
   function addSegment() {
     if (segments.length === 0) {
       // Empty track: add segment with full duration
@@ -786,11 +830,18 @@ export function MaintainTrack({
           </ContextMenuItem>
           <ContextMenuItem onClick={addSegment}>{t('maintainTrack.contextAdd')}</ContextMenuItem>
           {rightClickedId && (
-            <ContextMenuItem
-              onClick={() => { deleteSegment(rightClickedId); setRightClickedId(null) }}
-            >
-              {t('maintainTrack.contextDelete')}
-            </ContextMenuItem>
+            <>
+              <ContextMenuItem
+                onClick={() => { cloneSegment(rightClickedId); setRightClickedId(null) }}
+              >
+                {t('maintainTrack.contextClone')}
+              </ContextMenuItem>
+              <ContextMenuItem
+                onClick={() => { deleteSegment(rightClickedId); setRightClickedId(null) }}
+              >
+                {t('maintainTrack.contextDelete')}
+              </ContextMenuItem>
+            </>
           )}
         </ContextMenuContent>
       </ContextMenu>

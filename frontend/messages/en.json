@@ -84,6 +84,7 @@
     "combinedHint": "Use | to separate segments. Changes apply in real-time.",
     "contextEdit": "Edit segment",
     "contextAdd": "Add segment",
+    "contextClone": "Clone segment",
     "contextDelete": "Delete segment",
     "contextDistribute": "Distribute evenly",
     "addMedia": "Add media",

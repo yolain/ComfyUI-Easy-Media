@@ -84,6 +84,7 @@
     "combinedHint": "用 | 分隔各分段，修改实时生效。",
     "contextEdit": "编辑片段",
     "contextAdd": "添加片段",
+    "contextClone": "克隆片段",
     "contextDelete": "删除片段",
     "contextDistribute": "均匀分布",
     "addMedia": "添加媒体",

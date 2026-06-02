@@ -1,4 +1,5 @@
 import { addInlineStyles } from "@/lib/add-stylesheet";
+import { preserveTimelineEditorNodeHeight } from "@/lib/timeline-node-size";
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 import type { TimelineData } from '@/types/timeline'
 
@@ -27,6 +28,10 @@ globalThis.comfyAPI!.app.app.registerExtension({
     );
   },
 
+  beforeRegisterNodeDef(nodeType, nodeData) {
+    preserveTimelineEditorNodeHeight(nodeType, nodeData)
+  },
+
   getCustomWidgets() {
     return {
       TIMELINE: createReactWidget<TimelineData>(TimelineWidget, {
@@ -38,4 +43,3 @@ globalThis.comfyAPI!.app.app.registerExtension({
     }
   },
 })
-

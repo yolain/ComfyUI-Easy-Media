@@ -543,7 +543,7 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
           />
 
           {/* Shared horizontal scroll container for ruler + tracks */}
-          <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-x-auto overflow-y-hidden">
+          <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto">
             <div className="h-full flex flex-col" style={{ width: scaledWidth, minWidth: '100%' }}>
               {/* Ruler row — fixed height */}
               <div className="border-t shrink-0">

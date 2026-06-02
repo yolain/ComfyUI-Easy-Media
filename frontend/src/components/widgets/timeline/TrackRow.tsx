@@ -127,7 +127,7 @@ export function TrackRow({ track, children, onTrackChange, toolSlots, height, gr
       </div> */}
 
       {/* Track content area */}
-      <div className="relative flex-1">
+      <div className="relative flex-1 min-w-0 overflow-x-clip overflow-y-visible">
         {children}
       </div>
     </div>
