@@ -89,6 +89,19 @@
         "name": "分辨率",
         "tooltip": "选择分辨率或选择'自定义'来指定您自己的宽度和高度。"
       },
+      "resize_method": {
+        "name": "缩放方式",
+        "options": {
+          "stretch": "拉伸",
+          "resize": "缩放",
+          "pad": "填充",
+          "pad (white)": "填充（白色）",
+          "pad_edge": "边缘色填充",
+          "pad_edge_pixel": "边缘像素填充",
+          "crop": "裁剪",
+          "pillarbox_blur": "模糊边栏"
+        }
+      },
       "format": {
         "name": "格式",
         "tooltip": "选择视频格式以自动设置分辨率和帧率。"
@@ -399,6 +412,25 @@
       },
       "2": {
         "name": "Latent"
+      }
+    }
+  },
+  "LTXVMakeRefVideo": {
+    "display_name": "LTXV 制作参考视频",
+    "description": "将批次参考图像扩展为用于 IC-LoRA 的参考视频。",
+    "inputs": {
+      "images": {
+        "name": "图像",
+        "tooltip": "参考图像批次。"
+      },
+      "frame_count": {
+        "name": "帧数",
+        "tooltip": "输出参考视频的帧数。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "图像"
       }
     }
   }

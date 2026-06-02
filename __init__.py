@@ -56,7 +56,7 @@ class EasyMediaExtension(ComfyExtension):
             MakeAudioList,
             # LTXV
             LTXVAddGuidesFromBatchIndexes,
-            LTXVMakeICLoRAReferenceVideo,
+            LTXVMakeRefVideo,
             # Video
             EasySaveVideo,
             EasyMergeVideos,

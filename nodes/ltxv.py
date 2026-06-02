@@ -116,7 +116,7 @@ class LTXVAddGuidesFromBatchIndexes(LTXVAddGuide):
         return io.NodeOutput(positive, negative, {"samples": latent_image, "noise_mask": noise_mask})
 
 # code based on https://github.com/liconstudio/ComfyUI-Licon-MSR/blob/main/licon_msr.py
-class LTXVMakeICLoRAReferenceVideo(io.ComfyNode):
+class LTXVMakeRefVideo(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
