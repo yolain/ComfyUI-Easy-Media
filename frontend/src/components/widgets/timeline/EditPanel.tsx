@@ -60,10 +60,19 @@ function escHtml(str: string): string {
 }
 
 function buildHighlightHtml(raw: string): string {
-  const sep =
-    '<span style="color:var(--highlight);padding:0 4px;font-weight:700" data-pipe="1">|</span>'
+  const sep = '<span style="color:var(--highlight)" data-pipe="1">|</span>'
   return raw.split(/[|｜]/).map(escHtml).join(sep)
 }
+
+const COMBINED_TEXT_STYLE = {
+  fontFamily: 'inherit',
+  fontSize: '10px',
+  lineHeight: '1.4',
+  letterSpacing: 0,
+  whiteSpace: 'pre-wrap',
+  overflowWrap: 'break-word',
+  wordBreak: 'break-word',
+} satisfies React.CSSProperties
 
 function applyTextsToMaintainSegments(
   parts: string[],
@@ -71,15 +80,20 @@ function applyTextsToMaintainSegments(
   totalFrames: number,
   color: string,
 ): MaintainSegment[] {
+  if (parts.length === 0) return []
+
   if (parts.length === segments.length) {
     return segments.map((s, i) => ({ ...s, content: { ...s.content, text: parts[i] } }))
   }
   const count = Math.max(1, parts.length)
-  const perSeg = Math.floor((totalFrames - 1) / count)
+  const base = Math.floor(totalFrames / count)
+  const remainder = totalFrames % count
   return parts.map((text, i) => ({
     id: segments[i]?.id ?? uuid(),
-    start_frame: i * perSeg,
-    end_frame: i < count - 1 ? (i + 1) * perSeg - 1 : totalFrames - 1,
+    start_frame: i * base + Math.min(i, remainder),
+    end_frame: i < count - 1
+      ? i * base + Math.min(i, remainder) + base + (i < remainder ? 1 : 0) - 1
+      : totalFrames - 1,
     content: {
       text,
       images: segments[i]?.content.images ?? [],
@@ -112,7 +126,13 @@ function MaintainCombinedEditor({
   const segmentsRef = useRef(allSegments)
   segmentsRef.current = allSegments
 
-  const [text, setText] = useState(() => allSegments.map((s) => s.content.text).join('|'))
+  const combinedText = allSegments.map((s) => s.content.text).join('|')
+  const [text, setText] = useState(() => combinedText)
+
+  useEffect(() => {
+    if (composing.current) return
+    setText((current) => (current === combinedText ? current : combinedText))
+  }, [combinedText])
 
   function syncScroll() {
     if (textareaRef.current && overlayRef.current) {
@@ -121,18 +141,16 @@ function MaintainCombinedEditor({
   }
 
   const commit = useCallback((raw: string) => {
-    const validParts = raw.split(/[|｜]/).map((p) => p.trim()).filter(Boolean)
-    if (validParts.length > 0) {
-      onAllSegmentsChange(
-        applyTextsToMaintainSegments(validParts, segmentsRef.current, totalFrames, trackColor),
-      )
-    }
+    const parts = raw === '' ? [] : raw.split(/[|｜]/)
+    onAllSegmentsChange(
+      applyTextsToMaintainSegments(parts, segmentsRef.current, totalFrames, trackColor),
+    )
   }, [totalFrames, trackColor, onAllSegmentsChange])
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    if (composing.current) return
     const raw = e.target.value
     setText(raw)
+    if (composing.current) return
     commit(raw)
   }, [commit])
 
@@ -143,8 +161,8 @@ function MaintainCombinedEditor({
         <div
           ref={overlayRef}
           aria-hidden="true"
-          className="absolute inset-0 overflow-y-auto text-[10px] whitespace-pre-wrap wrap-break-word pointer-events-none"
-          style={{ padding: 0, lineHeight: 'inherit' }}
+          className="absolute inset-0 overflow-y-auto pointer-events-none"
+          style={{ ...COMBINED_TEXT_STYLE, padding: 0 }}
           dangerouslySetInnerHTML={{ __html: buildHighlightHtml(text) }}
         />
         {/* Transparent textarea for native input handling */}
@@ -161,8 +179,8 @@ function MaintainCombinedEditor({
             setText(raw)
             commit(raw)
           }}
-          className="absolute inset-0 w-full h-full resize-none text-[10px] border-0 shadow-none focus-visible:ring-0 p-0 bg-transparent outline-none"
-          style={{ color: 'transparent', caretColor: 'var(--foreground)' }}
+          className="absolute inset-0 w-full h-full resize-none border-0 shadow-none focus-visible:ring-0 p-0 bg-transparent outline-none"
+          style={{ ...COMBINED_TEXT_STYLE, color: 'transparent', caretColor: 'var(--foreground)' }}
         />
       </div>
       <p className="text-[9px] text-muted-foreground">{t('maintainTrack.combinedHint')}</p>

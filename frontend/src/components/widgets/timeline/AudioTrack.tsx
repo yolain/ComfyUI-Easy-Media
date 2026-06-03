@@ -465,7 +465,7 @@ export function AudioTrack({
   return (
     <TrackRow track={track} onTrackChange={onTrackChange} toolSlots={toolSlots} grow={grow}>
       <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
-        <ContextMenu open={contextMenuOpen} onOpenChange={setContextMenuOpen}>
+        <ContextMenu>
           <ContextMenuTrigger className="relative block w-full h-full" asChild>
             <section
               ref={containerRef}
@@ -475,6 +475,7 @@ export function AudioTrack({
               onDragLeave={() => setPendingDropFrame(null)}
               onDrop={handleDrop}
               onClick={handleClick}
+              onContextMenu={() => setContextMenuOpen(true)}
               onDoubleClick={(e) => {
                 const target = e.target as HTMLElement
                 if (target.closest('[data-segment-block]')) return
@@ -579,7 +580,7 @@ export function AudioTrack({
           </section>
         </ContextMenuTrigger>
 
-        <ContextMenuContent onCloseAutoFocus={() => setRightClickedId(null)}>
+        <ContextMenuContent onCloseAutoFocus={() => { setRightClickedId(null); setContextMenuOpen(false) }}>
           <ContextMenuItem
             disabled={!canImport}
             onClick={() => setTimeout(() => openPopoverAt(8, 8, 'inputs', null, ''), 0)}

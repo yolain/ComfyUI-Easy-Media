@@ -109,7 +109,7 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
     if (!app?.canvas) return
     const canvas = app.canvas
     const origOnDrawForeground = canvas.onDrawForeground?.bind(canvas)
-    canvas.onDrawForeground = (ctx: unknown, visibleArea: unknown) => {
+    canvas.onDrawForeground = (ctx, visibleArea) => {
       origOnDrawForeground?.(ctx, visibleArea)
       const s: number = canvas.ds?.scale ?? 1
       setCanvasScale((prev) => (prev !== s ? s : prev))
@@ -662,7 +662,12 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
               canvasScale={canvasScale * editPanelScale}
               trackColor={maintainTrack.color}
               onContentChange={handleContentChange}
-              onAllSegmentsChange={(segs) => updateSegments(maintainTrack.id, segs)}
+              onAllSegmentsChange={(segs) => {
+                updateSegments(maintainTrack.id, segs)
+                if (selectedId && !segs.some((seg) => seg.id === selectedId)) {
+                  setSelectedId(null)
+                }
+              }}
               node={node}
               app={app}
             />

@@ -1,29 +1,16 @@
-import { useState } from 'react'
-import { MessageSquareText, Music2, Image, Video, Film } from 'lucide-react'
-import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Input } from '@/components/ui/input'
-import type { Track, TrackType } from '@/types/timeline'
-import { useT } from '@/lib/i18n'
+import type { ReactNode } from 'react'
+import type { Track } from '@/types/timeline'
 
 export const TRACK_LABEL_WIDTH = 18   // px
 export const TRACK_HEIGHT = 40        // px
 export const MAINTAIN_TRACK_HEIGHT = 80 // px (2x normal)
 
-const TRACK_ICONS: Record<TrackType, React.ReactNode> = {
-  prompt:   <MessageSquareText className="w-3 h-3 text-background" />,
-  audio:    <Music2            className="w-3 h-3 text-background" />,
-  image:    <Image             className="w-3 h-3 text-background" />,
-  video:    <Video             className="w-3 h-3 text-background" />,
-  maintain: <Film              className="w-3 h-3 text-background" />,
-}
-
 // Exactly 3 tool slots, rendered as equal-height cells in the sidebar
-type ToolSlots = [React.ReactNode?, React.ReactNode?, React.ReactNode?]
+type ToolSlots = [ReactNode?, ReactNode?, ReactNode?]
 
 interface TrackRowProps {
   track: Track
-  children: React.ReactNode
+  children: ReactNode
   onTrackChange: (patch: Partial<Track>) => void
   toolSlots?: ToolSlots
   height?: number
@@ -31,18 +18,8 @@ interface TrackRowProps {
   grow?: number
 }
 
-export function TrackRow({ track, children, onTrackChange, toolSlots, height, grow }: Readonly<TrackRowProps>) {
-  const t = useT()
-  const [colorInput, setColorInput] = useState(track.color)
+export function TrackRow({ children, height, grow }: Readonly<TrackRowProps>) {
   const rowHeight = height ?? TRACK_HEIGHT
-
-  function commitColor() {
-    if (/^#[0-9a-fA-F]{6}$/.test(colorInput)) {
-      onTrackChange({ color: colorInput })
-    } else {
-      setColorInput(track.color)
-    }
-  }
 
   return (
     <div

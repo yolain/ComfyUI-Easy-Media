@@ -1,7 +1,10 @@
 const TIMELINE_NODE_NAME = 'easy timelineEditor'
 const TIMELINE_HEIGHT_PROPERTY = 'easyMediaTimelineHeight'
+const TIMELINE_WIDGET_RESIZE_GUARD = '__easyMediaTimelineWidgetResizeGuard'
+const WIDGET_RESIZE_GUARD_MS = 500
 
 type NodeSize = [number, number]
+type ResizeGuard = { height: number; width?: number; expiresAt: number }
 
 function readSize(size: unknown): NodeSize | null {
   if (Array.isArray(size) && size.length >= 2) {
@@ -10,7 +13,7 @@ function readSize(size: unknown): NodeSize | null {
     return Number.isFinite(width) && Number.isFinite(height) ? [width, height] : null
   }
   if (ArrayBuffer.isView(size) && 'length' in size && Number(size.length) >= 2) {
-    const arrayLikeSize = size as ArrayLike<number>
+    const arrayLikeSize = size as unknown as ArrayLike<number>
     const width = Number(arrayLikeSize[0])
     const height = Number(arrayLikeSize[1])
     return Number.isFinite(width) && Number.isFinite(height) ? [width, height] : null
@@ -57,6 +60,29 @@ function restoreHeight(node: any, height: number | null, fallbackWidth?: number)
   window.setTimeout(() => applyHeight(node, height, fallbackWidth), 100)
 }
 
+function readWidgetResizeGuard(node: any): ResizeGuard | null {
+  const guard = node?.[TIMELINE_WIDGET_RESIZE_GUARD] as ResizeGuard | undefined
+  if (!guard || !Number.isFinite(guard.height) || guard.height <= 0) return null
+  if (Date.now() > guard.expiresAt) {
+    delete node[TIMELINE_WIDGET_RESIZE_GUARD]
+    return null
+  }
+  return guard
+}
+
+function beginWidgetResizeGuard(node: any) {
+  const currentSize = readSize(node?.size)
+  const height = readStoredHeight(node) ?? currentSize?.[1] ?? null
+  if (!Number.isFinite(height) || height === null || height <= 0) return
+  node.properties ??= {}
+  node.properties[TIMELINE_HEIGHT_PROPERTY] = height
+  node[TIMELINE_WIDGET_RESIZE_GUARD] = {
+    height,
+    width: currentSize?.[0],
+    expiresAt: Date.now() + WIDGET_RESIZE_GUARD_MS,
+  } satisfies ResizeGuard
+}
+
 export function preserveTimelineEditorNodeHeight(nodeType: any, nodeData: { name?: string }) {
   if (nodeData.name !== TIMELINE_NODE_NAME) return
 
@@ -64,6 +90,7 @@ export function preserveTimelineEditorNodeHeight(nodeType: any, nodeData: { name
   const originalOnConfigure = nodeType.prototype.onConfigure
   const originalOnResize = nodeType.prototype.onResize
   const originalOnSerialize = nodeType.prototype.onSerialize
+  const originalOnWidgetChanged = nodeType.prototype.onWidgetChanged
 
   nodeType.prototype.onNodeCreated = function () {
     originalOnNodeCreated?.call(this)
@@ -80,7 +107,28 @@ export function preserveTimelineEditorNodeHeight(nodeType: any, nodeData: { name
   nodeType.prototype.onResize = function (size: unknown) {
     originalOnResize?.call(this, size)
     const nextSize = readSize(size)
-    if (nextSize) preserveHeight(this, nextSize[1])
+    if (!nextSize) return
+
+    const resizeGuard = readWidgetResizeGuard(this)
+    if (resizeGuard) {
+      preserveHeight(this, resizeGuard.height)
+      restoreHeight(this, resizeGuard.height, resizeGuard.width ?? nextSize[0])
+      return
+    }
+
+    preserveHeight(this, nextSize[1])
+  }
+
+  nodeType.prototype.onWidgetChanged = function (
+    name: string,
+    value: unknown,
+    oldValue: unknown,
+    widget: unknown,
+  ) {
+    beginWidgetResizeGuard(this)
+    originalOnWidgetChanged?.call(this, name, value, oldValue, widget)
+    const resizeGuard = readWidgetResizeGuard(this)
+    if (resizeGuard) restoreHeight(this, resizeGuard.height, resizeGuard.width)
   }
 
   nodeType.prototype.onSerialize = function (serialisedNode: any) {

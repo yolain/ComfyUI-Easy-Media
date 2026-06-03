@@ -46,7 +46,7 @@ interface MaintainTrackProps {
  * Multiplier is based on totalFrames to give proportional segment sizes.
  * For 24fps, this gives approximately 0.5s to 5s segments depending on totalFrames.
  */
-function calcSegmentDuration(totalFrames: number, frameRate: number): number {
+function calcSegmentDuration(frameRate: number): number {
   // const multiplier = Math.max(1, Math.floor(totalFrames / frameRate / 2))
   return frameRate * 2 + 1
 }
@@ -388,7 +388,7 @@ export function MaintainTrack({
     if (idx === -1) return
 
     const seg = segments[idx]
-    const segDuration = calcSegmentDuration(totalFrames, frameRate)
+    const segDuration = calcSegmentDuration(frameRate)
 
     // For 'left': new segment occupies [seg.start_frame, seg.start_frame + segDuration - 1],
     //   the selected segment and all after it shift right by segDuration.
@@ -502,7 +502,7 @@ export function MaintainTrack({
     }
     // No gap (full timeline): extend after last segment with calculated duration
     const last = segments.at(-1)!
-    const segDuration = calcSegmentDuration(totalFrames, frameRate)
+    const segDuration = calcSegmentDuration(frameRate)
     const newSegStart = last.end_frame + 1
     const newSegEnd = newSegStart + segDuration - 1
     const newSegment = {
@@ -625,7 +625,7 @@ export function MaintainTrack({
 
     // Check if there's a gap
     const gap = findFirstGap()
-    const segDuration = calcSegmentDuration(totalFrames, frameRate)
+    const segDuration = calcSegmentDuration(frameRate)
 
     if (gap) {
       // Fill gap with first image, extend with remaining (same as addSegment logic)
@@ -731,7 +731,7 @@ export function MaintainTrack({
                 onResizeEnd={handleResizeEnd}
                 frameRate={frameRate}
                 displayFormat={displayFormat}
-                onContextMenu={(e, s) => {
+                onContextMenu={(_, s) => {
                   setRightClickedId(s.id)
                   onSelectedIdChange(s.id)
                 }}
@@ -936,7 +936,7 @@ export function MaintainTrack({
               const gap = findFirstGap()
               if (gap) {
                 // Fill gap with first image, extend with remaining
-                const segDuration = calcSegmentDuration(totalFrames, frameRate)
+                const segDuration = calcSegmentDuration(frameRate)
                 const newSegments: MaintainSegment[] = []
                 let currentEndFrame = gap.start
 
@@ -973,7 +973,7 @@ export function MaintainTrack({
 
               // No gap (filled): extend after last segment with calculated duration for each image
               const lastSeg = segments[segments.length - 1]
-              const segDuration = calcSegmentDuration(totalFrames, frameRate)
+              const segDuration = calcSegmentDuration(frameRate)
               const newSegments: MaintainSegment[] = []
               let currentEndFrame = lastSeg.end_frame + 1
 
