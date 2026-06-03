@@ -26,6 +26,8 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 
 ### v1.0.3
 
+- **[Timeline Editor: UI Mode]** Fixed an issue where `node height` would reset to the default value when `canvas refresh` or `resolution option` was switched
+- **[Timeline Editor: UI Mode]** Fixed an issue where clip content could not be edited in some cases when using `Overall Edit` prompt mode
 - **[Timeline Editor: UI Mode]** Fixed the issue where nodes and track heights didn't adapt automatically; added `Clone Clip` to the right-click menu for better compatibility with wan2's `berinini` and `LTX2.3 R2V`
 - **[LTXV Reference Video]** New node for multi-reference LoRA [model_url](https://huggingface.co/LiconStudio/LTX-2.3-Multiple-Subject-Reference)
 
