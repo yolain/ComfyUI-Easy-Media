@@ -69,7 +69,11 @@
     "importUrl": "从 URL 导入…",
     "enterUrl": "请输入图片 URL：",
     "placeholder": "图片轨道",
-    "placeholderHint": "双击可添加内容"
+    "placeholderHint": "双击可添加内容",
+    "contextReselect": "重选分片段",
+    "contextAdd": "添加分片段",
+    "contextDistribute": "均分分片段",
+    "contextDelete": "删除片段"
   },
   "maintainTrack": {
     "dropZone": "主轨拖放区域",

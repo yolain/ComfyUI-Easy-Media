@@ -1,9 +1,10 @@
+import { useEffect } from 'react'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { NumberInput } from '@/components/ui/number-input'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { Play, Pause, Trash2, ZoomIn } from 'lucide-react'
+import { Play, Pause, Trash2, ZoomOut } from 'lucide-react'
 import type { TimeDisplayFormat, MaintainSegment } from '@/types/timeline'
 import { framesToSeconds, secondsToFrames } from '@/lib/timeline-utils'
 import { useT } from '@/lib/i18n'
@@ -23,13 +24,24 @@ interface ToolbarProps {
   /** Whether the delete action is allowed (e.g., false when only one segment remains) */
   canDelete?: boolean
   onDeleteSelected: () => void
-  /** Zoom level, 1 = fit to container, up to 10 */
+  /** Zoom level, 1 = fit to container */
   zoom: number
   onZoomChange: (zoom: number) => void
   /** Currently selected segment (for editing its duration) */
   selectedSegment: MaintainSegment | null
   /** Called when selected segment duration changes */
   onSelectedSegmentDurationChange: (segmentId: string, newDuration: number) => void
+}
+
+function getZoomConfig(totalLength: number, frameRate: number): { max: number; step: number } {
+  const seconds = framesToSeconds(Math.max(totalLength, 1), Math.max(frameRate, 1))
+
+  if (seconds <= 10) return { max: 2, step: 0.05 }
+  if (seconds <= 30) return { max: 3, step: 0.05 }
+  if (seconds <= 60) return { max: 4, step: 0.1 }
+  if (seconds <= 120) return { max: 6, step: 0.1 }
+  if (seconds <= 300) return { max: 8, step: 0.2 }
+  return { max: 10, step: 0.25 }
 }
 
 export function Toolbar({
@@ -50,6 +62,13 @@ export function Toolbar({
   onSelectedSegmentDurationChange,
 }: Readonly<ToolbarProps>) {
   const t = useT()
+  const zoomConfig = getZoomConfig(totalLength, frameRate)
+
+  useEffect(() => {
+    if (zoom > zoomConfig.max) {
+      onZoomChange(zoomConfig.max)
+    }
+  }, [zoom, zoomConfig.max, onZoomChange])
 
   // Duration for selected segment or total length
   const segmentDuration = selectedSegment
@@ -189,15 +208,15 @@ export function Toolbar({
         <div className="flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
-              <ZoomIn className="w-4 h-4 text-muted-foreground shrink-0" />
+              <ZoomOut className="w-4 h-4 text-muted-foreground shrink-0" />
             </TooltipTrigger>
             <TooltipContent side="bottom">{t('toolbar.zoom')}</TooltipContent>
           </Tooltip>
           <Slider
             min={1}
-            max={10}
-            step={0.1}
-            value={[zoom]}
+            max={zoomConfig.max}
+            step={zoomConfig.step}
+            value={[Math.min(zoom, zoomConfig.max)]}
             onValueChange={([v]) => onZoomChange(v)}
             className="w-12 h-3"
             aria-label={t('toolbar.zoom')}

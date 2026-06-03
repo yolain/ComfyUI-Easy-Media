@@ -1,9 +1,17 @@
-import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { Plus } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu'
+
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
 import type { MediaTab } from '@/components/widgets/mediaSelector/MediaSelector'
 import type { MaintainContent, MaintainType, ImageItem, MaintainSegment, Segment, TimeDisplayFormat } from '@/types/timeline'
@@ -202,6 +210,7 @@ interface SubImageBlockProps {
   onResizeEnd: (id: string, newStart: number, newEnd: number) => void
   onEdit: () => void
   onRemove: () => void
+  onContextMenu?: (e: React.MouseEvent) => void
 }
 
 /** Returns a slightly lighter border color from a hex color */
@@ -216,7 +225,7 @@ function lightenColor(hex: string, amount: number = 0.3): string {
   return `#${newR.toString(16).padStart(2, '0')}${newG.toString(16).padStart(2, '0')}${newB.toString(16).padStart(2, '0')}`
 }
 
-function SubImageBlock({
+const SubImageBlock = React.forwardRef<HTMLDivElement, SubImageBlockProps>(function SubImageBlock({
   block,
   span,
   areaWidth,
@@ -229,7 +238,8 @@ function SubImageBlock({
   onResizeEnd,
   onEdit,
   onRemove,
-}: Readonly<SubImageBlockProps>) {
+  onContextMenu,
+}: Readonly<SubImageBlockProps>, forwardedRef) {
   const t = useT()
   const [localStart, setLocalStart] = useState(block.start_frame)
   const [localEnd, setLocalEnd] = useState(block.end_frame)
@@ -345,6 +355,7 @@ function SubImageBlock({
 
   return (
     <div
+      ref={forwardedRef}
       role="button"
       tabIndex={0}
       className="absolute top-0 h-full select-none group"
@@ -368,6 +379,7 @@ function SubImageBlock({
         onSelect?.(block.id)
         onEdit()
       }}
+      onContextMenu={onContextMenu}
       onKeyDown={(e) => { if (e.key === 'Enter') { onSelect?.(block.id); onEdit() } }}
     >
       {/* Tiled image background */}
@@ -420,7 +432,7 @@ function SubImageBlock({
       )}
     </div>
   )
-}
+})
 
 // ── EditPanel ────────────────────────────────────────────────────────────────
 
@@ -475,6 +487,7 @@ export function EditPanel({
   const [popoverTab, setPopoverTab] = useState<MediaTab>('inputs')
   const [anchorPos, setAnchorPos] = useState({ x: 8, y: 8 })
   const trackAreaRef = useRef<HTMLDivElement>(null)
+  const justOpenedPopoverRef = useRef(false)
 
   // Recompute slot items when popover opens to get fresh graph data
   const slotItems = useMemo(() => computeSlotItems(node, app, 'image'), [node, app, popoverOpen])
@@ -492,6 +505,7 @@ export function EditPanel({
         y: e.clientY - (rect?.top ?? 0),
       })
     }
+    justOpenedPopoverRef.current = true
     setEditingBlockId(blockId)
     setSelectorValue(current)
     setPopoverTab(tab)
@@ -575,6 +589,20 @@ export function EditPanel({
     onContentChange({ images: updated.map((b) => ({ ...b.item, start_frame: b.start_frame, end_frame: b.end_frame })) })
   }
 
+  function distributeEvenlySubBlocks() {
+    if (subBlocks.length === 0) return
+    const base = Math.floor(span / subBlocks.length)
+    const remainder = span % subBlocks.length
+    const updated = subBlocks.map((b, i) => {
+      const extra = i < remainder ? 1 : 0
+      const start = i * base + Math.min(i, remainder)
+      const end = i === subBlocks.length - 1 ? span - 1 : start + base + extra - 1
+      return { ...b, start_frame: start, end_frame: end }
+    })
+    setSubBlocks(updated)
+    onContentChange({ images: updated.map((b) => ({ ...b.item, start_frame: b.start_frame, end_frame: b.end_frame })) })
+  }
+
   return (
     <div
       data-edit-panel=""
@@ -618,46 +646,87 @@ export function EditPanel({
         ref={trackAreaRef}
         className="relative w-full select-none bg-muted/30"
         style={{ height: 48 }}
-        onContextMenu={(e) => {
-          e.preventDefault()
-          openPopover(e, null, '', 'inputs')
-        }}
       >
         {subBlocks.length === 0 ? (
-          <button
-            type="button"
-            className="absolute inset-0 flex items-center justify-center gap-1 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
-            onClick={(e) => openPopover(e, null, '', 'inputs')}
-          >
-            <Plus className="w-2.5 h-2.5" />
-            <span>{t('maintainTrack.addImage')}</span>
-          </button>
+          <ContextMenu>
+            <ContextMenuTrigger asChild>
+              <button
+                type="button"
+                className="absolute inset-0 flex items-center justify-center gap-1 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
+                onClick={(e) => openPopover(e, null, '', 'inputs')}
+              >
+                <Plus className="w-2.5 h-2.5" />
+                <span>{t('maintainTrack.addImage')}</span>
+              </button>
+            </ContextMenuTrigger>
+            <ContextMenuContent>
+              <ContextMenuItem onClick={() => openPopover(null, null, '', 'inputs')}>
+                {t('imageTrack.contextAdd')}
+              </ContextMenuItem>
+            </ContextMenuContent>
+          </ContextMenu>
         ) : (
           <>
-            {subBlocks.map((block) => (
-              <SubImageBlock
-                key={block.id}
-                block={block}
-                span={span}
-                areaWidth={areaWidth}
-                frameRate={frameRate}
-                displayFormat={displayFormat}
-                trackColor={trackColor}
-                selected={selectedBlockId === block.id}
-                onSelect={setSelectedBlockId}
-                onMoveEnd={updateSubBlockPosition}
-                onResizeEnd={updateSubBlockPosition}
-                onEdit={() =>
-                  openPopover(
-                    null,
-                    block.id,
-                    block.item.file_path ?? block.item.url ?? '',
-                    block.item.source_type === 'url' ? 'url' : 'inputs',
-                  )
-                }
-                onRemove={() => handleRemove(block.id)}
-              />
-            ))}
+            {subBlocks.map((block) => {
+              return (
+                <ContextMenu key={block.id}>
+                  <ContextMenuTrigger asChild>
+                    <SubImageBlock
+                      block={block}
+                      span={span}
+                      areaWidth={areaWidth}
+                      frameRate={frameRate}
+                      displayFormat={displayFormat}
+                      trackColor={trackColor}
+                      selected={selectedBlockId === block.id}
+                      onSelect={setSelectedBlockId}
+                      onMoveEnd={updateSubBlockPosition}
+                      onResizeEnd={updateSubBlockPosition}
+                      onEdit={() =>
+                        openPopover(
+                          null,
+                          block.id,
+                          block.item.file_path ?? block.item.url ?? '',
+                          block.item.source_type === 'url' ? 'url' : 'inputs',
+                        )
+                      }
+                      onRemove={() => handleRemove(block.id)}
+                    />
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem
+                      onClick={() => {
+                        setSelectedBlockId(block.id)
+                        openPopover(
+                          null,
+                          block.id,
+                          block.item.file_path ?? block.item.url ?? '',
+                          block.item.source_type === 'url' ? 'url' : 'inputs',
+                        )
+                      }}
+                    >
+                      {t('imageTrack.contextReselect')}
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={() => openPopover(null, null, '', 'inputs')}>
+                      {t('imageTrack.contextAdd')}
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      disabled={subBlocks.length < 2}
+                      onClick={distributeEvenlySubBlocks}
+                    >
+                      {t('imageTrack.contextDistribute')}
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem
+                      className="text-destructive focus:text-destructive"
+                      onClick={() => handleRemove(block.id)}
+                    >
+                      {t('imageTrack.contextDelete')}
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
+              )
+            })}
 
             {/* Add button */}
             <button
@@ -684,6 +753,12 @@ export function EditPanel({
             side="bottom"
             align="start"
             onOpenAutoFocus={(e) => e.preventDefault()}
+            onInteractOutside={(e) => {
+              if (justOpenedPopoverRef.current) {
+                justOpenedPopoverRef.current = false
+                e.preventDefault()
+              }
+            }}
           >
             <MediaSelector
               value={selectorValue}
@@ -736,6 +811,7 @@ export function EditPanel({
           )
         }
       </div>
+
     </div>
   )
 }

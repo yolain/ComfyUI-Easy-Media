@@ -31,6 +31,8 @@ export type MediaTab = 'inputs' | 'outputs' | 'local' | 'url' | 'slot'
 type ViewMode = 'grid' | 'list'
 type SortBy = 'name' | 'date' | 'size'
 
+const MULTIPLE_MEDIA_SEPARATOR = '|MULTIPLE|'
+
 interface MediaDirEntry {
   type: 'dir'
   name: string
@@ -95,6 +97,11 @@ function isAudioFile(name: string, mediaType: MediaType): boolean {
   if (mediaType === 'audio') return true
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
   return ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus', 'wma'].includes(ext)
+}
+
+function getSelectedMediaValues(value: string): Set<string> {
+  if (!value) return new Set()
+  return new Set(value.split(MULTIPLE_MEDIA_SEPARATOR).filter((item) => item.length > 0))
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +279,7 @@ function RemoteFileList({
   const [subfolder, setSubfolder] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const selectedValues = getSelectedMediaValues(value)
 
   // Reset to root when the source or local path changes
   const rootKey = `${source}|${localPath}`
@@ -330,6 +338,8 @@ function RemoteFileList({
   const files = (items.filter((i): i is MediaFileEntry => i.type === 'file') as MediaFileEntry[])
     .filter((f) => f.name.toLowerCase().includes(searchQuery.toLowerCase()))
     .sort((a, b) => {
+      const selectedDelta = Number(selectedValues.has(b.path)) - Number(selectedValues.has(a.path))
+      if (selectedDelta !== 0) return selectedDelta
       if (sortBy === 'name') return a.name.localeCompare(b.name)
       if (sortBy === 'date') return b.mtime - a.mtime
       return b.size - a.size
@@ -350,6 +360,72 @@ function RemoteFileList({
   }
 
   const isEmpty = filteredDirs.length === 0 && files.length === 0
+  const selectedFiles = files.filter((file) => selectedValues.has(file.path))
+  const unselectedFiles = files.filter((file) => !selectedValues.has(file.path))
+  const leadFiles = selectedFiles.length > 0 ? selectedFiles : files
+  const tailFiles = selectedFiles.length > 0 ? unselectedFiles : []
+
+  function renderGridFile(file: MediaFileEntry, selected: boolean) {
+    return (
+      <button
+        key={file.path}
+        type="button"
+        className="flex flex-col gap-1 text-left hover:opacity-80 transition-opacity"
+        onClick={() => onChange(file.path, source === 'outputs' ? 'output' : 'input')}
+      >
+        <FileThumbnail file={file} mediaType={mediaType} isSelected={selected} />
+        <span className="text-[10px] truncate leading-tight max-w-full" title={file.name}>
+          {file.name}
+        </span>
+        <span className="text-[10px] text-muted-foreground truncate leading-tight max-w-full">
+          {isImageFile(file.name, mediaType) && file.width && file.height
+            ? `${file.width}×${file.height}`
+            : formatSize(file.size)}
+        </span>
+      </button>
+    )
+  }
+
+  function renderListFile(file: MediaFileEntry, selected: boolean) {
+    const Icon = getFileIcon(file.name, mediaType)
+    const showThumb = isImageFile(file.name, mediaType) && !!file.url
+    const showAudioIcon = !showThumb && isAudioFile(file.name, mediaType)
+
+    return (
+      <button
+        key={file.path}
+        type="button"
+        className={cn(
+          'flex items-center gap-2 px-2 py-1 text-left hover:bg-accent transition-colors',
+          selected && 'bg-accent',
+        )}
+        onClick={() => onChange(file.path, source === 'outputs' ? 'output' : 'input')}
+      >
+        {showThumb && (
+          <div className="w-4 h-4 rounded overflow-hidden shrink-0 bg-muted">
+            <LazyImage src={file.url} alt={file.name} className="w-full h-full object-cover" />
+          </div>
+        )}
+        {showAudioIcon && (
+          <div className="w-4 h-4 rounded flex items-center justify-center bg-[#34d399] shrink-0">
+            <Icon className="w-3 h-3 text-white" />
+          </div>
+        )}
+        {!showThumb && !showAudioIcon && (
+          <Icon className="w-4 h-4 text-muted-foreground shrink-0" />
+        )}
+        <span className="flex-1 text-xs truncate min-w-0" title={file.name}>
+          {file.name}
+        </span>
+        <span className="text-[10px] text-muted-foreground shrink-0">
+          {isImageFile(file.name, mediaType) && file.width && file.height
+            ? `${file.width}×${file.height}`
+            : formatSize(file.size)}
+        </span>
+        {selected && <CheckCircle2 className="w-3.5 h-3.5 text-primary shrink-0" />}
+      </button>
+    )
+  }
 
   function renderGrid() {
     return (
@@ -370,6 +446,7 @@ function RemoteFileList({
             </span>
           </button>
         )}
+        {leadFiles.map((file) => renderGridFile(file, selectedValues.has(file.path)))}
         {filteredDirs.map((dir) => (
           <button
             key={dir.path}
@@ -385,24 +462,7 @@ function RemoteFileList({
             </span>
           </button>
         ))}
-        {files.map((file) => (
-          <button
-            key={file.path}
-            type="button"
-            className="flex flex-col gap-1 text-left hover:opacity-80 transition-opacity"
-            onClick={() => onChange(file.path, source === 'outputs' ? 'output' : 'input')}
-          >
-            <FileThumbnail file={file} mediaType={mediaType} isSelected={value === file.path} />
-            <span className="text-[10px] truncate leading-tight max-w-full" title={file.name}>
-              {file.name}
-            </span>
-            <span className="text-[10px] text-muted-foreground truncate leading-tight max-w-full">
-              {isImageFile(file.name, mediaType) && file.width && file.height
-                ? `${file.width}×${file.height}`
-                : formatSize(file.size)}
-            </span>
-          </button>
-        ))}
+        {tailFiles.map((file) => renderGridFile(file, false))}
       </div>
     )
   }
@@ -426,6 +486,7 @@ function RemoteFileList({
             </span>
           </button>
         )}
+        {leadFiles.map((file) => renderListFile(file, selectedValues.has(file.path)))}
         {filteredDirs.map((dir) => (
           <button
             key={dir.path}
@@ -441,46 +502,7 @@ function RemoteFileList({
             </span>
           </button>
         ))}
-        {files.map((file) => {
-          const Icon = getFileIcon(file.name, mediaType)
-          const selected = value === file.path
-          const showThumb = isImageFile(file.name, mediaType) && !!file.url
-          const showAudioIcon = !showThumb && isAudioFile(file.name, mediaType)
-          return (
-            <button
-              key={file.path}
-              type="button"
-              className={cn(
-                'flex items-center gap-2 px-2 py-1 text-left hover:bg-accent transition-colors',
-                selected && 'bg-accent',
-              )}
-              onClick={() => onChange(file.path, source === 'outputs' ? 'output' : 'input')}
-            >
-              {showThumb && (
-                <div className="w-4 h-4 rounded overflow-hidden shrink-0 bg-muted">
-                  <LazyImage src={file.url} alt={file.name} className="w-full h-full object-cover" />
-                </div>
-              )}
-              {showAudioIcon && (
-                <div className="w-4 h-4 rounded flex items-center justify-center bg-[#34d399] shrink-0">
-                  <Icon className="w-3 h-3 text-white" />
-                </div>
-              )}
-              {!showThumb && !showAudioIcon && (
-                <Icon className="w-4 h-4 text-muted-foreground shrink-0" />
-              )}
-              <span className="flex-1 text-xs truncate min-w-0" title={file.name}>
-                {file.name}
-              </span>
-              <span className="text-[10px] text-muted-foreground shrink-0">
-                {isImageFile(file.name, mediaType) && file.width && file.height
-                  ? `${file.width}×${file.height}`
-                  : formatSize(file.size)}
-              </span>
-              {selected && <CheckCircle2 className="w-3.5 h-3.5 text-primary shrink-0" />}
-            </button>
-          )
-        })}
+        {tailFiles.map((file) => renderListFile(file, false))}
       </div>
     )
   }
@@ -520,6 +542,7 @@ export function MediaSelector({
   const [localPath, setLocalPath] = useState('')
   const [urlInput, setUrlInput] = useState(activeTab === 'url' ? value : '')
   const [urlChecking, setUrlChecking] = useState(false)
+  const selectedValues = getSelectedMediaValues(value)
 
   // Sync defaultTab when it changes (e.g. popover re-opens for a different segment)
   useEffect(() => {
@@ -619,7 +642,7 @@ export function MediaSelector({
       }
       if (paths.length > 0) {
         // Select first file for single selection, but indicate multiple were uploaded
-        onChange(paths.join('|MULTIPLE|'))
+        onChange(paths.join(MULTIPLE_MEDIA_SEPARATOR))
       }
     }
     input.click()
@@ -782,13 +805,16 @@ export function MediaSelector({
               </div>
             ) : (
               <div className="flex flex-col overflow-y-auto flex-1">
-                {slotItems.map((item, idx) => {
-                  const selected = value === item.value
+                {slotItems
+                  .map((item, index) => ({ item, index }))
+                  .sort((a, b) => Number(selectedValues.has(b.item.value)) - Number(selectedValues.has(a.item.value)))
+                  .map(({ item, index }) => {
+                  const selected = selectedValues.has(item.value)
                   const isImage = item.value.startsWith('__slot__:image')
                   const isAudio = item.value.startsWith('__slot__:audio')
                   const displayLabel = isImage
-                    ? t('mediaSelector.slotImage', { n: idx + 1 })
-                    : t('mediaSelector.slotAudio', { n: idx + 1 })
+                    ? t('mediaSelector.slotImage', { n: index + 1 })
+                    : t('mediaSelector.slotAudio', { n: index + 1 })
                   return (
                     <button
                       key={item.value}

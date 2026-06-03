@@ -69,7 +69,11 @@
     "importUrl": "Import from URL\u2026",
     "enterUrl": "Enter image URL:",
     "placeholder": "Image Track",
-    "placeholderHint": "Double-click to add content"
+    "placeholderHint": "Double-click to add content",
+    "contextReselect": "Change Segment",
+    "contextAdd": "Add segment",
+    "contextDistribute": "Distribute evenly",
+    "contextDelete": "Delete segment"
   },
   "maintainTrack": {
     "dropZone": "Maintain track drop zone",

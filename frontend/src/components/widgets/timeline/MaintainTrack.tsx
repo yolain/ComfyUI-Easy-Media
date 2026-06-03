@@ -7,7 +7,7 @@ import {
 } from '@/components/ui/context-menu'
 import { Popover, PopoverContent, PopoverAnchor } from '@/components/ui/popover'
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
-import { tiledImageBackground } from '../../../lib/image-utils'
+import { getImageSrc } from '../../../lib/image-utils'
 import { InsertButton } from './InsertButton'
 import { SegmentBlock } from './SegmentBlock'
 import { TrackRow, MAINTAIN_TRACK_HEIGHT } from './TrackRow'
@@ -127,12 +127,29 @@ function findGapAtFrame(sortedSegs: MaintainSegment[], frame: number, totalFrame
 
 /** Tiled image background for a maintain segment that has images. */
 function SegmentImageBackground({ images }: Readonly<{ images: ImageItem[] }>) {
-  if (images.length === 0) return null
+  const srcs = images.map((img) => getImageSrc(img)).filter((src): src is string => src !== null)
+  if (srcs.length === 0) return null
+  const repeatedSrcs = Array.from({ length: 24 }, (_, repeatIndex) =>
+    srcs.map((src, srcIndex) => ({ src, key: `${repeatIndex}-${srcIndex}` })),
+  ).flat()
+
   return (
-    <div
-      className="absolute inset-0 bg-black overflow-hidden"
-      style={tiledImageBackground(images)}
-    />
+    <div className="absolute inset-0 bg-black overflow-hidden">
+      <div className="flex h-full w-max">
+        {repeatedSrcs.map(({ src, key }) => (
+          <img
+            key={key}
+            src={src}
+            alt=""
+            className="h-full w-auto max-w-none shrink-0 object-contain"
+            draggable={false}
+            onError={(e) => {
+              ;(e.currentTarget as HTMLImageElement).style.display = 'none'
+            }}
+          />
+        ))}
+      </div>
+    </div>
   )
 }
 

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
+import type { WheelEvent } from 'react'
 import type { TimeDisplayFormat } from '@/types/timeline'
 
 interface TimelineRulerProps {
@@ -15,6 +16,8 @@ interface TimelineRulerProps {
   showLabel: boolean
   /** Called when the user clicks or drags on the ruler to seek */
   onSeek?: (frame: number) => void
+  /** Called when the user scrolls on the ruler to move the visible time range */
+  onWheel?: (e: WheelEvent<HTMLDivElement>) => void
 }
 
 /**
@@ -46,7 +49,17 @@ function computeTickInterval(
   )
 }
 
-export function TimelineRuler({ totalFrames, frameRate, displayFormat, width, canvasScale, playheadFrame, showLabel, onSeek }: Readonly<TimelineRulerProps>) {
+export function TimelineRuler({
+  totalFrames,
+  frameRate,
+  displayFormat,
+  width,
+  canvasScale,
+  playheadFrame,
+  showLabel,
+  onSeek,
+  onWheel,
+}: Readonly<TimelineRulerProps>) {
   const isDragging = useRef(false)
 
   useEffect(() => {
@@ -125,6 +138,7 @@ export function TimelineRuler({ totalFrames, frameRate, displayFormat, width, ca
       className="relative h-6 shrink-0 select-none border-b border-border overflow-hidden cursor-col-resize"
       style={{ width }}
       onMouseDown={handleMouseDown}
+      onWheel={onWheel}
       onKeyDown={(e) => {
         if (!onSeek) return
         const step = e.shiftKey ? 10 : 1

@@ -1,4 +1,5 @@
 import { useRef, useState, useLayoutEffect, useEffect } from 'react'
+import type { WheelEvent } from 'react'
 import type { ReactWidgetProps } from '@/lib/create-react-widget'
 import type { TimelineData, Track, Segment, TimeDisplayFormat, MaintainSegment, AudioSegment } from '@/types/timeline'
 import { createDefaultTimelineData } from '@/lib/timeline-utils'
@@ -126,6 +127,21 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
   }>({ rafId: null, lastTimestamp: null, frame: 0, audioEls: new Map() })
 
   const scaledWidth = Math.max(contentWidth, 1) * zoom
+
+  function handleRulerWheel(e: WheelEvent<HTMLDivElement>) {
+    const el = scrollContainerRef.current
+    if (!el || el.scrollWidth <= el.clientWidth) return
+
+    e.preventDefault()
+    e.stopPropagation()
+
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientWidth : 1
+    const primaryDelta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
+    el.scrollLeft = Math.max(
+      0,
+      Math.min(el.scrollWidth - el.clientWidth, el.scrollLeft + primaryDelta * unit),
+    )
+  }
 
   // Always-current ref for data so the RAF loop never has a stale closure
   const dataRef = useRef(data)
@@ -447,7 +463,9 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
       target.closest('[data-add-popover]') ||
       target.closest('[data-media-selector]') ||
       target.closest('[data-audio-popover]') ||
-      target.closest('[data-time-toolbar]')
+      target.closest('[data-time-toolbar]') ||
+      target.closest('[data-radix-popper-content-wrapper]') ||
+      target.closest('[data-radix-context-menu-content]')
     ) return
     setSelectedId(null)
   }
@@ -556,6 +574,7 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
                   playheadFrame={playheadFrame}
                   showLabel={showSeekLabel || isPlaying}
                   onSeek={handleSeek}
+                  onWheel={handleRulerWheel}
                 />
               </div>
 
