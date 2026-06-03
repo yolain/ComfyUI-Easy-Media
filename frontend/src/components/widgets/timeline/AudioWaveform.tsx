@@ -72,13 +72,14 @@ export function AudioWaveform({ content, startRatio = 0, endRatio = 1, className
   useEffect(() => {
     const url = getAudioUrl(content)
     if (!url) return
+    const audioUrl = url
 
     let cancelled = false
     const controller = new AbortController()
 
     async function load() {
       try {
-        const response = await fetch(url, { signal: controller.signal })
+        const response = await fetch(audioUrl, { signal: controller.signal })
         if (!response.ok || cancelled) return
 
         const arrayBuffer = await response.arrayBuffer()
