@@ -46,7 +46,7 @@ else:
 class EasyMediaExtension(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
-        return [
+        nodes = [
             TimelineEditor,
             TimelineInfoOutput,
             TimelineSegmentOutput,
@@ -54,6 +54,8 @@ class EasyMediaExtension(ComfyExtension):
             ImageIndexesToIntList,
             MakeImageList,
             MakeAudioList,
+            # Wan
+            BerniniModelPatch,
             # LTXV
             LTXVAddGuidesFromBatchIndexes,
             LTXVMakeRefVideo,
@@ -62,6 +64,10 @@ class EasyMediaExtension(ComfyExtension):
             EasyMergeVideos,
             EasyMergeVideosFromPaths,
         ]
-
+        try:
+            from comfy_extras.nodes_bernini import BerniniConditioning as CoreBerniniConditioning
+        except ImportError:
+            nodes.extend([BerniniConditioning])
+        return nodes
 async def comfy_entrypoint() -> EasyMediaExtension:
     return EasyMediaExtension()
