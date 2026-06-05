@@ -25,6 +25,7 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 ### v1.0.3
 
+- **【Bernini临时方案】** 添加了`Bernini conditioning`和 `Bernini Model Patch`节点, 在未更新到ComfyUI支持Bernini时，提供了一个暂时方案
 - **【时间线编辑器：UI模式】** 修复`节点高度`在`画布刷新`和`分辨率选项`切换时会被恢复成默认值的bug
 - **【时间线编辑器：UI模式】** 修复`整体编辑`提示词模式下，有些情况下不能编辑片段内容的bug
 - **【时间线编辑器：UI模式】** 修复节点和轨道高度自适应的问题，右键菜单新增`克隆片段`，以方便 wan2的`berinini`和 `LTX2.3 R2V` 使用

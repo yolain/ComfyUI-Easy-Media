@@ -33,15 +33,19 @@ class BerniniModelPatch(io.ComfyNode):
 
     @classmethod
     def execute(cls, model: io.Model.Type) -> io.NodeOutput:
-        from ..utils.bernini import bind_bernini_conds, bernini_diffusion_wrapper
-        m = model.clone()
-        bind_bernini_conds(m)
-        m.add_wrapper_with_key(
-            comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL,
-            "bernini_forward_wrapper",
-            bernini_diffusion_wrapper,
-        )
-        return io.NodeOutput(m)
+        try:
+            from comfy_extras.nodes_bernini import BerniniConditioning as CoreBerniniConditioning
+            return io.NodeOutput(model)
+        except ImportError:
+            from ..utils.bernini import bind_bernini_conds, bernini_forward_wrapper
+            m = model.clone()
+            bind_bernini_conds(m)
+            m.add_wrapper_with_key(
+                comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL,
+                "bernini_forward_wrapper",
+                bernini_forward_wrapper,
+            )
+            return io.NodeOutput(m)
 
 # code based on https://github.com/Comfy-Org/ComfyUI/pull/14216
 class BerniniConditioning(io.ComfyNode):

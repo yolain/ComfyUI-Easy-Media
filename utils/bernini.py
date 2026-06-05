@@ -147,7 +147,7 @@ def bind_bernini_conds(model):
     import comfy.conds
 
     base_model = model.model
-    if getattr(base_model, "_easy_media_bernini_conds", False):
+    if getattr(base_model, "_bernini_conds", False):
         return
 
     orig_extra_conds = base_model.extra_conds
@@ -175,9 +175,9 @@ def bind_bernini_conds(model):
 
     base_model.extra_conds = types.MethodType(extra_conds, base_model)
     base_model.resize_cond_for_context_window = types.MethodType(resize_cond_for_context_window, base_model)
-    base_model._easy_media_bernini_conds = True
+    base_model._bernini_conds = True
 
-def bernini_diffusion_wrapper(
+def bernini_forward_wrapper(
     executor,
     x,
     timestep,
