@@ -583,7 +583,7 @@ export function MediaSelector({
 
   async function downloadViaBackend() {
     try {
-      const res = await fetch('/easy-media/check-url', {
+      const res = await fetch('/easy-media/download-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: urlInput }),

@@ -209,31 +209,39 @@ async def handle_easy_upload(request: web.Request) -> web.Response:
     )
 
 
-# Content-Type → file extension map used by check-url
-_CT_EXT: dict[str, str] = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
-    "image/bmp": ".bmp",
-    "image/tiff": ".tiff",
-    "audio/mpeg": ".mp3",
-    "audio/wav": ".wav",
-    "audio/ogg": ".ogg",
-    "audio/flac": ".flac",
-    "audio/mp4": ".m4a",
-    "video/mp4": ".mp4",
-    "video/webm": ".webm",
-}
+def _extract_filename_from_content_disposition(header: str | None) -> str | None:
+    """Extract filename from Content-Disposition header."""
+    if not header:
+        return None
+    import re
+    match = re.search(r'filename\*=(?:utf-8\'\')?([^;\s]+)', header, re.IGNORECASE)
+    if match:
+        return match.group(1).strip('"')
+    match = re.search(r'filename=([^;\s]+)', header, re.IGNORECASE)
+    if match:
+        return match.group(1).strip('"')
+    return None
+
+
+def _is_json_error(content: bytes) -> bool:
+    """Check if content looks like a JSON error response (not a file)."""
+    if len(content) < 2 or content[0] != 123:  # doesn't start with '{'
+        return False
+    try:
+        obj = json.loads(content.decode('utf-8', errors='ignore'))
+        return isinstance(obj, dict) and any(
+            k in obj for k in ('detail', 'error', 'message', 'code')
+        )
+    except Exception:
+        return False
 
 
 @PromptServer.instance.routes.post("/easy-media/download-url")
 async def handle_download_url(request: web.Request) -> web.Response:
     """
-    Check whether a URL can be used directly in the browser (CORS-safe) or
-    must be downloaded and stored in the ComfyUI input directory first.
+    Download a URL and store it in the ComfyUI input directory.
 
-    Response: { source_type: "url", url } | { source_type: "input", file_name }
+    Response: { source_type: "input", file_name } | { error: "..." }
     """
     try:
         data = await request.json()
@@ -251,19 +259,57 @@ async def handle_download_url(request: web.Request) -> web.Response:
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url) as resp:
 
-                # No CORS header – download and store locally
                 content = await resp.read()
-                ct = resp.headers.get("Content-Type", "").split(";")[0].strip()
 
-                # Derive a safe filename from the URL path
-                url_path = url.split("?")[0].rstrip("/")
-                candidate = Path(url_path).name
-                if not candidate or not Path(candidate).suffix:
-                    ext = _CT_EXT.get(ct, ".bin")
-                    candidate = f"download_{uuid.uuid4().hex[:8]}{ext}"
+                # Detect JSON error responses (e.g., {"detail": "Not found"})
+                if _is_json_error(content):
+                    try:
+                        err_obj = json.loads(content.decode('utf-8', errors='ignore'))
+                        err_msg = err_obj.get('detail') or err_obj.get('error') or err_obj.get('message') or 'Download failed'
+                    except Exception:
+                        err_msg = 'Download failed (not a file)'
+                    return web.Response(
+                        status=502,
+                        content_type="application/json",
+                        text=json.dumps({"error": err_msg}),
+                    )
+
+                # Derive filename from Content-Disposition or URL path
+                ct = resp.headers.get("Content-Type", "").split(";")[0].strip()
+                cd = resp.headers.get("Content-Disposition")
+                filename = _extract_filename_from_content_disposition(cd)
+                if not filename:
+                    url_path = url.split("?")[0].rstrip("/")
+                    filename = Path(url_path).name
+
+                # Determine extension: use URL extension, or map Content-Type to extension
+                ext = Path(filename).suffix.lower()
+                if not ext:
+                    ext = {
+                        "image/jpeg": ".jpg",
+                        "image/png": ".png",
+                        "image/webp": ".webp",
+                        "image/gif": ".gif",
+                        "video/mp4": ".mp4",
+                        "video/webm": ".webm",
+                        "audio/mpeg": ".mp3",
+                        "audio/wav": ".wav",
+                    }.get(ct, ".bin")
+                    filename = f"download_{uuid.uuid4().hex[:8]}{ext}"
+                elif ext == ".bin":
+                    # Override .bin extension with Content-Type mapping if available
+                    mapped_ext = {
+                        "image/jpeg": ".jpg",
+                        "image/png": ".png",
+                        "image/webp": ".webp",
+                        "image/gif": ".gif",
+                        "video/mp4": ".mp4",
+                        "video/webm": ".webm",
+                    }.get(ct)
+                    if mapped_ext:
+                        filename = Path(filename).stem + mapped_ext
 
                 input_dir = Path(folder_paths.get_input_directory())
-                filename = candidate
                 target = input_dir / filename
                 if target.exists():
                     stem = Path(filename).stem
