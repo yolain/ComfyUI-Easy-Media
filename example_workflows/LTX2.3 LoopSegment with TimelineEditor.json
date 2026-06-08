@@ -1,8 +1,8 @@
 {
   "id": "e6149782-4769-4b23-8caf-dc7b15adb39f",
   "revision": 0,
-  "last_node_id": 168,
-  "last_link_id": 456,
+  "last_node_id": 195,
+  "last_link_id": 542,
   "nodes": [
     {
       "id": 1,
@@ -137,7 +137,6 @@
             67,
             69,
             71,
-            72,
             424
           ]
         }
@@ -206,7 +205,7 @@
       "mode": 0,
       "inputs": [
         {
-          "label": "vae_name",
+          "label": "VAE名称",
           "name": "vae_name",
           "type": "COMBO",
           "widget": {
@@ -215,7 +214,7 @@
           "link": null
         },
         {
-          "label": "device",
+          "label": "设备",
           "name": "device",
           "type": "COMBO",
           "widget": {
@@ -224,7 +223,7 @@
           "link": null
         },
         {
-          "label": "weight_dtype",
+          "label": "权重数据类型",
           "name": "weight_dtype",
           "type": "COMBO",
           "widget": {
@@ -268,7 +267,7 @@
         100
       ],
       "flags": {},
-      "order": 29,
+      "order": 31,
       "mode": 0,
       "inputs": [
         {
@@ -322,58 +321,6 @@
       ]
     },
     {
-      "id": 57,
-      "type": "easy ifElse",
-      "pos": [
-        4323.911039101069,
-        4313.975850456122
-      ],
-      "size": [
-        270,
-        78
-      ],
-      "flags": {},
-      "order": 81,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "on_true",
-          "type": "*",
-          "link": 93
-        },
-        {
-          "name": "on_false",
-          "type": "*",
-          "link": 94
-        },
-        {
-          "name": "boolean",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "boolean"
-          },
-          "link": 95
-        }
-      ],
-      "outputs": [
-        {
-          "name": "*",
-          "type": "*",
-          "links": [
-            104
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy ifElse"
-      },
-      "widgets_values": [
-        false
-      ]
-    },
-    {
       "id": 76,
       "type": "easy ifElse",
       "pos": [
@@ -385,20 +332,23 @@
         78
       ],
       "flags": {},
-      "order": 52,
+      "order": 55,
       "mode": 0,
       "inputs": [
         {
+          "label": "真时",
           "name": "on_true",
           "type": "*",
           "link": 137
         },
         {
+          "label": "假时",
           "name": "on_false",
           "type": "*",
           "link": 154
         },
         {
+          "label": "布尔",
           "name": "boolean",
           "type": "BOOLEAN",
           "widget": {
@@ -426,719 +376,6 @@
       ]
     },
     {
-      "id": 75,
-      "type": "PrimitiveString",
-      "pos": [
-        3072,
-        3480
-      ],
-      "size": [
-        210,
-        58
-      ],
-      "flags": {},
-      "order": 5,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "STRING",
-          "type": "STRING",
-          "links": [
-            137
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.21.1",
-        "Node name for S&R": "PrimitiveString"
-      },
-      "widgets_values": [
-        "0,-1"
-      ]
-    },
-    {
-      "id": 115,
-      "type": "easy isNone",
-      "pos": [
-        3864,
-        3324
-      ],
-      "size": [
-        140,
-        26
-      ],
-      "flags": {},
-      "order": 48,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "any",
-          "type": "*",
-          "link": 237
-        }
-      ],
-      "outputs": [
-        {
-          "name": "boolean",
-          "type": "BOOLEAN",
-          "links": [
-            241
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy isNone"
-      },
-      "widgets_values": []
-    },
-    {
-      "id": 114,
-      "type": "SimpleMath+",
-      "pos": [
-        3852,
-        3144
-      ],
-      "size": [
-        210,
-        98
-      ],
-      "flags": {},
-      "order": 47,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "a",
-          "shape": 7,
-          "type": "*",
-          "link": 235
-        },
-        {
-          "name": "b",
-          "shape": 7,
-          "type": "*",
-          "link": 236
-        },
-        {
-          "name": "c",
-          "shape": 7,
-          "type": "*",
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "INT",
-          "type": "INT",
-          "links": [
-            238
-          ]
-        },
-        {
-          "name": "FLOAT",
-          "type": "FLOAT",
-          "links": null
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui_essentials",
-        "ver": "9d9f4bedfc9f0321c19faf71855e228c93bd0dc9",
-        "Node name for S&R": "SimpleMath+"
-      },
-      "widgets_values": [
-        "b-b+a"
-      ]
-    },
-    {
-      "id": 118,
-      "type": "easy promptConcat",
-      "pos": [
-        4032,
-        3288
-      ],
-      "size": [
-        210,
-        78
-      ],
-      "flags": {},
-      "order": 56,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "prompt1",
-          "shape": 7,
-          "type": "STRING",
-          "link": 239
-        },
-        {
-          "name": "prompt2",
-          "shape": 7,
-          "type": "STRING",
-          "link": 240
-        }
-      ],
-      "outputs": [
-        {
-          "name": "prompt",
-          "type": "STRING",
-          "links": [
-            242
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy promptConcat"
-      },
-      "widgets_values": [
-        ","
-      ],
-      "color": "#008181",
-      "bgcolor": "rgba(24,24,27,.9)"
-    },
-    {
-      "id": 116,
-      "type": "easy showAnything",
-      "pos": [
-        4080,
-        3144
-      ],
-      "size": [
-        210,
-        88
-      ],
-      "flags": {},
-      "order": 53,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "anything",
-          "shape": 7,
-          "type": "*",
-          "link": 238
-        }
-      ],
-      "outputs": [
-        {
-          "name": "output",
-          "type": "*",
-          "links": [
-            240,
-            243
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy showAnything"
-      },
-      "widgets_values": [
-        "0"
-      ]
-    },
-    {
-      "id": 119,
-      "type": "easy ifElse",
-      "pos": [
-        4236,
-        3144
-      ],
-      "size": [
-        210,
-        78
-      ],
-      "flags": {},
-      "order": 59,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "on_true",
-          "type": "*",
-          "link": 243
-        },
-        {
-          "name": "on_false",
-          "type": "*",
-          "link": 242
-        },
-        {
-          "name": "boolean",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "boolean"
-          },
-          "link": 241
-        }
-      ],
-      "outputs": [
-        {
-          "name": "*",
-          "type": "*",
-          "links": [
-            244
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy ifElse"
-      },
-      "widgets_values": [
-        false
-      ]
-    },
-    {
-      "id": 113,
-      "type": "easy forLoopStart",
-      "pos": [
-        3624,
-        3156
-      ],
-      "size": [
-        210,
-        138
-      ],
-      "flags": {},
-      "order": 41,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "initial_value1",
-          "shape": 7,
-          "type": "*",
-          "link": 232
-        },
-        {
-          "name": "total",
-          "type": "INT",
-          "widget": {
-            "name": "total"
-          },
-          "link": 248
-        },
-        {
-          "name": "initial_value2",
-          "type": "*",
-          "link": null
-        },
-        {
-          "name": "initial_value3",
-          "type": "*",
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "flow",
-          "shape": 5,
-          "type": "FLOW_CONTROL",
-          "links": [
-            245
-          ]
-        },
-        {
-          "name": "index",
-          "type": "INT",
-          "links": [
-            235
-          ]
-        },
-        {
-          "name": "value1",
-          "type": "*",
-          "links": [
-            236,
-            247
-          ]
-        },
-        {
-          "name": "value2",
-          "type": "*",
-          "links": [
-            237,
-            239
-          ]
-        },
-        {
-          "name": "value3",
-          "type": "*",
-          "links": null
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy forLoopStart"
-      },
-      "widgets_values": [
-        1
-      ],
-      "color": "#1f1f48",
-      "bgcolor": "rgba(24,24,27,.9)"
-    },
-    {
-      "id": 117,
-      "type": "easy forLoopEnd",
-      "pos": [
-        4260,
-        3276
-      ],
-      "size": [
-        164.203125,
-        86
-      ],
-      "flags": {},
-      "order": 61,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "flow",
-          "shape": 5,
-          "type": "FLOW_CONTROL",
-          "link": 245
-        },
-        {
-          "name": "initial_value1",
-          "shape": 7,
-          "type": "*",
-          "link": 247
-        },
-        {
-          "name": "initial_value2",
-          "type": "*",
-          "link": 244
-        },
-        {
-          "name": "initial_value3",
-          "type": "*",
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "value1",
-          "type": "*",
-          "links": []
-        },
-        {
-          "name": "value2",
-          "type": "*",
-          "links": [
-            249
-          ]
-        },
-        {
-          "name": "value3",
-          "type": "*",
-          "links": null
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy forLoopEnd"
-      },
-      "widgets_values": [],
-      "color": "#1f1f48",
-      "bgcolor": "rgba(24,24,27,.9)"
-    },
-    {
-      "id": 37,
-      "type": "PrimitiveBoolean",
-      "pos": [
-        759.8801815910122,
-        3879.551836015428
-      ],
-      "size": [
-        228,
-        58
-      ],
-      "flags": {},
-      "order": 6,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "BOOLEAN",
-          "type": "BOOLEAN",
-          "links": [
-            61,
-            106
-          ]
-        }
-      ],
-      "title": "Using Editor Audio",
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.21.1",
-        "Node name for S&R": "PrimitiveBoolean"
-      },
-      "widgets_values": [
-        true
-      ]
-    },
-    {
-      "id": 62,
-      "type": "easy ifElse",
-      "pos": [
-        4323.911039101069,
-        4457.975850456122
-      ],
-      "size": [
-        270,
-        78
-      ],
-      "flags": {},
-      "order": 83,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "on_true",
-          "type": "*",
-          "link": 158
-        },
-        {
-          "name": "on_false",
-          "type": "*",
-          "link": 104
-        },
-        {
-          "name": "boolean",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "boolean"
-          },
-          "link": 106
-        }
-      ],
-      "outputs": [
-        {
-          "name": "*",
-          "type": "*",
-          "links": [
-            127
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy ifElse"
-      },
-      "widgets_values": [
-        false
-      ]
-    },
-    {
-      "id": 5,
-      "type": "LTXVImgToVideoInplace",
-      "pos": [
-        2964,
-        4392
-      ],
-      "size": [
-        210,
-        122
-      ],
-      "flags": {},
-      "order": 50,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "vae",
-          "type": "VAE",
-          "link": 2
-        },
-        {
-          "name": "image",
-          "type": "IMAGE",
-          "link": 285
-        },
-        {
-          "name": "latent",
-          "type": "LATENT",
-          "link": 4
-        },
-        {
-          "name": "bypass",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "bypass"
-          },
-          "link": 153
-        }
-      ],
-      "outputs": [
-        {
-          "name": "latent",
-          "type": "LATENT",
-          "links": [
-            45,
-            82
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.21.1",
-        "Node name for S&R": "LTXVImgToVideoInplace"
-      },
-      "widgets_values": [
-        0.7,
-        false
-      ]
-    },
-    {
-      "id": 11,
-      "type": "easy indexAnything",
-      "pos": [
-        2952,
-        4296
-      ],
-      "size": [
-        210,
-        58
-      ],
-      "flags": {},
-      "order": 35,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "any",
-          "type": "*",
-          "link": 159
-        }
-      ],
-      "outputs": [
-        {
-          "name": "out",
-          "type": "*",
-          "links": [
-            285,
-            286
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy indexAnything"
-      },
-      "widgets_values": [
-        0
-      ]
-    },
-    {
-      "id": 78,
-      "type": "easy lengthAnything",
-      "pos": [
-        3108,
-        3264
-      ],
-      "size": [
-        140,
-        26
-      ],
-      "flags": {},
-      "order": 36,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "any",
-          "type": "*",
-          "link": 160
-        }
-      ],
-      "outputs": [
-        {
-          "name": "length",
-          "type": "INT",
-          "links": [
-            142,
-            232,
-            248
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy lengthAnything"
-      },
-      "widgets_values": []
-    },
-    {
-      "id": 94,
-      "type": "easy anythingIndexSwitch",
-      "pos": [
-        3336,
-        3420
-      ],
-      "size": [
-        210,
-        118
-      ],
-      "flags": {},
-      "order": 62,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "value0",
-          "shape": 7,
-          "type": "*",
-          "link": 186
-        },
-        {
-          "name": "value1",
-          "shape": 7,
-          "type": "*",
-          "link": 187
-        },
-        {
-          "name": "index",
-          "type": "INT",
-          "widget": {
-            "name": "index"
-          },
-          "link": 185
-        },
-        {
-          "name": "value2",
-          "type": "*",
-          "link": 249
-        },
-        {
-          "name": "value3",
-          "type": "*",
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "value",
-          "type": "*",
-          "links": [
-            184,
-            377
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy anythingIndexSwitch"
-      },
-      "widgets_values": [
-        0
-      ]
-    },
-    {
       "id": 39,
       "type": "LTXVAudioVAEDecode",
       "pos": [
@@ -1150,7 +387,7 @@
         48.629326502396
       ],
       "flags": {},
-      "order": 69,
+      "order": 67,
       "mode": 0,
       "inputs": [
         {
@@ -1185,71 +422,930 @@
       "widgets_values": []
     },
     {
-      "id": 136,
-      "type": "easy compare",
+      "id": 17,
+      "type": "LTXVCropGuides",
       "pos": [
-        502.91558777896216,
-        4437.707198070092
+        4020,
+        4032
       ],
       "size": [
-        210,
-        78
+        180,
+        70
       ],
       "flags": {},
-      "order": 7,
+      "order": 66,
       "mode": 0,
       "inputs": [
         {
-          "name": "a",
-          "shape": 7,
-          "type": "*",
-          "link": null
+          "label": "positive",
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 412
         },
         {
-          "name": "b",
-          "shape": 7,
-          "type": "*",
+          "label": "negative",
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 410
+        },
+        {
+          "label": "latent",
+          "name": "latent",
+          "type": "LATENT",
+          "link": 27
+        }
+      ],
+      "outputs": [
+        {
+          "label": "positive",
+          "name": "positive",
+          "type": "CONDITIONING",
+          "links": [
+            378
+          ]
+        },
+        {
+          "label": "negative",
+          "name": "negative",
+          "type": "CONDITIONING",
+          "links": [
+            379
+          ]
+        },
+        {
+          "label": "latent",
+          "name": "latent",
+          "type": "LATENT",
+          "links": [
+            317,
+            318
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.19.3",
+        "Node name for S&R": "LTXVCropGuides",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 14,
+      "type": "SamplerCustomAdvanced",
+      "pos": [
+        3709.321751498559,
+        5062.557243082552
+      ],
+      "size": [
+        274.4312194926324,
+        264.6573932821756
+      ],
+      "flags": {},
+      "order": 74,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "噪波生成",
+          "name": "noise",
+          "type": "NOISE",
+          "link": 16
+        },
+        {
+          "label": "引导",
+          "name": "guider",
+          "type": "GUIDER",
+          "link": 17
+        },
+        {
+          "label": "采样器",
+          "name": "sampler",
+          "type": "SAMPLER",
+          "link": 18
+        },
+        {
+          "label": "Sigmas",
+          "name": "sigmas",
+          "type": "SIGMAS",
+          "link": 402
+        },
+        {
+          "label": "Latent",
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 20
+        }
+      ],
+      "outputs": [
+        {
+          "label": "输出",
+          "name": "output",
+          "type": "LATENT",
+          "links": [
+            389
+          ]
+        },
+        {
+          "label": "降噪输出",
+          "name": "denoised_output",
+          "type": "LATENT",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.60",
+        "Node name for S&R": "SamplerCustomAdvanced",
+        "hasSecondTab": false,
+        "widget_ue_connectable": {},
+        "secondTabText": "Send Back",
+        "enableTabs": false,
+        "secondTabOffset": 80,
+        "tabWidth": 65,
+        "secondTabWidth": 65,
+        "tabXOffset": 10
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 13,
+      "type": "KSamplerSelect",
+      "pos": [
+        3181.321751498559,
+        5266.557243082552
+      ],
+      "size": [
+        210,
+        60
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "sampler_name",
+          "name": "sampler_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "sampler_name"
+          },
           "link": null
         }
       ],
       "outputs": [
         {
-          "name": "boolean",
-          "type": "BOOLEAN",
-          "links": []
+          "label": "采样器",
+          "name": "SAMPLER",
+          "type": "SAMPLER",
+          "links": [
+            18
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.56",
+        "Node name for S&R": "KSamplerSelect",
+        "hasSecondTab": false,
+        "widget_ue_connectable": {},
+        "secondTabText": "Send Back",
+        "enableTabs": false,
+        "secondTabOffset": 80,
+        "tabWidth": 65,
+        "secondTabWidth": 65,
+        "tabXOffset": 10
+      },
+      "widgets_values": [
+        "euler_cfg_pp"
+      ]
+    },
+    {
+      "id": 12,
+      "type": "LTXVConcatAVLatent",
+      "pos": [
+        3469.321751498559,
+        5242.557243082552
+      ],
+      "size": [
+        181.308203125,
+        46
+      ],
+      "flags": {},
+      "order": 73,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "video_latent",
+          "type": "LATENT",
+          "link": 407
+        },
+        {
+          "name": "audio_latent",
+          "type": "LATENT",
+          "link": 251
+        }
+      ],
+      "outputs": [
+        {
+          "name": "latent",
+          "type": "LATENT",
+          "links": [
+            20
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.21.1",
+        "Node name for S&R": "LTXVConcatAVLatent"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 19,
+      "type": "LTXVSeparateAVLatent",
+      "pos": [
+        3769.321751498559,
+        4918.557243082552
+      ],
+      "size": [
+        193.2916015625,
+        49.757194980424174
+      ],
+      "flags": {},
+      "order": 75,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "av_latent",
+          "name": "av_latent",
+          "type": "LATENT",
+          "link": 389
+        }
+      ],
+      "outputs": [
+        {
+          "label": "video_latent",
+          "name": "video_latent",
+          "type": "LATENT",
+          "links": [
+            30
+          ]
+        },
+        {
+          "label": "audio_latent",
+          "name": "audio_latent",
+          "type": "LATENT",
+          "links": [
+            354
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.16.0",
+        "Node name for S&R": "LTXVSeparateAVLatent",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 40,
+      "type": "LTXVAudioVAEDecode",
+      "pos": [
+        4021.321751498557,
+        5218.557243082552
+      ],
+      "size": [
+        202.991796875,
+        48.629326502396
+      ],
+      "flags": {},
+      "order": 77,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "samples",
+          "name": "samples",
+          "type": "LATENT",
+          "link": 354
+        },
+        {
+          "label": "audio_vae",
+          "name": "audio_vae",
+          "type": "VAE",
+          "link": 69
+        }
+      ],
+      "outputs": [
+        {
+          "label": "Audio",
+          "name": "Audio",
+          "type": "AUDIO",
+          "links": [
+            94
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.16.0",
+        "Node name for S&R": "LTXVAudioVAEDecode",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 18,
+      "type": "LTXVCropGuides",
+      "pos": [
+        4009.321751498558,
+        4822.557243082552
+      ],
+      "size": [
+        180,
+        70
+      ],
+      "flags": {},
+      "order": 76,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "positive",
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 404
+        },
+        {
+          "label": "negative",
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 406
+        },
+        {
+          "label": "latent",
+          "name": "latent",
+          "type": "LATENT",
+          "link": 30
+        }
+      ],
+      "outputs": [
+        {
+          "label": "positive",
+          "name": "positive",
+          "type": "CONDITIONING"
+        },
+        {
+          "label": "negative",
+          "name": "negative",
+          "type": "CONDITIONING"
+        },
+        {
+          "label": "latent",
+          "name": "latent",
+          "type": "LATENT",
+          "links": [
+            364
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.19.3",
+        "Node name for S&R": "LTXVCropGuides",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 20,
+      "type": "CFGGuider",
+      "pos": [
+        3733.321751498559,
+        4714.557243082552
+      ],
+      "size": [
+        210,
+        100
+      ],
+      "flags": {},
+      "order": 72,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "模型",
+          "name": "model",
+          "type": "MODEL",
+          "link": 335
+        },
+        {
+          "label": "正面条件",
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 403
+        },
+        {
+          "label": "负面条件",
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 405
+        },
+        {
+          "label": "cfg",
+          "name": "cfg",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cfg"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "引导",
+          "name": "GUIDER",
+          "type": "GUIDER",
+          "links": [
+            17
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.64",
+        "Node name for S&R": "CFGGuider",
+        "hasSecondTab": false,
+        "widget_ue_connectable": {},
+        "secondTabText": "Send Back",
+        "enableTabs": false,
+        "secondTabOffset": 80,
+        "tabWidth": 65,
+        "secondTabWidth": 65,
+        "tabXOffset": 10
+      },
+      "widgets_values": [
+        1
+      ]
+    },
+    {
+      "id": 4,
+      "type": "LTXVSeparateAVLatent",
+      "pos": [
+        4020,
+        3900
+      ],
+      "size": [
+        193.2916015625,
+        49.757194980424174
+      ],
+      "flags": {},
+      "order": 65,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "av_latent",
+          "name": "av_latent",
+          "type": "LATENT",
+          "link": 315
+        }
+      ],
+      "outputs": [
+        {
+          "label": "video_latent",
+          "name": "video_latent",
+          "type": "LATENT",
+          "links": [
+            27
+          ]
+        },
+        {
+          "label": "audio_latent",
+          "name": "audio_latent",
+          "type": "LATENT",
+          "links": [
+            66,
+            251
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.16.0",
+        "Node name for S&R": "LTXVSeparateAVLatent",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 80,
+      "type": "easy int",
+      "pos": [
+        3072,
+        3144
+      ],
+      "size": [
+        210,
+        58
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "值",
+          "name": "value",
+          "type": "INT",
+          "widget": {
+            "name": "value"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "整数",
+          "name": "int",
+          "type": "INT",
+          "links": [
+            144
+          ]
         }
       ],
       "properties": {
         "cnr_id": "comfyui-easy-use",
         "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy compare"
+        "Node name for S&R": "easy int",
+        "sdppp_max": 100,
+        "sdppp_min": 0
       },
       "widgets_values": [
-        "a == b"
+        1
       ]
+    },
+    {
+      "id": 31,
+      "type": "RandomNoise",
+      "pos": [
+        3169.321751498559,
+        4726.557243082552
+      ],
+      "size": [
+        210,
+        82
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 25,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "noise_seed",
+          "type": "INT",
+          "widget": {
+            "name": "noise_seed"
+          },
+          "link": 50
+        }
+      ],
+      "outputs": [
+        {
+          "name": "NOISE",
+          "type": "NOISE",
+          "links": [
+            16
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.21.1",
+        "Node name for S&R": "RandomNoise"
+      },
+      "widgets_values": [
+        558591651224188,
+        "fixed"
+      ]
+    },
+    {
+      "id": 21,
+      "type": "LTXVLatentUpsampler",
+      "pos": [
+        2953.7033839734963,
+        5031.507238287865
+      ],
+      "size": [
+        187.8501953125,
+        66
+      ],
+      "flags": {},
+      "order": 68,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 317
+        },
+        {
+          "name": "upscale_model",
+          "type": "LATENT_UPSCALE_MODEL",
+          "link": 36
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 37
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            23
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.21.1",
+        "Node name for S&R": "LTXVLatentUpsampler"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 28,
+      "type": "LatentUpscaleModelLoader",
+      "pos": [
+        2952.3779378502236,
+        4851.401154462562
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "LATENT_UPSCALE_MODEL",
+          "type": "LATENT_UPSCALE_MODEL",
+          "links": [
+            36
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.21.1",
+        "Node name for S&R": "LatentUpscaleModelLoader"
+      },
+      "widgets_values": [
+        "ltx-2.3-spatial-upscaler-x2-1.0.safetensors"
+      ]
+    },
+    {
+      "id": 148,
+      "type": "LTXVAddGuidesFromBatchIndexes",
+      "pos": [
+        3444.9617428323727,
+        4836.099231366932
+      ],
+      "size": [
+        269.4234375,
+        186
+      ],
+      "flags": {},
+      "order": 71,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 378
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 379
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 374
+        },
+        {
+          "name": "latent",
+          "type": "LATENT",
+          "link": 380
+        },
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 376
+        },
+        {
+          "name": "image_indexes",
+          "type": "STRING",
+          "widget": {
+            "name": "image_indexes"
+          },
+          "link": 377
+        }
+      ],
+      "outputs": [
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "links": [
+            403,
+            404
+          ]
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "links": [
+            405,
+            406
+          ]
+        },
+        {
+          "name": "latent",
+          "type": "LATENT",
+          "links": [
+            407
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-media",
+        "ver": "0a61e3c1d5e0eab4f317a90e7340c484a8349e10",
+        "Node name for S&R": "LTXVAddGuidesFromBatchIndexes",
+        "aux_id": "yolain/ComfyUI-Easy-Media"
+      },
+      "widgets_values": [
+        0,
+        "",
+        1
+      ]
+    },
+    {
+      "id": 15,
+      "type": "LTXVImgToVideoInplace",
+      "pos": [
+        2948.0443989334417,
+        5185.244415960533
+      ],
+      "size": [
+        210,
+        122
+      ],
+      "flags": {},
+      "order": 70,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 21
+        },
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 286
+        },
+        {
+          "name": "latent",
+          "type": "LATENT",
+          "link": 23
+        },
+        {
+          "name": "bypass",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "bypass"
+          },
+          "link": 257
+        }
+      ],
+      "outputs": [
+        {
+          "name": "latent",
+          "type": "LATENT",
+          "links": [
+            380
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.21.1",
+        "Node name for S&R": "LTXVImgToVideoInplace"
+      },
+      "widgets_values": [
+        1,
+        false
+      ]
+    },
+    {
+      "id": 55,
+      "type": "ManualSigmas",
+      "pos": [
+        3183.5214376090976,
+        4968.326635674591
+      ],
+      "size": [
+        240.66901617208896,
+        58
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "SIGMAS",
+          "type": "SIGMAS",
+          "links": [
+            109
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.21.1",
+        "Node name for S&R": "ManualSigmas"
+      },
+      "widgets_values": [
+        "0.85, 0.7250, 0.4219, 0.0"
+      ]
+    },
+    {
+      "id": 67,
+      "type": "easy timelineSegmentCount",
+      "pos": [
+        2138.08924662248,
+        3410.7098948316734
+      ],
+      "size": [
+        202.6021484375,
+        26
+      ],
+      "flags": {},
+      "order": 27,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "timeline_info",
+          "type": "TIMELINE_INFO",
+          "link": 538
+        }
+      ],
+      "outputs": [
+        {
+          "name": "COUNT",
+          "type": "INT",
+          "links": [
+            448
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-media",
+        "ver": "b696c5485eedd910f343300fbf0dfac941eadca4",
+        "Node name for S&R": "easy timelineSegmentCount",
+        "aux_id": "yolain/ComfyUI-Easy-Media"
+      },
+      "widgets_values": []
     },
     {
       "id": 77,
       "type": "SimpleMath+",
       "pos": [
-        3072,
-        3348
+        3077.6434649926505,
+        3334.534019504341
       ],
       "size": [
         210,
         98
       ],
       "flags": {},
-      "order": 40,
+      "order": 44,
       "mode": 0,
       "inputs": [
         {
+          "label": "A",
           "name": "a",
           "shape": 7,
           "type": "*",
           "link": 152
         },
         {
+          "label": "B",
           "name": "b",
           "shape": 7,
           "type": "*",
@@ -1260,10 +1356,20 @@
           "shape": 7,
           "type": "*",
           "link": null
+        },
+        {
+          "label": "值",
+          "name": "value",
+          "type": "STRING",
+          "widget": {
+            "name": "value"
+          },
+          "link": null
         }
       ],
       "outputs": [
         {
+          "label": "整数",
           "name": "INT",
           "type": "INT",
           "links": [
@@ -1271,6 +1377,7 @@
           ]
         },
         {
+          "label": "浮点",
           "name": "FLOAT",
           "type": "FLOAT",
           "links": null
@@ -1286,18 +1393,640 @@
       ]
     },
     {
+      "id": 54,
+      "type": "SimpleMath+",
+      "pos": [
+        2449.0293035507157,
+        3505.6467592259537
+      ],
+      "size": [
+        210,
+        98
+      ],
+      "flags": {},
+      "order": 29,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "A",
+          "name": "a",
+          "shape": 7,
+          "type": "*",
+          "link": 92
+        },
+        {
+          "label": "B",
+          "name": "b",
+          "shape": 7,
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "c",
+          "shape": 7,
+          "type": "*",
+          "link": null
+        },
+        {
+          "label": "值",
+          "name": "value",
+          "type": "STRING",
+          "widget": {
+            "name": "value"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "整数",
+          "name": "INT",
+          "type": "INT",
+          "links": [
+            91,
+            426
+          ]
+        },
+        {
+          "label": "浮点",
+          "name": "FLOAT",
+          "type": "FLOAT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui_essentials",
+        "ver": "9d9f4bedfc9f0321c19faf71855e228c93bd0dc9",
+        "Node name for S&R": "SimpleMath+"
+      },
+      "widgets_values": [
+        "a"
+      ]
+    },
+    {
+      "id": 79,
+      "type": "easy compare",
+      "pos": [
+        3325.577803808821,
+        3153.7332319472666
+      ],
+      "size": [
+        210,
+        78
+      ],
+      "flags": {},
+      "order": 50,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "A",
+          "name": "a",
+          "shape": 7,
+          "type": "*",
+          "link": 143
+        },
+        {
+          "label": "B",
+          "name": "b",
+          "shape": 7,
+          "type": "*",
+          "link": 144
+        },
+        {
+          "label": "比较方式",
+          "name": "comparison",
+          "shape": 7,
+          "type": "COMBO",
+          "widget": {
+            "name": "comparison"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "布尔",
+          "name": "boolean",
+          "type": "BOOLEAN",
+          "links": [
+            145
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
+        "Node name for S&R": "easy compare"
+      },
+      "widgets_values": [
+        "a == b"
+      ]
+    },
+    {
+      "id": 155,
+      "type": "easy int",
+      "pos": [
+        3612.972509126753,
+        3155.2942232627056
+      ],
+      "size": [
+        210,
+        58
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "值",
+          "name": "value",
+          "type": "INT",
+          "widget": {
+            "name": "value"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "整数",
+          "name": "int",
+          "type": "INT",
+          "links": [
+            414
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
+        "Node name for S&R": "easy int",
+        "sdppp_max": 100,
+        "sdppp_min": 0
+      },
+      "widgets_values": [
+        2
+      ]
+    },
+    {
+      "id": 11,
+      "type": "easy indexAnything",
+      "pos": [
+        2945.7059559099166,
+        4242.901984567578
+      ],
+      "size": [
+        210,
+        58
+      ],
+      "flags": {},
+      "order": 37,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "任意",
+          "name": "any",
+          "type": "*",
+          "link": 159
+        },
+        {
+          "label": "索引",
+          "name": "index",
+          "type": "INT",
+          "widget": {
+            "name": "index"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "输出",
+          "name": "out",
+          "type": "*",
+          "links": [
+            285,
+            286
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
+        "Node name for S&R": "easy indexAnything"
+      },
+      "widgets_values": [
+        0
+      ]
+    },
+    {
+      "id": 33,
+      "type": "LTXVConditioning",
+      "pos": [
+        3225.7053303077555,
+        4428.263727942208
+      ],
+      "size": [
+        240.14237194388988,
+        80.14237194388988
+      ],
+      "flags": {},
+      "order": 60,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "positive",
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 333
+        },
+        {
+          "label": "negative",
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 57
+        },
+        {
+          "label": "frame_rate",
+          "name": "frame_rate",
+          "type": "FLOAT",
+          "widget": {
+            "name": "frame_rate"
+          },
+          "link": 58
+        }
+      ],
+      "outputs": [
+        {
+          "label": "positive",
+          "name": "positive",
+          "type": "CONDITIONING",
+          "links": [
+            42
+          ]
+        },
+        {
+          "label": "negative",
+          "name": "negative",
+          "type": "CONDITIONING",
+          "links": [
+            43
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.56",
+        "Node name for S&R": "LTXVConditioning",
+        "hasSecondTab": false,
+        "widget_ue_connectable": {
+          "frame_rate": true
+        },
+        "secondTabText": "Send Back",
+        "enableTabs": false,
+        "secondTabOffset": 80,
+        "tabWidth": 65,
+        "secondTabWidth": 65,
+        "tabXOffset": 10
+      },
+      "widgets_values": [
+        24
+      ]
+    },
+    {
+      "id": 24,
+      "type": "ConditioningZeroOut",
+      "pos": [
+        3222.800304158199,
+        4334.771955659996
+      ],
+      "size": [
+        240,
+        30
+      ],
+      "flags": {},
+      "order": 59,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "条件",
+          "name": "conditioning",
+          "type": "CONDITIONING",
+          "link": 332
+        }
+      ],
+      "outputs": [
+        {
+          "label": "条件",
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            57
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.19.3",
+        "Node name for S&R": "ConditioningZeroOut",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 35,
+      "type": "LoraLoaderModelOnly",
+      "pos": [
+        2239.1053596388397,
+        4367.84410492592
+      ],
+      "size": [
+        324.7807900746029,
+        82
+      ],
+      "flags": {},
+      "order": 33,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "模型",
+          "name": "model",
+          "type": "MODEL",
+          "link": 62
+        },
+        {
+          "label": "lora_name",
+          "name": "lora_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "lora_name"
+          },
+          "link": null
+        },
+        {
+          "label": "strength_model",
+          "name": "strength_model",
+          "type": "FLOAT",
+          "widget": {
+            "name": "strength_model"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "模型",
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            79,
+            470
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.75",
+        "Node name for S&R": "LoraLoaderModelOnly",
+        "hasSecondTab": false,
+        "models": [
+          {
+            "name": "ltx-2.3-22b-distilled-lora-384.safetensors",
+            "directory": "loras",
+            "url": "https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-22b-distilled-lora-384.safetensors"
+          }
+        ],
+        "widget_ue_connectable": {},
+        "secondTabText": "Send Back",
+        "enableTabs": false,
+        "secondTabOffset": 80,
+        "tabWidth": 65,
+        "secondTabWidth": 65,
+        "tabXOffset": 10
+      },
+      "widgets_values": [
+        "Singularity LTX-2.3  OmniCine Preview v0.1.safetensors",
+        0.7
+      ]
+    },
+    {
+      "id": 8,
+      "type": "CFGGuider",
+      "pos": [
+        3778.682533981897,
+        3879.414955885972
+      ],
+      "size": [
+        210,
+        100
+      ],
+      "flags": {},
+      "order": 62,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "模型",
+          "name": "model",
+          "type": "MODEL",
+          "link": 334
+        },
+        {
+          "label": "正面条件",
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 411
+        },
+        {
+          "label": "负面条件",
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 409
+        },
+        {
+          "label": "cfg",
+          "name": "cfg",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cfg"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "引导",
+          "name": "GUIDER",
+          "type": "GUIDER",
+          "links": [
+            52
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.64",
+        "Node name for S&R": "CFGGuider",
+        "hasSecondTab": false,
+        "widget_ue_connectable": {},
+        "secondTabText": "Send Back",
+        "enableTabs": false,
+        "secondTabOffset": 80,
+        "tabWidth": 65,
+        "secondTabWidth": 65,
+        "tabXOffset": 10
+      },
+      "widgets_values": [
+        1
+      ]
+    },
+    {
+      "id": 29,
+      "type": "PathchSageAttentionKJ",
+      "pos": [
+        3181.932697261678,
+        3785.378615895433
+      ],
+      "size": [
+        240,
+        82
+      ],
+      "flags": {},
+      "order": 53,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "模型",
+          "name": "model",
+          "type": "MODEL",
+          "link": 468
+        },
+        {
+          "label": "SAGE注意力",
+          "name": "sage_attention",
+          "type": "COMBO",
+          "widget": {
+            "name": "sage_attention"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            80
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "e56b3061ed49251a7b8a5450a2e18295548ea7a1",
+        "Node name for S&R": "PathchSageAttentionKJ"
+      },
+      "widgets_values": [
+        "auto",
+        false
+      ]
+    },
+    {
+      "id": 169,
+      "type": "LTXVMakeRefVideo",
+      "pos": [
+        4387.885176431345,
+        3177.850990091288
+      ],
+      "size": [
+        210,
+        58
+      ],
+      "flags": {},
+      "order": 51,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 476
+        },
+        {
+          "name": "frame_count",
+          "type": "INT",
+          "widget": {
+            "name": "frame_count"
+          },
+          "link": 475
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            478
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-media",
+        "ver": "837aba2e14f7642db2cf3980f51726412dd6f910",
+        "Node name for S&R": "LTXVMakeRefVideo"
+      },
+      "widgets_values": [
+        17
+      ]
+    },
+    {
+      "id": 171,
+      "type": "easy lengthAnything",
+      "pos": [
+        3913.677696302319,
+        3206.3919676567502
+      ],
+      "size": [
+        140,
+        26
+      ],
+      "flags": {},
+      "order": 39,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "任意",
+          "name": "any",
+          "type": "*",
+          "link": 473
+        }
+      ],
+      "outputs": [
+        {
+          "name": "length",
+          "type": "INT",
+          "links": [
+            474
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "625efbfa2fc20c31797dfffcbb41a26b6d91ab7b",
+        "Node name for S&R": "easy lengthAnything"
+      },
+      "widgets_values": []
+    },
+    {
       "id": 50,
       "type": "VAEDecodeTiled",
       "pos": [
-        3984,
-        4212
+        3999.7806357021504,
+        4205.466550565883
       ],
       "size": [
         210,
         152.94616080936885
       ],
       "flags": {},
-      "order": 71,
+      "order": 69,
       "mode": 0,
       "inputs": [
         {
@@ -1373,390 +2102,6 @@
       ]
     },
     {
-      "id": 17,
-      "type": "LTXVCropGuides",
-      "pos": [
-        4020,
-        4032
-      ],
-      "size": [
-        180,
-        70
-      ],
-      "flags": {},
-      "order": 68,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "positive",
-          "name": "positive",
-          "type": "CONDITIONING",
-          "link": 412
-        },
-        {
-          "label": "negative",
-          "name": "negative",
-          "type": "CONDITIONING",
-          "link": 410
-        },
-        {
-          "label": "latent",
-          "name": "latent",
-          "type": "LATENT",
-          "link": 27
-        }
-      ],
-      "outputs": [
-        {
-          "label": "positive",
-          "name": "positive",
-          "type": "CONDITIONING",
-          "links": [
-            378
-          ]
-        },
-        {
-          "label": "negative",
-          "name": "negative",
-          "type": "CONDITIONING",
-          "links": [
-            379
-          ]
-        },
-        {
-          "label": "latent",
-          "name": "latent",
-          "type": "LATENT",
-          "links": [
-            317,
-            318
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.19.3",
-        "Node name for S&R": "LTXVCropGuides",
-        "widget_ue_connectable": {}
-      },
-      "widgets_values": []
-    },
-    {
-      "id": 14,
-      "type": "SamplerCustomAdvanced",
-      "pos": [
-        3709.321751498559,
-        5062.557243082552
-      ],
-      "size": [
-        274.4312194926324,
-        265.65126523331867
-      ],
-      "flags": {},
-      "order": 76,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "噪波生成",
-          "name": "noise",
-          "type": "NOISE",
-          "link": 16
-        },
-        {
-          "label": "引导",
-          "name": "guider",
-          "type": "GUIDER",
-          "link": 17
-        },
-        {
-          "label": "采样器",
-          "name": "sampler",
-          "type": "SAMPLER",
-          "link": 18
-        },
-        {
-          "label": "Sigmas",
-          "name": "sigmas",
-          "type": "SIGMAS",
-          "link": 402
-        },
-        {
-          "label": "Latent",
-          "name": "latent_image",
-          "type": "LATENT",
-          "link": 20
-        }
-      ],
-      "outputs": [
-        {
-          "label": "输出",
-          "name": "output",
-          "type": "LATENT",
-          "links": [
-            389
-          ]
-        },
-        {
-          "label": "降噪输出",
-          "name": "denoised_output",
-          "type": "LATENT",
-          "links": []
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.3.60",
-        "Node name for S&R": "SamplerCustomAdvanced",
-        "hasSecondTab": false,
-        "widget_ue_connectable": {},
-        "secondTabText": "Send Back",
-        "enableTabs": false,
-        "secondTabOffset": 80,
-        "tabWidth": 65,
-        "secondTabWidth": 65,
-        "tabXOffset": 10
-      },
-      "widgets_values": []
-    },
-    {
-      "id": 15,
-      "type": "LTXVImgToVideoInplace",
-      "pos": [
-        2933.7840304036285,
-        5169.069792931744
-      ],
-      "size": [
-        210,
-        122
-      ],
-      "flags": {},
-      "order": 72,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "vae",
-          "type": "VAE",
-          "link": 21
-        },
-        {
-          "name": "image",
-          "type": "IMAGE",
-          "link": 286
-        },
-        {
-          "name": "latent",
-          "type": "LATENT",
-          "link": 23
-        },
-        {
-          "name": "bypass",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "bypass"
-          },
-          "link": 257
-        }
-      ],
-      "outputs": [
-        {
-          "name": "latent",
-          "type": "LATENT",
-          "links": [
-            380
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.21.1",
-        "Node name for S&R": "LTXVImgToVideoInplace"
-      },
-      "widgets_values": [
-        1,
-        false
-      ]
-    },
-    {
-      "id": 13,
-      "type": "KSamplerSelect",
-      "pos": [
-        3181.321751498559,
-        5266.557243082552
-      ],
-      "size": [
-        210,
-        60
-      ],
-      "flags": {},
-      "order": 8,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "sampler_name",
-          "name": "sampler_name",
-          "type": "COMBO",
-          "widget": {
-            "name": "sampler_name"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "label": "采样器",
-          "name": "SAMPLER",
-          "type": "SAMPLER",
-          "links": [
-            18
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.3.56",
-        "Node name for S&R": "KSamplerSelect",
-        "hasSecondTab": false,
-        "widget_ue_connectable": {},
-        "secondTabText": "Send Back",
-        "enableTabs": false,
-        "secondTabOffset": 80,
-        "tabWidth": 65,
-        "secondTabWidth": 65,
-        "tabXOffset": 10
-      },
-      "widgets_values": [
-        "euler_cfg_pp"
-      ]
-    },
-    {
-      "id": 63,
-      "type": "Sigmas Rescale",
-      "pos": [
-        3181.321751498559,
-        5086.557243082552
-      ],
-      "size": [
-        210,
-        82
-      ],
-      "flags": {},
-      "order": 20,
-      "mode": 4,
-      "inputs": [
-        {
-          "name": "sigmas",
-          "type": "SIGMAS",
-          "link": 109
-        }
-      ],
-      "outputs": [
-        {
-          "name": "sigmas_rescaled",
-          "type": "SIGMAS",
-          "links": [
-            402
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "RES4LYF",
-        "ver": "0dc91c00c4c3fb38e7874fcd7a2a327765e8882c",
-        "Node name for S&R": "Sigmas Rescale"
-      },
-      "widgets_values": [
-        0.5,
-        0
-      ]
-    },
-    {
-      "id": 12,
-      "type": "LTXVConcatAVLatent",
-      "pos": [
-        3469.321751498559,
-        5242.557243082552
-      ],
-      "size": [
-        181.308203125,
-        46
-      ],
-      "flags": {},
-      "order": 75,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "video_latent",
-          "type": "LATENT",
-          "link": 407
-        },
-        {
-          "name": "audio_latent",
-          "type": "LATENT",
-          "link": 251
-        }
-      ],
-      "outputs": [
-        {
-          "name": "latent",
-          "type": "LATENT",
-          "links": [
-            20
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.21.1",
-        "Node name for S&R": "LTXVConcatAVLatent"
-      },
-      "widgets_values": []
-    },
-    {
-      "id": 40,
-      "type": "LTXVAudioVAEDecode",
-      "pos": [
-        4021.321751498557,
-        5218.557243082552
-      ],
-      "size": [
-        202.991796875,
-        48.629326502396
-      ],
-      "flags": {},
-      "order": 79,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "samples",
-          "name": "samples",
-          "type": "LATENT",
-          "link": 354
-        },
-        {
-          "label": "audio_vae",
-          "name": "audio_vae",
-          "type": "VAE",
-          "link": 69
-        }
-      ],
-      "outputs": [
-        {
-          "label": "Audio",
-          "name": "Audio",
-          "type": "AUDIO",
-          "links": [
-            94
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.16.0",
-        "Node name for S&R": "LTXVAudioVAEDecode",
-        "widget_ue_connectable": {}
-      },
-      "widgets_values": []
-    },
-    {
       "id": 127,
       "type": "VAEDecodeTiled",
       "pos": [
@@ -1768,7 +2113,7 @@
         152.94616080936885
       ],
       "flags": {},
-      "order": 80,
+      "order": 78,
       "mode": 0,
       "inputs": [
         {
@@ -1826,7 +2171,7 @@
           "name": "IMAGE",
           "type": "IMAGE",
           "links": [
-            360
+            484
           ]
         }
       ],
@@ -1844,514 +2189,40 @@
       ]
     },
     {
-      "id": 10,
-      "type": "ManualSigmas",
-      "pos": [
-        3492,
-        4440
-      ],
-      "size": [
-        210,
-        58
-      ],
-      "flags": {},
-      "order": 9,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "SIGMAS",
-          "type": "SIGMAS",
-          "links": [
-            54
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.21.1",
-        "Node name for S&R": "ManualSigmas"
-      },
-      "widgets_values": [
-        "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
-      ]
-    },
-    {
-      "id": 26,
-      "type": "LTXVConcatAVLatent",
-      "pos": [
-        3516,
-        4308
-      ],
-      "size": [
-        181.308203125,
-        46
-      ],
-      "flags": {},
-      "order": 65,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "video_latent",
-          "type": "LATENT",
-          "link": 408
-        },
-        {
-          "name": "audio_latent",
-          "type": "LATENT",
-          "link": 436
-        }
-      ],
-      "outputs": [
-        {
-          "name": "latent",
-          "type": "LATENT",
-          "links": [
-            55
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.21.1",
-        "Node name for S&R": "LTXVConcatAVLatent"
-      },
-      "widgets_values": []
-    },
-    {
-      "id": 24,
-      "type": "ConditioningZeroOut",
-      "pos": [
-        3216,
-        4284
-      ],
-      "size": [
-        240,
-        30
-      ],
-      "flags": {},
-      "order": 57,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "条件",
-          "name": "conditioning",
-          "type": "CONDITIONING",
-          "link": 332
-        }
-      ],
-      "outputs": [
-        {
-          "label": "条件",
-          "name": "CONDITIONING",
-          "type": "CONDITIONING",
-          "links": [
-            57
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.19.3",
-        "Node name for S&R": "ConditioningZeroOut",
-        "widget_ue_connectable": {}
-      },
-      "widgets_values": []
-    },
-    {
-      "id": 33,
-      "type": "LTXVConditioning",
-      "pos": [
-        3204,
-        4392
-      ],
-      "size": [
-        240.14237194388988,
-        80.14237194388988
-      ],
-      "flags": {},
-      "order": 60,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "positive",
-          "name": "positive",
-          "type": "CONDITIONING",
-          "link": 333
-        },
-        {
-          "label": "negative",
-          "name": "negative",
-          "type": "CONDITIONING",
-          "link": 57
-        },
-        {
-          "label": "frame_rate",
-          "name": "frame_rate",
-          "type": "FLOAT",
-          "widget": {
-            "name": "frame_rate"
-          },
-          "link": 58
-        }
-      ],
-      "outputs": [
-        {
-          "label": "positive",
-          "name": "positive",
-          "type": "CONDITIONING",
-          "links": [
-            42
-          ]
-        },
-        {
-          "label": "negative",
-          "name": "negative",
-          "type": "CONDITIONING",
-          "links": [
-            43
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.3.56",
-        "Node name for S&R": "LTXVConditioning",
-        "hasSecondTab": false,
-        "widget_ue_connectable": {
-          "frame_rate": true
-        },
-        "secondTabText": "Send Back",
-        "enableTabs": false,
-        "secondTabOffset": 80,
-        "tabWidth": 65,
-        "secondTabWidth": 65,
-        "tabXOffset": 10
-      },
-      "widgets_values": [
-        24
-      ]
-    },
-    {
-      "id": 46,
-      "type": "PromptRelaySmartEncode",
-      "pos": [
-        3204,
-        3960
-      ],
-      "size": [
-        240,
-        230
-      ],
-      "flags": {},
-      "order": 54,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "model",
-          "type": "MODEL",
-          "link": 80
-        },
-        {
-          "name": "clip",
-          "type": "CLIP",
-          "link": 81
-        },
-        {
-          "name": "latent",
-          "type": "LATENT",
-          "link": 82
-        },
-        {
-          "name": "smart_prompt",
-          "type": "STRING",
-          "widget": {
-            "name": "smart_prompt"
-          },
-          "link": 151
-        },
-        {
-          "name": "epsilon",
-          "type": "FLOAT",
-          "widget": {
-            "name": "epsilon"
-          },
-          "link": 84
-        }
-      ],
-      "outputs": [
-        {
-          "name": "model",
-          "type": "MODEL",
-          "links": [
-            334,
-            335
-          ]
-        },
-        {
-          "name": "positive",
-          "type": "CONDITIONING",
-          "links": [
-            332,
-            333
-          ]
-        }
-      ],
-      "properties": {
-        "aux_id": "kijai/ComfyUI-PromptRelay",
-        "ver": "5cae3c00186ff2eb79771070f05a2c4e02f329bb",
-        "Node name for S&R": "PromptRelaySmartEncode"
-      },
-      "widgets_values": [
-        "",
-        "",
-        false,
-        0.9
-      ]
-    },
-    {
-      "id": 4,
-      "type": "LTXVSeparateAVLatent",
-      "pos": [
-        4020,
-        3900
-      ],
-      "size": [
-        193.2916015625,
-        49.757194980424174
-      ],
-      "flags": {},
-      "order": 67,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "av_latent",
-          "name": "av_latent",
-          "type": "LATENT",
-          "link": 315
-        }
-      ],
-      "outputs": [
-        {
-          "label": "video_latent",
-          "name": "video_latent",
-          "type": "LATENT",
-          "links": [
-            27
-          ]
-        },
-        {
-          "label": "audio_latent",
-          "name": "audio_latent",
-          "type": "LATENT",
-          "links": [
-            66,
-            251
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.16.0",
-        "Node name for S&R": "LTXVSeparateAVLatent",
-        "widget_ue_connectable": {}
-      },
-      "widgets_values": []
-    },
-    {
-      "id": 8,
-      "type": "CFGGuider",
-      "pos": [
-        3780,
-        3828
-      ],
-      "size": [
-        210,
-        100
-      ],
-      "flags": {},
-      "order": 64,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "模型",
-          "name": "model",
-          "type": "MODEL",
-          "link": 334
-        },
-        {
-          "label": "正面条件",
-          "name": "positive",
-          "type": "CONDITIONING",
-          "link": 411
-        },
-        {
-          "label": "负面条件",
-          "name": "negative",
-          "type": "CONDITIONING",
-          "link": 409
-        },
-        {
-          "label": "cfg",
-          "name": "cfg",
-          "type": "FLOAT",
-          "widget": {
-            "name": "cfg"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "label": "引导",
-          "name": "GUIDER",
-          "type": "GUIDER",
-          "links": [
-            52
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.3.64",
-        "Node name for S&R": "CFGGuider",
-        "hasSecondTab": false,
-        "widget_ue_connectable": {},
-        "secondTabText": "Send Back",
-        "enableTabs": false,
-        "secondTabOffset": 80,
-        "tabWidth": 65,
-        "secondTabWidth": 65,
-        "tabXOffset": 10
-      },
-      "widgets_values": [
-        1
-      ]
-    },
-    {
-      "id": 9,
-      "type": "KSamplerSelect",
-      "pos": [
-        3516,
-        3888
-      ],
-      "size": [
-        210,
-        60
-      ],
-      "flags": {},
-      "order": 10,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "sampler_name",
-          "name": "sampler_name",
-          "type": "COMBO",
-          "widget": {
-            "name": "sampler_name"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "label": "采样器",
-          "name": "SAMPLER",
-          "type": "SAMPLER",
-          "links": [
-            53
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.3.56",
-        "Node name for S&R": "KSamplerSelect",
-        "hasSecondTab": false,
-        "widget_ue_connectable": {},
-        "secondTabText": "Send Back",
-        "enableTabs": false,
-        "secondTabOffset": 80,
-        "tabWidth": 65,
-        "secondTabWidth": 65,
-        "tabXOffset": 10
-      },
-      "widgets_values": [
-        "euler_ancestral_cfg_pp"
-      ]
-    },
-    {
-      "id": 29,
-      "type": "PathchSageAttentionKJ",
-      "pos": [
-        3204,
-        3816
-      ],
-      "size": [
-        240,
-        82
-      ],
-      "flags": {},
-      "order": 49,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "model",
-          "type": "MODEL",
-          "link": 48
-        }
-      ],
-      "outputs": [
-        {
-          "name": "MODEL",
-          "type": "MODEL",
-          "links": [
-            80
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-kjnodes",
-        "ver": "e56b3061ed49251a7b8a5450a2e18295548ea7a1",
-        "Node name for S&R": "PathchSageAttentionKJ"
-      },
-      "widgets_values": [
-        "auto",
-        false
-      ]
-    },
-    {
       "id": 58,
       "type": "easy ifElse",
       "pos": [
-        4323.911039101069,
-        4157.975850456122
+        4332.066029597295,
+        4150.875091256576
       ],
       "size": [
         270,
         78
       ],
       "flags": {},
-      "order": 84,
+      "order": 80,
       "mode": 0,
       "inputs": [
         {
+          "label": "真时",
           "name": "on_true",
           "type": "*",
           "link": 96
         },
         {
+          "label": "假时",
           "name": "on_false",
           "type": "*",
-          "link": 283
+          "link": 484
         },
         {
+          "label": "布尔",
           "name": "boolean",
           "type": "BOOLEAN",
           "widget": {
             "name": "boolean"
           },
-          "link": 98
+          "link": 489
         }
       ],
       "outputs": [
@@ -2373,503 +2244,317 @@
       ]
     },
     {
-      "id": 55,
-      "type": "ManualSigmas",
+      "id": 142,
+      "type": "GetImageRangeFromBatch",
       "pos": [
-        3169.321751498559,
-        4954.557243082552
+        4325.987585017914,
+        3973.234789708042
       ],
       "size": [
-        240.66901617208896,
+        290.44362487792966,
+        102
+      ],
+      "flags": {},
+      "order": 82,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "图像",
+          "name": "images",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 362
+        },
+        {
+          "label": "遮罩",
+          "name": "masks",
+          "shape": 7,
+          "type": "MASK",
+          "link": null
+        },
+        {
+          "label": "起始编号",
+          "name": "start_index",
+          "type": "INT",
+          "widget": {
+            "name": "start_index"
+          },
+          "link": null
+        },
+        {
+          "label": "帧数",
+          "name": "num_frames",
+          "type": "INT",
+          "widget": {
+            "name": "num_frames"
+          },
+          "link": 439
+        }
+      ],
+      "outputs": [
+        {
+          "label": "图像",
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            361
+          ]
+        },
+        {
+          "label": "遮罩",
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "e56b3061ed49251a7b8a5450a2e18295548ea7a1",
+        "Node name for S&R": "GetImageRangeFromBatch"
+      },
+      "widgets_values": [
+        0,
+        1
+      ]
+    },
+    {
+      "id": 174,
+      "type": "SimpleMath+",
+      "pos": [
+        4379.517216615897,
+        3514.6024797036976
+      ],
+      "size": [
+        210,
+        98
+      ],
+      "flags": {},
+      "order": 42,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "A",
+          "name": "a",
+          "shape": 7,
+          "type": "*",
+          "link": 486
+        },
+        {
+          "label": "B",
+          "name": "b",
+          "shape": 7,
+          "type": "*",
+          "link": 485
+        },
+        {
+          "name": "c",
+          "shape": 7,
+          "type": "*",
+          "link": null
+        },
+        {
+          "label": "值",
+          "name": "value",
+          "type": "STRING",
+          "widget": {
+            "name": "value"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "整数",
+          "name": "INT",
+          "type": "INT",
+          "links": [
+            487
+          ]
+        },
+        {
+          "label": "浮点",
+          "name": "FLOAT",
+          "type": "FLOAT",
+          "links": null
+        }
+      ],
+      "title": "简易运算",
+      "properties": {
+        "cnr_id": "comfyui_essentials",
+        "ver": "9d9f4bedfc9f0321c19faf71855e228c93bd0dc9",
+        "Node name for S&R": "SimpleMath+"
+      },
+      "widgets_values": [
+        "a+b"
+      ]
+    },
+    {
+      "id": 176,
+      "type": "easy int",
+      "pos": [
+        4379.972789104222,
+        3376.62899632041
+      ],
+      "size": [
+        210,
         58
       ],
       "flags": {},
-      "order": 11,
+      "order": 10,
       "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "SIGMAS",
-          "type": "SIGMAS",
-          "links": [
-            109
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.21.1",
-        "Node name for S&R": "ManualSigmas"
-      },
-      "widgets_values": [
-        "0.85, 0.7250, 0.4219, 0.0"
-      ]
-    },
-    {
-      "id": 36,
-      "type": "LoraLoaderModelOnly",
-      "pos": [
-        2556,
-        4452
-      ],
-      "size": [
-        291.9295349121094,
-        83.55774688720703
-      ],
-      "flags": {},
-      "order": 43,
-      "mode": 4,
       "inputs": [
         {
-          "label": "模型",
-          "name": "model",
-          "type": "MODEL",
-          "link": 63
-        },
-        {
-          "label": "lora_name",
-          "name": "lora_name",
-          "type": "COMBO",
+          "label": "值",
+          "name": "value",
+          "type": "INT",
           "widget": {
-            "name": "lora_name"
-          },
-          "link": null
-        },
-        {
-          "label": "strength_model",
-          "name": "strength_model",
-          "type": "FLOAT",
-          "widget": {
-            "name": "strength_model"
+            "name": "value"
           },
           "link": null
         }
       ],
       "outputs": [
         {
-          "label": "模型",
-          "name": "MODEL",
-          "type": "MODEL",
+          "label": "整数",
+          "name": "int",
+          "type": "INT",
           "links": [
-            48
+            488
           ]
         }
       ],
       "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.3.75",
-        "Node name for S&R": "LoraLoaderModelOnly",
-        "hasSecondTab": false,
-        "models": [
-          {
-            "name": "ltx-2.3-22b-distilled-lora-384.safetensors",
-            "directory": "loras",
-            "url": "https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-22b-distilled-lora-384.safetensors"
-          }
-        ],
-        "widget_ue_connectable": {},
-        "secondTabText": "Send Back",
-        "enableTabs": false,
-        "secondTabOffset": 80,
-        "tabWidth": 65,
-        "secondTabWidth": 65,
-        "tabXOffset": 10
+        "cnr_id": "comfyui-easy-use",
+        "ver": "625efbfa2fc20c31797dfffcbb41a26b6d91ab7b",
+        "Node name for S&R": "easy int",
+        "sdppp_max": 100,
+        "sdppp_min": 0
       },
       "widgets_values": [
-        "Ltx2.3-Licon-VBVR-I2V-240K-R32.safetensors",
-        0.6
+        0
       ]
     },
     {
-      "id": 79,
+      "id": 175,
       "type": "easy compare",
       "pos": [
-        3312,
-        3156
+        4373.830845508419,
+        3674.8314794042712
       ],
       "size": [
         210,
         78
       ],
       "flags": {},
-      "order": 46,
+      "order": 48,
       "mode": 0,
       "inputs": [
         {
+          "label": "A",
           "name": "a",
           "shape": 7,
           "type": "*",
-          "link": 143
+          "link": 487
         },
         {
+          "label": "B",
           "name": "b",
           "shape": 7,
           "type": "*",
-          "link": 144
+          "link": 488
+        },
+        {
+          "label": "比较方式",
+          "name": "comparison",
+          "shape": 7,
+          "type": "COMBO",
+          "widget": {
+            "name": "comparison"
+          },
+          "link": null
         }
       ],
       "outputs": [
         {
+          "label": "布尔",
           "name": "boolean",
           "type": "BOOLEAN",
           "links": [
-            145
+            489,
+            490
           ]
         }
       ],
       "properties": {
         "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
+        "ver": "625efbfa2fc20c31797dfffcbb41a26b6d91ab7b",
         "Node name for S&R": "easy compare"
       },
       "widgets_values": [
-        "a == b"
+        "a > b"
       ]
     },
     {
-      "id": 80,
-      "type": "easy int",
+      "id": 30,
+      "type": "RandomNoise",
       "pos": [
-        3072,
-        3144
+        3768,
+        4046.9786818833413
       ],
       "size": [
         210,
-        58
+        83.07677106752226
       ],
-      "flags": {},
-      "order": 12,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "int",
-          "type": "INT",
-          "links": [
-            144
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy int",
-        "sdppp_max": 100,
-        "sdppp_min": 0
+      "flags": {
+        "collapsed": false
       },
-      "widgets_values": [
-        1
-      ]
-    },
-    {
-      "id": 54,
-      "type": "SimpleMath+",
-      "pos": [
-        2940,
-        3744
-      ],
-      "size": [
-        210,
-        98
-      ],
-      "flags": {},
-      "order": 27,
+      "order": 24,
       "mode": 0,
       "inputs": [
         {
-          "name": "a",
-          "shape": 7,
-          "type": "*",
-          "link": 92
-        },
-        {
-          "name": "b",
-          "shape": 7,
-          "type": "*",
-          "link": null
-        },
-        {
-          "name": "c",
-          "shape": 7,
-          "type": "*",
-          "link": null
+          "label": "noise_seed",
+          "name": "noise_seed",
+          "type": "INT",
+          "widget": {
+            "name": "noise_seed"
+          },
+          "link": 49
         }
       ],
       "outputs": [
         {
-          "name": "INT",
-          "type": "INT",
+          "label": "噪波生成",
+          "name": "NOISE",
+          "type": "NOISE",
           "links": [
-            74,
-            91,
-            426
-          ]
-        },
-        {
-          "name": "FLOAT",
-          "type": "FLOAT",
-          "links": null
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui_essentials",
-        "ver": "9d9f4bedfc9f0321c19faf71855e228c93bd0dc9",
-        "Node name for S&R": "SimpleMath+"
-      },
-      "widgets_values": [
-        "a"
-      ]
-    },
-    {
-      "id": 44,
-      "type": "SolidMask",
-      "pos": [
-        2231.5960566820627,
-        4940.155750923199
-      ],
-      "size": [
-        210,
-        106
-      ],
-      "flags": {},
-      "order": 26,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "width",
-          "type": "INT",
-          "widget": {
-            "name": "width"
-          },
-          "link": 77
-        },
-        {
-          "name": "height",
-          "type": "INT",
-          "widget": {
-            "name": "height"
-          },
-          "link": 78
-        }
-      ],
-      "outputs": [
-        {
-          "name": "MASK",
-          "type": "MASK",
-          "links": [
-            76
+            51
           ]
         }
       ],
       "properties": {
         "cnr_id": "comfy-core",
-        "ver": "0.21.1",
-        "Node name for S&R": "SolidMask"
+        "ver": "0.19.3",
+        "Node name for S&R": "RandomNoise",
+        "widget_ue_connectable": {}
       },
       "widgets_values": [
-        0,
-        512,
-        512
-      ]
-    },
-    {
-      "id": 155,
-      "type": "easy int",
-      "pos": [
-        4520.532618802959,
-        3138.5511538027836
-      ],
-      "size": [
-        210,
-        58
-      ],
-      "flags": {},
-      "order": 13,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "int",
-          "type": "INT",
-          "links": [
-            414
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy int",
-        "sdppp_max": 100,
-        "sdppp_min": 0
-      },
-      "widgets_values": [
-        2
-      ]
-    },
-    {
-      "id": 156,
-      "type": "SimpleMath+",
-      "pos": [
-        3504,
-        3708
-      ],
-      "size": [
-        210,
-        98
-      ],
-      "flags": {},
-      "order": 34,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "a",
-          "shape": 7,
-          "type": "*",
-          "link": 441
-        },
-        {
-          "name": "b",
-          "shape": 7,
-          "type": "*",
-          "link": null
-        },
-        {
-          "name": "c",
-          "shape": 7,
-          "type": "*",
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "INT",
-          "type": "INT",
-          "links": [
-            418
-          ]
-        },
-        {
-          "name": "FLOAT",
-          "type": "FLOAT",
-          "links": null
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui_essentials",
-        "ver": "9d9f4bedfc9f0321c19faf71855e228c93bd0dc9",
-        "Node name for S&R": "SimpleMath+"
-      },
-      "widgets_values": [
-        "a+8"
-      ]
-    },
-    {
-      "id": 41,
-      "type": "LTXVAudioVAEEncode",
-      "pos": [
-        2231.5960566820627,
-        4808.155750923199
-      ],
-      "size": [
-        201.4126953125,
-        46
-      ],
-      "flags": {},
-      "order": 37,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "audio",
-          "type": "AUDIO",
-          "link": 163
-        },
-        {
-          "label": "Audio VAE",
-          "name": "audio_vae",
-          "type": "VAE",
-          "link": 71
-        }
-      ],
-      "outputs": [
-        {
-          "name": "Audio Latent",
-          "type": "LATENT",
-          "links": [
-            435
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.21.1",
-        "Node name for S&R": "LTXVAudioVAEEncode"
-      },
-      "widgets_values": []
-    },
-    {
-      "id": 158,
-      "type": "LTXVEmptyLatentAudio",
-      "pos": [
-        2472,
-        4788
-      ],
-      "size": [
-        210,
-        106
-      ],
-      "flags": {},
-      "order": 30,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "Audio VAE",
-          "name": "audio_vae",
-          "type": "VAE",
-          "link": 424
-        },
-        {
-          "name": "frame_rate",
-          "type": "INT",
-          "widget": {
-            "name": "frame_rate"
-          },
-          "link": 426
-        }
-      ],
-      "outputs": [
-        {
-          "name": "Latent",
-          "type": "LATENT",
-          "links": [
-            443
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.21.1",
-        "Node name for S&R": "LTXVEmptyLatentAudio"
-      },
-      "widgets_values": [
-        8,
-        24,
-        1
+        793992093166817,
+        "fixed"
       ]
     },
     {
       "id": 32,
       "type": "SamplerCustomAdvanced",
       "pos": [
-        3756,
-        4260
+        3771.391903641195,
+        4238.0605382397225
       ],
       "size": [
         212.3638671875,
-        232.0718578338623
+        231.32043647766113
       ],
       "flags": {},
-      "order": 66,
+      "order": 64,
       "mode": 0,
       "inputs": [
         {
@@ -2935,18 +2620,774 @@
       "widgets_values": []
     },
     {
+      "id": 94,
+      "type": "easy anythingIndexSwitch",
+      "pos": [
+        3338.185684993489,
+        3427.641453151137
+      ],
+      "size": [
+        210,
+        118
+      ],
+      "flags": {},
+      "order": 58,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "值0",
+          "name": "value0",
+          "shape": 7,
+          "type": "*",
+          "link": 186
+        },
+        {
+          "label": "值1",
+          "name": "value1",
+          "shape": 7,
+          "type": "*",
+          "link": 187
+        },
+        {
+          "label": "编号",
+          "name": "index",
+          "type": "INT",
+          "widget": {
+            "name": "index"
+          },
+          "link": 185
+        },
+        {
+          "name": "value2",
+          "type": "*",
+          "link": 491
+        },
+        {
+          "name": "value3",
+          "type": "*",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "值",
+          "name": "value",
+          "type": "*",
+          "links": [
+            184,
+            377
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
+        "Node name for S&R": "easy anythingIndexSwitch"
+      },
+      "widgets_values": [
+        0
+      ]
+    },
+    {
+      "id": 75,
+      "type": "PrimitiveString",
+      "pos": [
+        3078.029625842587,
+        3479.7407205721856
+      ],
+      "size": [
+        210,
+        58
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": [
+            137
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.21.1",
+        "Node name for S&R": "PrimitiveString"
+      },
+      "widgets_values": [
+        "0,-1"
+      ]
+    },
+    {
+      "id": 78,
+      "type": "easy lengthAnything",
+      "pos": [
+        3066.7765157389254,
+        3259.0254601239476
+      ],
+      "size": [
+        140,
+        26
+      ],
+      "flags": {},
+      "order": 38,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "任意",
+          "name": "any",
+          "type": "*",
+          "link": 160
+        }
+      ],
+      "outputs": [
+        {
+          "name": "length",
+          "type": "INT",
+          "links": [
+            142
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
+        "Node name for S&R": "easy lengthAnything"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 177,
+      "type": "PrimitiveString",
+      "pos": [
+        3228.4834696615967,
+        3270.0257548689224
+      ],
+      "size": [
+        210,
+        58
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 12,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": [
+            491
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.21.1",
+        "Node name for S&R": "PrimitiveString"
+      },
+      "widgets_values": [
+        ""
+      ]
+    },
+    {
+      "id": 170,
+      "type": "SimpleMath+",
+      "pos": [
+        4091.9656234451627,
+        3145.562176123154
+      ],
+      "size": [
+        270,
+        98
+      ],
+      "flags": {},
+      "order": 45,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "A",
+          "name": "a",
+          "shape": 7,
+          "type": "*",
+          "link": 474
+        },
+        {
+          "label": "B",
+          "name": "b",
+          "shape": 7,
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "c",
+          "shape": 7,
+          "type": "*",
+          "link": null
+        },
+        {
+          "label": "值",
+          "name": "value",
+          "type": "STRING",
+          "widget": {
+            "name": "value"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "整数",
+          "name": "INT",
+          "type": "INT",
+          "links": [
+            475
+          ]
+        },
+        {
+          "label": "浮点",
+          "name": "FLOAT",
+          "type": "FLOAT",
+          "links": null
+        }
+      ],
+      "title": "简易运算",
+      "properties": {
+        "cnr_id": "comfyui_essentials",
+        "ver": "9d9f4bedfc9f0321c19faf71855e228c93bd0dc9",
+        "Node name for S&R": "SimpleMath+"
+      },
+      "widgets_values": [
+        "(a==1)*17+(a==2)*33+(a>2)*41"
+      ]
+    },
+    {
+      "id": 154,
+      "type": "easy compare",
+      "pos": [
+        3631.5401678346807,
+        3287.8115160429993
+      ],
+      "size": [
+        210,
+        78
+      ],
+      "flags": {},
+      "order": 34,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "A",
+          "name": "a",
+          "shape": 7,
+          "type": "*",
+          "link": 447
+        },
+        {
+          "label": "B",
+          "name": "b",
+          "shape": 7,
+          "type": "*",
+          "link": 414
+        },
+        {
+          "label": "比较方式",
+          "name": "comparison",
+          "shape": 7,
+          "type": "COMBO",
+          "widget": {
+            "name": "comparison"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "布尔",
+          "name": "boolean",
+          "type": "BOOLEAN",
+          "links": [
+            466,
+            471,
+            477,
+            485
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
+        "Node name for S&R": "easy compare"
+      },
+      "widgets_values": [
+        "a == b"
+      ]
+    },
+    {
+      "id": 81,
+      "type": "easy timelineSegmentOutput",
+      "pos": [
+        2733.1470784850108,
+        3417.9878191974944
+      ],
+      "size": [
+        253.5191685789846,
+        202
+      ],
+      "flags": {},
+      "order": 32,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "timeline_info",
+          "type": "TIMELINE_INFO",
+          "link": 539
+        },
+        {
+          "name": "images",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 540
+        },
+        {
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": 541
+        },
+        {
+          "name": "segment_index",
+          "type": "INT",
+          "widget": {
+            "name": "segment_index"
+          },
+          "link": 449
+        }
+      ],
+      "outputs": [
+        {
+          "name": "PROMPT",
+          "type": "STRING",
+          "links": [
+            151
+          ]
+        },
+        {
+          "name": "TYPE",
+          "type": "INT",
+          "links": [
+            152,
+            185,
+            447,
+            467
+          ]
+        },
+        {
+          "name": "NO_IMAGES",
+          "type": "BOOLEAN",
+          "links": [
+            153,
+            257
+          ]
+        },
+        {
+          "name": "IMAGE_INDEXES",
+          "type": "STRING",
+          "links": [
+            154,
+            187
+          ]
+        },
+        {
+          "name": "LENGTH",
+          "type": "INT",
+          "links": [
+            439,
+            451,
+            454
+          ]
+        },
+        {
+          "name": "IMAGES",
+          "type": "IMAGE",
+          "links": [
+            159,
+            160,
+            376,
+            473,
+            476,
+            479
+          ]
+        },
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "links": [
+            158,
+            163
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-media",
+        "ver": "5fa488975649802387ec37c779d1e80fd25c60ee",
+        "Node name for S&R": "easy timelineSegmentOutput",
+        "aux_id": "yolain/ComfyUI-Easy-Media"
+      },
+      "widgets_values": [
+        "default",
+        0
+      ]
+    },
+    {
+      "id": 172,
+      "type": "easy ifElse",
+      "pos": [
+        3518.3183442464897,
+        3762.6873652290133
+      ],
+      "size": [
+        210,
+        78
+      ],
+      "flags": {},
+      "order": 56,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "真时",
+          "name": "on_true",
+          "type": "*",
+          "link": 478
+        },
+        {
+          "label": "假时",
+          "name": "on_false",
+          "type": "*",
+          "link": 479
+        },
+        {
+          "label": "布尔",
+          "name": "boolean",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "boolean"
+          },
+          "link": 477
+        }
+      ],
+      "outputs": [
+        {
+          "name": "*",
+          "type": "*",
+          "links": [
+            480
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "625efbfa2fc20c31797dfffcbb41a26b6d91ab7b",
+        "Node name for S&R": "easy ifElse"
+      },
+      "widgets_values": [
+        false
+      ]
+    },
+    {
+      "id": 46,
+      "type": "PromptRelaySmartEncode",
+      "pos": [
+        3212.8507964208093,
+        4058.0572525444586
+      ],
+      "size": [
+        240,
+        230
+      ],
+      "flags": {},
+      "order": 57,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 80
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 81
+        },
+        {
+          "name": "latent",
+          "type": "LATENT",
+          "link": 465
+        },
+        {
+          "name": "smart_prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "smart_prompt"
+          },
+          "link": 151
+        },
+        {
+          "name": "epsilon",
+          "type": "FLOAT",
+          "widget": {
+            "name": "epsilon"
+          },
+          "link": 84
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            334,
+            335
+          ]
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "links": [
+            332,
+            333
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "kijai/ComfyUI-PromptRelay",
+        "ver": "5cae3c00186ff2eb79771070f05a2c4e02f329bb",
+        "Node name for S&R": "PromptRelaySmartEncode"
+      },
+      "widgets_values": [
+        "",
+        "",
+        false,
+        0.9
+      ]
+    },
+    {
+      "id": 27,
+      "type": "LTXVAddGuidesFromBatchIndexes",
+      "pos": [
+        3499.7810609614753,
+        4065.133917563903
+      ],
+      "size": [
+        253.11081562179368,
+        186
+      ],
+      "flags": {},
+      "order": 61,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 42
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 43
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 44
+        },
+        {
+          "name": "latent",
+          "type": "LATENT",
+          "link": 495
+        },
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 480
+        },
+        {
+          "name": "image_indexes",
+          "type": "STRING",
+          "widget": {
+            "name": "image_indexes"
+          },
+          "link": 184
+        }
+      ],
+      "outputs": [
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "links": [
+            411,
+            412
+          ]
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "links": [
+            409,
+            410
+          ]
+        },
+        {
+          "name": "latent",
+          "type": "LATENT",
+          "links": [
+            408
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-media",
+        "ver": "0a61e3c1d5e0eab4f317a90e7340c484a8349e10",
+        "Node name for S&R": "LTXVAddGuidesFromBatchIndexes",
+        "aux_id": "yolain/ComfyUI-Easy-Media"
+      },
+      "widgets_values": [
+        0,
+        "",
+        1
+      ]
+    },
+    {
+      "id": 167,
+      "type": "easy ifElse",
+      "pos": [
+        3220.2137855394303,
+        3925.48315636111
+      ],
+      "size": [
+        210,
+        78
+      ],
+      "flags": {},
+      "order": 54,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "真时",
+          "name": "on_true",
+          "type": "*",
+          "link": 464
+        },
+        {
+          "label": "假时",
+          "name": "on_false",
+          "type": "*",
+          "link": 463
+        },
+        {
+          "label": "布尔",
+          "name": "boolean",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "boolean"
+          },
+          "link": 466
+        }
+      ],
+      "outputs": [
+        {
+          "name": "*",
+          "type": "*",
+          "links": [
+            465,
+            495
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "625efbfa2fc20c31797dfffcbb41a26b6d91ab7b",
+        "Node name for S&R": "easy ifElse"
+      },
+      "widgets_values": [
+        false
+      ]
+    },
+    {
+      "id": 5,
+      "type": "LTXVImgToVideoInplace",
+      "pos": [
+        2950.632000746489,
+        4392.493051017157
+      ],
+      "size": [
+        210,
+        122
+      ],
+      "flags": {},
+      "order": 49,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 2
+        },
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 285
+        },
+        {
+          "name": "latent",
+          "type": "LATENT",
+          "link": 4
+        },
+        {
+          "name": "bypass",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "bypass"
+          },
+          "link": 153
+        }
+      ],
+      "outputs": [
+        {
+          "name": "latent",
+          "type": "LATENT",
+          "links": [
+            463
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.21.1",
+        "Node name for S&R": "LTXVImgToVideoInplace"
+      },
+      "widgets_values": [
+        0.7,
+        false
+      ]
+    },
+    {
       "id": 7,
       "type": "EmptyLTXVLatentVideo",
       "pos": [
-        2952,
-        4116
+        2931.546935840984,
+        4040.872392993626
       ],
       "size": [
         228.04354291635173,
         130
       ],
       "flags": {},
-      "order": 44,
+      "order": 43,
       "mode": 0,
       "inputs": [
         {
@@ -2971,7 +3412,7 @@
           "widget": {
             "name": "length"
           },
-          "link": 421
+          "link": 451
         }
       ],
       "outputs": [
@@ -2979,7 +3420,8 @@
           "name": "LATENT",
           "type": "LATENT",
           "links": [
-            4
+            4,
+            464
           ]
         }
       ],
@@ -2996,266 +3438,206 @@
       ]
     },
     {
-      "id": 154,
-      "type": "easy compare",
+      "id": 6,
+      "type": "SimpleMathDual+",
       "pos": [
-        4520.532618802959,
-        3258.5511538027836
+        2937.4261084004174,
+        3818.247580698945
       ],
       "size": [
         210,
-        78
+        142
       ],
       "flags": {},
-      "order": 33,
+      "order": 35,
       "mode": 0,
       "inputs": [
         {
           "name": "a",
           "shape": 7,
           "type": "*",
-          "link": 447
+          "link": 5
         },
         {
           "name": "b",
           "shape": 7,
           "type": "*",
-          "link": 414
-        }
-      ],
-      "outputs": [
-        {
-          "name": "boolean",
-          "type": "BOOLEAN",
-          "links": [
-            416,
-            427
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy compare"
-      },
-      "widgets_values": [
-        "a == b"
-      ]
-    },
-    {
-      "id": 153,
-      "type": "easy ifElse",
-      "pos": [
-        4520.532618802959,
-        3390.5511538027836
-      ],
-      "size": [
-        210,
-        78
-      ],
-      "flags": {},
-      "order": 39,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "on_true",
-          "type": "*",
-          "link": 418
+          "link": 6
         },
         {
-          "name": "on_false",
-          "type": "*",
-          "link": 419
-        },
-        {
-          "name": "boolean",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "boolean"
-          },
-          "link": 416
-        }
-      ],
-      "outputs": [
-        {
-          "name": "*",
-          "type": "*",
-          "links": [
-            421,
-            422
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy ifElse"
-      },
-      "widgets_values": [
-        false
-      ]
-    },
-    {
-      "id": 142,
-      "type": "GetImageRangeFromBatch",
-      "pos": [
-        4323.911039101069,
-        4001.9758504561237
-      ],
-      "size": [
-        289.7056640625,
-        102
-      ],
-      "flags": {},
-      "order": 85,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "images",
+          "name": "c",
           "shape": 7,
-          "type": "IMAGE",
-          "link": 362
+          "type": "*",
+          "link": 467
         },
         {
-          "name": "masks",
+          "name": "d",
           "shape": 7,
-          "type": "MASK",
+          "type": "*",
           "link": null
         },
         {
-          "name": "num_frames",
-          "type": "INT",
+          "label": "值1",
+          "name": "value_1",
+          "type": "STRING",
           "widget": {
-            "name": "num_frames"
+            "name": "value_1"
           },
-          "link": 439
+          "link": null
+        },
+        {
+          "label": "值2",
+          "name": "value_2",
+          "type": "STRING",
+          "widget": {
+            "name": "value_2"
+          },
+          "link": null
         }
       ],
       "outputs": [
         {
-          "name": "IMAGE",
-          "type": "IMAGE",
+          "label": "整数_1",
+          "name": "int_1",
+          "type": "INT",
           "links": [
-            361
+            7
           ]
         },
         {
-          "name": "MASK",
-          "type": "MASK",
+          "label": "浮点_1",
+          "name": "float_1",
+          "type": "FLOAT",
+          "links": null
+        },
+        {
+          "label": "整数_2",
+          "name": "int_2",
+          "type": "INT",
+          "links": [
+            8
+          ]
+        },
+        {
+          "label": "浮点_2",
+          "name": "float_2",
+          "type": "FLOAT",
           "links": null
         }
       ],
       "properties": {
-        "cnr_id": "comfyui-kjnodes",
-        "ver": "e56b3061ed49251a7b8a5450a2e18295548ea7a1",
-        "Node name for S&R": "GetImageRangeFromBatch"
+        "cnr_id": "comfyui_essentials",
+        "ver": "9d9f4bedfc9f0321c19faf71855e228c93bd0dc9",
+        "Node name for S&R": "SimpleMathDual+"
       },
       "widgets_values": [
-        0,
-        1
+        "(c==2)*a+(c<2)*a/2",
+        "(c==2)*b+(c<2)*b/2"
       ]
     },
     {
-      "id": 31,
-      "type": "RandomNoise",
+      "id": 9,
+      "type": "KSamplerSelect",
       "pos": [
-        3169.321751498559,
-        4726.557243082552
+        3497.7581674190637,
+        3921.9129996782945
       ],
       "size": [
-        210,
-        82
-      ],
-      "flags": {
-        "collapsed": false
-      },
-      "order": 22,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "noise_seed",
-          "type": "INT",
-          "widget": {
-            "name": "noise_seed"
-          },
-          "link": 50
-        }
-      ],
-      "outputs": [
-        {
-          "name": "NOISE",
-          "type": "NOISE",
-          "links": [
-            16
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.21.1",
-        "Node name for S&R": "RandomNoise"
-      },
-      "widgets_values": [
-        558591651224188,
-        "fixed"
-      ]
-    },
-    {
-      "id": 21,
-      "type": "LTXVLatentUpsampler",
-      "pos": [
-        2953.7033839734963,
-        5031.507238287865
-      ],
-      "size": [
-        187.8501953125,
-        66
+        241.16313850513052,
+        59.0259759780688
       ],
       "flags": {},
-      "order": 70,
+      "order": 13,
       "mode": 0,
       "inputs": [
         {
-          "name": "samples",
-          "type": "LATENT",
-          "link": 317
-        },
-        {
-          "name": "upscale_model",
-          "type": "LATENT_UPSCALE_MODEL",
-          "link": 36
-        },
-        {
-          "name": "vae",
-          "type": "VAE",
-          "link": 37
+          "label": "sampler_name",
+          "name": "sampler_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "sampler_name"
+          },
+          "link": null
         }
       ],
       "outputs": [
         {
-          "name": "LATENT",
+          "label": "采样器",
+          "name": "SAMPLER",
+          "type": "SAMPLER",
+          "links": [
+            53
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.56",
+        "Node name for S&R": "KSamplerSelect",
+        "hasSecondTab": false,
+        "widget_ue_connectable": {},
+        "secondTabText": "Send Back",
+        "enableTabs": false,
+        "secondTabOffset": 80,
+        "tabWidth": 65,
+        "secondTabWidth": 65,
+        "tabXOffset": 10
+      },
+      "widgets_values": [
+        "euler_ancestral_cfg_pp"
+      ]
+    },
+    {
+      "id": 26,
+      "type": "LTXVConcatAVLatent",
+      "pos": [
+        3541.302074199835,
+        4316.386957895192
+      ],
+      "size": [
+        181.308203125,
+        46
+      ],
+      "flags": {},
+      "order": 63,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "video_latent",
+          "type": "LATENT",
+          "link": 408
+        },
+        {
+          "name": "audio_latent",
+          "type": "LATENT",
+          "link": 500
+        }
+      ],
+      "outputs": [
+        {
+          "name": "latent",
           "type": "LATENT",
           "links": [
-            23
+            55
           ]
         }
       ],
       "properties": {
         "cnr_id": "comfy-core",
         "ver": "0.21.1",
-        "Node name for S&R": "LTXVLatentUpsampler"
+        "Node name for S&R": "LTXVConcatAVLatent"
       },
       "widgets_values": []
     },
     {
-      "id": 28,
-      "type": "LatentUpscaleModelLoader",
+      "id": 10,
+      "type": "ManualSigmas",
       "pos": [
-        2952.3779378502236,
-        4851.401154462562
+        3513.2339843418863,
+        4437.359238023072
       ],
       "size": [
-        270,
+        210,
         58
       ],
       "flags": {},
@@ -3264,207 +3646,152 @@
       "inputs": [],
       "outputs": [
         {
-          "name": "LATENT_UPSCALE_MODEL",
-          "type": "LATENT_UPSCALE_MODEL",
+          "name": "SIGMAS",
+          "type": "SIGMAS",
           "links": [
-            36
+            54
           ]
         }
       ],
       "properties": {
         "cnr_id": "comfy-core",
         "ver": "0.21.1",
-        "Node name for S&R": "LatentUpscaleModelLoader"
+        "Node name for S&R": "ManualSigmas"
       },
       "widgets_values": [
-        "ltx-2.3-spatial-upscaler-x2-1.0.safetensors"
+        "1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875, 0.0"
       ]
     },
     {
-      "id": 42,
-      "type": "LTXVEmptyLatentAudio",
+      "id": 44,
+      "type": "SolidMask",
       "pos": [
-        2243.5960566820627,
-        5096.155750923199
+        2268.604868519914,
+        5050.2949962316125
       ],
       "size": [
-        226.1739472717245,
-        106.59526391895952
+        210,
+        106
       ],
       "flags": {},
-      "order": 45,
+      "order": 28,
       "mode": 0,
       "inputs": [
+        {
+          "name": "width",
+          "type": "INT",
+          "widget": {
+            "name": "width"
+          },
+          "link": 77
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "widget": {
+            "name": "height"
+          },
+          "link": 78
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": [
+            76
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.21.1",
+        "Node name for S&R": "SolidMask"
+      },
+      "widgets_values": [
+        0,
+        512,
+        512
+      ]
+    },
+    {
+      "id": 41,
+      "type": "LTXVAudioVAEEncode",
+      "pos": [
+        2287.7343120902183,
+        4909.572769779328
+      ],
+      "size": [
+        201.4126953125,
+        46
+      ],
+      "flags": {},
+      "order": 40,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "link": 163
+        },
         {
           "label": "Audio VAE",
           "name": "audio_vae",
           "type": "VAE",
-          "link": 72
-        },
-        {
-          "name": "frames_number",
-          "type": "INT",
-          "widget": {
-            "name": "frames_number"
-          },
-          "link": 422
-        },
-        {
-          "name": "frame_rate",
-          "type": "INT",
-          "widget": {
-            "name": "frame_rate"
-          },
-          "link": 74
+          "link": 71
         }
       ],
       "outputs": [
         {
-          "name": "Latent",
+          "name": "Audio Latent",
           "type": "LATENT",
           "links": [
-            60
+            435
           ]
         }
       ],
       "properties": {
         "cnr_id": "comfy-core",
         "ver": "0.21.1",
-        "Node name for S&R": "LTXVEmptyLatentAudio"
-      },
-      "widgets_values": [
-        97,
-        24,
-        1
-      ]
-    },
-    {
-      "id": 34,
-      "type": "easy ifElse",
-      "pos": [
-        2504.3438319658176,
-        5136.372324365791
-      ],
-      "size": [
-        210,
-        78
-      ],
-      "flags": {},
-      "order": 51,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "on_true",
-          "type": "*",
-          "link": 59
-        },
-        {
-          "name": "on_false",
-          "type": "*",
-          "link": 60
-        },
-        {
-          "name": "boolean",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "boolean"
-          },
-          "link": 61
-        }
-      ],
-      "outputs": [
-        {
-          "name": "*",
-          "type": "*",
-          "links": [
-            438,
-            442
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy ifElse"
-      },
-      "widgets_values": [
-        false
-      ]
-    },
-    {
-      "id": 165,
-      "type": "easy batchAnything",
-      "pos": [
-        2700,
-        4844.379073995307
-      ],
-      "size": [
-        140,
-        46
-      ],
-      "flags": {},
-      "order": 55,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "any_1",
-          "type": "*",
-          "link": 443
-        },
-        {
-          "name": "any_2",
-          "type": "*",
-          "link": 442
-        }
-      ],
-      "outputs": [
-        {
-          "name": "batch",
-          "type": "*",
-          "links": [
-            444
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy batchAnything"
+        "Node name for S&R": "LTXVAudioVAEEncode"
       },
       "widgets_values": []
     },
     {
-      "id": 159,
+      "id": 168,
       "type": "easy ifElse",
       "pos": [
-        2667.248530091534,
-        4971.836716732645
+        2621.822556373326,
+        4475.056181779978
       ],
       "size": [
         210,
         78
       ],
       "flags": {},
-      "order": 58,
+      "order": 47,
       "mode": 0,
       "inputs": [
         {
+          "label": "真时",
           "name": "on_true",
           "type": "*",
-          "link": 444
+          "link": 469
         },
         {
+          "label": "假时",
           "name": "on_false",
           "type": "*",
-          "link": 438
+          "link": 470
         },
         {
+          "label": "布尔",
           "name": "boolean",
           "type": "BOOLEAN",
           "widget": {
             "name": "boolean"
           },
-          "link": 427
+          "link": 471
         }
       ],
       "outputs": [
@@ -3472,32 +3799,147 @@
           "name": "*",
           "type": "*",
           "links": [
-            436
+            468
           ]
         }
       ],
       "properties": {
         "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
+        "ver": "625efbfa2fc20c31797dfffcbb41a26b6d91ab7b",
         "Node name for S&R": "easy ifElse"
       },
       "widgets_values": [
         false
+      ]
+    },
+    {
+      "id": 45,
+      "type": "LoraLoaderModelOnly",
+      "pos": [
+        2240.440380448563,
+        4528.717300339186
+      ],
+      "size": [
+        291.9295349121094,
+        83.55774688720703
+      ],
+      "flags": {},
+      "order": 41,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "模型",
+          "name": "model",
+          "type": "MODEL",
+          "link": 79
+        },
+        {
+          "label": "lora_name",
+          "name": "lora_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "lora_name"
+          },
+          "link": null
+        },
+        {
+          "label": "strength_model",
+          "name": "strength_model",
+          "type": "FLOAT",
+          "widget": {
+            "name": "strength_model"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "模型",
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            469
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.75",
+        "Node name for S&R": "LoraLoaderModelOnly",
+        "hasSecondTab": false,
+        "models": [
+          {
+            "name": "ltx-2.3-22b-distilled-lora-384.safetensors",
+            "directory": "loras",
+            "url": "https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-22b-distilled-lora-384.safetensors"
+          }
+        ],
+        "widget_ue_connectable": {},
+        "secondTabText": "Send Back",
+        "enableTabs": false,
+        "secondTabOffset": 80,
+        "tabWidth": 65,
+        "secondTabWidth": 65,
+        "tabXOffset": 10
+      },
+      "widgets_values": [
+        "LTX-2.3-Licon-MSR-V1.safetensors",
+        1
+      ]
+    },
+    {
+      "id": 63,
+      "type": "Sigmas Rescale",
+      "pos": [
+        3217.4360632486623,
+        5102.080188904083
+      ],
+      "size": [
+        210,
+        82
+      ],
+      "flags": {},
+      "order": 23,
+      "mode": 4,
+      "inputs": [
+        {
+          "name": "sigmas",
+          "type": "SIGMAS",
+          "link": 109
+        }
+      ],
+      "outputs": [
+        {
+          "name": "sigmas_rescaled",
+          "type": "SIGMAS",
+          "links": [
+            402
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "RES4LYF",
+        "ver": "0dc91c00c4c3fb38e7874fcd7a2a327765e8882c",
+        "Node name for S&R": "Sigmas Rescale"
+      },
+      "widgets_values": [
+        0.5,
+        0
       ]
     },
     {
       "id": 43,
       "type": "SetLatentNoiseMask",
       "pos": [
-        2467.0909318559816,
-        4996.443734234146
+        2459.5930823571075,
+        4993.236620234267
       ],
       "size": [
         188.41179504394532,
         46
       ],
       "flags": {},
-      "order": 42,
+      "order": 46,
       "mode": 0,
       "inputs": [
         {
@@ -3516,7 +3958,7 @@
           "name": "LATENT",
           "type": "LATENT",
           "links": [
-            59
+            502
           ]
         }
       ],
@@ -3528,11 +3970,179 @@
       "widgets_values": []
     },
     {
+      "id": 183,
+      "type": "easy ifElse",
+      "pos": [
+        2569.4441512701096,
+        5122.073914499933
+      ],
+      "size": [
+        210,
+        78
+      ],
+      "flags": {},
+      "order": 52,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "真时",
+          "name": "on_true",
+          "type": "*",
+          "link": 502
+        },
+        {
+          "label": "假时",
+          "name": "on_false",
+          "type": "*",
+          "link": 503
+        },
+        {
+          "label": "布尔",
+          "name": "boolean",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "boolean"
+          },
+          "link": 501
+        }
+      ],
+      "outputs": [
+        {
+          "name": "*",
+          "type": "*",
+          "links": [
+            500
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "625efbfa2fc20c31797dfffcbb41a26b6d91ab7b",
+        "Node name for S&R": "easy ifElse"
+      },
+      "widgets_values": [
+        false
+      ]
+    },
+    {
+      "id": 158,
+      "type": "LTXVEmptyLatentAudio",
+      "pos": [
+        2566.627558022365,
+        4828.35522932275
+      ],
+      "size": [
+        210,
+        106
+      ],
+      "flags": {},
+      "order": 36,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "Audio VAE",
+          "name": "audio_vae",
+          "type": "VAE",
+          "link": 424
+        },
+        {
+          "name": "frames_number",
+          "type": "INT",
+          "widget": {
+            "name": "frames_number"
+          },
+          "link": 454
+        },
+        {
+          "name": "frame_rate",
+          "type": "INT",
+          "widget": {
+            "name": "frame_rate"
+          },
+          "link": 426
+        }
+      ],
+      "outputs": [
+        {
+          "name": "Latent",
+          "type": "LATENT",
+          "links": [
+            503
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.21.1",
+        "Node name for S&R": "LTXVEmptyLatentAudio"
+      },
+      "widgets_values": [
+        8,
+        24,
+        1
+      ]
+    },
+    {
+      "id": 62,
+      "type": "easy ifElse",
+      "pos": [
+        4330.522389760683,
+        4467.490790647382
+      ],
+      "size": [
+        270,
+        78
+      ],
+      "flags": {},
+      "order": 81,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "真时",
+          "name": "on_true",
+          "type": "*",
+          "link": 158
+        },
+        {
+          "label": "假时",
+          "name": "on_false",
+          "type": "*",
+          "link": 104
+        },
+        {
+          "label": "布尔",
+          "name": "boolean",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "boolean"
+          },
+          "link": 106
+        }
+      ],
+      "outputs": [
+        {
+          "name": "*",
+          "type": "*",
+          "links": [
+            127
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
+        "Node name for S&R": "easy ifElse"
+      },
+      "widgets_values": [
+        false
+      ]
+    },
+    {
       "id": 52,
       "type": "PrimitiveNode",
       "pos": [
-        475.97346845180715,
-        4167.9492885929285
+        444.02730620861166,
+        4201.879097811604
       ],
       "size": [
         210,
@@ -3564,100 +4174,266 @@
       ]
     },
     {
-      "id": 6,
-      "type": "SimpleMathDual+",
+      "id": 57,
+      "type": "easy ifElse",
       "pos": [
-        2950.622853156056,
-        3904.500750124682
+        4331.925438865296,
+        4320.890694235735
       ],
       "size": [
-        210,
-        142
+        270,
+        78
       ],
       "flags": {},
-      "order": 25,
+      "order": 79,
       "mode": 0,
       "inputs": [
         {
-          "name": "a",
-          "shape": 7,
+          "label": "真时",
+          "name": "on_true",
           "type": "*",
-          "link": 5
+          "link": 93
         },
         {
-          "name": "b",
-          "shape": 7,
+          "label": "假时",
+          "name": "on_false",
           "type": "*",
-          "link": 6
+          "link": 94
         },
         {
-          "name": "c",
-          "shape": 7,
+          "label": "布尔",
+          "name": "boolean",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "boolean"
+          },
+          "link": 490
+        }
+      ],
+      "outputs": [
+        {
+          "name": "*",
           "type": "*",
-          "link": null
+          "links": [
+            104
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
+        "Node name for S&R": "easy ifElse"
+      },
+      "widgets_values": [
+        false
+      ]
+    },
+    {
+      "id": 70,
+      "type": "easy forLoopEnd",
+      "pos": [
+        2826.4414808168403,
+        3213.9576898640235
+      ],
+      "size": [
+        164.203125,
+        86
+      ],
+      "flags": {},
+      "order": 85,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "流",
+          "name": "flow",
+          "shape": 5,
+          "type": "FLOW_CONTROL",
+          "link": 115
         },
         {
-          "name": "d",
+          "label": "初始值1",
+          "name": "initial_value1",
           "shape": 7,
+          "type": "*",
+          "link": 131
+        },
+        {
+          "label": "初始值2",
+          "name": "initial_value2",
           "type": "*",
           "link": null
         }
       ],
       "outputs": [
         {
-          "name": "int_1",
-          "type": "INT",
+          "label": "值1",
+          "name": "value1",
+          "type": "*",
           "links": [
-            7
+            133
           ]
         },
         {
-          "name": "float_1",
-          "type": "FLOAT",
-          "links": null
-        },
-        {
-          "name": "int_2",
-          "type": "INT",
-          "links": [
-            8
-          ]
-        },
-        {
-          "name": "float_2",
-          "type": "FLOAT",
-          "links": null
+          "label": "值2",
+          "name": "value2",
+          "type": "*",
+          "links": []
         }
       ],
       "properties": {
-        "cnr_id": "comfyui_essentials",
-        "ver": "9d9f4bedfc9f0321c19faf71855e228c93bd0dc9",
-        "Node name for S&R": "SimpleMathDual+"
+        "cnr_id": "comfyui-easy-use",
+        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
+        "Node name for S&R": "easy forLoopEnd"
+      },
+      "widgets_values": [],
+      "color": "#1f1f48",
+      "bgcolor": "rgba(24,24,27,.9)"
+    },
+    {
+      "id": 73,
+      "type": "easy batchAnything",
+      "pos": [
+        2591.011655308863,
+        3283.427993528199
+      ],
+      "size": [
+        140,
+        46
+      ],
+      "flags": {},
+      "order": 84,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "任意_1",
+          "name": "any_1",
+          "type": "*",
+          "link": 129
+        },
+        {
+          "label": "任意_2",
+          "name": "any_2",
+          "type": "*",
+          "link": 130
+        }
+      ],
+      "outputs": [
+        {
+          "name": "batch",
+          "type": "*",
+          "links": [
+            131
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
+        "Node name for S&R": "easy batchAnything"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 69,
+      "type": "easy forLoopStart",
+      "pos": [
+        2265.8148482518295,
+        3209.4940119665544
+      ],
+      "size": [
+        270,
+        138
+      ],
+      "flags": {},
+      "order": 30,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "初始值1",
+          "name": "initial_value1",
+          "shape": 7,
+          "type": "*",
+          "link": null
+        },
+        {
+          "label": "总量",
+          "name": "total",
+          "type": "INT",
+          "widget": {
+            "name": "total"
+          },
+          "link": 448
+        },
+        {
+          "label": "初始值2",
+          "name": "initial_value2",
+          "type": "*",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "流",
+          "name": "flow",
+          "shape": 5,
+          "type": "FLOW_CONTROL",
+          "links": [
+            115
+          ]
+        },
+        {
+          "label": "索引",
+          "name": "index",
+          "type": "INT",
+          "links": [
+            449
+          ]
+        },
+        {
+          "label": "值1",
+          "name": "value1",
+          "type": "*",
+          "links": [
+            129
+          ]
+        },
+        {
+          "label": "值2",
+          "name": "value2",
+          "type": "*",
+          "links": []
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
+        "Node name for S&R": "easy forLoopStart"
       },
       "widgets_values": [
-        "a/2",
-        "b/2"
-      ]
+        1
+      ],
+      "color": "#1f1f48",
+      "bgcolor": "rgba(24,24,27,.9)"
     },
     {
       "id": 51,
       "type": "easy timelineInfoOutput",
       "pos": [
-        766.7604944104921,
-        4087.9667984551156
+        669.5218241842819,
+        4126.1016885904155
       ],
       "size": [
         228,
         168
       ],
       "flags": {},
-      "order": 23,
+      "order": 26,
       "mode": 0,
       "inputs": [
         {
           "name": "timeline_info",
           "type": "TIMELINE_INFO",
-          "link": 88
+          "link": 537
         }
       ],
       "outputs": [
@@ -3703,170 +4479,21 @@
         }
       ],
       "properties": {
-        "aux_id": "yolain/ComfyUI-Easy-Media",
+        "cnr_id": "comfyui-easy-media",
         "ver": "0a61e3c1d5e0eab4f317a90e7340c484a8349e10",
-        "Node name for S&R": "easy timelineInfoOutput"
+        "Node name for S&R": "easy timelineInfoOutput",
+        "aux_id": "yolain/ComfyUI-Easy-Media"
       },
       "widgets_values": [
         "promptRelay"
       ]
     },
     {
-      "id": 35,
-      "type": "LoraLoaderModelOnly",
-      "pos": [
-        2232,
-        4356
-      ],
-      "size": [
-        291.9295349121094,
-        83.55774688720703
-      ],
-      "flags": {},
-      "order": 32,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "模型",
-          "name": "model",
-          "type": "MODEL",
-          "link": 62
-        },
-        {
-          "label": "lora_name",
-          "name": "lora_name",
-          "type": "COMBO",
-          "widget": {
-            "name": "lora_name"
-          },
-          "link": null
-        },
-        {
-          "label": "strength_model",
-          "name": "strength_model",
-          "type": "FLOAT",
-          "widget": {
-            "name": "strength_model"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "label": "模型",
-          "name": "MODEL",
-          "type": "MODEL",
-          "links": [
-            79
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.3.75",
-        "Node name for S&R": "LoraLoaderModelOnly",
-        "hasSecondTab": false,
-        "models": [
-          {
-            "name": "ltx-2.3-22b-distilled-lora-384.safetensors",
-            "directory": "loras",
-            "url": "https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-22b-distilled-lora-384.safetensors"
-          }
-        ],
-        "widget_ue_connectable": {},
-        "secondTabText": "Send Back",
-        "enableTabs": false,
-        "secondTabOffset": 80,
-        "tabWidth": 65,
-        "secondTabWidth": 65,
-        "tabXOffset": 10
-      },
-      "widgets_values": [
-        "Singularity LTX-2.3  OmniCine Preview v0.1.safetensors",
-        1
-      ]
-    },
-    {
-      "id": 45,
-      "type": "LoraLoaderModelOnly",
-      "pos": [
-        2244,
-        4524
-      ],
-      "size": [
-        291.9295349121094,
-        83.55774688720703
-      ],
-      "flags": {},
-      "order": 38,
-      "mode": 4,
-      "inputs": [
-        {
-          "label": "模型",
-          "name": "model",
-          "type": "MODEL",
-          "link": 79
-        },
-        {
-          "label": "lora_name",
-          "name": "lora_name",
-          "type": "COMBO",
-          "widget": {
-            "name": "lora_name"
-          },
-          "link": null
-        },
-        {
-          "label": "strength_model",
-          "name": "strength_model",
-          "type": "FLOAT",
-          "widget": {
-            "name": "strength_model"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "label": "模型",
-          "name": "MODEL",
-          "type": "MODEL",
-          "links": [
-            63
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.3.75",
-        "Node name for S&R": "LoraLoaderModelOnly",
-        "hasSecondTab": false,
-        "models": [
-          {
-            "name": "ltx-2.3-22b-distilled-lora-384.safetensors",
-            "directory": "loras",
-            "url": "https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-22b-distilled-lora-384.safetensors"
-          }
-        ],
-        "widget_ue_connectable": {},
-        "secondTabText": "Send Back",
-        "enableTabs": false,
-        "secondTabOffset": 80,
-        "tabWidth": 65,
-        "secondTabWidth": 65,
-        "tabXOffset": 10
-      },
-      "widgets_values": [
-        "ltx2亚洲人像美学V2.safetensors",
-        0.4
-      ]
-    },
-    {
       "id": 60,
       "type": "PrimitiveBoolean",
       "pos": [
-        758.6792573289945,
-        3981.899659869192
+        667.86058313297,
+        4017.618670472315
       ],
       "size": [
         228,
@@ -3881,8 +4508,7 @@
           "name": "BOOLEAN",
           "type": "BOOLEAN",
           "links": [
-            95,
-            98
+            486
           ]
         }
       ],
@@ -3897,15 +4523,70 @@
       ]
     },
     {
-      "id": 47,
-      "type": "PrimitiveInt",
+      "id": 193,
+      "type": "easy ifElse",
       "pos": [
-        475.97346845180715,
-        3898.9798765938644
+        1659.7456035509647,
+        3672.7620358622235
       ],
       "size": [
-        211.2781143865302,
-        82
+        210,
+        78
+      ],
+      "flags": {},
+      "order": 88,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "真时",
+          "name": "on_true",
+          "type": "*",
+          "link": 542
+        },
+        {
+          "label": "假时",
+          "name": "on_false",
+          "type": "*",
+          "link": 529
+        },
+        {
+          "label": "布尔",
+          "name": "boolean",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "boolean"
+          },
+          "link": 527
+        }
+      ],
+      "outputs": [
+        {
+          "name": "*",
+          "type": "*",
+          "links": [
+            530
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "625efbfa2fc20c31797dfffcbb41a26b6d91ab7b",
+        "Node name for S&R": "easy ifElse"
+      },
+      "widgets_values": [
+        false
+      ]
+    },
+    {
+      "id": 37,
+      "type": "PrimitiveBoolean",
+      "pos": [
+        670.9510919163383,
+        3907.5929653387734
+      ],
+      "size": [
+        228,
+        58
       ],
       "flags": {},
       "order": 17,
@@ -3913,348 +4594,37 @@
       "inputs": [],
       "outputs": [
         {
-          "name": "INT",
-          "type": "INT",
-          "links": [
-            49
-          ]
-        }
-      ],
-      "title": "Stage1 Seed",
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.21.1",
-        "Node name for S&R": "PrimitiveInt"
-      },
-      "widgets_values": [
-        328075966653293,
-        "randomize"
-      ]
-    },
-    {
-      "id": 48,
-      "type": "PrimitiveInt",
-      "pos": [
-        475.97346845180715,
-        4035.904715055023
-      ],
-      "size": [
-        210,
-        82
-      ],
-      "flags": {},
-      "order": 18,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "INT",
-          "type": "INT",
-          "links": [
-            50
-          ]
-        }
-      ],
-      "title": "Stage2 Seed",
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.21.1",
-        "Node name for S&R": "PrimitiveInt"
-      },
-      "widgets_values": [
-        388427622322584,
-        "randomize"
-      ]
-    },
-    {
-      "id": 81,
-      "type": "easy timelineSegmentOutput",
-      "pos": [
-        2748,
-        3360
-      ],
-      "size": [
-        253.5191685789846,
-        202
-      ],
-      "flags": {},
-      "order": 31,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "timeline_info",
-          "type": "TIMELINE_INFO",
-          "link": 147
-        },
-        {
-          "name": "images",
-          "shape": 7,
-          "type": "IMAGE",
-          "link": 148
-        },
-        {
-          "name": "audio",
-          "shape": 7,
-          "type": "AUDIO",
-          "link": 149
-        },
-        {
-          "name": "segment_index",
-          "type": "INT",
-          "widget": {
-            "name": "segment_index"
-          },
-          "link": 449
-        }
-      ],
-      "outputs": [
-        {
-          "name": "PROMPT",
-          "type": "STRING",
-          "links": [
-            151
-          ]
-        },
-        {
-          "name": "TYPE",
-          "type": "INT",
-          "links": [
-            152,
-            185,
-            447
-          ]
-        },
-        {
-          "name": "NO_IMAGES",
+          "name": "BOOLEAN",
           "type": "BOOLEAN",
           "links": [
-            153,
-            257
-          ]
-        },
-        {
-          "name": "IMAGE_INDEXES",
-          "type": "STRING",
-          "links": [
-            154,
-            187
-          ]
-        },
-        {
-          "name": "LENGTH",
-          "type": "INT",
-          "links": [
-            419,
-            439,
-            441
-          ]
-        },
-        {
-          "name": "IMAGES",
-          "type": "IMAGE",
-          "links": [
-            159,
-            160,
-            175,
-            376
-          ]
-        },
-        {
-          "name": "AUDIO",
-          "type": "AUDIO",
-          "links": [
-            158,
-            163
+            106,
+            501
           ]
         }
       ],
+      "title": "Using Editor Audio",
       "properties": {
-        "aux_id": "yolain/ComfyUI-Easy-Media",
-        "ver": "5fa488975649802387ec37c779d1e80fd25c60ee",
-        "Node name for S&R": "easy timelineSegmentOutput"
+        "cnr_id": "comfy-core",
+        "ver": "0.21.1",
+        "Node name for S&R": "PrimitiveBoolean"
       },
       "widgets_values": [
-        "default",
-        0
-      ]
-    },
-    {
-      "id": 67,
-      "type": "easy timelineSegmentCount",
-      "pos": [
-        2121.1312687266773,
-        3495.7866466563546
-      ],
-      "size": [
-        202.6021484375,
-        26
-      ],
-      "flags": {},
-      "order": 24,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "timeline_info",
-          "type": "TIMELINE_INFO",
-          "link": 113
-        }
-      ],
-      "outputs": [
-        {
-          "name": "COUNT",
-          "type": "INT",
-          "links": [
-            448
-          ]
-        }
-      ],
-      "properties": {
-        "aux_id": "yolain/ComfyUI-Easy-Media",
-        "ver": "b696c5485eedd910f343300fbf0dfac941eadca4",
-        "Node name for S&R": "easy timelineSegmentCount"
-      },
-      "widgets_values": []
-    },
-    {
-      "id": 69,
-      "type": "easy forLoopStart",
-      "pos": [
-        2364.2614123345893,
-        3324.0512716548596
-      ],
-      "size": [
-        270,
-        118
-      ],
-      "flags": {},
-      "order": 28,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "initial_value1",
-          "shape": 7,
-          "type": "*",
-          "link": null
-        },
-        {
-          "name": "total",
-          "type": "INT",
-          "widget": {
-            "name": "total"
-          },
-          "link": 448
-        },
-        {
-          "name": "initial_value2",
-          "type": "*",
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "flow",
-          "shape": 5,
-          "type": "FLOW_CONTROL",
-          "links": [
-            115
-          ]
-        },
-        {
-          "name": "index",
-          "type": "INT",
-          "links": [
-            449
-          ]
-        },
-        {
-          "name": "value1",
-          "type": "*",
-          "links": [
-            129
-          ]
-        },
-        {
-          "name": "value2",
-          "type": "*",
-          "links": null
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy forLoopStart"
-      },
-      "widgets_values": [
-        1
-      ],
-      "color": "#1f1f48",
-      "bgcolor": "rgba(24,24,27,.9)"
-    },
-    {
-      "id": 66,
-      "type": "easy saveVideo",
-      "pos": [
-        1209.7873801811447,
-        3897.4629631561256
-      ],
-      "size": [
-        769.6631944576147,
-        126
-      ],
-      "flags": {},
-      "order": 92,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "video",
-          "name": "input_mode.video",
-          "type": "VIDEO",
-          "link": 134
-        },
-        {
-          "label": "audio",
-          "name": "input_mode.audio",
-          "shape": 7,
-          "type": "AUDIO",
-          "link": 440
-        }
-      ],
-      "outputs": [
-        {
-          "name": "VIDEO",
-          "type": "VIDEO",
-          "links": null
-        },
-        {
-          "name": "file_path",
-          "type": "STRING",
-          "links": null
-        }
-      ],
-      "properties": {
-        "aux_id": "yolain/ComfyUI-Easy-Media",
-        "ver": "b696c5485eedd910f343300fbf0dfac941eadca4",
-        "Node name for S&R": "easy saveVideo"
-      },
-      "widgets_values": [
-        "video",
-        "preview_only",
-        "ltx2.3/loop"
+        false
       ]
     },
     {
       "id": 72,
       "type": "easy saveVideo",
       "pos": [
-        1246.659568274311,
-        4645.54644323424
+        1246.7948557424647,
+        4651.526459178493
       ],
       "size": [
         716.9602125326728,
-        150
+        524.3787800174255
       ],
       "flags": {},
-      "order": 86,
+      "order": 83,
       "mode": 0,
       "inputs": [
         {
@@ -4295,9 +4665,10 @@
         }
       ],
       "properties": {
-        "aux_id": "yolain/ComfyUI-Easy-Media",
+        "cnr_id": "comfyui-easy-media",
         "ver": "b696c5485eedd910f343300fbf0dfac941eadca4",
-        "Node name for S&R": "easy saveVideo"
+        "Node name for S&R": "easy saveVideo",
+        "aux_id": "yolain/ComfyUI-Easy-Media"
       },
       "widgets_values": [
         "images+audio",
@@ -4307,15 +4678,50 @@
       ]
     },
     {
-      "id": 56,
-      "type": "easy timelineEditor",
+      "id": 47,
+      "type": "PrimitiveInt",
       "pos": [
-        438.5168756830062,
-        4306.854490885655
+        436.4768531178189,
+        3904.811168972575
       ],
       "size": [
-        686.1623737437588,
-        330
+        211.2781143865302,
+        82
+      ],
+      "flags": {},
+      "order": 18,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "INT",
+          "type": "INT",
+          "links": [
+            49
+          ]
+        }
+      ],
+      "title": "Stage1 Seed",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.21.1",
+        "Node name for S&R": "PrimitiveInt"
+      },
+      "widgets_values": [
+        42,
+        "randomize"
+      ]
+    },
+    {
+      "id": 48,
+      "type": "PrimitiveInt",
+      "pos": [
+        440.6267685363615,
+        4049.809135759335
+      ],
+      "size": [
+        210,
+        82
       ],
       "flags": {},
       "order": 19,
@@ -4323,526 +4729,43 @@
       "inputs": [],
       "outputs": [
         {
-          "name": "TIMELINE_INFO",
-          "type": "TIMELINE_INFO",
-          "links": [
-            88,
-            113,
-            147
-          ]
-        },
-        {
-          "name": "IMAGES",
-          "type": "IMAGE",
-          "links": [
-            148
-          ]
-        },
-        {
-          "name": "AUDIO",
-          "type": "AUDIO",
-          "links": [
-            149,
-            440
-          ]
-        }
-      ],
-      "properties": {
-        "aux_id": "yolain/ComfyUI-Easy-Media",
-        "ver": "0a61e3c1d5e0eab4f317a90e7340c484a8349e10",
-        "Node name for S&R": "easy timelineEditor"
-      },
-      "widgets_values": [
-        "1280 x 720 (16:9)",
-        "crop",
-        "LTXV",
-        "{\"tracks\":[{\"id\":\"mp8s7dhk-6x9yhzrew\",\"name\":\"主轨 1\",\"type\":\"maintain\",\"color\":\"var(--secondary)\",\"muted\":false,\"locked\":false,\"segments\":[{\"id\":\"mpca74sq-awn1dvs69\",\"start_frame\":0,\"end_frame\":160,\"content\":{\"text\":\"\",\"images\":[],\"type\":\"flf\"},\"color\":\"var(--secondary)\"},{\"id\":\"mpcpsunq-ycf7ee9hr\",\"start_frame\":161,\"end_frame\":320,\"content\":{\"text\":\"\",\"images\":[],\"type\":\"flf\"},\"color\":\"var(--secondary)\"},{\"id\":\"mpcpsx44-ej5oso0kv\",\"start_frame\":321,\"end_frame\":480,\"content\":{\"text\":\"\",\"images\":[],\"type\":\"flf\"},\"color\":\"var(--secondary)\"}]},{\"id\":\"mp8s7dhk-asohlhtdl\",\"name\":\"音频轨 1\",\"type\":\"audio\",\"color\":\"#34d399\",\"muted\":false,\"locked\":false,\"segments\":[]}],\"total_length\":481,\"frame_rate\":24}"
-      ]
-    },
-    {
-      "id": 49,
-      "type": "ImageResizeKJv2",
-      "pos": [
-        1191.6798361023689,
-        3426.7874804208004
-      ],
-      "size": [
-        270,
-        336
-      ],
-      "flags": {},
-      "order": 82,
-      "mode": 4,
-      "inputs": [
-        {
-          "name": "image",
-          "type": "IMAGE",
-          "link": 360
-        },
-        {
-          "name": "mask",
-          "shape": 7,
-          "type": "MASK",
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            283
-          ]
-        },
-        {
-          "name": "width",
+          "name": "INT",
           "type": "INT",
-          "links": null
-        },
-        {
-          "name": "height",
-          "type": "INT",
-          "links": null
-        },
-        {
-          "name": "mask",
-          "type": "MASK",
-          "links": null
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-kjnodes",
-        "ver": "e56b3061ed49251a7b8a5450a2e18295548ea7a1",
-        "Node name for S&R": "ImageResizeKJv2"
-      },
-      "widgets_values": [
-        1920,
-        1920,
-        "nvidia_rtx_vsr",
-        "resize",
-        "0, 0, 0",
-        "center",
-        2,
-        "cpu"
-      ]
-    },
-    {
-      "id": 27,
-      "type": "LTXVAddGuidesFromBatchIndexes",
-      "pos": [
-        3467.922848640876,
-        4022.502307449788
-      ],
-      "size": [
-        269.4234375,
-        186
-      ],
-      "flags": {},
-      "order": 63,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "positive",
-          "type": "CONDITIONING",
-          "link": 42
-        },
-        {
-          "name": "negative",
-          "type": "CONDITIONING",
-          "link": 43
-        },
-        {
-          "name": "vae",
-          "type": "VAE",
-          "link": 44
-        },
-        {
-          "name": "latent",
-          "type": "LATENT",
-          "link": 45
-        },
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "link": 175
-        },
-        {
-          "name": "image_indexes",
-          "type": "STRING",
-          "widget": {
-            "name": "image_indexes"
-          },
-          "link": 184
-        }
-      ],
-      "outputs": [
-        {
-          "name": "positive",
-          "type": "CONDITIONING",
           "links": [
-            411,
-            412,
-            450
-          ]
-        },
-        {
-          "name": "negative",
-          "type": "CONDITIONING",
-          "links": [
-            409,
-            410,
-            451
-          ]
-        },
-        {
-          "name": "latent",
-          "type": "LATENT",
-          "links": [
-            408
+            50
           ]
         }
       ],
-      "properties": {
-        "aux_id": "yolain/ComfyUI-Easy-Media",
-        "ver": "0a61e3c1d5e0eab4f317a90e7340c484a8349e10",
-        "Node name for S&R": "LTXVAddGuidesFromBatchIndexes"
-      },
-      "widgets_values": [
-        0,
-        "",
-        1
-      ]
-    },
-    {
-      "id": 18,
-      "type": "LTXVCropGuides",
-      "pos": [
-        4044.9291582412607,
-        4845.971254354772
-      ],
-      "size": [
-        180,
-        70
-      ],
-      "flags": {},
-      "order": 78,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "positive",
-          "name": "positive",
-          "type": "CONDITIONING",
-          "link": 450
-        },
-        {
-          "label": "negative",
-          "name": "negative",
-          "type": "CONDITIONING",
-          "link": 451
-        },
-        {
-          "label": "latent",
-          "name": "latent",
-          "type": "LATENT",
-          "link": 30
-        }
-      ],
-      "outputs": [
-        {
-          "label": "positive",
-          "name": "positive",
-          "type": "CONDITIONING"
-        },
-        {
-          "label": "negative",
-          "name": "negative",
-          "type": "CONDITIONING"
-        },
-        {
-          "label": "latent",
-          "name": "latent",
-          "type": "LATENT",
-          "links": [
-            364
-          ]
-        }
-      ],
+      "title": "Stage2 Seed",
       "properties": {
         "cnr_id": "comfy-core",
-        "ver": "0.19.3",
-        "Node name for S&R": "LTXVCropGuides",
-        "widget_ue_connectable": {}
-      },
-      "widgets_values": []
-    },
-    {
-      "id": 30,
-      "type": "RandomNoise",
-      "pos": [
-        3768.581220556796,
-        4069.201849660619
-      ],
-      "size": [
-        210,
-        83.07677106752226
-      ],
-      "flags": {
-        "collapsed": false
-      },
-      "order": 21,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "noise_seed",
-          "name": "noise_seed",
-          "type": "INT",
-          "widget": {
-            "name": "noise_seed"
-          },
-          "link": 49
-        }
-      ],
-      "outputs": [
-        {
-          "label": "噪波生成",
-          "name": "NOISE",
-          "type": "NOISE",
-          "links": [
-            51
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.19.3",
-        "Node name for S&R": "RandomNoise",
-        "widget_ue_connectable": {}
+        "ver": "0.21.1",
+        "Node name for S&R": "PrimitiveInt"
       },
       "widgets_values": [
-        793992093166817,
-        "fixed"
-      ]
-    },
-    {
-      "id": 20,
-      "type": "CFGGuider",
-      "pos": [
-        3740.8042014034254,
-        4772.911786984938
-      ],
-      "size": [
-        210,
-        100
-      ],
-      "flags": {},
-      "order": 74,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "模型",
-          "name": "model",
-          "type": "MODEL",
-          "link": 335
-        },
-        {
-          "label": "正面条件",
-          "name": "positive",
-          "type": "CONDITIONING",
-          "link": 403
-        },
-        {
-          "label": "负面条件",
-          "name": "negative",
-          "type": "CONDITIONING",
-          "link": 405
-        },
-        {
-          "label": "cfg",
-          "name": "cfg",
-          "type": "FLOAT",
-          "widget": {
-            "name": "cfg"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "label": "引导",
-          "name": "GUIDER",
-          "type": "GUIDER",
-          "links": [
-            17
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.3.64",
-        "Node name for S&R": "CFGGuider",
-        "hasSecondTab": false,
-        "widget_ue_connectable": {},
-        "secondTabText": "Send Back",
-        "enableTabs": false,
-        "secondTabOffset": 80,
-        "tabWidth": 65,
-        "secondTabWidth": 65,
-        "tabXOffset": 10
-      },
-      "widgets_values": [
-        1
-      ]
-    },
-    {
-      "id": 19,
-      "type": "LTXVSeparateAVLatent",
-      "pos": [
-        3756.0454503590977,
-        4954.0484057138965
-      ],
-      "size": [
-        193.2916015625,
-        49.757194980424174
-      ],
-      "flags": {},
-      "order": 77,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "av_latent",
-          "name": "av_latent",
-          "type": "LATENT",
-          "link": 389
-        }
-      ],
-      "outputs": [
-        {
-          "label": "video_latent",
-          "name": "video_latent",
-          "type": "LATENT",
-          "links": [
-            30
-          ]
-        },
-        {
-          "label": "audio_latent",
-          "name": "audio_latent",
-          "type": "LATENT",
-          "links": [
-            354
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.16.0",
-        "Node name for S&R": "LTXVSeparateAVLatent",
-        "widget_ue_connectable": {}
-      },
-      "widgets_values": []
-    },
-    {
-      "id": 148,
-      "type": "LTXVAddGuidesFromBatchIndexes",
-      "pos": [
-        3455.1083452117487,
-        4872.653371112653
-      ],
-      "size": [
-        269.4234375,
-        186
-      ],
-      "flags": {},
-      "order": 73,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "positive",
-          "type": "CONDITIONING",
-          "link": 378
-        },
-        {
-          "name": "negative",
-          "type": "CONDITIONING",
-          "link": 379
-        },
-        {
-          "name": "vae",
-          "type": "VAE",
-          "link": 374
-        },
-        {
-          "name": "latent",
-          "type": "LATENT",
-          "link": 380
-        },
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "link": 376
-        },
-        {
-          "name": "image_indexes",
-          "type": "STRING",
-          "widget": {
-            "name": "image_indexes"
-          },
-          "link": 377
-        }
-      ],
-      "outputs": [
-        {
-          "name": "positive",
-          "type": "CONDITIONING",
-          "links": [
-            403
-          ]
-        },
-        {
-          "name": "negative",
-          "type": "CONDITIONING",
-          "links": [
-            405
-          ]
-        },
-        {
-          "name": "latent",
-          "type": "LATENT",
-          "links": [
-            407
-          ]
-        }
-      ],
-      "properties": {
-        "aux_id": "yolain/ComfyUI-Easy-Media",
-        "ver": "0a61e3c1d5e0eab4f317a90e7340c484a8349e10",
-        "Node name for S&R": "LTXVAddGuidesFromBatchIndexes"
-      },
-      "widgets_values": [
-        0,
-        "",
-        1
+        42,
+        "randomize"
       ]
     },
     {
       "id": 74,
       "type": "easy mergeVideosFromPaths",
       "pos": [
-        1820.3631954417508,
-        3690.432453096261
+        1193.5125310893723,
+        3621.5215018399986
       ],
       "size": [
         210.4771484375,
         84
       ],
       "flags": {},
-      "order": 91,
+      "order": 86,
       "mode": 0,
       "inputs": [
         {
           "name": "paths",
           "type": "STRING",
-          "link": 454
+          "link": 133
         }
       ],
       "outputs": [
@@ -4850,196 +4773,250 @@
           "name": "VIDEO",
           "type": "VIDEO",
           "links": [
-            134
+            134,
+            526
           ]
         }
       ],
       "properties": {
-        "aux_id": "yolain/ComfyUI-Easy-Media",
+        "cnr_id": "comfyui-easy-media",
         "ver": "77e4d1c736c50ff9a2c36d30c9d0de73ad8f4b83",
-        "Node name for S&R": "easy mergeVideosFromPaths"
+        "Node name for S&R": "easy mergeVideosFromPaths",
+        "aux_id": "yolain/ComfyUI-Easy-Media"
       },
       "widgets_values": []
     },
     {
-      "id": 167,
-      "type": "LayerUtility: PurgeVRAM V2",
+      "id": 192,
+      "type": "GetVideoComponents",
       "pos": [
-        1567.6625988179906,
-        3689.787298635433
-      ],
-      "size": [
-        228.4146484375,
-        82
-      ],
-      "flags": {},
-      "order": 90,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "anything",
-          "type": "*",
-          "link": 453
-        }
-      ],
-      "outputs": [
-        {
-          "name": "any",
-          "type": "*",
-          "links": [
-            454
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui_layerstyle",
-        "ver": "d94bef1ee5ed3656f5ff1bb2830a4ffd94f40935",
-        "Node name for S&R": "LayerUtility: PurgeVRAM V2"
-      },
-      "widgets_values": [
-        true,
-        true
-      ],
-      "color": "rgba(38, 73, 116, 0.7)"
-    },
-    {
-      "id": 168,
-      "type": "LayerUtility: PurgeVRAM V2",
-      "pos": [
-        3796.0648157598944,
-        3516.9669850732275
-      ],
-      "size": [
-        228.4146484375,
-        82
-      ],
-      "flags": {},
-      "order": 88,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "anything",
-          "type": "*",
-          "link": 456
-        }
-      ],
-      "outputs": [
-        {
-          "name": "any",
-          "type": "*",
-          "links": [
-            455
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui_layerstyle",
-        "ver": "d94bef1ee5ed3656f5ff1bb2830a4ffd94f40935",
-        "Node name for S&R": "LayerUtility: PurgeVRAM V2"
-      },
-      "widgets_values": [
-        true,
-        true
-      ],
-      "color": "rgba(38, 73, 116, 0.7)"
-    },
-    {
-      "id": 73,
-      "type": "easy batchAnything",
-      "pos": [
-        3642.7914459363737,
-        3516.9669850732275
+        1460.7102278268965,
+        3694.641406724262
       ],
       "size": [
         140,
-        46
+        66
       ],
       "flags": {},
       "order": 87,
       "mode": 0,
       "inputs": [
         {
-          "name": "any_1",
-          "type": "*",
-          "link": 129
-        },
-        {
-          "name": "any_2",
-          "type": "*",
-          "link": 130
+          "name": "video",
+          "type": "VIDEO",
+          "link": 526
         }
       ],
       "outputs": [
         {
-          "name": "batch",
-          "type": "*",
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
           "links": [
-            456
+            529
           ]
+        },
+        {
+          "name": "fps",
+          "type": "FLOAT",
+          "links": null
         }
       ],
       "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy batchAnything"
+        "cnr_id": "comfy-core",
+        "ver": "0.22.0",
+        "Node name for S&R": "GetVideoComponents"
       },
       "widgets_values": []
     },
     {
-      "id": 70,
-      "type": "easy forLoopEnd",
+      "id": 66,
+      "type": "easy saveVideo",
       "pos": [
-        4056,
-        3492
+        1228.036211810359,
+        3938.968706089385
       ],
       "size": [
-        164.203125,
-        66
+        769.6631944576147,
+        528.4870370440613
       ],
       "flags": {},
       "order": 89,
       "mode": 0,
       "inputs": [
         {
-          "name": "flow",
-          "shape": 5,
-          "type": "FLOW_CONTROL",
-          "link": 115
+          "label": "video",
+          "name": "input_mode.video",
+          "type": "VIDEO",
+          "link": 134
         },
         {
-          "name": "initial_value1",
+          "label": "audio",
+          "name": "input_mode.audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": 530
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": null
+        },
+        {
+          "name": "file_path",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-media",
+        "ver": "b696c5485eedd910f343300fbf0dfac941eadca4",
+        "Node name for S&R": "easy saveVideo",
+        "aux_id": "yolain/ComfyUI-Easy-Media"
+      },
+      "widgets_values": [
+        "video",
+        "preview_only",
+        "ltx2.3/loop"
+      ]
+    },
+    {
+      "id": 195,
+      "type": "MarkdownNote",
+      "pos": [
+        914.4333258554173,
+        4014.111741524895
+      ],
+      "size": [
+        225.08190435753522,
+        153.8623952093767
+      ],
+      "flags": {},
+      "order": 20,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "title": "Markdown注释",
+      "properties": {},
+      "widgets_values": [
+        "## 如果你是用来制作长MV视频建议开启 `Override Audio`\n\n## If you're creating a long music video, we recommend enabling `Override Audio`."
+      ],
+      "color": "#c09430",
+      "bgcolor": "rgba(24,24,27,.9)"
+    },
+    {
+      "id": 56,
+      "type": "easy timelineEditor",
+      "pos": [
+        448.7648334423996,
+        4336.242473215747
+      ],
+      "size": [
+        679.8616345694792,
+        431.16834304207896
+      ],
+      "flags": {},
+      "order": 21,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "prompt_override",
           "shape": 7,
           "type": "*",
-          "link": 455
+          "link": null
         },
         {
-          "name": "initial_value2",
-          "type": "*",
+          "name": "image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
           "link": null
         }
       ],
       "outputs": [
         {
-          "name": "value1",
-          "type": "*",
+          "name": "TIMELINE_INFO",
+          "type": "TIMELINE_INFO",
           "links": [
-            453
+            537,
+            538,
+            539
           ]
         },
         {
-          "name": "value2",
-          "type": "*",
-          "links": null
+          "name": "IMAGES",
+          "type": "IMAGE",
+          "links": [
+            540
+          ]
+        },
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "links": [
+            541,
+            542
+          ]
         }
       ],
       "properties": {
-        "cnr_id": "comfyui-easy-use",
-        "ver": "130c1b5796d9876a5f853fa0bea88e808cfda4ad",
-        "Node name for S&R": "easy forLoopEnd"
+        "easyMediaTimelineHeight": 431.16834304207896,
+        "cnr_id": "comfyui-easy-media",
+        "ver": "0a61e3c1d5e0eab4f317a90e7340c484a8349e10",
+        "Node name for S&R": "easy timelineEditor",
+        "aux_id": "yolain/ComfyUI-Easy-Media"
       },
-      "widgets_values": [],
-      "color": "#1f1f48",
-      "bgcolor": "rgba(24,24,27,.9)"
+      "widgets_values": [
+        "960 x 544 (16:9)",
+        "stretch",
+        "LTXV",
+        "{\"tracks\":[{\"id\":\"mp8s7dhk-6x9yhzrew\",\"name\":\"主轨 1\",\"type\":\"maintain\",\"color\":\"var(--secondary)\",\"muted\":false,\"locked\":false,\"segments\":[]},{\"id\":\"mp8s7dhk-asohlhtdl\",\"name\":\"音频轨 1\",\"type\":\"audio\",\"color\":\"#34d399\",\"muted\":false,\"locked\":false,\"segments\":[]}],\"total_length\":361,\"frame_rate\":24}"
+      ]
+    },
+    {
+      "id": 191,
+      "type": "PrimitiveBoolean",
+      "pos": [
+        913.1962318440723,
+        3907.518672928033
+      ],
+      "size": [
+        228,
+        58
+      ],
+      "flags": {},
+      "order": 22,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "BOOLEAN",
+          "type": "BOOLEAN",
+          "links": [
+            527
+          ]
+        }
+      ],
+      "title": "Override Audio",
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.21.1",
+        "Node name for S&R": "PrimitiveBoolean"
+      },
+      "widgets_values": [
+        false
+      ]
     }
   ],
   "links": [
@@ -5196,22 +5173,6 @@
       "VAE"
     ],
     [
-      45,
-      5,
-      0,
-      27,
-      3,
-      "LATENT"
-    ],
-    [
-      48,
-      36,
-      0,
-      29,
-      0,
-      "MODEL"
-    ],
-    [
       49,
       47,
       0,
@@ -5284,42 +5245,10 @@
       "FLOAT"
     ],
     [
-      59,
-      43,
-      0,
-      34,
-      0,
-      "LATENT"
-    ],
-    [
-      60,
-      42,
-      0,
-      34,
-      1,
-      "LATENT"
-    ],
-    [
-      61,
-      37,
-      0,
-      34,
-      2,
-      "BOOLEAN"
-    ],
-    [
       62,
       53,
       0,
       35,
-      0,
-      "MODEL"
-    ],
-    [
-      63,
-      45,
-      0,
-      36,
       0,
       "MODEL"
     ],
@@ -5354,22 +5283,6 @@
       41,
       1,
       "VAE"
-    ],
-    [
-      72,
-      3,
-      0,
-      42,
-      0,
-      "VAE"
-    ],
-    [
-      74,
-      54,
-      0,
-      42,
-      2,
-      "INT"
     ],
     [
       76,
@@ -5420,14 +5333,6 @@
       "CLIP"
     ],
     [
-      82,
-      5,
-      0,
-      46,
-      2,
-      "LATENT"
-    ],
-    [
       84,
       52,
       0,
@@ -5442,14 +5347,6 @@
       50,
       1,
       "VAE"
-    ],
-    [
-      88,
-      56,
-      0,
-      51,
-      0,
-      "TIMELINE_INFO"
     ],
     [
       89,
@@ -5500,28 +5397,12 @@
       "AUDIO"
     ],
     [
-      95,
-      60,
-      0,
-      57,
-      2,
-      "BOOLEAN"
-    ],
-    [
       96,
       50,
       0,
       58,
       0,
       "IMAGE"
-    ],
-    [
-      98,
-      60,
-      0,
-      58,
-      2,
-      "BOOLEAN"
     ],
     [
       104,
@@ -5546,14 +5427,6 @@
       63,
       0,
       "SIGMAS"
-    ],
-    [
-      113,
-      56,
-      0,
-      67,
-      0,
-      "TIMELINE_INFO"
     ],
     [
       115,
@@ -5588,12 +5461,28 @@
       "STRING"
     ],
     [
+      131,
+      73,
+      0,
+      70,
+      1,
+      "*"
+    ],
+    [
       132,
       51,
       4,
       72,
       0,
       "FLOAT"
+    ],
+    [
+      133,
+      70,
+      0,
+      74,
+      0,
+      "STRING"
     ],
     [
       134,
@@ -5642,30 +5531,6 @@
       76,
       2,
       "BOOLEAN"
-    ],
-    [
-      147,
-      56,
-      0,
-      81,
-      0,
-      "TIMELINE_INFO"
-    ],
-    [
-      148,
-      56,
-      1,
-      81,
-      1,
-      "IMAGE"
-    ],
-    [
-      149,
-      56,
-      2,
-      81,
-      2,
-      "AUDIO"
     ],
     [
       151,
@@ -5732,14 +5597,6 @@
       "AUDIO"
     ],
     [
-      175,
-      81,
-      5,
-      27,
-      4,
-      "IMAGE"
-    ],
-    [
       184,
       94,
       0,
@@ -5780,126 +5637,6 @@
       "*"
     ],
     [
-      232,
-      78,
-      0,
-      113,
-      0,
-      "INT"
-    ],
-    [
-      235,
-      113,
-      1,
-      114,
-      0,
-      "INT"
-    ],
-    [
-      236,
-      113,
-      2,
-      114,
-      1,
-      "*"
-    ],
-    [
-      237,
-      113,
-      3,
-      115,
-      0,
-      "*"
-    ],
-    [
-      238,
-      114,
-      0,
-      116,
-      0,
-      "INT"
-    ],
-    [
-      239,
-      113,
-      3,
-      118,
-      0,
-      "STRING"
-    ],
-    [
-      240,
-      116,
-      0,
-      118,
-      1,
-      "STRING"
-    ],
-    [
-      241,
-      115,
-      0,
-      119,
-      2,
-      "BOOLEAN"
-    ],
-    [
-      242,
-      118,
-      0,
-      119,
-      1,
-      "STRING"
-    ],
-    [
-      243,
-      116,
-      0,
-      119,
-      0,
-      "*"
-    ],
-    [
-      244,
-      119,
-      0,
-      117,
-      2,
-      "*"
-    ],
-    [
-      245,
-      113,
-      0,
-      117,
-      0,
-      "FLOW_CONTROL"
-    ],
-    [
-      247,
-      113,
-      2,
-      117,
-      1,
-      "*"
-    ],
-    [
-      248,
-      78,
-      0,
-      113,
-      1,
-      "INT"
-    ],
-    [
-      249,
-      117,
-      1,
-      94,
-      3,
-      "*"
-    ],
-    [
       251,
       4,
       1,
@@ -5914,14 +5651,6 @@
       15,
       3,
       "BOOLEAN"
-    ],
-    [
-      283,
-      49,
-      0,
-      58,
-      1,
-      "IMAGE"
     ],
     [
       285,
@@ -6010,14 +5739,6 @@
       127,
       1,
       "VAE"
-    ],
-    [
-      360,
-      127,
-      0,
-      49,
-      0,
-      "IMAGE"
     ],
     [
       361,
@@ -6116,11 +5837,27 @@
       "CONDITIONING"
     ],
     [
+      404,
+      148,
+      0,
+      18,
+      0,
+      "CONDITIONING"
+    ],
+    [
       405,
       148,
       1,
       20,
       2,
+      "CONDITIONING"
+    ],
+    [
+      406,
+      148,
+      1,
+      18,
+      1,
       "CONDITIONING"
     ],
     [
@@ -6180,46 +5917,6 @@
       "INT"
     ],
     [
-      416,
-      154,
-      0,
-      153,
-      2,
-      "BOOLEAN"
-    ],
-    [
-      418,
-      156,
-      0,
-      153,
-      0,
-      "INT"
-    ],
-    [
-      419,
-      81,
-      4,
-      153,
-      1,
-      "INT"
-    ],
-    [
-      421,
-      153,
-      0,
-      7,
-      2,
-      "INT"
-    ],
-    [
-      422,
-      153,
-      0,
-      42,
-      1,
-      "INT"
-    ],
-    [
       424,
       3,
       0,
@@ -6232,16 +5929,8 @@
       54,
       0,
       158,
-      1,
-      "INT"
-    ],
-    [
-      427,
-      154,
-      0,
-      159,
       2,
-      "BOOLEAN"
+      "INT"
     ],
     [
       435,
@@ -6252,68 +5941,12 @@
       "LATENT"
     ],
     [
-      436,
-      159,
-      0,
-      26,
-      1,
-      "LATENT"
-    ],
-    [
-      438,
-      34,
-      0,
-      159,
-      1,
-      "*"
-    ],
-    [
       439,
       81,
       4,
       142,
-      2,
+      3,
       "INT"
-    ],
-    [
-      440,
-      56,
-      2,
-      66,
-      1,
-      "AUDIO"
-    ],
-    [
-      441,
-      81,
-      4,
-      156,
-      0,
-      "INT"
-    ],
-    [
-      442,
-      34,
-      0,
-      165,
-      1,
-      "*"
-    ],
-    [
-      443,
-      158,
-      0,
-      165,
-      0,
-      "LATENT"
-    ],
-    [
-      444,
-      165,
-      0,
-      159,
-      0,
-      "*"
     ],
     [
       447,
@@ -6340,52 +5973,340 @@
       "INT"
     ],
     [
-      450,
-      27,
-      0,
-      18,
-      0,
-      "CONDITIONING"
-    ],
-    [
       451,
-      27,
-      1,
-      18,
-      1,
-      "CONDITIONING"
-    ],
-    [
-      453,
-      70,
-      0,
-      167,
-      0,
-      "*"
+      81,
+      4,
+      7,
+      2,
+      "INT"
     ],
     [
       454,
+      81,
+      4,
+      158,
+      1,
+      "INT"
+    ],
+    [
+      463,
+      5,
+      0,
+      167,
+      1,
+      "LATENT"
+    ],
+    [
+      464,
+      7,
+      0,
       167,
       0,
-      74,
+      "LATENT"
+    ],
+    [
+      465,
+      167,
       0,
+      46,
+      2,
+      "LATENT"
+    ],
+    [
+      466,
+      154,
+      0,
+      167,
+      2,
+      "BOOLEAN"
+    ],
+    [
+      467,
+      81,
+      1,
+      6,
+      2,
+      "INT"
+    ],
+    [
+      468,
+      168,
+      0,
+      29,
+      0,
+      "MODEL"
+    ],
+    [
+      469,
+      45,
+      0,
+      168,
+      0,
+      "MODEL"
+    ],
+    [
+      470,
+      35,
+      0,
+      168,
+      1,
+      "MODEL"
+    ],
+    [
+      471,
+      154,
+      0,
+      168,
+      2,
+      "BOOLEAN"
+    ],
+    [
+      473,
+      81,
+      5,
+      171,
+      0,
+      "IMAGE"
+    ],
+    [
+      474,
+      171,
+      0,
+      170,
+      0,
+      "INT"
+    ],
+    [
+      475,
+      170,
+      0,
+      169,
+      1,
+      "INT"
+    ],
+    [
+      476,
+      81,
+      5,
+      169,
+      0,
+      "IMAGE"
+    ],
+    [
+      477,
+      154,
+      0,
+      172,
+      2,
+      "BOOLEAN"
+    ],
+    [
+      478,
+      169,
+      0,
+      172,
+      0,
+      "IMAGE"
+    ],
+    [
+      479,
+      81,
+      5,
+      172,
+      1,
+      "IMAGE"
+    ],
+    [
+      480,
+      172,
+      0,
+      27,
+      4,
+      "IMAGE"
+    ],
+    [
+      484,
+      127,
+      0,
+      58,
+      1,
+      "IMAGE"
+    ],
+    [
+      485,
+      154,
+      0,
+      174,
+      1,
+      "BOOLEAN"
+    ],
+    [
+      486,
+      60,
+      0,
+      174,
+      0,
+      "BOOLEAN"
+    ],
+    [
+      487,
+      174,
+      0,
+      175,
+      0,
+      "INT"
+    ],
+    [
+      488,
+      176,
+      0,
+      175,
+      1,
+      "INT"
+    ],
+    [
+      489,
+      175,
+      0,
+      58,
+      2,
+      "BOOLEAN"
+    ],
+    [
+      490,
+      175,
+      0,
+      57,
+      2,
+      "BOOLEAN"
+    ],
+    [
+      491,
+      177,
+      0,
+      94,
+      3,
       "STRING"
     ],
     [
-      455,
-      168,
+      495,
+      167,
       0,
-      70,
-      1,
-      "*"
+      27,
+      3,
+      "LATENT"
     ],
     [
-      456,
-      73,
+      500,
+      183,
       0,
-      168,
+      26,
+      1,
+      "LATENT"
+    ],
+    [
+      501,
+      37,
       0,
-      "*"
+      183,
+      2,
+      "BOOLEAN"
+    ],
+    [
+      502,
+      43,
+      0,
+      183,
+      0,
+      "LATENT"
+    ],
+    [
+      503,
+      158,
+      0,
+      183,
+      1,
+      "LATENT"
+    ],
+    [
+      526,
+      74,
+      0,
+      192,
+      0,
+      "VIDEO"
+    ],
+    [
+      527,
+      191,
+      0,
+      193,
+      2,
+      "BOOLEAN"
+    ],
+    [
+      529,
+      192,
+      1,
+      193,
+      1,
+      "AUDIO"
+    ],
+    [
+      530,
+      193,
+      0,
+      66,
+      1,
+      "AUDIO"
+    ],
+    [
+      537,
+      56,
+      0,
+      51,
+      0,
+      "TIMELINE_INFO"
+    ],
+    [
+      538,
+      56,
+      0,
+      67,
+      0,
+      "TIMELINE_INFO"
+    ],
+    [
+      539,
+      56,
+      0,
+      81,
+      0,
+      "TIMELINE_INFO"
+    ],
+    [
+      540,
+      56,
+      1,
+      81,
+      1,
+      "IMAGE"
+    ],
+    [
+      541,
+      56,
+      2,
+      81,
+      2,
+      "AUDIO"
+    ],
+    [
+      542,
+      56,
+      2,
+      193,
+      0,
+      "AUDIO"
     ]
   ],
   "groups": [
@@ -6431,8 +6352,8 @@
       "bounding": [
         2925.103913189313,
         4596.6571083279505,
-        1341.176832710124,
-        759.7344235216542
+        1319.5306120240066,
+        758.3647247897898
       ],
       "color": "#3f789e",
       "flags": {}
@@ -6443,8 +6364,8 @@
       "bounding": [
         422.1118630807407,
         3811.75411795109,
-        719.5536001154159,
-        843.2441259535694
+        733.1080738341873,
+        986.3716896121796
       ],
       "color": "#b58b2a",
       "flags": {}
@@ -6453,8 +6374,8 @@
       "id": 6,
       "title": "FinalPreview",
       "bounding": [
-        1167.0506201819583,
-        3815.2138201022494,
+        1183.6268394282276,
+        3814.4606408862123,
         868.3704259922958,
         690.167272866679
       ],
@@ -6474,18 +6395,6 @@
       "flags": {}
     },
     {
-      "id": 8,
-      "title": "nvidia upscale",
-      "bounding": [
-        1171.6798361023689,
-        3348.7874804208004,
-        310.0000000000001,
-        434
-      ],
-      "color": "#b58b2a",
-      "flags": {}
-    },
-    {
       "id": 9,
       "title": "Generate type（0-flf 1-fmlf 2-ref）",
       "bounding": [
@@ -6498,23 +6407,11 @@
       "flags": {}
     },
     {
-      "id": 10,
-      "title": "Reference image indexes",
-      "bounding": [
-        3600,
-        3060,
-        866.3354726592838,
-        320.1140683386734
-      ],
-      "color": "#3f789e",
-      "flags": {}
-    },
-    {
       "id": 11,
       "title": "Segment Loop Previiew",
       "bounding": [
-        1168.3976463542767,
-        4548.864153168522,
+        1181.0761631575579,
+        4543.422433332658,
         861.9383172516918,
         664.9941004216835
       ],
@@ -6523,12 +6420,36 @@
     },
     {
       "id": 12,
-      "title": "Group",
+      "title": "Is Ref",
       "bounding": [
-        4496.532618802959,
-        3066.5511538027836,
-        250,
-        431.4661122396046
+        3598.0578249437385,
+        3064.895546553002,
+        261.26653968036044,
+        305.9687573800443
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    },
+    {
+      "id": 13,
+      "title": "Make Ref to RefVideo",
+      "bounding": [
+        3889.9877815598434,
+        3067.562176123154,
+        727.8973948715002,
+        196
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    },
+    {
+      "id": 14,
+      "title": "Only Sample Stage 1",
+      "bounding": [
+        4353.830845508419,
+        3298.62899632041,
+        256.14194359580324,
+        474.20248308386135
       ],
       "color": "#3f789e",
       "flags": {}
@@ -6537,13 +6458,13 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.4680715737367287,
+      "scale": 0.6623253367682076,
       "offset": [
-        -1036.2950035904842,
-        -2489.5518841714634
+        138.92911154588245,
+        -3133.858159024294
       ]
     },
-    "frontendVersion": "1.43.18",
+    "frontendVersion": "1.44.19",
     "VHS_latentpreview": false,
     "VHS_latentpreviewrate": 0,
     "VHS_MetadataImage": true,
