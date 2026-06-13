@@ -2,7 +2,8 @@ import { useRef, useState, useLayoutEffect, useEffect } from 'react'
 import type { WheelEvent } from 'react'
 import type { ReactWidgetProps } from '@/lib/create-react-widget'
 import type { TimelineData, Track, Segment, TimeDisplayFormat, MaintainSegment, AudioSegment } from '@/types/timeline'
-import { createDefaultTimelineData } from '@/lib/timeline-utils'
+import { createDefaultTimelineData, scaleImageItemsToDuration } from '@/lib/timeline-utils'
+import { audioContentToViewUrl } from '@/lib/media-url'
 import { Toolbar } from './timeline/Toolbar'
 import { TimelineRuler } from './timeline/TimelineRuler'
 import { MaintainTrack } from './timeline/MaintainTrack'
@@ -36,16 +37,7 @@ function ensureDefaults(raw: unknown): TimelineData {
 
 /** Build a browser-playable URL from an audio segment's content. */
 function audioUrl(seg: AudioSegment): string | null {
-  const { source_type, file_path, local_path, url } = seg.content
-  if (source_type === 'url' && url) return url
-  if (source_type === 'input' && file_path) {
-    return `/api/view?filename=${encodeURIComponent(file_path)}&type=input`
-  }
-  if (source_type === 'slot' && url) return url
-  if (source_type === 'local' && local_path) {
-    return `file://${local_path}`
-  }
-  return null
+  return audioContentToViewUrl(seg.content)
 }
 
 /** Track last synced frame to avoid unnecessary seeks */
@@ -432,7 +424,16 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
     // Update this segment and shift all subsequent segments
     const updated = segments.map((s, i) => {
       if (i < idx) return s
-      if (i === idx) return { ...s, end_frame: newEndFrame }
+      if (i === idx) {
+        return {
+          ...s,
+          end_frame: newEndFrame,
+          content: {
+            ...s.content,
+            images: scaleImageItemsToDuration(s.content.images, oldDuration, newDuration),
+          },
+        }
+      }
       // Shift subsequent segments
       return {
         ...s,
@@ -503,7 +504,16 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
                 let updated = segments.map((seg) => {
                   // If segment ends beyond new total, truncate it
                   if (seg.end_frame >= newTotal) {
-                    return { ...seg, end_frame: newTotal - 1 }
+                    const oldDuration = seg.end_frame - seg.start_frame + 1
+                    const newDuration = newTotal - seg.start_frame
+                    return {
+                      ...seg,
+                      end_frame: newTotal - 1,
+                      content: {
+                        ...seg.content,
+                        images: scaleImageItemsToDuration(seg.content.images, oldDuration, newDuration),
+                      },
+                    }
                   }
                   return seg
                 })

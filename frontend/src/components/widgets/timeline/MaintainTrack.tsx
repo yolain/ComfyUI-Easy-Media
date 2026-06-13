@@ -21,6 +21,7 @@ import type {
 } from '@/types/timeline'
 import { useT } from '@/lib/i18n'
 import { uuid } from '@/lib/uuid'
+import { scaleImageItemsToDuration } from '@/lib/timeline-utils'
 
 interface MaintainTrackProps {
   track: Track
@@ -328,7 +329,7 @@ export function MaintainTrack({
     const next = updated[idx + 1]
     const minEnd = seg.start_frame + 1
     const newEnd = Math.max(minEnd, Math.min(seg.end_frame + delta, totalFrames - 1))
-    updated[idx] = { ...seg, end_frame: newEnd }
+    updated[idx] = resizeSegmentWithScaledImages(seg, seg.start_frame, newEnd)
 
     // 当有后续片段时，让它们跟随到当前片段后面（无论拉伸还是缩减）
     if (next) {
@@ -348,8 +349,8 @@ export function MaintainTrack({
     const maxStart = seg.end_frame - 1
     const minStart = prev ? prev.start_frame + 1 : 0
     const newStart = Math.max(minStart, Math.min(maxStart, seg.start_frame + delta))
-    updated[idx] = { ...seg, start_frame: newStart }
-    if (prev) updated[idx - 1] = { ...prev, end_frame: newStart - 1 }
+    updated[idx] = resizeSegmentWithScaledImages(seg, newStart, seg.end_frame)
+    if (prev) updated[idx - 1] = resizeSegmentWithScaledImages(prev, prev.start_frame, newStart - 1)
 
     // 让后续片段跟随到当前片段后面
     for (let i = idx + 1; i < updated.length; i++) {
@@ -358,6 +359,28 @@ export function MaintainTrack({
         const shift = expectedStart - updated[i].start_frame
         updated[i] = { ...updated[i], start_frame: expectedStart, end_frame: updated[i].end_frame + shift }
       }
+    }
+  }
+
+  function resizeSegmentWithScaledImages(
+    seg: MaintainSegment,
+    startFrame: number,
+    endFrame: number,
+  ): MaintainSegment {
+    const oldDuration = seg.end_frame - seg.start_frame + 1
+    const newDuration = endFrame - startFrame + 1
+    if (oldDuration === newDuration) {
+      return { ...seg, start_frame: startFrame, end_frame: endFrame }
+    }
+
+    return {
+      ...seg,
+      start_frame: startFrame,
+      end_frame: endFrame,
+      content: {
+        ...seg.content,
+        images: scaleImageItemsToDuration(seg.content.images, oldDuration, newDuration),
+      },
     }
   }
 

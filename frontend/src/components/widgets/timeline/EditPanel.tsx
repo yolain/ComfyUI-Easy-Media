@@ -207,6 +207,18 @@ function subBlockRect(start: number, end: number, span: number, width: number) {
   return { left, width: Math.max(right - left, 20) }
 }
 
+async function uploadImageFile(file: File): Promise<string> {
+  const form = new FormData()
+  form.append('image', file)
+  form.append('type', 'input')
+  form.append('overwrite', 'false')
+  const res = await fetch('/upload/image', { method: 'POST', body: form })
+  if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
+  const json = await res.json() as { name: string; subfolder?: string }
+  const sub = json.subfolder ? `${json.subfolder}/` : ''
+  return `${sub}${json.name}`
+}
+
 function formatTime(frame: number, frameRate: number, displayFormat: TimeDisplayFormat): string {
   return displayFormat === 'seconds'
     ? `${(frame / frameRate).toFixed(1)}s`
@@ -478,24 +490,21 @@ export function EditPanel({
   const [subBlocks, setSubBlocks] = useState<SubBlock[]>(() =>
     buildSubBlocks(segment.content.images, span),
   )
-  const prevSegIdRef = useRef(segment.id)
+  const imageSyncKey = segment.content.images
+    .map((img) => [
+      img.source_type,
+      img.file_path,
+      img.local_path,
+      img.url,
+      img.slot_name,
+      img.start_frame,
+      img.end_frame,
+    ].join(':'))
+    .join('|')
 
-  // Re-initialize when switching to a different segment
   useEffect(() => {
-    if (prevSegIdRef.current !== segment.id) {
-      prevSegIdRef.current = segment.id
-      setSubBlocks(buildSubBlocks(segment.content.images, span))
-    }
-  }, [segment.id, segment.content.images, span])
-
-  // Sync when images are added/removed externally
-  const prevImageCountRef = useRef(segment.content.images.length)
-  useEffect(() => {
-    if (segment.content.images.length !== prevImageCountRef.current) {
-      prevImageCountRef.current = segment.content.images.length
-      setSubBlocks(buildSubBlocks(segment.content.images, span))
-    }
-  }, [segment.content.images, segment.content.images.length, span])
+    setSubBlocks(buildSubBlocks(segment.content.images, span))
+  }, [segment.id, imageSyncKey, segment.content.images, span])
 
   // Image selector popover
   const [popoverOpen, setPopoverOpen] = useState(false)
@@ -621,6 +630,67 @@ export function EditPanel({
     onContentChange({ images: updated.map((b) => ({ ...b.item, start_frame: b.start_frame, end_frame: b.end_frame })) })
   }
 
+  function handleSubTrackDragOver(e: React.DragEvent<HTMLDivElement>) {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+
+  async function handleSubTrackDrop(e: React.DragEvent<HTMLDivElement>) {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+
+    const imageExts = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tiff', '.tif'])
+    const files = Array.from(e.dataTransfer.files).filter((file) => {
+      if (file.type.startsWith('image/')) return true
+      const ext = `.${file.name.split('.').pop()?.toLowerCase() ?? ''}`
+      return imageExts.has(ext)
+    })
+    if (files.length === 0) return
+
+    const rect = e.currentTarget.getBoundingClientRect()
+    const clientX = Number.isFinite(e.clientX) ? e.clientX : rect.left + areaWidth / 2
+    const x = (clientX - rect.left) / canvasScale
+    const dropFrame = Math.max(0, Math.min(span - 1, Math.round((x / areaWidth) * (span - 1))))
+    const defaultSpan = Math.max(1, Math.floor(span / Math.max(subBlocks.length + files.length, 1)))
+
+    const uploaded: string[] = []
+    for (const file of files) {
+      try {
+        uploaded.push(await uploadImageFile(file))
+      } catch (err) {
+        console.error('[EditPanel] upload failed:', err)
+      }
+    }
+    if (uploaded.length === 0) return
+
+    let cursor = dropFrame
+    const newBlocks: SubBlock[] = []
+    for (const path of uploaded) {
+      if (cursor > span - 1) break
+      const end = Math.min(span - 1, cursor + defaultSpan - 1)
+      const item: ImageItem = {
+        source_type: 'input',
+        file_path: path,
+        file_name: path.split('/').pop() ?? path,
+        start_frame: cursor,
+        end_frame: end,
+      }
+      newBlocks.push({
+        id: String(subBlocks.length + newBlocks.length),
+        item,
+        start_frame: cursor,
+        end_frame: end,
+      })
+      cursor = end + 1
+    }
+
+    if (newBlocks.length === 0) return
+    const updated = [...subBlocks, ...newBlocks]
+    setSubBlocks(updated)
+    onContentChange({ images: updated.map((b) => ({ ...b.item, start_frame: b.start_frame, end_frame: b.end_frame })) })
+  }
+
   return (
     <div
       data-edit-panel=""
@@ -664,6 +734,8 @@ export function EditPanel({
         ref={trackAreaRef}
         className="relative w-full select-none bg-muted/30"
         style={{ height: 48 }}
+        onDragOver={handleSubTrackDragOver}
+        onDrop={handleSubTrackDrop}
       >
         {subBlocks.length === 0 ? (
           <ContextMenu>
@@ -729,7 +801,7 @@ export function EditPanel({
                       {t('imageTrack.contextAdd')}
                     </ContextMenuItem>
                     <ContextMenuItem
-                      disabled={subBlocks.length < 2}
+                      disabled={subBlocks.length < 1}
                       onClick={distributeEvenlySubBlocks}
                     >
                       {t('imageTrack.contextDistribute')}

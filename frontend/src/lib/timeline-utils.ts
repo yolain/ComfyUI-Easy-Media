@@ -1,4 +1,4 @@
-import type { TimelineData, Track, TrackType } from '@/types/timeline'
+import type { ImageItem, TimelineData, Track, TrackType } from '@/types/timeline'
 import { uuid } from './uuid'
 import { traceToRootSourceViaLink } from './graph-utils'
 
@@ -102,6 +102,33 @@ export function computeSlotItems(
   }
 
   return result
+}
+
+export function scaleImageItemsToDuration(
+  images: ImageItem[],
+  oldDuration: number,
+  newDuration: number,
+): ImageItem[] {
+  if (oldDuration <= 0 || newDuration <= 0) return images
+
+  return images.map((image) => {
+    if (image.start_frame === undefined || image.end_frame === undefined) {
+      return image
+    }
+
+    const start = Math.max(
+      0,
+      Math.min(newDuration - 1, Math.round((image.start_frame / oldDuration) * newDuration)),
+    )
+    const exclusiveEnd = Math.round(((image.end_frame + 1) / oldDuration) * newDuration)
+    const end = Math.max(start, Math.min(newDuration - 1, exclusiveEnd - 1))
+
+    return {
+      ...image,
+      start_frame: start,
+      end_frame: end,
+    }
+  })
 }
 
 /**

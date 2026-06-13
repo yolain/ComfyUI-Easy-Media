@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { preserveTimelineEditorNodeHeight } from './timeline-node-size'
+import { scaleImageItemsToDuration } from './timeline-utils'
+import type { ImageItem } from '@/types/timeline'
 
 function installTimelineHeightHooks() {
   class NodeType {
@@ -48,5 +50,19 @@ describe('preserveTimelineEditorNodeHeight', () => {
     expect(node.size).toEqual([480, 420])
     expect(node.properties.easyMediaTimelineHeight).toBe(420)
     vi.useRealTimers()
+  })
+})
+
+describe('scaleImageItemsToDuration', () => {
+  it('keeps child image ranges proportional when a segment is shortened', () => {
+    const images: ImageItem[] = [
+      { source_type: 'input', file_path: 'a.png', file_name: 'a.png', start_frame: 0, end_frame: 126 },
+      { source_type: 'input', file_path: 'b.png', file_name: 'b.png', start_frame: 127, end_frame: 252 },
+    ]
+
+    expect(scaleImageItemsToDuration(images, 253, 121)).toEqual([
+      expect.objectContaining({ file_name: 'a.png', start_frame: 0, end_frame: 60 }),
+      expect.objectContaining({ file_name: 'b.png', start_frame: 61, end_frame: 120 }),
+    ])
   })
 })
