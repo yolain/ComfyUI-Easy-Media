@@ -33,6 +33,7 @@ _OUTPUT_MODE_OPTIONS = [
         ],
     ),
     io.DynamicCombo.Option("preview_only", []),
+    io.DynamicCombo.Option("hide&save", []),
 ]
 
 _INPUT_MODE_OPTIONS = [
@@ -88,6 +89,7 @@ class EasySaveVideo(io.ComfyNode):
         input_mode_key: str = input_mode.get("input_mode", "images+audio")
         output_mode_key: str = output_mode.get("output_mode", "save")
         only_preview = output_mode_key == "preview_only"
+        hide_preview = output_mode_key == "hide&save"
         save_metadata: bool = output_mode.get("save_metadata", False)
 
         if input_mode_key == "video":
@@ -151,6 +153,9 @@ class EasySaveVideo(io.ComfyNode):
             codec=Types.VideoCodec.AUTO,
             metadata=metadata,
         )
+
+        if hide_preview:
+            return io.NodeOutput(source_video, relative_path)
 
         return io.NodeOutput(
             source_video,
