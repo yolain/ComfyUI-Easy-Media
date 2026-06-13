@@ -24,6 +24,14 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 
 ## Changelog
 
+### v1.0.4
+
+- **[SaveVideo]** Added `hide&save` option to hide the output video node while saving the video
+- **[Timeline Editor: App Mode]** Added time range parsing support like `[0-5s]` for `prompt_override`
+- **[Timeline Editor: UI Mode]** Added drag-and-drop image import for sub-tracks
+- **[Timeline Editor: UI Mode]** Fixed issue where modifying clip duration in main track should proportionally adjust sub-track images
+- **[Timeline Editor: UI Mode]** Fixed audio preview display error after importing audio subdirectory
+
 ### v1.0.3
 
 - **[Bernini Temporary Solution]** Added `Bernini conditioning` and `Bernini Model Patch` nodes, providing a temporary solution before ComfyUI officially supports Bernini
@@ -37,20 +45,25 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 - **[Timeline Editor: App Mode]** Fixed an issue where, if `prompt_override` was not written strictly according to the prompt format, the default duration was not evenly distributed across clips
 - **[Timeline Editor: App Mode]** Fixed an issue where filling the entire timeline with a single audio clip required filtering out empty audio before making a determination
 - **[Timeline Editor: UI Mode]** Fixed an issue where the output resources and sorting were incorrect when a single clip contained different formats
+</details>
 
-### v1.0.1
+<details>
+<summary><b>v1.0.1</b></summary>
 
 - **[Workflow]** Added wan2.2 loop segment example workflow
 - **[Frontend Optimization]** Added + button to insert segments before or after the selected segment, and fixed some known bugs
 - **[Bug Fix]** Fixed incorrect image import paths from output and subdirectories, which caused images and outputs to be filtered out in the editor
+</details>
 
-### v1.0.0
+<details>
+<summary><b>v1.0.0</b></summary>
 
 - **Important Changes** `Duration and frame rate` input only takes effect after `blur` (i.e., press Enter or click outside to confirm changes, reducing errors)
 - **Important Changes** Duration input step changes: `4` when format is frames, `1` when format is seconds
 - **Important Changes** Segment duration editing no longer affects other segments; if the total exceeds the timeline length, the timeline will auto-expand to fit all segments
 - The automatic height adjustment of tracks in the Timeline Editor has been adjusted; users must now double-click image and audio clips to open the media selection interface, thereby preventing frequent pop-ups caused by accidental operations.
 - Added dynamic parameter injection support for prompt template format + media input using the timeline editor
+</details>
 
 ## Features
 
@@ -60,13 +73,6 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 The editor can be used for single video segment generation (e.g., combined with PromptRelay), as well as segmented generation. Each segment can be combined with different model video pipelines for text-only generation, single image generation, first/last frame generation, multi-frame generation, reference-based generation, etc.
 
 ![timelineEditor](https://github.com/user-attachments/assets/d7c9e894-6e7e-488c-90fb-d3aa8310419d)
-
-#### Track Types
-
-| Type       | Description                              |
-| ---------- | ---------------------------------------- |
-| Main Track | Supports multi-segment editing with images and prompts |
-| Audio Track | Can load multiple audio segments, merged for final export |
 
 #### Dynamic Parameter Injection (05-23)
 

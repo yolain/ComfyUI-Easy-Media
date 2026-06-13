@@ -1,4 +1,5 @@
 import json
+import math
 import re
 
 import torch
@@ -94,11 +95,20 @@ PROMPT_FORMAT_OPTIONS = ["default", "promptRelay"]
 
 _IMAGE_REF_RE = re.compile(r'@(?:图像|图片|图|image|img)(\d+)', re.IGNORECASE)
 _AUDIO_REF_RE = re.compile(r'@(?:audio|auido|音频)(\d+)', re.IGNORECASE)
-_FRAME_RANGE_RE = re.compile(r'\[(\d+)-(\d+)(?:,(\w+))?\]')
+_FRAME_RANGE_RE = re.compile(
+    r'\[(\d+(?:\.\d+)?)(s?)-(\d+(?:\.\d+)?)(s?)(?:,(\w+))?\]',
+    re.IGNORECASE,
+)
 _SLOT_ONE_BASED_INDEX_RE = re.compile(r'(?:image|audio)(\d+)$', re.IGNORECASE)
 
 
-def _parse_override_segments(prompt_override, total_length: int = 121) -> list[dict]:
+def _seconds_to_override_frame(seconds: float, frame_rate: int) -> int:
+    if seconds <= 0:
+        return 0
+    return math.ceil((seconds * frame_rate) / 4) * 4 + 1
+
+
+def _parse_override_segments(prompt_override, total_length: int = 121, frame_rate: int = 24) -> list[dict]:
     """Parse prompt_override (str with | separators, or list) into segment dicts."""
     if isinstance(prompt_override, list):
         parts = [
@@ -112,13 +122,24 @@ def _parse_override_segments(prompt_override, total_length: int = 121) -> list[d
 
     segments: list[dict] = []
     safe_total_length = max(1, int(total_length))
+    safe_frame_rate = max(1, int(frame_rate))
     part_count = max(1, len(parts))
     for part_idx, part in enumerate(parts):
         m = _FRAME_RANGE_RE.search(part)
         if m:
-            start_frame = int(m.group(1))
-            end_frame = int(m.group(2))
-            seg_type = (m.group(3) or 'flf').lower()
+            is_seconds_range = bool(m.group(2) or m.group(4))
+            if is_seconds_range:
+                start_seconds = float(m.group(1))
+                end_seconds = float(m.group(3))
+                start_frame = _seconds_to_override_frame(start_seconds, safe_frame_rate)
+                end_frame = max(
+                    start_frame,
+                    _seconds_to_override_frame(end_seconds, safe_frame_rate) - 1,
+                )
+            else:
+                start_frame = int(m.group(1))
+                end_frame = int(m.group(3))
+            seg_type = (m.group(5) or 'flf').lower()
         else:
             start_frame = round(part_idx * safe_total_length / part_count)
             end_frame = round((part_idx + 1) * safe_total_length / part_count) - 1
@@ -440,7 +461,11 @@ class TimelineEditor(io.ComfyNode):
             frame_rate: int = int(_td.get('frame_rate', 24))
             total_length = int(_td.get('total_length', 121))
 
-            override_segs = _parse_override_segments(prompt_override, total_length=total_length)
+            override_segs = _parse_override_segments(
+                prompt_override,
+                total_length=total_length,
+                frame_rate=frame_rate,
+            )
             if any(_FRAME_RANGE_RE.search(str(part)) for part in str(prompt_override).split('|')):
                 total_length = max((s['end_frame'] for s in override_segs), default=120) + 1
 

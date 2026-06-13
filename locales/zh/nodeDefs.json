@@ -82,8 +82,8 @@
     }
   },
   "easy timelineEditor": {
-    "display_name": "时间轴编辑器",
-    "description": "加载时间轴媒体项目（提示词、图像、音频轨道）并输出结构化数据。",
+    "display_name": "时间线编辑器",
+    "description": "加载时间线媒体项目（提示词、图像、音频轨道）并输出结构化数据。",
     "inputs": {
       "resolution": {
         "name": "分辨率",
@@ -107,25 +107,25 @@
         "tooltip": "选择视频格式以自动设置分辨率和帧率。"
       },
       "timeline_data": {
-        "name": "时间轴数据",
-        "tooltip": "包含轨道、片段和媒体项目的JSON时间轴数据。"
+        "name": "时间线数据",
+        "tooltip": "包含轨道、片段和媒体项目的JSON时间线数据。"
       },
       "prompt_override": {
         "name": "提示词覆盖",
-        "tooltip": "如果提供，将覆盖时间轴中所有片段的提示词。使用格式: @image1 @audio1 提示词内容 [0-120] | @image2 @audio2 提示词内容 [121-296]"
+        "tooltip": "如果提供，将覆盖时间线中所有片段的提示词。使用格式: @image1 @audio1 提示词内容 [0-120] | @image2 @audio2 提示词内容 [121-296]"
       },
       "image": {
         "name": "图像列表",
-        "tooltip": "要覆盖时间轴中图像的图像列表。建议使用 '创建图像列表' 节点创建。"
+        "tooltip": "要覆盖时间线中图像的图像列表。建议使用 '创建图像列表' 节点创建。"
       },
       "audio": {
         "name": "音频列表",
-        "tooltip": "要覆盖时间轴中音频的音频列表。建议使用 '创建音频列表' 节点创建。"
+        "tooltip": "要覆盖时间线中音频的音频列表。建议使用 '创建音频列表' 节点创建。"
       }
     },
     "outputs": {
       "0": {
-        "name": "时间轴信息"
+        "name": "时间线信息"
       },
       "1": {
         "name": "图像"
@@ -136,12 +136,12 @@
     }
   },
   "easy timelineInfoOutput": {
-    "display_name": "时间轴信息输出",
-    "description": "输出时间轴信息，包括格式化的提示词、尺寸和图像索引。",
+    "display_name": "时间线信息输出",
+    "description": "输出时间线信息，包括格式化的提示词、尺寸和图像索引。",
     "inputs": {
       "timeline_info": {
-        "name": "时间轴信息",
-        "tooltip": "来自时间轴编辑器节点的时间轴信息。"
+        "name": "时间线信息",
+        "tooltip": "来自时间线编辑器节点的时间线信息。"
       },
       "prompt_format": {
         "name": "提示词格式",
@@ -170,12 +170,12 @@
     }
   },
   "easy timelineSegmentOutput": {
-    "display_name": "时间轴片段输出",
-    "description": "输出时间轴中特定片段的数据。",
+    "display_name": "时间线片段输出",
+    "description": "输出时间线中特定片段的数据。",
     "inputs": {
       "timeline_info": {
-        "name": "时间轴信息",
-        "tooltip": "来自时间轴编辑器节点的时间轴信息。"
+        "name": "时间线信息",
+        "tooltip": "来自时间线编辑器节点的时间线信息。"
       },
       "prompt_format": {
         "name": "提示词格式",
@@ -183,11 +183,11 @@
       },
       "images": {
         "name": "图像",
-        "tooltip": "来自时间轴编辑器节点的图像。"
+        "tooltip": "来自时间线编辑器节点的图像。"
       },
       "audio": {
         "name": "音频",
-        "tooltip": "来自时间轴编辑器节点的音频。"
+        "tooltip": "来自时间线编辑器节点的音频。"
       },
       "segment_index": {
         "name": "片段索引",
@@ -219,12 +219,12 @@
     }
   },
   "easy timelineSegmentCount": {
-    "display_name": "时间轴片段总数",
-    "description": "输出时间轴中的片段总数。",
+    "display_name": "时间线片段总数",
+    "description": "输出时间线中的片段总数。",
     "inputs": {
       "timeline_info": {
-        "name": "时间轴信息",
-        "tooltip": "来自时间轴编辑器节点的时间轴信息。"
+        "name": "时间线信息",
+        "tooltip": "来自时间线编辑器节点的时间线信息。"
       }
     },
     "outputs": {
