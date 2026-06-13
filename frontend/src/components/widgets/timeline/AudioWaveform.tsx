@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import type { AudioContent } from '@/types/timeline'
+import { audioContentToViewUrl } from '@/lib/media-url'
 
 interface AudioWaveformProps {
   content: AudioContent
@@ -8,19 +9,6 @@ interface AudioWaveformProps {
   /** Fraction [0,1] of the full audio where the visible window ends */
   endRatio?: number
   className?: string
-}
-
-function getAudioUrl(content: AudioContent): string | null {
-  if (content.url) return content.url
-  if (content.file_path) {
-    const relPath = content.file_path
-    const lastSlash = relPath.lastIndexOf('/')
-    const filename = lastSlash >= 0 ? relPath.slice(lastSlash + 1) : relPath
-    const subfolder = lastSlash >= 0 ? relPath.slice(0, lastSlash) : ''
-    const typeParam = content.source_type === 'output' ? 'output' : 'input'
-    return `/view?filename=${encodeURIComponent(filename)}&type=${typeParam}&subfolder=${encodeURIComponent(subfolder)}`
-  }
-  return null
 }
 
 function drawWaveform(canvas: HTMLCanvasElement, peaks: Float32Array, startRatio: number, endRatio: number) {
@@ -70,7 +58,7 @@ export function AudioWaveform({ content, startRatio = 0, endRatio = 1, className
   }, [])
 
   useEffect(() => {
-    const url = getAudioUrl(content)
+    const url = audioContentToViewUrl(content)
     if (!url) return
     const audioUrl = url
 
