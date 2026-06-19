@@ -44,6 +44,7 @@ bun run build:release     # production build → dist/release
 - **Import aliases** — use `@/*` for `src/` paths
 - **React components** — functional only, hooks-based
 - **Reusable hooks** — When component logic has reusable state/effect behavior, write it directly in `src/hooks` and call it from components instead of duplicating the logic inline
+- **Test location** — Write test cases separately under `src/tests`; do not colocate test files with components or other source modules
 - **Never use raw HTML elements** for interactive controls — use shadcn/ui equivalents (`<Button>` not `<button>`, `<Input>` not `<input>`, `<Textarea>` not `<textarea>`, `<Select>` not `<select>`). Exception: `src/components/ui/**` (the shadcn/ui primitives themselves may use raw elements)
 - **Error handling** — always handle errors explicitly; never swallow exceptions silently
 - **Color tokens only** — All colors are defined as CSS custom properties in `src/styles/global.css` and mapped to Tailwind utilities via `@theme inline`; use theme tokens instead of hardcoded values

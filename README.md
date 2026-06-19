@@ -172,3 +172,4 @@ bun run build:release
 - [WhatDreamsCost-ComfyUI](https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI)
 - [ComfyUI-PromptRelay](https://github.com/kijai/ComfyUI-PromptRelay)
 - [ComfyUI-Licon-MSR](https://github.com/liconstudio/ComfyUI-Licon-MSR)
+- [ComfyUI-RH-Bernini](https://github.com/RH-RunningHub/ComfyUI-RH-Bernini)
