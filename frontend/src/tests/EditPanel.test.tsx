@@ -5,7 +5,7 @@ vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
   MediaSelector: () => null,
 }))
 
-import { EditPanel } from './EditPanel'
+import { EditPanel } from '@/components/widgets/timeline/EditPanel'
 import type { ImageItem, MaintainSegment, Segment } from '@/types/timeline'
 
 function segment(

@@ -1,0 +1,89 @@
+export type MultiTrackType = 'task' | 'video' | 'audio' | 'subtitle'
+
+export type MultiTrackTaskMode = 'default' | 'ref' | 'edit'
+
+export type MultiTrackMediaType = 'image' | 'audio' | 'video' | 'subtitle' | 'none'
+
+export type MultiTrackSourceType = 'preset' | 'input' | 'output' | 'local' | 'url' | 'slot'
+
+export interface MultiTrackTaskImage {
+  id: string
+  source_type?: MultiTrackSourceType
+  file_path?: string
+  local_path?: string
+  url?: string
+  slot_name?: string
+  file_name?: string
+}
+
+export interface MultiTrackSegmentContent {
+  media_type: MultiTrackMediaType
+  source_type?: MultiTrackSourceType
+  file_path?: string
+  local_path?: string
+  url?: string
+  slot_name?: string
+  file_name?: string
+  text?: string
+  system_prompt?: string
+  task_mode?: MultiTrackTaskMode
+  images?: MultiTrackTaskImage[]
+  duration?: number
+  volume?: number
+  speed?: number
+  media_index?: number
+}
+
+export interface MultiTrackSegment {
+  id: string
+  start_frame: number
+  end_frame: number
+  content: MultiTrackSegmentContent
+  color: string
+}
+
+export interface MultiTrack {
+  id: string
+  name: string
+  type: MultiTrackType
+  task_mode?: MultiTrackTaskMode
+  color: string
+  muted: boolean
+  locked: boolean
+  media_index?: number
+  segments: MultiTrackSegment[]
+}
+
+export interface TrackData {
+  tracks: MultiTrack[]
+  total_length: number
+  frame_rate: number
+  muted?: boolean
+  volume?: number
+}
+
+export interface TracksInfoMediaItem {
+  index: number
+  track_id: string
+  segment_id: string
+  source_type?: MultiTrackSourceType
+  file_path?: string
+  local_path?: string
+  url?: string
+  slot_name?: string
+  file_name?: string
+  duration?: number
+}
+
+export interface TracksInfo {
+  total_length: number
+  frame_rate: number
+  width: number
+  height: number
+  tracks: MultiTrack[]
+  media: {
+    images: TracksInfoMediaItem[]
+    audio: TracksInfoMediaItem[]
+    video: TracksInfoMediaItem[]
+  }
+}

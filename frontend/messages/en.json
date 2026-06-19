@@ -18,6 +18,51 @@
     "defaultTrackName": "Track {n}",
     "defaultAudioTrackName": "Audio Track {n}"
   },
+  "multitrackTaskModes": {
+    "default": "Default",
+    "ref": "Reference",
+    "edit": "Edit"
+  },
+  "multitrackSegment": {
+    "taskLabel": "Task{n} {mode}"
+  },
+  "multitrack": {
+    "audio": "Audio",
+    "audioSettings": "Audio settings",
+    "speed": "Speed",
+    "speedSettings": "Speed settings",
+    "mutePreviewAudio": "Mute preview audio",
+    "unmutePreviewAudio": "Unmute preview audio",
+    "mute": "Mute",
+    "unmute": "Unmute",
+    "volume": "Volume",
+    "frameRate": "Frame rate",
+    "fps": "fps",
+    "duration": "Duration",
+    "prompt": "Prompt",
+    "promptPlaceholder": "Describe what you want to generate...",
+    "userPrompt": "User Prompt",
+    "systemPrompt": "System Prompt",
+    "systemPromptPlaceholder": "System prompt",
+    "loadingSystemPrompt": "Loading default system prompt...",
+    "resetSystemPrompt": "Reset system prompt",
+    "taskImageDropZone": "Task image drop zone",
+    "selectImage": "Select image",
+    "imageDropHint": "Click to choose, or drag files here.",
+    "previewImage": "Preview image",
+    "deleteImage": "Delete image",
+    "individualEdit": "Individual",
+    "combinedEdit": "Combined",
+    "taskNumber": "Task {n}",
+    "addVideo": "Add video",
+    "addTaskSegment": "Add task segment",
+    "deleteSelectedSegment": "Delete selected segment",
+    "play": "Play",
+    "pause": "Pause",
+    "hideTimeline": "Hide timeline",
+    "showTimeline": "Show timeline",
+    "timelineZoom": "Timeline zoom"
+  },
   "trackRow": {
     "trackColor": "Track color"
   },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { audioContentToViewUrl, mediaPathToViewUrl } from './media-url'
+import { audioContentToViewUrl, mediaContentToViewUrl, mediaPathToViewUrl } from './media-url'
 import type { AudioContent } from '@/types/timeline'
 
 describe('media view urls', () => {
@@ -19,5 +19,12 @@ describe('media view urls', () => {
     expect(audioContentToViewUrl(content)).toBe(
       '/view?filename=take%201.wav&type=output&subfolder=renders',
     )
+  })
+
+  it('builds generic media urls for input video content', () => {
+    expect(mediaContentToViewUrl({
+      source_type: 'input',
+      file_path: 'clips/shot 01.mp4',
+    })).toBe('/view?filename=shot%2001.mp4&type=input&subfolder=clips')
   })
 })

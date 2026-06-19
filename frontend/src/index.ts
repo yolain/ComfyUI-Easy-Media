@@ -2,6 +2,7 @@ import { addInlineStyles } from "@/lib/add-stylesheet";
 import { preserveTimelineEditorNodeHeight } from "@/lib/timeline-node-size";
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 import type { TimelineData } from '@/types/timeline'
+import type { TrackData } from '@/types/multitrack'
 
 declare const __COMFY_EASY_MEDIA_GLOBAL_CSS__: string;
 
@@ -10,13 +11,20 @@ declare global {
   var comfyAPI: { app: { app: ComfyApp } } | undefined
 }
 
-const [{ createReactWidget }, { TimelineWidget }, { createDefaultTimelineData }] = await Promise.all([
+const [
+  { createReactWidget },
+  { TimelineWidget, MultiTrackWidget },
+  { createDefaultTimelineData },
+  { createDefaultTrackData },
+] = await Promise.all([
   import('@/lib/create-react-widget'),
   import('@/components/widgets'),
   import('@/lib/timeline-utils'),
+  import('@/lib/multitrack-utils'),
 ]);
 
 const DEFAULT_TIMELINE_VALUE = JSON.stringify(createDefaultTimelineData())
+const DEFAULT_TRACK_DATA_VALUE = JSON.stringify(createDefaultTrackData())
 
 globalThis.comfyAPI!.app.app.registerExtension({
   name: 'Comfy.EasyMedia.widgets',
@@ -38,6 +46,12 @@ globalThis.comfyAPI!.app.app.registerExtension({
         defaultValue: DEFAULT_TIMELINE_VALUE,
         domWidgetOptions: {
           getMinHeight: () => 180,
+        },
+      }),
+      TRACK_DATA: createReactWidget<TrackData>(MultiTrackWidget, {
+        defaultValue: DEFAULT_TRACK_DATA_VALUE,
+        domWidgetOptions: {
+          getMinHeight: () => 320,
         },
       }),
     }

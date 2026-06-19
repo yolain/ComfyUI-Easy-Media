@@ -1,4 +1,4 @@
-const TIMELINE_NODE_NAME = 'easy timelineEditor'
+const TIMELINE_NODE_NAME = new Set(['easy timelineEditor', 'easy multiTrackEditor'])
 const TIMELINE_HEIGHT_PROPERTY = 'easyMediaTimelineHeight'
 const TIMELINE_WIDGET_RESIZE_GUARD = '__easyMediaTimelineWidgetResizeGuard'
 const WIDGET_RESIZE_GUARD_MS = 500
@@ -57,7 +57,7 @@ function applyHeight(node: any, height: number, fallbackWidth?: number) {
 
 function restoreHeight(node: any, height: number | null, fallbackWidth?: number) {
   if (!Number.isFinite(height) || height === null || height <= 0) return
-  window.setTimeout(() => applyHeight(node, height, fallbackWidth), 100)
+  globalThis.setTimeout(() => applyHeight(node, height, fallbackWidth), 100)
 }
 
 function readWidgetResizeGuard(node: any): ResizeGuard | null {
@@ -84,7 +84,7 @@ function beginWidgetResizeGuard(node: any) {
 }
 
 export function preserveTimelineEditorNodeHeight(nodeType: any, nodeData: { name?: string }) {
-  if (nodeData.name !== TIMELINE_NODE_NAME) return
+  if (!TIMELINE_NODE_NAME.has(nodeData.name || '')) return
 
   const originalOnNodeCreated = nodeType.prototype.onNodeCreated
   const originalOnConfigure = nodeType.prototype.onConfigure

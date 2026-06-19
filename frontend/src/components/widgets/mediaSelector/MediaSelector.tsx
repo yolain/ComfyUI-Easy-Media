@@ -6,6 +6,7 @@ import {
   LayoutGrid,
   CheckCircle2,
   FileAudio,
+  FileVideo,
   Image as ImageIcon,
   File,
   Folder,
@@ -81,9 +82,11 @@ function formatSize(bytes: number): string {
 function getFileIcon(name: string, mediaType: MediaType) {
   if (mediaType === 'audio') return FileAudio
   if (mediaType === 'image') return ImageIcon
+  if (mediaType === 'video') return FileVideo
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
   if (['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus', 'wma'].includes(ext)) return FileAudio
   if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tiff', 'tif'].includes(ext)) return ImageIcon
+  if (['mp4', 'webm', 'mov', 'mkv', 'avi', 'm4v'].includes(ext)) return FileVideo
   return File
 }
 
@@ -97,6 +100,12 @@ function isAudioFile(name: string, mediaType: MediaType): boolean {
   if (mediaType === 'audio') return true
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
   return ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus', 'wma'].includes(ext)
+}
+
+function isVideoFile(name: string, mediaType: MediaType): boolean {
+  if (mediaType === 'video') return true
+  const ext = name.split('.').pop()?.toLowerCase() ?? ''
+  return ['mp4', 'webm', 'mov', 'mkv', 'avi', 'm4v'].includes(ext)
 }
 
 function getSelectedMediaValues(value: string): Set<string> {
@@ -145,6 +154,48 @@ function LazyImage({
   )
 }
 
+function LazyVideo({
+  src,
+  className,
+}: Readonly<{ src: string; className?: string }>) {
+  const ref = useRef<HTMLVideoElement>(null)
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisible(true)
+          observer.disconnect()
+        }
+      },
+      { threshold: 0 },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  return (
+    <video
+      ref={ref}
+      src={visible ? src : undefined}
+      className={className}
+      muted
+      playsInline
+      preload="metadata"
+      onLoadedMetadata={(event) => {
+        const video = event.currentTarget
+        if (Number.isFinite(video.duration) && video.duration > 0.1) video.currentTime = 0.1
+      }}
+      onError={(event) => {
+        event.currentTarget.style.display = 'none'
+      }}
+    />
+  )
+}
+
 // ---------------------------------------------------------------------------
 // FileThumbnail (grid)
 // ---------------------------------------------------------------------------
@@ -156,7 +207,8 @@ function FileThumbnail({
 }: Readonly<{ file: MediaFileEntry; mediaType: MediaType; isSelected: boolean }>) {
   const Icon = getFileIcon(file.name, mediaType)
   const showImage = isImageFile(file.name, mediaType) && !!file.url
-  const isAudio = !showImage && isAudioFile(file.name, mediaType)
+  const showVideo = !showImage && isVideoFile(file.name, mediaType) && !!file.url
+  const isAudio = !showImage && !showVideo && isAudioFile(file.name, mediaType)
 
   return (
     <div
@@ -167,6 +219,8 @@ function FileThumbnail({
     >
       {showImage ? (
         <LazyImage src={file.url} alt={file.name} className="w-full h-full object-cover" />
+      ) : showVideo ? (
+        <LazyVideo src={file.url} className="w-full h-full object-cover" />
       ) : (
         <Icon className={`w-6 h-6 ${isAudio ? 'text-highlight' : 'text-muted-foreground'}`} />
       )}
@@ -389,7 +443,8 @@ function RemoteFileList({
   function renderListFile(file: MediaFileEntry, selected: boolean) {
     const Icon = getFileIcon(file.name, mediaType)
     const showThumb = isImageFile(file.name, mediaType) && !!file.url
-    const showAudioIcon = !showThumb && isAudioFile(file.name, mediaType)
+    const showVideoThumb = !showThumb && isVideoFile(file.name, mediaType) && !!file.url
+    const showAudioIcon = !showThumb && !showVideoThumb && isAudioFile(file.name, mediaType)
 
     return (
       <button
@@ -406,12 +461,17 @@ function RemoteFileList({
             <LazyImage src={file.url} alt={file.name} className="w-full h-full object-cover" />
           </div>
         )}
+        {showVideoThumb && (
+          <div className="w-4 h-4 rounded overflow-hidden shrink-0 bg-muted">
+            <LazyVideo src={file.url} className="w-full h-full object-cover" />
+          </div>
+        )}
         {showAudioIcon && (
           <div className="w-4 h-4 rounded flex items-center justify-center bg-[#34d399] shrink-0">
             <Icon className="w-3 h-3 text-white" />
           </div>
         )}
-        {!showThumb && !showAudioIcon && (
+        {!showThumb && !showVideoThumb && !showAudioIcon && (
           <Icon className="w-4 h-4 text-muted-foreground shrink-0" />
         )}
         <span className="flex-1 text-xs truncate min-w-0" title={file.name}>

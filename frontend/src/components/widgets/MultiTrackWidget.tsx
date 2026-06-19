@@ -1,0 +1,417 @@
+import { useEffect, useRef, useState } from 'react'
+import { TooltipProvider } from '@/components/ui/tooltip'
+import { useCanvasScale } from '@/hooks/use-canvas-scale'
+import { useElementWidth } from '@/hooks/use-element-width'
+import type { ReactWidgetProps } from '@/lib/create-react-widget'
+import { LocaleContext } from '@/lib/i18n'
+import {
+  addDefaultTaskSegmentIfRangeEmpty,
+  createDefaultTrackData,
+  calculateTotalLength,
+  createMultiTrackVideoContent,
+  deleteSegmentWithLinkedTasks,
+  getSelectedMultiTrackSegment,
+  moveSegmentBetweenCompatibleTracks,
+  normalizeTrackData,
+  remapFrameToRate,
+  remapTrackDataFrameRate,
+  secondsToFrame,
+  snapSecondsToFrame,
+  snapTimeToFrame,
+  updateMultiTrackSegmentContent,
+  updateMultiTrackSegmentDuration,
+} from '@/lib/multitrack-utils'
+import { mediaContentToViewUrl } from '@/lib/media-url'
+import { uuid } from '@/lib/uuid'
+import { loadBrowserVideoMetadata } from '@/lib/video-utils'
+import type { MultiTrackSegmentContent, MultiTrackSourceType, TrackData } from '@/types/multitrack'
+import { MultiTrackRuler } from './multitrack/MultiTrackRuler'
+import { MultiTrackToolbar } from './multitrack/MultiTrackToolbar'
+import { PreviewArea } from './multitrack/PreviewArea'
+import { TrackArea } from './multitrack/TrackArea'
+
+function ensureTrackData(raw: unknown): TrackData {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    const data = raw as Partial<TrackData>
+    if (Array.isArray(data.tracks)) {
+      return normalizeTrackData(raw as Parameters<typeof normalizeTrackData>[0])
+    }
+  }
+  return createDefaultTrackData()
+}
+
+export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactWidgetProps<TrackData>>) {
+  const data = ensureTrackData(value)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [zoom, setZoom] = useState(1)
+  const [timelineCollapsed, setTimelineCollapsed] = useState(false)
+  const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null)
+  const rafRef = useRef<number | null>(null)
+  const timelineContainerRef = useRef<HTMLDivElement>(null)
+  const startedAtRef = useRef(0)
+  const startTimeRef = useRef(0)
+  const currentTimeRef = useRef(0)
+  const timelineWidth = Math.max(1, useElementWidth(timelineContainerRef))
+  const scaledTimelineWidth = timelineWidth * zoom
+  const canvasScale = useCanvasScale(app)
+  const selectedSegment = getSelectedMultiTrackSegment(data, selectedSegmentId)
+  const selectedTaskTrackSegments = selectedSegment?.trackType === 'task'
+    ? data.tracks.find((track) => track.id === selectedSegment.trackId && track.type === 'task')?.segments ?? [selectedSegment.segment]
+    : undefined
+  const locale = app?.ui?.settings?.settingsValues?.['Comfy.Locale']
+
+  useEffect(() => {
+    currentTimeRef.current = currentTime
+  }, [currentTime])
+
+  useEffect(() => {
+    if (!isPlaying) {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+      return
+    }
+
+    startedAtRef.current = performance.now()
+    startTimeRef.current = currentTimeRef.current
+
+    function tick(now: number) {
+      const elapsed = (now - startedAtRef.current) / 1000
+      const next = snapTimeToFrame(startTimeRef.current + secondsToFrame(elapsed, data.frame_rate), data.frame_rate)
+      if (next >= data.total_length) {
+        currentTimeRef.current = data.total_length
+        setCurrentTime(data.total_length)
+        setIsPlaying(false)
+        return
+      }
+      currentTimeRef.current = next
+      setCurrentTime(next)
+      rafRef.current = requestAnimationFrame(tick)
+    }
+
+    rafRef.current = requestAnimationFrame(tick)
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+    }
+  }, [isPlaying, data.frame_rate, data.total_length])
+
+  async function handleAddVideo(trackId: string, filePath: string, sourceType: MultiTrackSourceType) {
+    const content = createMultiTrackVideoContent(filePath, sourceType)
+    const src = mediaContentToViewUrl(content)
+    let duration = 1
+    if (src) {
+      try {
+        const metadata = await loadBrowserVideoMetadata(src)
+        duration = Math.max(metadata.duration, 1)
+      } catch (error) {
+        console.error('[MultiTrackWidget] failed to read video metadata:', error)
+      }
+    }
+
+    const addedVideoRange = { added: false, startFrame: 0, endFrame: 0 }
+    const videoUpdatedTracks = data.tracks.map((track) => {
+      if (track.id !== trackId) return track
+      const startFrame = snapTimeToFrame(
+        track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0),
+        data.frame_rate,
+      )
+      const endFrame = startFrame + Math.max(1, snapSecondsToFrame(duration, data.frame_rate))
+      addedVideoRange.added = true
+      addedVideoRange.startFrame = startFrame
+      addedVideoRange.endFrame = endFrame
+      return {
+        ...track,
+        segments: [
+          ...track.segments,
+          {
+            id: uuid(),
+            start_frame: startFrame,
+            end_frame: endFrame,
+            color: track.color,
+            content: {
+              ...content,
+              duration,
+            },
+          },
+        ],
+      }
+    })
+    const updatedTracks = addedVideoRange.added
+      ? addDefaultTaskSegmentIfRangeEmpty(videoUpdatedTracks, addedVideoRange.startFrame, addedVideoRange.endFrame)
+      : videoUpdatedTracks
+
+    onChange({
+      ...data,
+      tracks: updatedTracks,
+      total_length: calculateTotalLength(updatedTracks),
+    })
+  }
+
+  async function handleReplaceVideo(
+    trackId: string,
+    segmentId: string,
+    filePath: string,
+    sourceType: MultiTrackSourceType,
+  ) {
+    const content = createMultiTrackVideoContent(filePath, sourceType)
+    const src = mediaContentToViewUrl(content)
+    let duration = 1
+    if (src) {
+      try {
+        const metadata = await loadBrowserVideoMetadata(src)
+        duration = Math.max(metadata.duration, 1)
+      } catch (error) {
+        console.error('[MultiTrackWidget] failed to read replacement video metadata:', error)
+      }
+    }
+
+    const updatedTracks = data.tracks.map((track) => {
+      if (track.id !== trackId) return track
+      return {
+        ...track,
+        segments: track.segments.map((segment) => (
+          segment.id === segmentId
+            ? {
+                ...segment,
+                content: {
+                  ...content,
+                  duration,
+                },
+              }
+            : segment
+        )),
+      }
+    })
+
+    onChange({
+      ...data,
+      tracks: updatedTracks,
+      total_length: calculateTotalLength(updatedTracks),
+    })
+  }
+
+  function handleAddTaskSegment(trackId: string) {
+    const updatedTracks = data.tracks.map((track) => {
+      if (track.id !== trackId || track.type !== 'task') return track
+      const startFrame = snapTimeToFrame(
+        track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0),
+        data.frame_rate,
+      )
+      const endFrame = startFrame + Math.max(1, secondsToFrame(5, data.frame_rate))
+      return {
+        ...track,
+        segments: [
+          ...track.segments,
+          {
+            id: uuid(),
+            start_frame: startFrame,
+            end_frame: endFrame,
+            color: track.color,
+            content: {
+              media_type: 'none' as const,
+              task_mode: track.task_mode ?? 'default',
+            },
+          },
+        ],
+      }
+    })
+
+    onChange({
+      ...data,
+      tracks: updatedTracks,
+      total_length: calculateTotalLength(updatedTracks),
+    })
+  }
+
+  function handleDeleteSegment(segmentId: string) {
+    const updatedTracks = deleteSegmentWithLinkedTasks(data.tracks, segmentId)
+    const totalLength = calculateTotalLength(updatedTracks)
+    onChange({
+      ...data,
+      tracks: updatedTracks,
+      total_length: totalLength,
+    })
+    setSelectedSegmentId((current) => current === segmentId ? null : current)
+    setCurrentTime((time) => Math.min(time, totalLength))
+  }
+
+  function handleResizeSegment(segmentId: string, edge: 'start' | 'end', nextTime: number) {
+    const updatedTracks = data.tracks.map((track) => ({
+      ...track,
+      segments: track.segments.map((segment) => {
+        if (segment.id !== segmentId) return segment
+        const sortedSegments = [...track.segments].sort((a, b) => a.start_frame - b.start_frame)
+        const segmentIndex = sortedSegments.findIndex((item) => item.id === segmentId)
+        const prevSegment = segmentIndex > 0 ? sortedSegments[segmentIndex - 1] : null
+        const nextSegment = segmentIndex >= 0 && segmentIndex < sortedSegments.length - 1
+          ? sortedSegments[segmentIndex + 1]
+          : null
+        const sourceDuration = segment.content.duration && segment.content.duration > 0
+          ? Math.max(1, snapSecondsToFrame(segment.content.duration, data.frame_rate))
+          : Number.POSITIVE_INFINITY
+
+        if (edge === 'start') {
+          const nextStart = snapTimeToFrame(nextTime, data.frame_rate)
+          const minStart = Math.max(0, prevSegment?.end_frame ?? 0, segment.end_frame - sourceDuration)
+          const maxStart = segment.end_frame - 1
+          return {
+            ...segment,
+            start_frame: Math.max(minStart, Math.min(nextStart, maxStart)),
+          }
+        }
+
+        const nextEnd = snapTimeToFrame(nextTime, data.frame_rate)
+        const minEnd = segment.start_frame + 1
+        const maxEnd = Math.min(nextSegment?.start_frame ?? Number.POSITIVE_INFINITY, segment.start_frame + sourceDuration)
+        return {
+          ...segment,
+          end_frame: Math.max(minEnd, Math.min(nextEnd, maxEnd)),
+        }
+      }).sort((a, b) => a.start_frame - b.start_frame),
+    }))
+    onChange({
+      ...data,
+      tracks: updatedTracks,
+      total_length: calculateTotalLength(updatedTracks),
+    })
+  }
+
+  function handleMoveSegment(segmentId: string, targetTrackId: string, nextStartTime: number) {
+    const updatedTracks = moveSegmentBetweenCompatibleTracks(
+      data.tracks,
+      segmentId,
+      targetTrackId,
+      nextStartTime,
+      data.frame_rate,
+    )
+
+    onChange({
+      ...data,
+      tracks: updatedTracks,
+      total_length: calculateTotalLength(updatedTracks),
+    })
+  }
+
+  function handleGlobalSettingsChange(patch: Partial<Pick<TrackData, 'muted' | 'volume' | 'frame_rate'>>) {
+    const nextFrameRate = patch.frame_rate
+    if (typeof nextFrameRate === 'number' && nextFrameRate > 0 && nextFrameRate !== data.frame_rate) {
+      const remapped = remapTrackDataFrameRate(data, nextFrameRate)
+      const nextCurrentTime = remapFrameToRate(currentTimeRef.current, data.frame_rate, remapped.frame_rate)
+      currentTimeRef.current = nextCurrentTime
+      setCurrentTime(nextCurrentTime)
+      onChange({
+        ...remapped,
+        ...patch,
+        frame_rate: remapped.frame_rate,
+      })
+      return
+    }
+
+    onChange({ ...data, ...patch, frame_rate: data.frame_rate })
+  }
+
+  function handleSelectedSegmentContentChange(patch: Partial<MultiTrackSegmentContent>) {
+    if (!selectedSegmentId) return
+    onChange(updateMultiTrackSegmentContent(data, selectedSegmentId, patch))
+  }
+
+  function handleTrackSegmentsContentChange(updates: Array<{ segmentId: string; patch: Partial<MultiTrackSegmentContent> }>) {
+    const updateMap = new Map(updates.map((update) => [update.segmentId, update.patch]))
+    const updatedTracks = data.tracks.map((track) => ({
+      ...track,
+      segments: track.segments.map((segment) => {
+        const patch = updateMap.get(segment.id)
+        if (!patch) return segment
+        return {
+          ...segment,
+          content: {
+            ...segment.content,
+            ...patch,
+          },
+        }
+      }),
+    }))
+    onChange({
+      ...data,
+      tracks: updatedTracks,
+    })
+  }
+
+  function handleSelectedSegmentDurationChange(duration: number) {
+    if (!selectedSegmentId) return
+    onChange(updateMultiTrackSegmentDuration(data, selectedSegmentId, duration, data.frame_rate))
+  }
+
+  return (
+    <LocaleContext.Provider value={locale}>
+      <TooltipProvider>
+        <div
+          className="flex h-full w-full flex-col overflow-hidden rounded text-foreground font-sans text-xs select-none"
+          onClick={() => setSelectedSegmentId(null)}
+        >
+          <PreviewArea
+            data={data}
+            currentTime={currentTime}
+            selectedSegment={selectedSegment}
+            isPlaying={isPlaying}
+            node={node}
+            onGlobalSettingsChange={handleGlobalSettingsChange}
+            onSelectedSegmentContentChange={handleSelectedSegmentContentChange}
+            taskSegments={selectedTaskTrackSegments}
+            onTrackSegmentsContentChange={handleTrackSegmentsContentChange}
+            onSelectedSegmentDurationChange={handleSelectedSegmentDurationChange}
+          />
+          <MultiTrackToolbar
+            currentTime={currentTime}
+            totalLength={data.total_length}
+            frameRate={data.frame_rate}
+            isPlaying={isPlaying}
+            zoom={zoom}
+            timelineCollapsed={timelineCollapsed}
+            onPlayPause={() => setIsPlaying((value) => !value)}
+            onZoomChange={setZoom}
+            onToggleTimeline={() => setTimelineCollapsed((collapsed) => !collapsed)}
+            canDelete={selectedSegmentId !== null}
+            onDeleteSelected={() => {
+              if (selectedSegmentId) handleDeleteSegment(selectedSegmentId)
+            }}
+          />
+          <div
+            data-testid="multitrack-timeline-panel"
+            aria-hidden={timelineCollapsed}
+            className={`grid shrink-0 transition-[grid-template-rows] duration-300 ease-in-out ${timelineCollapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}
+          >
+            <div className="min-h-0 overflow-hidden">
+              <div ref={timelineContainerRef} className="no-scrollbar shrink-0 overflow-x-auto overflow-y-hidden">
+                <div className="min-h-full" style={{ width: scaledTimelineWidth, minWidth: '100%' }}>
+                  <MultiTrackRuler
+                    totalLength={data.total_length}
+                    frameRate={data.frame_rate}
+                    width={scaledTimelineWidth}
+                    canvasScale={canvasScale}
+                    currentTime={currentTime}
+                    onSeek={(time) => setCurrentTime(snapTimeToFrame(time, data.frame_rate))}
+                  />
+                  <TrackArea
+                    data={data}
+                    width={scaledTimelineWidth}
+                    currentTime={currentTime}
+                    canvasScale={canvasScale}
+                    selectedSegmentId={selectedSegmentId}
+                    onAddVideo={handleAddVideo}
+                    onReplaceVideo={handleReplaceVideo}
+                    onAddTaskSegment={handleAddTaskSegment}
+                    onSelectSegment={setSelectedSegmentId}
+                    onDeleteSegment={handleDeleteSegment}
+                    onResizeSegment={handleResizeSegment}
+                    onMoveSegment={handleMoveSegment}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </TooltipProvider>
+    </LocaleContext.Provider>
+  )
+}
