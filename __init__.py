@@ -48,10 +48,15 @@ class EasyMediaExtension(ComfyExtension):
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
         nodes = [
             TimelineEditor,
+            MultiTrackEditor,
             TimelineInfoOutput,
+            MultiTrackInfoOutput,
+            MultiTrackTaskOutput,
             TimelineSegmentOutput,
             TimelineSegmentCount,
             ImageIndexesToIntList,
+            MatchLine,
+            SplitImages,
             MakeImageList,
             MakeAudioList,
             # Wan

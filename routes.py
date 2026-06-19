@@ -32,6 +32,8 @@ from server import PromptServer
 from aiohttp import web
 import folder_paths
 
+from .utils.prompt_builder import get_system_prompt_options
+
 try:
     from PIL import Image as PILImage
     _HAS_PIL = True
@@ -318,10 +320,10 @@ async def handle_download_url(request: web.Request) -> web.Response:
                     target = input_dir / filename
 
                 target.write_bytes(content)
-                return web.Response(
-                    content_type="application/json",
-                    text=json.dumps({"source_type": "input", "file_name": filename}),
-                )
+        return web.Response(
+            content_type="application/json",
+            text=json.dumps({"source_type": "input", "file_name": filename}),
+        )
 
     except Exception as exc:
         return web.Response(
@@ -330,3 +332,12 @@ async def handle_download_url(request: web.Request) -> web.Response:
             text=json.dumps({"error": str(exc)}),
         )
 
+
+@PromptServer.instance.routes.get("/easy-media/prompt/system-prompts")
+async def handle_system_prompt_options(request: web.Request) -> web.Response:
+    return web.Response(
+        content_type="application/json",
+        text=json.dumps({
+            "items": get_system_prompt_options(),
+        }),
+    )
