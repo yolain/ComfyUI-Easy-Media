@@ -24,6 +24,12 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 
 ## Changelog
 
+### v1.0.5
+
+- **[Split Multi-Image]** Added support for splitting images from image list or image batch types, applicable to `Bernini multi-reference` scenarios
+- **[Media Selector]** Added directory store cache for media selector to solve the issue of frequently fetching list data from the backend
+- **[MultiTrack Editor]** Added initial version of multi-track editor with supporting nodes, supporting multi-track video, audio editing, clip editing and preview, providing more powerful media editing features
+
 ### v1.0.4
 
 - **[SaveVideo]** Added `hide&save` option to hide the output video node while saving the video
@@ -40,7 +46,8 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 - **[Timeline Editor: UI Mode]** Fixed the issue where nodes and track heights didn't adapt automatically; added `Clone Clip` to the right-click menu for better compatibility with wan2's `berinini` and `LTX2.3 R2V`
 - **[LTXV Reference Video]** New node for multi-reference LoRA [model_url](https://huggingface.co/LiconStudio/LTX-2.3-Multiple-Subject-Reference)
 
-### v1.0.2
+<details>
+<summary><b>v1.0.2</b></summary>
 
 - **[Timeline Editor: App Mode]** Fixed an issue where, if `prompt_override` was not written strictly according to the prompt format, the default duration was not evenly distributed across clips
 - **[Timeline Editor: App Mode]** Fixed an issue where filling the entire timeline with a single audio clip required filtering out empty audio before making a determination
