@@ -12,6 +12,10 @@ vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
   MediaSelector: () => null,
 }))
 
+vi.mock('@/components/widgets/timeline/AudioWaveform', () => ({
+  AudioWaveform: () => <canvas data-testid="audio-waveform" />,
+}))
+
 function trackData(): { data: TrackData; selectedSegment: SelectedMultiTrackSegment } {
   const videoSegment = {
     id: 'selected-video',
@@ -28,7 +32,6 @@ function trackData(): { data: TrackData; selectedSegment: SelectedMultiTrackSegm
   }
   const data: TrackData = {
     muted: false,
-    volume: 1,
     frame_rate: 24,
     total_length: 5,
     tracks: [
@@ -125,5 +128,143 @@ describe('PreviewArea', () => {
     })
 
     expect(previewFrame.style.aspectRatio).toBe('576 / 1024')
+  })
+
+  it('shows images from the task segment at the current time when no segment is selected', () => {
+    const { data } = trackData()
+    data.tracks.unshift({
+      id: 'task-track',
+      name: 'Task 1',
+      type: 'task',
+      color: 'var(--primary)',
+      muted: false,
+      locked: false,
+      segments: [
+        {
+          id: 'task-before',
+          start_frame: 0,
+          end_frame: 24,
+          color: 'var(--primary)',
+          content: { media_type: 'none', images: [] },
+        },
+        {
+          id: 'active-task',
+          start_frame: 24,
+          end_frame: 48,
+          color: 'var(--primary)',
+          content: {
+            media_type: 'none',
+            images: [
+              { id: 'first', source_type: 'input', file_path: 'tasks/first.png', file_name: 'first.png' },
+              { id: 'second', source_type: 'url', url: 'https://example.com/second.png', file_name: 'second.png' },
+            ],
+          },
+        },
+      ],
+    })
+
+    const props = {
+      data,
+      selectedSegment: null,
+      isPlaying: false,
+      node: { widgets: [] },
+      onGlobalSettingsChange: vi.fn(),
+      onSelectedSegmentContentChange: vi.fn(),
+      onSelectedSegmentDurationChange: vi.fn(),
+    }
+    const { rerender } = render(<PreviewArea {...props} currentTime={36} />)
+
+    const imageArea = screen.getByTestId('task-preview-images')
+    expect(imageArea.className).toContain('w-20')
+    expect(screen.getByText('Task1')).toBeTruthy()
+    expect(screen.getAllByRole('img').map((image) => image.getAttribute('src'))).toEqual([
+      '/view?filename=first.png&type=input&subfolder=tasks',
+      'https://example.com/second.png',
+    ])
+    expect(screen.getAllByRole('img').every((image) => image.className.includes('object-contain'))).toBe(true)
+
+    rerender(<PreviewArea {...props} currentTime={48} />)
+    expect(screen.queryByTestId('task-preview-images')).toBeNull()
+  })
+
+  it('does not show task images while another segment is selected', () => {
+    const { data, selectedSegment } = trackData()
+    data.tracks.unshift({
+      id: 'task-track',
+      name: 'Task 1',
+      type: 'task',
+      color: 'var(--primary)',
+      muted: false,
+      locked: false,
+      segments: [{
+        id: 'active-task',
+        start_frame: 0,
+        end_frame: 48,
+        color: 'var(--primary)',
+        content: {
+          media_type: 'none',
+          images: [{ id: 'first', source_type: 'input', file_path: 'first.png' }],
+        },
+      }],
+    })
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={1}
+        selectedSegment={selectedSegment}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByTestId('task-preview-images')).toBeNull()
+  })
+
+  it('shows a constrained full-width waveform and media toolbar for a selected audio segment', () => {
+    const { data } = trackData()
+    const audioSegment = {
+      id: 'selected-audio',
+      start_frame: 0,
+      end_frame: 48,
+      color: 'var(--multitrack-audio-bg)',
+      content: {
+        media_type: 'audio' as const,
+        source_type: 'input' as const,
+        file_path: 'audio.wav',
+        volume_db: 2,
+      },
+    }
+    data.tracks.push({
+      id: 'audio-track',
+      name: 'Audio 1',
+      type: 'audio',
+      color: 'var(--multitrack-audio-bg)',
+      muted: false,
+      locked: false,
+      segments: [audioSegment],
+    })
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={12}
+        selectedSegment={{ trackId: 'audio-track', trackType: 'audio', segment: audioSegment }}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    const waveform = screen.getByTestId('selected-audio-waveform')
+    expect(waveform.className).toContain('h-20')
+    expect(waveform.className).toContain('w-full')
+    expect(screen.getByRole('button', { name: 'Audio settings' })).not.toBeNull()
+    expect(screen.queryByTestId('multitrack-video-preview')).toBeNull()
   })
 })

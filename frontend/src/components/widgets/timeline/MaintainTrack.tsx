@@ -22,6 +22,7 @@ import type {
 import { useT } from '@/lib/i18n'
 import { uuid } from '@/lib/uuid'
 import { scaleImageItemsToDuration } from '@/lib/timeline-utils'
+import { invalidateMediaListCache } from '@/stores/media-list-store'
 
 interface MaintainTrackProps {
   track: Track
@@ -616,6 +617,7 @@ export function MaintainTrack({
       }
     }
     if (paths.length === 0) { setPendingDropFrame(null); return }
+    invalidateMediaListCache('inputs')
 
     // If empty track: create one segment with all images distributed evenly
     if (segments.length === 0) {

@@ -29,7 +29,8 @@ export interface MultiTrackSegmentContent {
   task_mode?: MultiTrackTaskMode
   images?: MultiTrackTaskImage[]
   duration?: number
-  volume?: number
+  volume_db?: number
+  muted?: boolean
   speed?: number
   media_index?: number
 }
@@ -49,6 +50,8 @@ export interface MultiTrack {
   task_mode?: MultiTrackTaskMode
   color: string
   muted: boolean
+  solo?: boolean
+  volume_db?: number
   locked: boolean
   media_index?: number
   segments: MultiTrackSegment[]
@@ -59,7 +62,7 @@ export interface TrackData {
   total_length: number
   frame_rate: number
   muted?: boolean
-  volume?: number
+  volume_db?: number
 }
 
 export interface TracksInfoMediaItem {
@@ -78,6 +81,8 @@ export interface TracksInfoMediaItem {
 export interface TracksInfo {
   total_length: number
   frame_rate: number
+  muted?: boolean
+  volume_db?: number
   width: number
   height: number
   tracks: MultiTrack[]

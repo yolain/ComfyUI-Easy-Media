@@ -415,6 +415,60 @@
       }
     }
   },
+  "easy multiTrackEditor": {
+    "display_name": "多轨编辑器",
+    "description": "编辑多轨媒体数据，并输出轨道信息以及图像、音频和视频媒体列表。",
+    "inputs": {
+      "resolution": { "name": "分辨率", "tooltip": "选择输出分辨率，或选择自定义宽高。" },
+      "format": { "name": "视频格式", "tooltip": "选择视频格式以自动设置分辨率和帧率。" },
+      "track_data": { "name": "多轨数据" },
+      "prompt_override": { "name": "提示词覆盖", "tooltip": "覆盖多轨任务片段中的提示词。" },
+      "image": { "name": "图像列表", "tooltip": "多轨任务片段使用的可选图像列表。" },
+      "audio": { "name": "音频列表", "tooltip": "多轨音频片段使用的可选音频列表。" },
+      "video": { "name": "视频列表", "tooltip": "多轨视频片段使用的可选视频列表。" }
+    },
+    "outputs": {
+      "0": { "name": "轨道信息" },
+      "1": { "name": "图像" },
+      "2": { "name": "音频" },
+      "3": { "name": "视频" }
+    }
+  },
+  "easy multiTrackInfoOutput": {
+    "display_name": "多轨信息输出",
+    "description": "输出多轨项目的尺寸、总帧数、帧率和任务数量。",
+    "inputs": {
+      "tracks_info": { "name": "轨道信息" }
+    },
+    "outputs": {
+      "0": { "name": "宽度" },
+      "1": { "name": "高度" },
+      "2": { "name": "总帧数" },
+      "3": { "name": "帧率" },
+      "4": { "name": "任务数量" }
+    }
+  },
+  "easy multiTrackTaskOutput": {
+    "display_name": "多轨任务输出",
+    "description": "输出指定多轨任务片段的提示词和对应时间范围内的媒体。",
+    "inputs": {
+      "tracks_info": { "name": "轨道信息" },
+      "images": { "name": "图像" },
+      "audio": { "name": "音频" },
+      "video": { "name": "视频" },
+      "task_index": { "name": "任务索引" },
+      "prompt_format": { "name": "提示词格式", "tooltip": "选择任务提示词的输出格式。" }
+    },
+    "outputs": {
+      "0": { "name": "系统提示词" },
+      "1": { "name": "用户提示词" },
+      "2": { "name": "类型" },
+      "3": { "name": "长度" },
+      "4": { "name": "图像" },
+      "5": { "name": "音频" },
+      "6": { "name": "视频" }
+    }
+  },
   "LTXVMakeRefVideo": {
     "display_name": "LTXV 制作参考视频",
     "description": "将批次参考图像扩展为用于 IC-LoRA 的参考视频。",

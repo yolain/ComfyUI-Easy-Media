@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { MultiTrack } from '@/types/multitrack'
 import { VideoTrack } from '@/components/widgets/multitrack/VideoTrack'
+import { TooltipProvider } from '@/components/ui/tooltip'
 
 vi.mock('@/lib/i18n', () => ({
   useT: () => (key: string) => key,
@@ -58,7 +59,8 @@ function videoTrack(): MultiTrack {
 describe('VideoTrack', () => {
   it('preselects the current video when a segment is opened for replacement', () => {
     render(
-      <VideoTrack
+      <TooltipProvider>
+        <VideoTrack
         track={videoTrack()}
         totalLength={24}
         frameRate={24}
@@ -68,12 +70,16 @@ describe('VideoTrack', () => {
         onAddVideo={vi.fn()}
         onSelectSegment={vi.fn()}
         onDeleteSegment={vi.fn()}
+        canDeleteTrack={false}
+        onDeleteTrack={vi.fn()}
+        onTrackAudioSettingsChange={vi.fn()}
         onResizeSegment={vi.fn()}
         onMoveSegment={vi.fn()}
         onDragPreviewChange={vi.fn()}
         onDragPreviewEnd={vi.fn()}
         onReplaceVideo={vi.fn()}
-      />,
+        />
+      </TooltipProvider>,
     )
 
     fireEvent.doubleClick(screen.getByRole('button', { name: 'video-segment' }), {

@@ -8,9 +8,14 @@ import {
   addDefaultTaskSegmentIfRangeEmpty,
   createDefaultTrackData,
   calculateTotalLength,
+  cloneMultiTrackSegment,
+  createMultiTrackAudioContent,
   createMultiTrackVideoContent,
   deleteSegmentWithLinkedTasks,
+  distributeMultiTrackSegmentsEvenly,
   getSelectedMultiTrackSegment,
+  MULTITRACK_DEFAULT_VOLUME_DB,
+  MULTITRACK_TRACK_COLORS,
   moveSegmentBetweenCompatibleTracks,
   normalizeTrackData,
   remapFrameToRate,
@@ -22,9 +27,10 @@ import {
   updateMultiTrackSegmentDuration,
 } from '@/lib/multitrack-utils'
 import { mediaContentToViewUrl } from '@/lib/media-url'
+import { loadBrowserAudioMetadata } from '@/lib/audio-utils'
 import { uuid } from '@/lib/uuid'
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
-import type { MultiTrackSegmentContent, MultiTrackSourceType, TrackData } from '@/types/multitrack'
+import type { MultiTrack, MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSourceType, MultiTrackType, TrackData } from '@/types/multitrack'
 import { MultiTrackRuler } from './multitrack/MultiTrackRuler'
 import { MultiTrackToolbar } from './multitrack/MultiTrackToolbar'
 import { PreviewArea } from './multitrack/PreviewArea'
@@ -147,6 +153,78 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     })
   }
 
+  async function handleAddAudio(
+    trackId: string,
+    filePath: string,
+    sourceType: MultiTrackSourceType,
+    previewUrl?: string,
+  ) {
+    const content = createMultiTrackAudioContent(filePath, sourceType)
+    if (previewUrl) content.url = previewUrl
+    const src = mediaContentToViewUrl(content)
+    let duration = 5
+    if (src) {
+      try {
+        duration = (await loadBrowserAudioMetadata(src)).duration
+      } catch (error) {
+        console.error('[MultiTrackWidget] failed to read audio metadata:', error)
+      }
+    }
+    const updatedTracks = data.tracks.map((track) => {
+      if (track.id !== trackId || track.type !== 'audio') return track
+      const startFrame = track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0)
+      const endFrame = startFrame + Math.max(1, snapSecondsToFrame(duration, data.frame_rate))
+      return {
+        ...track,
+        segments: [...track.segments, {
+          id: uuid(),
+          start_frame: startFrame,
+          end_frame: endFrame,
+          color: track.color,
+          content: { ...content, duration },
+        }],
+      }
+    })
+    onChange({ ...data, tracks: updatedTracks, total_length: calculateTotalLength(updatedTracks) })
+  }
+
+  function handleAddTrack(type: MultiTrackType) {
+    if (type !== 'audio') return
+    const trackNumber = data.tracks.filter((track) => track.type === 'audio').length
+    const track: MultiTrack = {
+      id: uuid(),
+      name: `Audio ${trackNumber}`,
+      type: 'audio',
+      color: MULTITRACK_TRACK_COLORS.audio,
+      muted: false,
+      solo: false,
+      volume_db: MULTITRACK_DEFAULT_VOLUME_DB,
+      locked: false,
+      segments: [],
+    }
+    onChange({ ...data, tracks: [...data.tracks, track] })
+  }
+
+  function handleDeleteTrack(trackId: string) {
+    const target = data.tracks.find((track) => track.id === trackId)
+    const firstVideoTrackId = data.tracks.find((track) => track.type === 'video')?.id
+    if (!target || target.type === 'task' || target.id === firstVideoTrackId) return
+    const segmentIds = new Set(target.segments.map((segment) => segment.id))
+    const updatedTracks = data.tracks.filter((track) => track.id !== trackId)
+    onChange({ ...data, tracks: updatedTracks, total_length: calculateTotalLength(updatedTracks) })
+    setSelectedSegmentId((current) => current && segmentIds.has(current) ? null : current)
+  }
+
+  function handleTrackAudioSettingsChange(
+    trackId: string,
+    patch: Partial<Pick<MultiTrack, 'muted' | 'solo'>>,
+  ) {
+    onChange({
+      ...data,
+      tracks: data.tracks.map((track) => track.id === trackId ? { ...track, ...patch } : track),
+    })
+  }
+
   async function handleReplaceVideo(
     trackId: string,
     segmentId: string,
@@ -235,6 +313,35 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     setCurrentTime((time) => Math.min(time, totalLength))
   }
 
+  function handleDistributeTaskSegments(trackId: string) {
+    const updatedTracks = data.tracks.map((track) => (
+      track.id === trackId && track.type === 'task'
+        ? { ...track, segments: distributeMultiTrackSegmentsEvenly(track.segments, data.total_length) }
+        : track
+    ))
+    onChange({ ...data, tracks: updatedTracks })
+  }
+
+  function handleCloneTaskSegment(trackId: string, segmentId: string) {
+    let clonedSegmentId: string | null = null
+    let taskTrackEnd = 0
+    const updatedTracks = data.tracks.map((track) => {
+      if (track.id !== trackId || track.type !== 'task') return track
+      const result = cloneMultiTrackSegment(track.segments, segmentId)
+      if (!result) return track
+      clonedSegmentId = result.clonedSegmentId
+      taskTrackEnd = result.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0)
+      return { ...track, segments: result.segments }
+    })
+    if (!clonedSegmentId) return
+    onChange({
+      ...data,
+      tracks: updatedTracks,
+      total_length: Math.max(data.total_length, taskTrackEnd),
+    })
+    setSelectedSegmentId(clonedSegmentId)
+  }
+
   function handleResizeSegment(segmentId: string, edge: 'start' | 'end', nextTime: number) {
     const updatedTracks = data.tracks.map((track) => ({
       ...track,
@@ -292,7 +399,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     })
   }
 
-  function handleGlobalSettingsChange(patch: Partial<Pick<TrackData, 'muted' | 'volume' | 'frame_rate'>>) {
+  function handleGlobalSettingsChange(patch: Partial<Pick<TrackData, 'muted' | 'volume_db' | 'frame_rate'>>) {
     const nextFrameRate = patch.frame_rate
     if (typeof nextFrameRate === 'number' && nextFrameRate > 0 && nextFrameRate !== data.frame_rate) {
       const remapped = remapTrackDataFrameRate(data, nextFrameRate)
@@ -337,6 +444,18 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     })
   }
 
+  function handleTaskTrackSegmentsChange(segments: MultiTrackSegment[]) {
+    if (selectedSegment?.trackType !== 'task') return
+    const updatedTracks = data.tracks.map((track) => (
+      track.id === selectedSegment.trackId ? { ...track, segments } : track
+    ))
+    onChange({
+      ...data,
+      tracks: updatedTracks,
+      total_length: calculateTotalLength(updatedTracks),
+    })
+  }
+
   function handleSelectedSegmentDurationChange(duration: number) {
     if (!selectedSegmentId) return
     onChange(updateMultiTrackSegmentDuration(data, selectedSegmentId, duration, data.frame_rate))
@@ -359,6 +478,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             onSelectedSegmentContentChange={handleSelectedSegmentContentChange}
             taskSegments={selectedTaskTrackSegments}
             onTrackSegmentsContentChange={handleTrackSegmentsContentChange}
+            onTaskTrackSegmentsChange={handleTaskTrackSegmentsChange}
             onSelectedSegmentDurationChange={handleSelectedSegmentDurationChange}
           />
           <MultiTrackToolbar
@@ -381,7 +501,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             aria-hidden={timelineCollapsed}
             className={`grid shrink-0 transition-[grid-template-rows] duration-300 ease-in-out ${timelineCollapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}
           >
-            <div className="min-h-0 overflow-hidden">
+            <div className="min-h-0 shrink-0 overflow-hidden">
               <div ref={timelineContainerRef} className="no-scrollbar shrink-0 overflow-x-auto overflow-y-hidden">
                 <div className="min-h-full" style={{ width: scaledTimelineWidth, minWidth: '100%' }}>
                   <MultiTrackRuler
@@ -394,15 +514,23 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                   />
                   <TrackArea
                     data={data}
+                    node={node}
+                    app={app}
                     width={scaledTimelineWidth}
                     currentTime={currentTime}
                     canvasScale={canvasScale}
                     selectedSegmentId={selectedSegmentId}
                     onAddVideo={handleAddVideo}
+                    onAddAudio={handleAddAudio}
+                    onAddTrack={handleAddTrack}
                     onReplaceVideo={handleReplaceVideo}
                     onAddTaskSegment={handleAddTaskSegment}
                     onSelectSegment={setSelectedSegmentId}
                     onDeleteSegment={handleDeleteSegment}
+                    onDeleteTrack={handleDeleteTrack}
+                    onTrackAudioSettingsChange={handleTrackAudioSettingsChange}
+                    onDistributeTaskSegments={handleDistributeTaskSegments}
+                    onCloneTaskSegment={handleCloneTaskSegment}
                     onResizeSegment={handleResizeSegment}
                     onMoveSegment={handleMoveSegment}
                   />

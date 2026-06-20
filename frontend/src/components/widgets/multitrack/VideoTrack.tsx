@@ -1,13 +1,15 @@
 import { useRef, useState } from 'react'
-import { Clapperboard, Plus } from 'lucide-react'
+import { Clapperboard, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
 import type { MediaTab } from '@/components/widgets/mediaSelector/MediaSelector'
 import { useT } from '@/lib/i18n'
 import type { MultiTrack, MultiTrackSourceType } from '@/types/multitrack'
 import { MULTITRACK_LEFT_GUTTER } from './MultiTrackRuler'
 import { MultiTrackSegmentBlock } from './MultiTrackSegmentBlock'
+import { TrackAudioControls } from './TrackAudioControls'
 
 interface VideoTrackProps {
   track: MultiTrack
@@ -19,6 +21,9 @@ interface VideoTrackProps {
   onAddVideo: (trackId: string, filePath: string, sourceType: MultiTrackSourceType) => void
   onSelectSegment: (segmentId: string) => void
   onDeleteSegment: (segmentId: string) => void
+  canDeleteTrack: boolean
+  onDeleteTrack: (trackId: string) => void
+  onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo'>>) => void
   onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
   onMoveSegment: (segmentId: string, nextStartTime: number, clientY: number) => void
   onDragPreviewChange: (segmentId: string, nextStartTime: number, clientY: number) => void
@@ -43,6 +48,9 @@ export function VideoTrack({
   onAddVideo,
   onSelectSegment,
   onDeleteSegment,
+  canDeleteTrack,
+  onDeleteTrack,
+  onTrackAudioSettingsChange,
   onResizeSegment,
   onMoveSegment,
   onDragPreviewChange,
@@ -64,11 +72,13 @@ export function VideoTrack({
 
   return (
     <div className="relative flex h-16 border-b border-border">
-      <div
-        className="flex shrink-0 items-center justify-center border-r border-border"
-        style={{ width: MULTITRACK_LEFT_GUTTER }}
-      >
-        <Clapperboard className="h-3.5 w-3.5 text-muted-foreground" />
+      <div className="shrink-0 border-r border-border" style={{ width: MULTITRACK_LEFT_GUTTER }}>
+        <TrackAudioControls
+          track={track}
+          icon={<Clapperboard className="h-3.5 w-3.5 text-muted-foreground" />}
+          preserveSelection={track.segments.some((segment) => segment.id === selectedSegmentId)}
+          onChange={(patch) => onTrackAudioSettingsChange(track.id, patch)}
+        />
       </div>
       <div ref={contentRef} className="relative min-w-0 flex-1">
         {track.segments.map((segment, index) => (
@@ -100,33 +110,51 @@ export function VideoTrack({
           />
         ))}
 
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="secondary"
-              size="icon"
-              className="absolute top-1/2 h-5 w-5 cursor-pointer"
-              style={{
-                left: track.segments.length === 0 ? 6 : addLeft + 6,
-                transform: 'translateY(-50%)',
-              }}
-              aria-label={t('multitrack.addVideo')}
-            >
-              <Plus className="h-2.5 w-2.5" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0" align="start">
-            <MediaSelector
-              value=""
-              mediaType="video"
-              defaultTab="inputs"
-              onChange={(filePath, sourceType = 'input') => {
-                onAddVideo(track.id, filePath, sourceType)
-              }}
-            />
-          </PopoverContent>
-        </Popover>
+        <div
+          className="absolute top-1/2 flex -translate-y-1/2 flex-col gap-1"
+          style={{ left: track.segments.length === 0 ? 6 : addLeft + 6 }}
+        >
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                className="h-5 w-5 cursor-pointer"
+                aria-label={t('multitrack.addVideo')}
+              >
+                <Plus className="h-2.5 w-2.5" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <MediaSelector
+                value=""
+                mediaType="video"
+                defaultTab="inputs"
+                onChange={(filePath, sourceType = 'input') => {
+                  onAddVideo(track.id, filePath, sourceType)
+                }}
+              />
+            </PopoverContent>
+          </Popover>
+          {canDeleteTrack ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 cursor-pointer text-destructive"
+                  aria-label={t('multitrack.deleteTrack', { name: track.name })}
+                  onClick={() => onDeleteTrack(track.id)}
+                >
+                  <Trash2 className="h-2.5 w-2.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t('multitrack.deleteTrack', { name: track.name })}</TooltipContent>
+            </Tooltip>
+          ) : null}
+        </div>
         <Popover open={reselectAnchor !== null} onOpenChange={(open) => {
           if (!open) setReselectAnchor(null)
         }}>

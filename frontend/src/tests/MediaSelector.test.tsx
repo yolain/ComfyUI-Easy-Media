@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
+import { clearMediaListCache } from '@/stores/media-list-store'
 
 vi.mock('@/lib/i18n', () => ({
   useT: () => (key: string) => key,
@@ -12,6 +13,7 @@ vi.mock('@/lib/comfy-api', () => ({
 
 describe('MediaSelector', () => {
   beforeEach(() => {
+    clearMediaListCache()
     vi.stubGlobal('IntersectionObserver', class {
       private readonly callback: IntersectionObserverCallback
 
@@ -60,5 +62,16 @@ describe('MediaSelector', () => {
       expect(video).not.toBeNull()
       expect(video?.getAttribute('src')).toContain('clip.mp4')
     })
+  })
+
+  it('reuses the media list after the selector is reopened', async () => {
+    const { unmount } = render(<MediaSelector value="" mediaType="video" onChange={vi.fn()} />)
+    await screen.findByTitle('clip.mp4')
+    unmount()
+
+    render(<MediaSelector value="" mediaType="video" onChange={vi.fn()} />)
+    await screen.findByTitle('clip.mp4')
+
+    expect(fetch).toHaveBeenCalledTimes(1)
   })
 })

@@ -1,30 +1,32 @@
+import { useEffect, useState } from 'react'
 import { Gauge, Volume2, VolumeX } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { NumberInput } from '@/components/ui/number-input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Slider } from '@/components/ui/slider'
 import { useT } from '@/lib/i18n'
-import { MULTITRACK_DEFAULT_FRAME_RATE, MULTITRACK_FRAME_RATE_OPTIONS } from '@/lib/multitrack-utils'
+import {
+  formatMultiTrackDurationTimecode,
+  MULTITRACK_DEFAULT_FRAME_RATE,
+  MULTITRACK_FRAME_RATE_OPTIONS,
+  MULTITRACK_MAX_VOLUME_DB,
+  MULTITRACK_MIN_VOLUME_DB,
+  clampMultiTrackVolumeDb,
+  parseMultiTrackDurationTimecode,
+} from '@/lib/multitrack-utils'
 import type { MultiTrackSegmentContent, TrackData } from '@/types/multitrack'
 
 interface PreviewFloatingToolbarProps {
   globalMuted: boolean
-  globalVolume: number
+  globalVolumeDb: number
   frameRate: number
-  selectedVideoVolume: number | null
-  selectedVideoDuration: number | null
-  onGlobalSettingsChange: (patch: Partial<Pick<TrackData, 'muted' | 'volume' | 'frame_rate'>>) => void
+  selectedMediaVolumeDb: number | null
+  selectedMediaMuted: boolean
+  selectedMediaDuration: number | null
+  onGlobalSettingsChange: (patch: Partial<Pick<TrackData, 'muted' | 'volume_db' | 'frame_rate'>>) => void
   onSelectedSegmentContentChange: (patch: Partial<MultiTrackSegmentContent>) => void
   onSelectedSegmentDurationChange: (duration: number) => void
-}
-
-function clampVolume(value: number): number {
-  return Math.max(0, Math.min(1, value))
-}
-
-function parsePositiveNumber(value: string): number | null {
-  const parsed = Number.parseFloat(value)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
 }
 
 function nearestFrameRateIndex(frameRate: number): number {
@@ -40,31 +42,41 @@ function nearestFrameRateIndex(frameRate: number): number {
 
 export function PreviewFloatingToolbar({
   globalMuted,
-  globalVolume,
+  globalVolumeDb,
   frameRate,
-  selectedVideoVolume,
-  selectedVideoDuration,
+  selectedMediaVolumeDb,
+  selectedMediaMuted,
+  selectedMediaDuration,
   onGlobalSettingsChange,
   onSelectedSegmentContentChange,
   onSelectedSegmentDurationChange,
 }: Readonly<PreviewFloatingToolbarProps>) {
   const t = useT()
-  const hasSelectedVideo = selectedVideoVolume !== null
-  const effectiveVolume = hasSelectedVideo ? selectedVideoVolume : globalVolume
-  const muted = hasSelectedVideo ? effectiveVolume <= 0 : globalMuted
+  const hasSelectedMedia = selectedMediaVolumeDb !== null
+  const audioLabel = t(hasSelectedMedia ? 'multitrack.audio' : 'multitrack.globalAudio')
+  const effectiveVolumeDb = hasSelectedMedia ? selectedMediaVolumeDb : globalVolumeDb
+  const muted = hasSelectedMedia ? selectedMediaMuted : globalMuted
+  const formattedDuration = selectedMediaDuration === null
+    ? ''
+    : formatMultiTrackDurationTimecode(selectedMediaDuration, frameRate)
+  const [durationInput, setDurationInput] = useState(formattedDuration)
 
-  function updateVolume(value: number) {
-    const nextVolume = clampVolume(value)
-    if (hasSelectedVideo) {
-      onSelectedSegmentContentChange({ volume: nextVolume })
+  useEffect(() => {
+    setDurationInput(formattedDuration)
+  }, [formattedDuration])
+
+  function updateVolumeDb(value: number) {
+    const nextVolumeDb = clampMultiTrackVolumeDb(value)
+    if (hasSelectedMedia) {
+      onSelectedSegmentContentChange({ volume_db: nextVolumeDb })
       return
     }
-    onGlobalSettingsChange({ volume: nextVolume, muted: nextVolume <= 0 })
+    onGlobalSettingsChange({ volume_db: nextVolumeDb })
   }
 
   function toggleMute() {
-    if (hasSelectedVideo) {
-      onSelectedSegmentContentChange({ volume: muted ? 1 : 0 })
+    if (hasSelectedMedia) {
+      onSelectedSegmentContentChange({ muted: !muted })
       return
     }
     onGlobalSettingsChange({ muted: !globalMuted })
@@ -74,6 +86,16 @@ export function PreviewFloatingToolbar({
     const nextIndex = Math.max(0, Math.min(MULTITRACK_FRAME_RATE_OPTIONS.length - 1, Math.round(index)))
     const nextFrameRate = MULTITRACK_FRAME_RATE_OPTIONS[nextIndex] ?? MULTITRACK_DEFAULT_FRAME_RATE
     if (nextFrameRate !== frameRate) onGlobalSettingsChange({ frame_rate: nextFrameRate })
+  }
+
+  function commitDuration() {
+    const duration = parseMultiTrackDurationTimecode(durationInput, frameRate)
+    if (duration === null) {
+      setDurationInput(formattedDuration)
+      return
+    }
+    setDurationInput(formatMultiTrackDurationTimecode(duration, frameRate))
+    if (duration !== selectedMediaDuration) onSelectedSegmentDurationChange(duration)
   }
 
   const frameRateIndex = nearestFrameRateIndex(frameRate)
@@ -89,43 +111,46 @@ export function PreviewFloatingToolbar({
             aria-label={t('multitrack.audioSettings')}
           >
             {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-            <span className="text-[8px]">{t('multitrack.audio')}</span>
+            <span className="text-[8px]">{audioLabel}</span>
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-56 space-y-3" align="end" side="left">
           <div className="flex items-center justify-between gap-3 cursor-pointer">
-            <span className="text-sm font-medium">{t('multitrack.audio')}</span>
+            <span className="text-sm font-medium">{audioLabel}</span>
             <Button
               type="button"
               variant="secondary"
               size="sm"
+              className="cursor-pointer"
               aria-label={muted ? t('multitrack.unmutePreviewAudio') : t('multitrack.mutePreviewAudio')}
               onClick={toggleMute}
             >
               {muted ? t('multitrack.unmute') : t('multitrack.mute')}
             </Button>
           </div>
-          <label className="grid gap-2 text-xs text-muted-foreground">
-            {t('multitrack.volume')}
-            <Input
+          <div className="grid gap-2 text-xs text-muted-foreground">
+            <span className="flex items-center justify-between">
+              <span>{t('multitrack.volume')}</span>
+              <span className="tabular-nums text-foreground">{effectiveVolumeDb.toFixed(1)} dB</span>
+            </span>
+            <NumberInput
               aria-label={t('multitrack.volume')}
-              type="number"
-              min={0}
-              max={1}
-              step={0.01}
-              value={effectiveVolume}
-              onChange={(event) => {
-                const parsed = Number.parseFloat(event.currentTarget.value)
-                if (!Number.isNaN(parsed)) updateVolume(parsed)
-              }}
+              min={MULTITRACK_MIN_VOLUME_DB}
+              max={MULTITRACK_MAX_VOLUME_DB}
+              step={0.1}
+              className="cursor-pointer"
+              value={effectiveVolumeDb}
+              onChange={updateVolumeDb}
             />
-          </label>
+          </div>
           <Slider
-            value={[clampVolume(effectiveVolume)]}
-            min={0}
-            max={1}
-            step={0.01}
-            onValueChange={(value) => updateVolume(value[0] ?? 0)}
+            aria-label={t('multitrack.volume')}
+            className="cursor-pointer"
+            value={[clampMultiTrackVolumeDb(effectiveVolumeDb)]}
+            min={MULTITRACK_MIN_VOLUME_DB}
+            max={MULTITRACK_MAX_VOLUME_DB}
+            step={0.1}
+            onValueChange={(value) => updateVolumeDb(value[0] ?? 0)}
           />
         </PopoverContent>
       </Popover>
@@ -162,18 +187,22 @@ export function PreviewFloatingToolbar({
               }))}
               onValueChange={(value) => updateFrameRateIndex(value[0] ?? frameRateIndex)}
             />
-            {selectedVideoDuration !== null && (
+            {selectedMediaDuration !== null && (
               <label className="grid gap-2 pt-2">
                 {t('multitrack.duration')}
                 <Input
                   aria-label={t('multitrack.duration')}
-                  type="number"
-                  min={0.01}
-                  step={0.01}
-                  value={selectedVideoDuration}
-                  onChange={(event) => {
-                    const duration = parsePositiveNumber(event.currentTarget.value)
-                    if (duration !== null) onSelectedSegmentDurationChange(duration)
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="00:00:00"
+                  className="tabular-nums"
+                  value={durationInput}
+                  onChange={(event) => setDurationInput(event.currentTarget.value)}
+                  onBlur={commitDuration}
+                  onKeyDown={(event) => {
+                    if (event.key !== 'Enter') return
+                    event.preventDefault()
+                    commitDuration()
                   }}
                 />
               </label>

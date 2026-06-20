@@ -21,6 +21,7 @@ import { TimelineRuler } from './TimelineRuler'
 import { imageItemFromPath, imageItemFromUrl, tiledImageBackground } from '@/lib/image-utils'
 import { computeSlotItems } from '@/lib/timeline-utils'
 import type { SlotItem } from '@/lib/timeline-utils'
+import { invalidateMediaListCache } from '@/stores/media-list-store'
 
 interface EditPanelProps {
   segment: MaintainSegment
@@ -663,6 +664,7 @@ export function EditPanel({
       }
     }
     if (uploaded.length === 0) return
+    invalidateMediaListCache('inputs')
 
     let cursor = dropFrame
     const newBlocks: SubBlock[] = []

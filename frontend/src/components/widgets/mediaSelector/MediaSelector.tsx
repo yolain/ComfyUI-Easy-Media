@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useSyncExternalStore } from 'react'
 import {
   Search,
   ArrowUpDown,
@@ -22,36 +22,27 @@ import { cn } from '@/lib/utils'
 import { useT } from '@/lib/i18n'
 import { $error } from '@/lib/comfy-api'
 import type { SlotItem } from '@/lib/timeline-utils'
+import {
+  getMediaList,
+  getMediaListStoreRevision,
+  invalidateMediaListCache,
+  subscribeMediaListStore,
+  type MediaDirEntry,
+  type MediaFileEntry,
+  type MediaItem,
+  type MediaListMediaType,
+} from '@/stores/media-list-store'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type MediaType = 'all' | 'image' | 'audio' | 'video'
+export type MediaType = MediaListMediaType
 export type MediaTab = 'inputs' | 'outputs' | 'local' | 'url' | 'slot'
 type ViewMode = 'grid' | 'list'
 type SortBy = 'name' | 'date' | 'size'
 
 const MULTIPLE_MEDIA_SEPARATOR = '|MULTIPLE|'
-
-interface MediaDirEntry {
-  type: 'dir'
-  name: string
-  path: string
-}
-
-interface MediaFileEntry {
-  type: 'file'
-  name: string
-  path: string
-  url: string
-  size: number
-  mtime: number
-  width?: number
-  height?: number
-}
-
-type MediaItem = MediaDirEntry | MediaFileEntry
 
 interface MediaSelectorChangeEvent {
   filePath: string
@@ -333,6 +324,11 @@ function RemoteFileList({
   const [subfolder, setSubfolder] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const cacheRevision = useSyncExternalStore(
+    subscribeMediaListStore,
+    getMediaListStoreRevision,
+    getMediaListStoreRevision,
+  )
   const selectedValues = getSelectedMediaValues(value)
 
   // Reset to root when the source or local path changes
@@ -357,36 +353,18 @@ function RemoteFileList({
     setLoading(true)
     setError(null)
 
-    const params = new URLSearchParams({ source, type: mediaType })
-    if (source === 'local') params.set('path', localPath)
-    if (subfolder) params.set('subfolder', subfolder)
-
     let cancelled = false
-    fetch(`/easy-media/media/list?${params}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`${r.status}`)
-        return r.json() as Promise<{ items: MediaItem[] }>
+    getMediaList({ source, mediaType, localPath, subfolder })
+      .then((list) => {
+        if (!cancelled) setItems(list)
       })
-      .then((data) => {
-          if (!cancelled) {
-            const raw = data as Record<string, unknown>
-            // Support both old "files" (no type field) and new "items" format
-            const rawList = (raw.items ?? raw.files ?? []) as Array<Record<string, unknown>>
-            const list: MediaItem[] = rawList.map((entry) =>
-              entry.type === 'dir'
-                ? (entry as unknown as MediaDirEntry)
-                : ({ ...entry, type: 'file' } as unknown as MediaFileEntry),
-            )
-            setItems(list)
-          }
-        })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : JSON.stringify(e))
       })
       .finally(() => { if (!cancelled) setLoading(false) })
 
     return () => { cancelled = true }
-  }, [source, mediaType, localPath, subfolder])
+  }, [source, mediaType, localPath, subfolder, cacheRevision])
 
   const dirs = items.filter((i): i is MediaDirEntry => i.type === 'dir')
   const files = (items.filter((i): i is MediaFileEntry => i.type === 'file') as MediaFileEntry[])
@@ -656,6 +634,7 @@ export function MediaSelector({
       if (data.source_type === 'url') {
         onChange(data.url!)
       } else {
+        invalidateMediaListCache('inputs')
         onChange(data.file_name!)
       }
     } catch {
@@ -683,6 +662,7 @@ export function MediaSelector({
         const file = input.files[0]
         try {
           const uploaded = await uploadFile(file)
+          invalidateMediaListCache('inputs')
           onChange(uploaded)
         } catch (err) {
           console.error('[MediaSelector] upload failed:', err)
@@ -701,6 +681,7 @@ export function MediaSelector({
         }
       }
       if (paths.length > 0) {
+        invalidateMediaListCache('inputs')
         // Select first file for single selection, but indicate multiple were uploaded
         onChange(paths.join(MULTIPLE_MEDIA_SEPARATOR))
       }

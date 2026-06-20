@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CloudUpload, Eye, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { CloudUpload, Eye, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -9,9 +10,18 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
 import { useT } from '@/lib/i18n'
 import { mediaContentToViewUrl } from '@/lib/media-url'
-import { getMultiTrackTaskModeLabel } from '@/lib/multitrack-utils'
+import {
+  applyCombinedTaskTexts,
+  formatMultiTrackDurationTimecode,
+  frameToSeconds,
+  getMultiTrackTaskModeLabel,
+  MULTITRACK_DEFAULT_FRAME_RATE,
+  parseMultiTrackDurationTimecode,
+  segmentDuration,
+} from '@/lib/multitrack-utils'
 import { cn } from '@/lib/utils'
 import { uuid } from '@/lib/uuid'
+import { invalidateMediaListCache } from '@/stores/media-list-store'
 import type {
   MultiTrackSegment,
   MultiTrackSegmentContent,
@@ -32,8 +42,12 @@ interface TaskSegmentEditorProps {
   segment: MultiTrackSegment
   trackSegments?: MultiTrackSegment[]
   videoSegments?: MultiTrackSegment[]
+  frameRate?: number
+  totalFrames?: number
   onContentChange: (patch: Partial<MultiTrackSegmentContent>) => void
   onTrackSegmentsContentChange?: (updates: TrackSegmentContentUpdate[]) => void
+  onTrackSegmentsChange?: (segments: MultiTrackSegment[]) => void
+  onDurationChange?: (duration: number) => void
 }
 
 interface SystemPromptResponse {
@@ -125,6 +139,14 @@ function renderSystemPromptHighlight(value: string) {
   ))
 }
 
+function renderCombinedPromptHighlight(value: string) {
+  return value.split(/([|｜])/).map((part, index) => (
+    part === '|' || part === '｜' ? (
+      <span key={`pipe-${index}`} className="text-highlight" data-pipe="true">|</span>
+    ) : part
+  ))
+}
+
 async function uploadImageFile(file: File): Promise<MultiTrackTaskImage> {
   const formData = new FormData()
   formData.append('image', file)
@@ -170,26 +192,49 @@ export function TaskSegmentEditor({
   segment,
   trackSegments,
   videoSegments = [],
+  frameRate = MULTITRACK_DEFAULT_FRAME_RATE,
+  totalFrames,
   onContentChange,
   onTrackSegmentsContentChange,
+  onTrackSegmentsChange,
+  onDurationChange,
 }: Readonly<TaskSegmentEditorProps>) {
   const t = useT()
   const draggedImageIdRef = useRef<string | null>(null)
+  const combinedPromptComposingRef = useRef(false)
+  const combinedPromptOverlayRef = useRef<HTMLDivElement>(null)
   const systemPromptOverlayRef = useRef<HTMLDivElement>(null)
   const [promptTab, setPromptTab] = useState<PromptTab>('user')
   const [editMode, setEditMode] = useState<EditMode>('individual')
   const [mediaSelectorOpen, setMediaSelectorOpen] = useState(false)
   const [isImageDragOver, setIsImageDragOver] = useState(false)
+  const [hoveredImageId, setHoveredImageId] = useState<string | null>(null)
   const [systemPromptOptions, setSystemPromptOptions] = useState<SystemPromptOption[] | null>(cachedSystemPromptOptions ?? null)
   const [systemPromptLoading, setSystemPromptLoading] = useState(false)
+  const [isDurationEditing, setIsDurationEditing] = useState(false)
+  const duration = frameToSeconds(segmentDuration(segment), frameRate)
+  const formattedDuration = formatMultiTrackDurationTimecode(duration, frameRate)
+  const [durationInput, setDurationInput] = useState(formattedDuration)
   const images = taskImages(segment)
+  const focusedImageId = images.some((image) => image.id === hoveredImageId) ? hoveredImageId : null
+  const focusedImageIndex = focusedImageId === null ? -1 : images.findIndex((image) => image.id === focusedImageId)
+  const focusedImage = focusedImageIndex < 0 ? null : images[focusedImageIndex]
+  const focusedImageUrl = focusedImage ? mediaContentToViewUrl({
+    source_type: focusedImage.source_type ?? 'input',
+    file_path: focusedImage.file_path,
+    local_path: focusedImage.local_path,
+    url: focusedImage.url,
+    slot_name: focusedImage.slot_name,
+  }) : null
   const mode = segment.content.task_mode ?? 'default'
   const editableSegments = useMemo(() => (
     trackSegments && trackSegments.length > 0 ? trackSegments : [segment]
   ), [segment, trackSegments])
+  const combinedPromptValue = editableSegments.map((item) => item.content.text ?? '').join('|')
+  const [combinedPromptInput, setCombinedPromptInput] = useState(combinedPromptValue)
   const taskIndex = Math.max(0, editableSegments.findIndex((item) => item.id === segment.id))
   const promptValue = editMode === 'combined'
-    ? editableSegments.map((item) => item.content.text ?? '').join('|')
+    ? combinedPromptInput
     : segment.content.text ?? ''
   const segmentHasVideoInRange = hasVideoInRange(segment, videoSegments)
   const systemPromptDefault = getDefaultSystemPromptForSegment(segment, systemPromptOptions ?? [], videoSegments)
@@ -198,6 +243,31 @@ export function TaskSegmentEditor({
         item.content.system_prompt ?? getDefaultSystemPromptForSegment(item, systemPromptOptions ?? [], videoSegments)
       )).join('|')
     : segment.content.system_prompt || systemPromptDefault
+
+  useEffect(() => {
+    setDurationInput(formattedDuration)
+  }, [formattedDuration])
+
+  useEffect(() => {
+    setIsDurationEditing(false)
+  }, [segment.id])
+
+  useEffect(() => {
+    if (combinedPromptComposingRef.current) return
+    setCombinedPromptInput((current) => current === combinedPromptValue ? current : combinedPromptValue)
+  }, [combinedPromptValue])
+
+  function commitDuration() {
+    const nextDuration = parseMultiTrackDurationTimecode(durationInput, frameRate)
+    if (nextDuration === null) {
+      setDurationInput(formattedDuration)
+      setIsDurationEditing(false)
+      return
+    }
+    setDurationInput(formatMultiTrackDurationTimecode(nextDuration, frameRate))
+    setIsDurationEditing(false)
+    if (nextDuration !== duration) onDurationChange?.(nextDuration)
+  }
 
   useEffect(() => {
     if (promptTab !== 'system') return
@@ -256,11 +326,15 @@ export function TaskSegmentEditor({
       .slice(0, remainingSlots)
     if (files.length === 0) return
 
-    try {
-      const uploaded = await Promise.all(files.map((file) => uploadImageFile(file)))
+    const results = await Promise.allSettled(files.map((file) => uploadImageFile(file)))
+    const uploaded = results.flatMap((result) => {
+      if (result.status === 'fulfilled') return [result.value]
+      console.error('[TaskSegmentEditor] failed to upload task image:', result.reason)
+      return []
+    })
+    if (uploaded.length > 0) {
+      invalidateMediaListCache('inputs')
       onContentChange({ images: [...images, ...uploaded] })
-    } catch (error) {
-      console.error('[TaskSegmentEditor] failed to upload task images:', error)
     }
   }
 
@@ -275,16 +349,44 @@ export function TaskSegmentEditor({
     setMediaSelectorOpen(false)
   }
 
+  function commitCombinedPrompt(value: string) {
+    const parts = value === '' ? [''] : value.split(/[|｜]/)
+    if (onTrackSegmentsChange) {
+      const trackEndFrame = editableSegments.reduce((max, item) => Math.max(max, item.end_frame), 0)
+      onTrackSegmentsChange(applyCombinedTaskTexts(
+        parts,
+        editableSegments,
+        totalFrames ?? trackEndFrame,
+        segment.color,
+      ))
+      return
+    }
+    onTrackSegmentsContentChange?.(editableSegments.map((item, index) => ({
+      segmentId: item.id,
+      patch: { text: parts[index] ?? '' },
+    })))
+  }
+
   function handlePromptChange(value: string) {
     if (editMode === 'combined') {
-      const parts = value.split('|')
-      onTrackSegmentsContentChange?.(editableSegments.map((item, index) => ({
-        segmentId: item.id,
-        patch: { text: parts[index] ?? '' },
-      })))
+      setCombinedPromptInput(value)
+      if (combinedPromptComposingRef.current) return
+      commitCombinedPrompt(value)
       return
     }
     onContentChange({ text: value })
+  }
+
+  function handleCombinedPromptShortcut(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (!(event.ctrlKey || event.metaKey)) return
+    if (!['a', 'c', 'v', 'x'].includes(event.key.toLowerCase())) return
+    event.stopPropagation()
+  }
+
+  function handleCombinedPromptScroll(event: React.UIEvent<HTMLTextAreaElement>) {
+    if (!combinedPromptOverlayRef.current) return
+    combinedPromptOverlayRef.current.scrollTop = event.currentTarget.scrollTop
+    combinedPromptOverlayRef.current.scrollLeft = event.currentTarget.scrollLeft
   }
 
   function handleSystemPromptChange(value: string) {
@@ -306,6 +408,7 @@ export function TaskSegmentEditor({
   }
 
   function handleDeleteImage(imageId: string) {
+    setHoveredImageId((current) => current === imageId ? null : current)
     onContentChange({ images: images.filter((image) => image.id !== imageId) })
   }
 
@@ -365,8 +468,16 @@ export function TaskSegmentEditor({
                   </div>
                 </PopoverTrigger>
               ) : (
-                <div className={cn('grid h-full content-start gap-2 overflow-y-auto rounded-md p-3 transition-colors', imageGridColumns, imagePickerSurfaceClass)}>
-                  {images.map((image) => {
+                <div
+                  data-testid="task-image-grid"
+                  className={cn(
+                    'task-image-grid relative grid h-full content-start gap-2 overflow-y-auto rounded-md p-3 transition-colors',
+                    imageGridColumns,
+                    imagePickerSurfaceClass,
+                  )}
+                  onMouseLeave={() => setHoveredImageId(null)}
+                >
+                  {images.map((image, index) => {
                     const imageUrl = mediaContentToViewUrl({
                       source_type: image.source_type ?? 'input',
                       file_path: image.file_path,
@@ -379,8 +490,14 @@ export function TaskSegmentEditor({
                         key={image.id}
                         draggable
                         data-testid={`task-image-${image.id}`}
-                        className="group relative flex aspect-square items-center justify-center overflow-hidden rounded-md border border-border bg-background"
+                        className={cn(
+                          'task-image-grid-item group relative flex aspect-square items-center justify-center overflow-hidden rounded-md border border-border bg-black',
+                          focusedImageId !== null && 'opacity-0',
+                          focusedImageId !== null && focusedImageId !== image.id && 'pointer-events-none',
+                        )}
+                        onMouseEnter={() => setHoveredImageId(image.id)}
                         onDragStart={() => {
+                          setHoveredImageId(null)
                           draggedImageIdRef.current = image.id
                         }}
                         onDragOver={(event) => event.preventDefault()}
@@ -395,7 +512,7 @@ export function TaskSegmentEditor({
                           <img
                             src={imageUrl}
                             alt={imageDisplayName(image)}
-                            className="h-full w-full object-cover"
+                            className="block h-full w-full object-contain"
                             draggable={false}
                           />
                         ) : (
@@ -405,13 +522,13 @@ export function TaskSegmentEditor({
                         )}
                         <div
                           data-testid={`task-image-actions-${image.id}`}
-                          className="absolute inset-0 flex items-center justify-center gap-1 bg-black/30 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                          className="absolute right-1 top-1 z-10 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
                         >
                           <Button
                             type="button"
                             size="icon"
                             variant="ghost"
-                            className="h-6 w-6 bg-background/70 text-foreground hover:bg-background/90 [&_svg]:!size-3"
+                            className="h-6 w-6 cursor-pointer bg-background/70 text-foreground hover:bg-background/90 [&_svg]:!size-3"
                             aria-label={t('multitrack.previewImage')}
                             onClick={() => handlePreviewImage(image)}
                           >
@@ -421,13 +538,19 @@ export function TaskSegmentEditor({
                             type="button"
                             size="icon"
                             variant="ghost"
-                            className="h-6 w-6 bg-background/70 text-destructive hover:bg-background/90 hover:text-destructive [&_svg]:!size-3"
+                            className="h-6 w-6 cursor-pointer bg-background/70 text-destructive hover:bg-background/90 hover:text-destructive [&_svg]:!size-3"
                             aria-label={t('multitrack.deleteImage')}
                             onClick={() => handleDeleteImage(image.id)}
                           >
                             <Trash2 />
                           </Button>
                         </div>
+                        <span
+                          data-testid={`task-image-index-${image.id}`}
+                          className="absolute bottom-0 left-0 z-10 min-w-5 rounded-sm bg-black/50 px-1.5 py-0.5 text-center text-[9px] font-semibold leading-none text-white"
+                        >
+                          {index}
+                        </span>
                       </div>
                     )
                   })}
@@ -436,12 +559,59 @@ export function TaskSegmentEditor({
                       <Button
                         type="button"
                         variant="outline"
-                        className="aspect-square h-auto border-dashed text-muted-foreground"
+                        className={cn(
+                          'task-image-grid-add aspect-square h-auto border-dashed text-muted-foreground',
+                          focusedImageId && 'pointer-events-none opacity-0',
+                        )}
                         aria-label={t('multitrack.selectImage')}
                       >
                         <Plus className="h-7 w-7" />
                       </Button>
                     </PopoverTrigger>
+                  )}
+                  {focusedImage && (
+                    <div
+                      data-testid="task-image-focus-preview"
+                      className="pointer-events-none absolute inset-3 z-20 flex aspect-square items-center justify-center overflow-hidden rounded-md border border-border bg-black shadow-lg"
+                    >
+                      {focusedImageUrl ? (
+                        <img
+                          src={focusedImageUrl}
+                          alt={imageDisplayName(focusedImage)}
+                          className="block h-auto w-full"
+                          draggable={false}
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center px-2 text-center text-[8px] text-muted-foreground">
+                          {imageDisplayName(focusedImage)}
+                        </div>
+                      )}
+                      <div className="pointer-events-auto absolute right-1 top-1 z-10 flex gap-1">
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-6 w-6 cursor-pointer bg-background/70 text-foreground hover:bg-background/90 [&_svg]:!size-3"
+                          aria-label={t('multitrack.previewImage')}
+                          onClick={() => handlePreviewImage(focusedImage)}
+                        >
+                          <Eye />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-6 w-6 cursor-pointer bg-background/70 text-destructive hover:bg-background/90 hover:text-destructive [&_svg]:!size-3"
+                          aria-label={t('multitrack.deleteImage')}
+                          onClick={() => handleDeleteImage(focusedImage.id)}
+                        >
+                          <Trash2 />
+                        </Button>
+                      </div>
+                      <span className="absolute bottom-1 left-1 z-10 min-w-5 rounded-sm bg-black px-1.5 py-0.5 text-center text-[9px] font-semibold leading-none text-white">
+                        {focusedImageIndex}
+                      </span>
+                    </div>
                   )}
                 </div>
               )}
@@ -507,13 +677,35 @@ export function TaskSegmentEditor({
           )}
           {editMode === 'combined' ? (
             <div className="flex min-h-0 flex-1 flex-col gap-1 p-2">
-              <Textarea
-                aria-label={t('multitrack.prompt')}
-                placeholder={t('multitrack.promptPlaceholder')}
-                className="min-h-24 flex-1 resize-none border-none bg-card text-[10px] shadow-none focus-visible:ring-1"
-                value={promptValue}
-                onChange={(event) => handlePromptChange(event.currentTarget.value)}
-              />
+              <div className="relative min-h-24 flex-1 overflow-hidden rounded-md bg-card">
+                <div
+                  ref={combinedPromptOverlayRef}
+                  data-testid="combined-prompt-highlight"
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 overflow-auto whitespace-pre-wrap wrap-break-word px-3 py-2 text-[10px] leading-normal text-foreground"
+                >
+                  {renderCombinedPromptHighlight(promptValue)}
+                </div>
+                <Textarea
+                  aria-label={t('multitrack.prompt')}
+                  placeholder={t('multitrack.promptPlaceholder')}
+                  className="absolute inset-0 h-full min-h-0 resize-none border-none bg-transparent text-[10px] leading-normal shadow-none focus-visible:ring-1"
+                  style={{ color: 'transparent', caretColor: 'var(--foreground)' }}
+                  value={promptValue}
+                  onChange={(event) => handlePromptChange(event.currentTarget.value)}
+                  onKeyDown={handleCombinedPromptShortcut}
+                  onScroll={handleCombinedPromptScroll}
+                  onCompositionStart={() => {
+                    combinedPromptComposingRef.current = true
+                  }}
+                  onCompositionEnd={(event) => {
+                    combinedPromptComposingRef.current = false
+                    const value = event.currentTarget.value
+                    setCombinedPromptInput(value)
+                    commitCombinedPrompt(value)
+                  }}
+                />
+              </div>
               <p className="shrink-0 text-[9px] text-muted-foreground mt-1">{t('maintainTrack.combinedHint')}</p>
             </div>
           ) : promptTab === 'user' ? (
@@ -559,9 +751,45 @@ export function TaskSegmentEditor({
           </TabsList>
         </Tabs>
 
-        <span className="absolute left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground">
-          {t('multitrack.taskNumber', { n: taskIndex })}
-        </span>
+        <div className={cn('absolute left-1/2 -translate-x-1/2', isDurationEditing && 'w-28')}>
+          {isDurationEditing ? (
+            <Input
+              autoFocus
+              aria-label={t('multitrack.duration')}
+              type="text"
+              inputMode="numeric"
+              placeholder="00:00:00"
+              className="tabular-nums"
+              value={durationInput}
+              onChange={(event) => setDurationInput(event.currentTarget.value)}
+              onBlur={commitDuration}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return
+                event.preventDefault()
+                commitDuration()
+              }}
+            />
+          ) : (
+            <div className="flex items-center gap-1 text-muted-foreground">
+              <div className="flex flex-col items-center">
+                <span className="text-[10px] text-primary">{t('multitrack.taskNumber', { n: taskIndex })}</span>
+                <span className="text-[10px] mt-0.5 tabular-nums">{formattedDuration}</span>
+              </div>
+              {onDurationChange && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 cursor-pointer"
+                  aria-label={t('multitrack.editTaskDuration')}
+                  onClick={() => setIsDurationEditing(true)}
+                >
+                  <Pencil className="h-3 w-3" />
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
 
         <Select value={mode} onValueChange={(value) => onContentChange({ task_mode: value as MultiTrackTaskMode })}>
           <SelectTrigger className="w-36 h-8 text-[10px] bg-card">

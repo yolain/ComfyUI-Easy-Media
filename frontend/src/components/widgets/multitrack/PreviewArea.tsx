@@ -2,16 +2,21 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   collectMultiTrackPreviewResolutionInput,
   frameToSeconds,
+  getActivePreviewAudioSources,
   getActivePreviewVideoSegment,
   parseMultiTrackPreviewResolution,
   segmentDuration,
+  snapTimeToFrame,
   type MultiTrackVideoMetadata,
   type SelectedMultiTrackSegment,
 } from '@/lib/multitrack-utils'
+import { useT } from '@/lib/i18n'
+import { AudioWaveform } from '@/components/widgets/timeline/AudioWaveform'
 import { mediaContentToViewUrl } from '@/lib/media-url'
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
-import type { MultiTrackSegment, MultiTrackSegmentContent, TrackData } from '@/types/multitrack'
+import type { MultiTrackSegment, MultiTrackSegmentContent, MultiTrackTaskImage, TrackData } from '@/types/multitrack'
 import { PreviewFloatingToolbar } from './PreviewFloatingToolbar'
+import { PreviewAudioPlayback } from './PreviewAudioPlayback'
 import { TaskSegmentEditor } from './TaskSegmentEditor'
 import { VideoPreview } from './VideoPreview'
 
@@ -23,10 +28,11 @@ interface PreviewAreaProps {
   selectedSegment: SelectedMultiTrackSegment | null
   isPlaying: boolean
   node: unknown
-  onGlobalSettingsChange: (patch: Partial<Pick<TrackData, 'muted' | 'volume' | 'frame_rate'>>) => void
+  onGlobalSettingsChange: (patch: Partial<Pick<TrackData, 'muted' | 'volume_db' | 'frame_rate'>>) => void
   onSelectedSegmentContentChange: (patch: Partial<MultiTrackSegmentContent>) => void
   taskSegments?: MultiTrackSegment[]
   onTrackSegmentsContentChange?: (updates: Array<{ segmentId: string; patch: Partial<MultiTrackSegmentContent> }>) => void
+  onTaskTrackSegmentsChange?: (segments: MultiTrackSegment[]) => void
   onSelectedSegmentDurationChange: (duration: number) => void
 }
 
@@ -36,6 +42,37 @@ function resolutionInputSignature(input: unknown): string {
   } catch {
     return String(Date.now())
   }
+}
+
+interface ActiveTaskImages {
+  index: number
+  images: Array<{ image: MultiTrackTaskImage; url: string }>
+}
+
+function getActiveTaskImages(data: TrackData, currentTime: number): ActiveTaskImages | null {
+  const currentFrame = snapTimeToFrame(currentTime, data.frame_rate)
+
+  for (const track of data.tracks) {
+    if (track.type !== 'task') continue
+    const index = track.segments.findIndex((segment) => (
+      currentFrame >= segment.start_frame && currentFrame < segment.end_frame
+    ))
+    if (index < 0) continue
+
+    const images = (track.segments[index].content.images ?? []).flatMap((image) => {
+      const url = mediaContentToViewUrl({
+        source_type: image.source_type ?? 'input',
+        file_path: image.file_path,
+        local_path: image.local_path,
+        url: image.url,
+        slot_name: image.slot_name,
+      })
+      return url ? [{ image, url }] : []
+    })
+    return images.length > 0 ? { index, images } : null
+  }
+
+  return null
 }
 
 export function PreviewArea({
@@ -48,8 +85,10 @@ export function PreviewArea({
   onSelectedSegmentContentChange,
   taskSegments,
   onTrackSegmentsContentChange,
+  onTaskTrackSegmentsChange,
   onSelectedSegmentDurationChange,
 }: Readonly<PreviewAreaProps>) {
+  const t = useT()
   const [firstVideoMetadata, setFirstVideoMetadata] = useState<MultiTrackVideoMetadata | null>(null)
   const [resolutionInput, setResolutionInput] = useState(() => collectMultiTrackPreviewResolutionInput(node))
   const videoSegments = useMemo(() => (
@@ -68,19 +107,16 @@ export function PreviewArea({
       slot_name: firstVideoSegment.content.slot_name,
     })
   }, [videoSegments])
-  const activeVideo = selectedSegment?.trackType === 'task'
+  const activeVideo = selectedSegment?.trackType === 'task' || selectedSegment?.trackType === 'audio'
     ? null
     : getActivePreviewVideoSegment(data, currentTime, selectedSegment?.trackType === 'video' ? selectedSegment.segment.id : null)
+  const activeAudioSources = getActivePreviewAudioSources(data, currentTime, selectedSegment)
+  const activeTaskImages = selectedSegment === null ? getActiveTaskImages(data, currentTime) : null
   const resolution = parseMultiTrackPreviewResolution(resolutionInput, firstVideoMetadata)
-  const muted = selectedSegment?.trackType === 'video'
-    ? data.muted === true || selectedSegment.segment.content.volume === 0
-    : data.muted === true
-  const volume = selectedSegment?.trackType === 'video'
-    ? selectedSegment.segment.content.volume ?? data.volume ?? 1
-    : data.volume ?? 1
-  const selectedVideoDuration = selectedSegment?.trackType === 'video'
+  const selectedMediaDuration = selectedSegment?.trackType === 'video' || selectedSegment?.trackType === 'audio'
     ? frameToSeconds(segmentDuration(selectedSegment.segment), data.frame_rate)
     : null
+  const selectedAudio = selectedSegment?.trackType === 'audio' ? selectedSegment.segment : null
 
   useEffect(() => {
     if (!firstVideoUrl) {
@@ -132,8 +168,12 @@ export function PreviewArea({
           segment={selectedSegment.segment}
           trackSegments={taskSegments}
           videoSegments={videoSegments}
+          frameRate={data.frame_rate}
+          totalFrames={data.total_length}
           onContentChange={onSelectedSegmentContentChange}
           onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+          onTrackSegmentsChange={onTaskTrackSegmentsChange}
+          onDurationChange={onSelectedSegmentDurationChange}
         />
       </div>
     )
@@ -144,21 +184,62 @@ export function PreviewArea({
       className="relative flex min-h-24 flex-1 items-center justify-center overflow-hidden rounded-sm bg-black text-xs text-muted-foreground"
       onClick={(event) => event.stopPropagation()}
     >
-      <div className="flex h-full min-h-24 items-center justify-center">
-        <VideoPreview
-          activeVideo={activeVideo}
-          resolution={resolution}
-          isPlaying={isPlaying}
-          muted={muted}
-          volume={volume}
-        />
+      <div className="flex h-full min-h-24 w-full items-center justify-center gap-3">
+        {selectedAudio ? (
+          <div data-testid="selected-audio-waveform" className="h-20 max-h-full w-full overflow-hidden px-2">
+            <AudioWaveform
+              content={{
+                source_type: selectedAudio.content.source_type ?? 'input',
+                file_path: selectedAudio.content.file_path,
+                local_path: selectedAudio.content.local_path,
+                url: selectedAudio.content.url,
+                slot_name: selectedAudio.content.slot_name,
+              }}
+              className="h-full w-full"
+            />
+          </div>
+        ) : activeTaskImages && (
+          <div
+            data-testid="task-preview-images"
+            className="flex max-h-full w-20 shrink-0 flex-col gap-2 overflow-hidden"
+          >
+            <div className="shrink-0 text-center text-[10px] font-medium text-foreground pt-2">
+              {t('multitrack.previewTaskLabel', { n: activeTaskImages.index })}
+            </div>
+            <div className="flex min-h-0 flex-col gap-2 overflow-y-auto pb-2">
+              {activeTaskImages.images.map(({ image, url }) => (
+                <img
+                  key={image.id}
+                  className="aspect-square w-full shrink-0 rounded-sm border border-border bg-black object-contain"
+                  src={url}
+                  alt={image.file_name ?? image.file_path ?? image.local_path ?? image.url ?? image.id}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+        {!selectedAudio ? (
+          <VideoPreview
+            activeVideo={activeVideo}
+            resolution={resolution}
+            isPlaying={isPlaying}
+            muted
+            volume={0}
+          />
+        ) : null}
       </div>
+      <PreviewAudioPlayback sources={activeAudioSources} isPlaying={isPlaying} />
       <PreviewFloatingToolbar
         globalMuted={data.muted === true}
-        globalVolume={data.volume ?? 1}
+        globalVolumeDb={data.volume_db ?? 0}
         frameRate={data.frame_rate}
-        selectedVideoVolume={selectedSegment?.trackType === 'video' ? selectedSegment.segment.content.volume ?? data.volume ?? 1 : null}
-        selectedVideoDuration={selectedVideoDuration}
+        selectedMediaVolumeDb={selectedSegment?.trackType === 'video' || selectedSegment?.trackType === 'audio'
+          ? selectedSegment.segment.content.volume_db ?? 0
+          : null}
+        selectedMediaMuted={selectedSegment?.trackType === 'video' || selectedSegment?.trackType === 'audio'
+          ? selectedSegment.segment.content.muted === true
+          : false}
+        selectedMediaDuration={selectedMediaDuration}
         onGlobalSettingsChange={onGlobalSettingsChange}
         onSelectedSegmentContentChange={onSelectedSegmentContentChange}
         onSelectedSegmentDurationChange={onSelectedSegmentDurationChange}

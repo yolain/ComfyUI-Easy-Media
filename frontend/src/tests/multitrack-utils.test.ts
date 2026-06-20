@@ -2,12 +2,17 @@ import { describe, expect, it } from 'vitest'
 import {
   addDefaultTaskSegmentIfRangeEmpty,
   calculateTotalLength,
+  cloneMultiTrackSegment,
   collectMultiTrackPreviewResolutionInput,
   createDefaultTrackData,
+  createMultiTrackAudioContent,
   createMultiTrackVideoContent,
   deleteSegmentWithLinkedTasks,
+  distributeMultiTrackSegmentsEvenly,
+  formatMultiTrackDurationTimecode,
   formatMultiTrackTime,
   getActivePreviewVideoSegment,
+  getActivePreviewAudioSources,
   getMultiTrackTaskModeLabel,
   getSelectedMultiTrackSegment,
   frameToSeconds,
@@ -15,7 +20,9 @@ import {
   getSegmentDragPreviewSegments,
   MULTITRACK_TASK_MODES,
   moveSegmentBetweenCompatibleTracks,
+  multiTrackDbToLinearGain,
   normalizeTrackData,
+  parseMultiTrackDurationTimecode,
   parseMultiTrackPreviewResolution,
   remapTrackDataFrameRate,
   secondsToFrame,
@@ -25,6 +32,66 @@ import {
 } from '@/lib/multitrack-utils'
 
 describe('multitrack utilities', () => {
+  it('evenly distributes multitrack segments across a half-open frame range', () => {
+    const source = {
+      id: 'source',
+      start_frame: 0,
+      end_frame: 1,
+      color: 'var(--multitrack-task-bg)',
+      content: { media_type: 'none' as const, task_mode: 'default' as const },
+    }
+    const segments = [
+      { ...source, id: 'third', start_frame: 8, end_frame: 10 },
+      { ...source, id: 'first', start_frame: 0, end_frame: 2 },
+      { ...source, id: 'second', start_frame: 3, end_frame: 7 },
+    ]
+
+    expect(distributeMultiTrackSegmentsEvenly(segments, 10).map((segment) => ({
+      id: segment.id,
+      start_frame: segment.start_frame,
+      end_frame: segment.end_frame,
+    }))).toEqual([
+      { id: 'first', start_frame: 0, end_frame: 4 },
+      { id: 'second', start_frame: 4, end_frame: 7 },
+      { id: 'third', start_frame: 7, end_frame: 10 },
+    ])
+  })
+
+  it('deep-clones a segment after its source and shifts following segments', () => {
+    const source = {
+      id: 'source',
+      start_frame: 0,
+      end_frame: 3,
+      color: 'var(--multitrack-task-bg)',
+      content: {
+        media_type: 'none' as const,
+        task_mode: 'default' as const,
+        images: [{ id: 'image', source_type: 'input' as const, file_path: 'image.png' }],
+      },
+    }
+    const following = { ...source, id: 'following', start_frame: 3, end_frame: 5 }
+    const result = cloneMultiTrackSegment([source, following], source.id)
+
+    expect(result).not.toBeNull()
+    expect(result?.addedDuration).toBe(3)
+    expect(result?.segments.map((segment) => [segment.id, segment.start_frame, segment.end_frame])).toEqual([
+      ['source', 0, 3],
+      [result?.clonedSegmentId, 3, 6],
+      ['following', 6, 8],
+    ])
+    expect(result?.segments[1].content).toEqual(source.content)
+    expect(result?.segments[1].content).not.toBe(source.content)
+  })
+
+  it('formats and validates minute-second-frame duration timecodes', () => {
+    expect(formatMultiTrackDurationTimecode(65.5, 24)).toBe('01:05:12')
+    expect(parseMultiTrackDurationTimecode('01:05:12', 24)).toBe(65.5)
+    expect(parseMultiTrackDurationTimecode('00:60:00', 24)).toBeNull()
+    expect(parseMultiTrackDurationTimecode('00:01:24', 24)).toBeNull()
+    expect(parseMultiTrackDurationTimecode('0:01:00', 24)).toBeNull()
+    expect(parseMultiTrackDurationTimecode('00:00:00', 24)).toBeNull()
+  })
+
   it('serializes direct video URLs as URL media', () => {
     expect(createMultiTrackVideoContent('https://example.com/clips/shot.mp4', 'input')).toEqual({
       media_type: 'video',
@@ -36,16 +103,59 @@ describe('multitrack utilities', () => {
     })
   })
 
+  it('serializes connected audio slots as slot media', () => {
+    expect(createMultiTrackAudioContent('__slot__:audio2', 'input')).toMatchObject({
+      media_type: 'audio',
+      source_type: 'slot',
+      slot_name: 'audio2',
+      file_name: 'audio2',
+      volume_db: 0,
+    })
+  })
+
   it('creates default data with task and video tracks', () => {
     const data = createDefaultTrackData()
 
     expect(data.frame_rate).toBe(24)
     expect(data.total_length).toBe(120)
     expect(data.muted).toBe(false)
-    expect(data.volume).toBe(1)
+    expect(data.volume_db).toBe(0)
+    expect(data.tracks.every((track) => track.solo === false && track.volume_db === 0)).toBe(true)
     expect(data.tracks.map((track) => track.type)).toEqual(['task', 'video'])
-    expect(data.tracks[0].name).toBe('Task 1')
+    expect(data.tracks.map((track) => track.name)).toEqual(['Task 0', 'Video 0'])
     expect(data.tracks[0].task_mode).toBe('default')
+  })
+
+  it('uses only volume_db and muted for normalized audio settings', () => {
+    const normalized = normalizeTrackData({
+      muted: false,
+      volume: 0.5,
+      volume_db: -12,
+      tracks: [{
+        id: 'audio',
+        name: 'Audio 1',
+        type: 'audio',
+        color: 'var(--multitrack-audio-bg)',
+        muted: false,
+        locked: false,
+        segments: [{
+          id: 'audio-segment',
+          start_frame: 0,
+          end_frame: 24,
+          color: 'var(--multitrack-audio-bg)',
+          content: { media_type: 'audio', volume: 0, volume_db: -4, muted: false },
+        }],
+      }],
+      total_length: 24,
+      frame_rate: 24,
+    } as unknown as Parameters<typeof normalizeTrackData>[0])
+
+    expect(normalized.volume_db).toBe(-12)
+    expect('volume' in normalized).toBe(false)
+    expect(normalized.tracks[0]).toMatchObject({ name: 'Audio 0', solo: false, volume_db: 0 })
+    expect(normalized.tracks[0].segments[0].content).toMatchObject({ muted: false, volume_db: -4 })
+    expect('volume' in normalized.tracks[0].segments[0].content).toBe(false)
+    expect(multiTrackDbToLinearGain(6)).toBeCloseTo(1.995, 2)
   })
 
   it('maintains task modes separately from media track types', () => {
@@ -72,12 +182,9 @@ describe('multitrack utilities', () => {
       frame_rate: 24,
     } as unknown as Parameters<typeof normalizeTrackData>[0])
 
-    expect(normalized).toMatchObject({
-      muted: false,
-      volume: 1,
-    })
+    expect(normalized).toMatchObject({ muted: false, volume_db: 0 })
     expect(normalized.tracks[0]).toMatchObject({
-      name: 'Task 1',
+      name: 'Task 0',
       type: 'task',
       task_mode: 'default',
       color: 'var(--multitrack-task-bg)',
@@ -185,6 +292,54 @@ describe('multitrack utilities', () => {
       localTime: 1,
     })
     expect(getActivePreviewVideoSegment(trackData, 72, 'second-video')).toBeNull()
+  })
+
+  it('collects all active audio sources and applies track solo, mute, and dB settings', () => {
+    const data = createDefaultTrackData()
+    data.volume_db = 1
+    data.tracks[1] = {
+      ...data.tracks[1],
+      id: 'video-track',
+      volume_db: 2,
+      segments: [{
+        id: 'video-audio',
+        start_frame: 0,
+        end_frame: 48,
+        color: data.tracks[1].color,
+        content: { media_type: 'video', source_type: 'input', file_path: 'video.mp4', volume_db: 3 },
+      }],
+    }
+    data.tracks.push({
+      id: 'audio-track',
+      name: 'Audio 1',
+      type: 'audio',
+      color: 'var(--multitrack-audio-bg)',
+      muted: false,
+      solo: false,
+      volume_db: -1,
+      locked: false,
+      segments: [{
+        id: 'audio-segment',
+        start_frame: 0,
+        end_frame: 48,
+        color: 'var(--multitrack-audio-bg)',
+        content: { media_type: 'audio', source_type: 'input', file_path: 'audio.wav', volume_db: -2 },
+      }],
+    })
+
+    expect(getActivePreviewAudioSources(data, 24, null).map((source) => ({
+      id: source.segment.id,
+      localTime: source.localTime,
+      volumeDb: source.volumeDb,
+    }))).toEqual([
+      { id: 'video-audio', localTime: 1, volumeDb: 6 },
+      { id: 'audio-segment', localTime: 1, volumeDb: -2 },
+    ])
+
+    data.tracks[2].solo = true
+    expect(getActivePreviewAudioSources(data, 24, null).map((source) => source.segment.id)).toEqual(['audio-segment'])
+    data.tracks[2].muted = true
+    expect(getActivePreviewAudioSources(data, 24, null)).toEqual([])
   })
 
   it('parses preview resolution aspect ratios from fixed, custom, and auto modes', () => {
@@ -655,6 +810,65 @@ describe('multitrack utilities', () => {
       [0, 3],
       [3, 5],
     ])
+  })
+
+  it('keeps audio drop positions and source-track gaps while preventing overlaps', () => {
+    const data = createDefaultTrackData()
+    const audioTrack = {
+      ...data.tracks[1],
+      type: 'audio' as const,
+      id: 'audio1',
+      segments: [
+        {
+          id: 'keep',
+          start_frame: 8,
+          end_frame: 10,
+          color: data.tracks[1].color,
+          content: { media_type: 'audio' as const },
+        },
+        {
+          id: 'moving',
+          start_frame: 14,
+          end_frame: 17,
+          color: data.tracks[1].color,
+          content: { media_type: 'audio' as const },
+        },
+      ],
+    }
+    const targetTrack = {
+      ...audioTrack,
+      id: 'audio2',
+      segments: [{
+        id: 'existing',
+        start_frame: 12,
+        end_frame: 15,
+        color: audioTrack.color,
+        content: { media_type: 'audio' as const },
+      }],
+    }
+
+    const moved = moveSegmentBetweenCompatibleTracks(
+      [data.tracks[0], audioTrack, targetTrack],
+      'moving',
+      'audio2',
+      11,
+      24,
+    )
+
+    expect(moved[1].segments.map((segment) => [segment.id, segment.start_frame, segment.end_frame])).toEqual([
+      ['keep', 8, 10],
+    ])
+    expect(moved[2].segments.map((segment) => [segment.id, segment.start_frame, segment.end_frame])).toEqual([
+      ['moving', 11, 14],
+      ['existing', 14, 17],
+    ])
+    expect(getSegmentDragPlaceholder(
+      [data.tracks[0], audioTrack, targetTrack],
+      'moving',
+      'audio2',
+      20,
+      24,
+    )).toMatchObject({ start_frame: 20, end_frame: 23 })
   })
 
   it('computes drag placeholder only for compatible target tracks', () => {

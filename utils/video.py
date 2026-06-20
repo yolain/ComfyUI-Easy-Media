@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -214,9 +215,18 @@ def merge_video_track_with_ffmpeg(
         if ffprobe_info(str(segment["source"])).get("has_audio"):
             audio_label = f"clipa{index}"
             delay_ms = round(start_seconds * 1000)
+            muted = segment.get("audio_muted") is True
+            raw_volume_db = segment.get("audio_volume_db", 0.0)
+            try:
+                volume_db = float(raw_volume_db)
+            except (TypeError, ValueError):
+                volume_db = 0.0
+            if not math.isfinite(volume_db):
+                volume_db = 0.0
+            volume_filter = "volume=0" if muted else f"volume={volume_db:g}dB"
             filters.append(
                 f"[{input_index}:a]atrim=duration={duration},asetpts=PTS-STARTPTS,"
-                f"adelay={delay_ms}:all=1[{audio_label}]"
+                f"{volume_filter},adelay={delay_ms}:all=1[{audio_label}]"
             )
             audio_labels.append(audio_label)
 

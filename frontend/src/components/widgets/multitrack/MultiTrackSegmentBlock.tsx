@@ -28,6 +28,8 @@ interface MultiTrackSegmentBlockProps {
   selected: boolean
   onSelect: (segmentId: string) => void
   onDelete: (segmentId: string) => void
+  onDistribute?: () => void
+  onClone?: (segmentId: string) => void
   onResize: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
   onMove: (segmentId: string, nextStartTime: number, clientY: number) => void
   onDragPreviewChange?: (segmentId: string, nextStartTime: number, clientY: number) => void
@@ -53,6 +55,8 @@ export function MultiTrackSegmentBlock({
   selected,
   onSelect,
   onDelete,
+  onDistribute,
+  onClone,
   onResize,
   onMove,
   onDragPreviewChange,
@@ -331,7 +335,9 @@ export function MultiTrackSegmentBlock({
             ) : null}
             {presentation.showWaveform ? (
               <div
-                className="relative h-2.5 overflow-hidden rounded-sm"
+                className={trackType === 'audio'
+                  ? 'relative min-h-0 flex-1 overflow-hidden rounded-sm'
+                  : 'relative h-2.5 overflow-hidden rounded-sm'}
                 style={{ backgroundColor: presentation.backgroundColorStrong }}
               >
                 <div className="absolute inset-x-0 top-0 z-10 h-0.5 bg-warning" />
@@ -346,9 +352,9 @@ export function MultiTrackSegmentBlock({
                   className="h-full w-full"
                 />
               </div>
-            ) : (
+            ) : trackType !== 'audio' ? (
               <div className="min-h-0 flex-1" />
-            )}
+            ) : null}
           </div>
           <span
             className="absolute left-0 top-0 h-full w-0.5 cursor-ew-resize"
@@ -361,8 +367,18 @@ export function MultiTrackSegmentBlock({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
+        {trackType === 'task' && onDistribute ? (
+          <ContextMenuItem onClick={onDistribute}>
+            {t('multitrack.distributeTaskSegments')}
+          </ContextMenuItem>
+        ) : null}
+        {trackType === 'task' && onClone ? (
+          <ContextMenuItem onClick={() => onClone(segment.id)}>
+            {t('multitrack.cloneTaskSegment')}
+          </ContextMenuItem>
+        ) : null}
         <ContextMenuItem onClick={() => onDelete(segment.id)}>
-          Delete segment
+          {t('multitrack.deleteSegment')}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

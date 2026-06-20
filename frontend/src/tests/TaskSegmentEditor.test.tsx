@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { LocaleContext } from '@/lib/i18n'
 import { TaskSegmentEditor } from '@/components/widgets/multitrack/TaskSegmentEditor'
+import { getMediaListStoreRevision } from '@/stores/media-list-store'
 import type { MultiTrackSegment } from '@/types/multitrack'
 
 vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
@@ -116,6 +117,7 @@ describe('TaskSegmentEditor', () => {
 
   it('uploads dropped image files and appends them to task images', async () => {
     const onContentChange = vi.fn()
+    const initialCacheRevision = getMediaListStoreRevision()
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ name: 'first.png', subfolder: 'uploads' }) })
       .mockResolvedValueOnce({ ok: true, json: async () => ({ name: 'second.png', subfolder: '' }) })
@@ -142,6 +144,7 @@ describe('TaskSegmentEditor', () => {
         ],
       })
     })
+    expect(getMediaListStoreRevision()).toBe(initialCacheRevision + 1)
   })
 
   it('highlights the image picker while image files are dragged over it', () => {
@@ -167,8 +170,18 @@ describe('TaskSegmentEditor', () => {
     const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
     render(<TaskSegmentEditor segment={taskSegment()} onContentChange={onContentChange} />)
 
+    expect(screen.getByTestId('task-image-a').className).toContain('bg-black')
+    expect(screen.getByAltText('a.png').className).toContain('h-full')
+    expect(screen.getByAltText('a.png').className).toContain('w-full')
+    expect(screen.getByAltText('a.png').className).toContain('object-contain')
     expect(screen.getByTestId('task-image-actions-a').className).toContain('opacity-0')
-    expect(screen.getByTestId('task-image-actions-a').className).toContain('bg-black/30')
+    expect(screen.getByTestId('task-image-actions-a').className).toContain('right-1')
+    expect(screen.getByTestId('task-image-actions-a').className).toContain('top-1')
+    expect(screen.getByTestId('task-image-index-a').textContent).toBe('0')
+    expect(screen.getByTestId('task-image-index-a').className).toContain('bottom-0')
+    expect(screen.getByTestId('task-image-index-b').textContent).toBe('1')
+    expect(screen.getAllByRole('button', { name: 'Preview image' })[0].className).toContain('cursor-pointer')
+    expect(screen.getAllByRole('button', { name: 'Delete image' })[0].className).toContain('cursor-pointer')
     expect(screen.getAllByRole('button', { name: 'Delete image' })[0].className).toContain('text-destructive')
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Preview image' })[0])
@@ -195,6 +208,36 @@ describe('TaskSegmentEditor', () => {
         expect.objectContaining({ id: 'a' }),
       ],
     })
+  })
+
+  it('shows a stable image overlay without changing the underlying grid layout', () => {
+    render(<TaskSegmentEditor segment={taskSegment()} onContentChange={vi.fn()} />)
+
+    const grid = screen.getByTestId('task-image-grid')
+    const firstImage = screen.getByTestId('task-image-a')
+    const secondImage = screen.getByTestId('task-image-b')
+
+    expect(grid.className).toContain('grid-cols-2')
+    expect(screen.queryByTestId('task-image-focus-preview')).toBeNull()
+    fireEvent.mouseEnter(secondImage)
+    const preview = screen.getByTestId('task-image-focus-preview')
+    expect(grid.className).toContain('grid-cols-2')
+    expect(grid.className).not.toContain('grid-cols-1')
+    expect(preview.className).toContain('absolute')
+    expect(preview.className).toContain('inset-3')
+    expect(preview.className).toContain('pointer-events-none')
+    expect(preview.className).toContain('bg-black')
+    expect(preview.querySelector('img')?.className).toContain('h-auto')
+    expect(preview.querySelector('img')?.className).not.toContain('object-cover')
+    expect(secondImage.className).toContain('relative')
+    expect(secondImage.className).toContain('opacity-0')
+    expect(firstImage.className).toContain('opacity-0')
+
+    fireEvent.mouseLeave(grid)
+    expect(grid.className).toContain('grid-cols-2')
+    expect(screen.queryByTestId('task-image-focus-preview')).toBeNull()
+    expect(secondImage.className).toContain('relative')
+    expect(secondImage.className).not.toContain('opacity-0')
   })
 
   it('uses locale messages for task mode and prompt labels', () => {
@@ -369,16 +412,98 @@ describe('TaskSegmentEditor', () => {
     ])
   })
 
-  it('shows the selected task number in the center of the footer', () => {
+  it('creates and evenly distributes task segments when combined pasted text has more parts', () => {
+    const onTrackSegmentsChange = vi.fn()
     render(
       <TaskSegmentEditor
-        segment={secondTaskSegment()}
+        segment={taskSegment()}
         trackSegments={[taskSegment(), secondTaskSegment()]}
+        totalFrames={10}
         onContentChange={vi.fn()}
+        onTrackSegmentsChange={onTrackSegmentsChange}
       />,
     )
 
-    expect(screen.getByText('Task 1').className).toContain('left-1/2')
+    activateTab('Combined')
+    const prompt = screen.getByRole('textbox', { name: 'Prompt' }) as HTMLTextAreaElement
+    fireEvent.change(prompt, { target: { value: 'First pasted｜Second pasted|Third pasted' } })
+
+    expect(prompt.value).toBe('First pasted｜Second pasted|Third pasted')
+    const highlight = screen.getByTestId('combined-prompt-highlight')
+    expect(highlight.querySelectorAll('[data-pipe="true"]')).toHaveLength(2)
+    expect(highlight.querySelector('[data-pipe="true"]')?.className).toContain('text-highlight')
+    const updated = onTrackSegmentsChange.mock.lastCall?.[0] as MultiTrackSegment[]
+    expect(updated).toHaveLength(3)
+    expect(updated.map(({ start_frame, end_frame, content }) => ({
+      start_frame,
+      end_frame,
+      text: content.text,
+    }))).toEqual([
+      { start_frame: 0, end_frame: 4, text: 'First pasted' },
+      { start_frame: 4, end_frame: 7, text: 'Second pasted' },
+      { start_frame: 7, end_frame: 10, text: 'Third pasted' },
+    ])
+    expect(updated[0].id).toBe('task-segment')
+    expect(updated[1].id).toBe('task-segment-2')
+    expect(updated[2]).toMatchObject({
+      content: { media_type: 'none', task_mode: 'default', images: [] },
+    })
+
+    fireEvent.change(prompt, { target: { value: '' } })
+    const cleared = onTrackSegmentsChange.mock.lastCall?.[0] as MultiTrackSegment[]
+    expect(cleared).toHaveLength(1)
+    expect(cleared[0]).toMatchObject({
+      id: 'task-segment',
+      start_frame: 0,
+      end_frame: 10,
+      content: { text: '' },
+    })
+  })
+
+  it('shows and edits the selected task duration in the center of the footer', () => {
+    const onDurationChange = vi.fn()
+    const { rerender } = render(
+      <TaskSegmentEditor
+        segment={secondTaskSegment()}
+        trackSegments={[taskSegment(), secondTaskSegment()]}
+        frameRate={24}
+        onContentChange={vi.fn()}
+        onDurationChange={onDurationChange}
+      />,
+    )
+
+    expect(screen.getByText('Task 1').className).toContain('text-[10px]')
+    expect(screen.getByText('Task 1').className).toContain('text-primary')
+    expect(screen.getByText('00:00:03').className).toContain('text-[10px]')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit task duration' }))
+    expect(screen.queryByText('Task 1')).toBeNull()
+    expect(screen.queryByText('00:00:03')).toBeNull()
+    const durationInput = screen.getByRole('textbox', { name: 'Duration' })
+    expect(durationInput.className).toContain('tabular-nums')
+    expect(durationInput.getAttribute('placeholder')).toBe('00:00:00')
+    fireEvent.change(durationInput, { target: { value: '00:01:12' } })
+    fireEvent.keyDown(durationInput, { key: 'Enter' })
+    expect(onDurationChange).toHaveBeenCalledWith(1.5)
+
+    const updatedSegment = { ...secondTaskSegment(), end_frame: 39 }
+    rerender(
+      <TaskSegmentEditor
+        segment={updatedSegment}
+        trackSegments={[taskSegment(), updatedSegment]}
+        frameRate={24}
+        onContentChange={vi.fn()}
+        onDurationChange={onDurationChange}
+      />,
+    )
+    expect(screen.getByText('00:01:12')).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit task duration' }))
+    const invalidDurationInput = screen.getByRole('textbox', { name: 'Duration' })
+    fireEvent.change(invalidDurationInput, { target: { value: '00:61:00' } })
+    fireEvent.blur(invalidDurationInput)
+    expect(screen.getByText('00:01:12')).not.toBeNull()
+    expect(onDurationChange).toHaveBeenCalledTimes(1)
   })
 
   it('uses compact preview editor sizing without rendering the empty image picker as a button element', () => {

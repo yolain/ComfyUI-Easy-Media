@@ -9,6 +9,9 @@ from comfy_api.latest import InputImpl, Types, io
 from comfy.utils import ProgressBar
 from ..utils import (
     FFMPEG_RESIZE_METHODS,
+    audio_db_to_gain,
+    audio_is_muted,
+    audio_volume_db,
     frames_to_seconds,
     load_audio_waveform,
     load_image_tensor,
@@ -439,6 +442,8 @@ def _merge_audio_track(
     segments: list[tuple[dict, dict]],
     total_length: int,
     frame_rate: float,
+    base_volume_db: float = 0.0,
+    muted: bool = False,
 ) -> dict:
     sample_rate = 44100
     channels = 2
@@ -451,6 +456,8 @@ def _merge_audio_track(
 
     total_samples = max(1, round(total_length * sample_rate / frame_rate))
     merged = torch.zeros(1, channels, total_samples)
+    if muted:
+        return {"waveform": merged, "sample_rate": sample_rate}
     for segment, audio in sorted(segments, key=lambda item: int(item[0].get("start_frame", 0))):
         waveform = audio.get("waveform")
         if not isinstance(waveform, torch.Tensor):
@@ -462,13 +469,20 @@ def _merge_audio_track(
         elif waveform.shape[1] != channels:
             waveform = waveform[:, :channels]
 
+        content = segment.get("content", {})
+        if not isinstance(content, dict):
+            content = {}
+        if audio_is_muted(content):
+            continue
+        gain = audio_db_to_gain(base_volume_db + audio_volume_db(content))
+
         start_frame = max(0, int(segment.get("start_frame", 0)))
         end_frame = min(total_length, max(start_frame, int(segment.get("end_frame", start_frame))))
         start_sample = round(start_frame * sample_rate / frame_rate)
         segment_samples = max(0, round((end_frame - start_frame) * sample_rate / frame_rate))
         copy_samples = min(segment_samples, waveform.shape[-1], total_samples - start_sample)
         if copy_samples > 0:
-            merged[..., start_sample:start_sample + copy_samples] = waveform[..., :copy_samples]
+            merged[..., start_sample:start_sample + copy_samples] = waveform[..., :copy_samples] * gain
     return {"waveform": merged, "sample_rate": sample_rate}
 
 
@@ -492,6 +506,8 @@ def _merge_video_track_tensor(
     frame_rate: float,
     width: int,
     height: int,
+    base_volume_db: float = 0.0,
+    audio_muted: bool = False,
 ):
     merged_frames = torch.zeros(total_length, height, width, 3)
     embedded_audio_segments: list[tuple[dict, dict]] = []
@@ -520,7 +536,13 @@ def _merge_video_track_tensor(
             embedded_audio_segments.append((segment, components.audio))
 
     merged_audio = (
-        _merge_audio_track(embedded_audio_segments, total_length, frame_rate)
+        _merge_audio_track(
+            embedded_audio_segments,
+            total_length,
+            frame_rate,
+            base_volume_db,
+            audio_muted,
+        )
         if embedded_audio_segments
         else None
     )
@@ -539,16 +561,23 @@ def _merge_video_track(
     frame_rate: float,
     width: int,
     height: int,
+    base_volume_db: float = 0.0,
+    audio_muted: bool = False,
 ):
     file_segments: list[dict] = []
     for segment, video in segments:
         source = _video_stream_source(video)
         if source is None:
             break
+        content = segment.get("content", {})
+        if not isinstance(content, dict):
+            content = {}
         file_segments.append({
             "source": source,
             "start_frame": int(segment.get("start_frame", 0)),
             "end_frame": int(segment.get("end_frame", 0)),
+            "audio_volume_db": base_volume_db + audio_volume_db(content),
+            "audio_muted": audio_muted or audio_is_muted(content),
         })
     else:
         merged_path = merge_video_track_with_ffmpeg(
@@ -560,7 +589,15 @@ def _merge_video_track(
         )
         if merged_path is not None:
             return InputImpl.VideoFromFile(merged_path)
-    return _merge_video_track_tensor(segments, total_length, frame_rate, width, height)
+    return _merge_video_track_tensor(
+        segments,
+        total_length,
+        frame_rate,
+        width,
+        height,
+        base_volume_db,
+        audio_muted,
+    )
 
 
 def _build_tracks_info_and_media_outputs(
@@ -577,6 +614,14 @@ def _build_tracks_info_and_media_outputs(
 
     frame_rate = float(data.get("frame_rate", 24.0))
     total_length = int(data.get("total_length", 0))
+    global_volume_db = audio_volume_db(data)
+    global_muted = audio_is_muted(data)
+    has_solo_track = any(
+        isinstance(track, dict) and
+        track.get("type") in ("video", "audio") and
+        track.get("solo") is True
+        for track in tracks
+    )
 
     media_info = {
         "images": [],
@@ -624,6 +669,12 @@ def _build_tracks_info_and_media_outputs(
 
         track_id = str(track.get("id", ""))
         track_type = track.get("type")
+        track_volume_db = global_volume_db + audio_volume_db(track)
+        track_muted = (
+            global_muted or
+            audio_is_muted(track) or
+            (has_solo_track and track.get("solo") is not True)
+        )
         normalized_segments: list[dict] = []
         track_audio_segments: list[tuple[dict, dict]] = []
         track_video_segments: list[tuple[dict, object]] = []
@@ -637,6 +688,7 @@ def _build_tracks_info_and_media_outputs(
                 content = {}
 
             normalized_content = dict(content)
+            normalized_content.pop("volume", None)
 
             if track_type == "task":
                 normalized_images: list[dict] = []
@@ -683,14 +735,22 @@ def _build_tracks_info_and_media_outputs(
                     track_video_segments.append((segment, rebuilt_video))
 
             normalized_segment = dict(segment)
+            normalized_segment.pop("volume", None)
             normalized_segment["content"] = normalized_content
             normalized_segments.append(normalized_segment)
 
         normalized_track = dict(track)
+        normalized_track.pop("volume", None)
         normalized_track["segments"] = normalized_segments
         if track_type == "audio":
             media_index = len(audio_out)
-            audio_out.append(_merge_audio_track(track_audio_segments, total_length, frame_rate))
+            audio_out.append(_merge_audio_track(
+                track_audio_segments,
+                total_length,
+                frame_rate,
+                track_volume_db,
+                track_muted,
+            ))
             normalized_track["media_index"] = media_index
             for normalized_segment in normalized_segments:
                 content = normalized_segment.get("content", {})
@@ -708,6 +768,8 @@ def _build_tracks_info_and_media_outputs(
                     frame_rate,
                     width,
                     height,
+                    track_volume_db,
+                    track_muted,
                 )
             )
             normalized_track["media_index"] = media_index
@@ -726,6 +788,8 @@ def _build_tracks_info_and_media_outputs(
     tracks_info = {
         "total_length": total_length,
         "frame_rate": frame_rate,
+        "muted": global_muted,
+        "volume_db": global_volume_db,
         "width": width,
         "height": height,
         "tracks": normalized_tracks,

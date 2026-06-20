@@ -85,7 +85,7 @@ export function computeSlotItems(
       // Try to trace to find the actual image source
       let imgsrc: string | undefined
       let audio_name: string | undefined
-      const currentNodeId = traceToRootSourceViaLink(link, app.graph)
+      const currentNodeId = traceToRootSourceViaLink(input.link, app.graph)
       const node = currentNodeId !== null
         ? app.graph.getNodeById(currentNodeId)
         : sourceNode

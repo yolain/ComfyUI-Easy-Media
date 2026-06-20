@@ -1,29 +1,44 @@
 import { useRef, useState } from 'react'
-import { Captions, ListTree, Clapperboard, Layers2, Plus, Volume2 } from 'lucide-react'
+import { Captions, Film, ListTree, Clapperboard, Layers2, Music2, Plus, Trash2, Volume2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useT } from '@/lib/i18n'
 import {
   getSegmentDragPlaceholder,
   getSegmentDragPreviewSegments,
   type SegmentDragPlaceholder,
 } from '@/lib/multitrack-utils'
-import type { MultiTrackSegment } from '@/types/multitrack'
+import type { MultiTrack, MultiTrackSegment, MultiTrackType } from '@/types/multitrack'
 import type { MultiTrackSourceType, TrackData } from '@/types/multitrack'
 import { MULTITRACK_LEFT_GUTTER, MULTITRACK_RIGHT_RESERVE } from './MultiTrackRuler'
 import { MultiTrackSegmentBlock } from './MultiTrackSegmentBlock'
+import { AudioTrack } from './AudioTrack'
 import { VideoTrack } from './VideoTrack'
 
 interface TrackAreaProps {
   data: TrackData
+  node: unknown
+  app: unknown
   width: number
   currentTime: number
   canvasScale: number
   selectedSegmentId: string | null
   onAddVideo: (trackId: string, filePath: string, sourceType: MultiTrackSourceType) => void
+  onAddAudio: (
+    trackId: string,
+    filePath: string,
+    sourceType: MultiTrackSourceType,
+    previewUrl?: string,
+  ) => void
+  onAddTrack: (type: MultiTrackType) => void
   onReplaceVideo: (trackId: string, segmentId: string, filePath: string, sourceType: MultiTrackSourceType) => void
   onAddTaskSegment: (trackId: string) => void
   onSelectSegment: (segmentId: string) => void
   onDeleteSegment: (segmentId: string) => void
+  onDeleteTrack: (trackId: string) => void
+  onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo'>>) => void
+  onDistributeTaskSegments: (trackId: string) => void
+  onCloneTaskSegment: (trackId: string, segmentId: string) => void
   onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
   onMoveSegment: (segmentId: string, targetTrackId: string, nextStartTime: number) => void
 }
@@ -58,15 +73,23 @@ function samePlaceholder(left: SegmentDragPlaceholder | null, right: SegmentDrag
 
 export function TrackArea({
   data,
+  node,
+  app,
   width,
   currentTime,
   canvasScale,
   selectedSegmentId,
   onAddVideo,
+  onAddAudio,
+  onAddTrack,
   onReplaceVideo,
   onAddTaskSegment,
   onSelectSegment,
   onDeleteSegment,
+  onDeleteTrack,
+  onTrackAudioSettingsChange,
+  onDistributeTaskSegments,
+  onCloneTaskSegment,
   onResizeSegment,
   onMoveSegment,
 }: Readonly<TrackAreaProps>) {
@@ -79,7 +102,10 @@ export function TrackArea({
   const playheadLeft = MULTITRACK_LEFT_GUTTER + (currentTime / safeLength) * playableWidth
   const reserveLeft = MULTITRACK_LEFT_GUTTER + playableWidth
 
-  const trackAreaHeight = data.tracks.reduce((height, track) => height + trackHeight(track.type), 0)
+  const addTrackHeight = 24
+  const tracksHeight = data.tracks.reduce((height, track) => height + trackHeight(track.type), 0)
+  const trackAreaHeight = tracksHeight + addTrackHeight
+  const firstVideoTrackId = data.tracks.find((track) => track.type === 'video')?.id
   const trackBounds = data.tracks.reduce<Array<{ id: string, top: number, bottom: number }>>((bounds, track) => {
     const top = bounds.at(-1)?.bottom ?? 0
     bounds.push({ id: track.id, top, bottom: top + trackHeight(track.type) })
@@ -136,12 +162,12 @@ export function TrackArea({
   }
 
   return (
-    <div ref={trackAreaRef} className="relative shrink-0 overflow-hidden" style={{ width, height: trackAreaHeight }}>
+    <div ref={trackAreaRef} className="relative shrink-0" style={{ width, height: trackAreaHeight }}>
       <div
-        className="pointer-events-none absolute top-0 z-10 h-full bg-black/30"
-        style={{ left: reserveLeft, width: MULTITRACK_RIGHT_RESERVE }}
+        className="pointer-events-none absolute top-0 z-10 bg-black/30"
+        style={{ left: reserveLeft, width: MULTITRACK_RIGHT_RESERVE, height: tracksHeight }}
       />
-      <div className="absolute top-0 z-20 h-full w-px bg-destructive" style={{ left: playheadLeft }} />
+      <div className="absolute top-0 z-20 w-px bg-destructive" style={{ left: playheadLeft, height: tracksHeight }} />
       {data.tracks.map((track) => {
         if (track.type === 'video') {
           return (
@@ -160,10 +186,38 @@ export function TrackArea({
               onReplaceVideo={onReplaceVideo}
               onSelectSegment={onSelectSegment}
               onDeleteSegment={onDeleteSegment}
+              canDeleteTrack={track.id !== firstVideoTrackId}
+              onDeleteTrack={onDeleteTrack}
+              onTrackAudioSettingsChange={onTrackAudioSettingsChange}
               onResizeSegment={onResizeSegment}
               onMoveSegment={(segmentId, nextStartTime, clientY) => {
                 handleMoveSegment(segmentId, track.id, nextStartTime, clientY)
               }}
+              onDragPreviewChange={updateDragPlaceholder}
+              onDragPreviewEnd={() => setDragPlaceholder(null)}
+            />
+          )
+        }
+
+        if (track.type === 'audio') {
+          return (
+            <AudioTrack
+              key={track.id}
+              track={{ ...track, segments: track.segments.map((segment) => previewSegment(track.id, segment)) }}
+              totalLength={data.total_length}
+              frameRate={data.frame_rate}
+              width={playableWidth}
+              canvasScale={canvasScale}
+              selectedSegmentId={selectedSegmentId}
+              node={node}
+              app={app}
+              onAddAudio={onAddAudio}
+              onSelectSegment={onSelectSegment}
+              onDeleteSegment={onDeleteSegment}
+              onDeleteTrack={onDeleteTrack}
+              onTrackAudioSettingsChange={onTrackAudioSettingsChange}
+              onResizeSegment={onResizeSegment}
+              onMoveSegment={(segmentId, nextStartTime, clientY) => handleMoveSegment(segmentId, track.id, nextStartTime, clientY)}
               onDragPreviewChange={updateDragPlaceholder}
               onDragPreviewEnd={() => setDragPlaceholder(null)}
             />
@@ -196,6 +250,8 @@ export function TrackArea({
                   selected={selectedSegmentId === segment.id}
                   onSelect={onSelectSegment}
                   onDelete={onDeleteSegment}
+                  onDistribute={track.type === 'task' ? () => onDistributeTaskSegments(track.id) : undefined}
+                  onClone={track.type === 'task' ? (segmentId) => onCloneTaskSegment(track.id, segmentId) : undefined}
                   onResize={onResizeSegment}
                   onMove={(segmentId, nextStartTime, clientY) => {
                     handleMoveSegment(segmentId, track.id, nextStartTime, clientY)
@@ -224,11 +280,73 @@ export function TrackArea({
                 >
                   <Plus className="h-2.5 w-2.5" />
                 </Button>
-              ) : null}
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute top-1/2 h-5 w-5 -translate-y-1/2 cursor-pointer text-destructive"
+                      style={{
+                        left: track.segments.length === 0
+                          ? 6
+                          : (track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0) / safeLength) * playableWidth + 6,
+                      }}
+                      aria-label={t('multitrack.deleteTrack', { name: track.name })}
+                      onClick={() => onDeleteTrack(track.id)}
+                    >
+                      <Trash2 className="h-2.5 w-2.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{t('multitrack.deleteTrack', { name: track.name })}</TooltipContent>
+                </Tooltip>
+              )}
             </div>
           </div>
         )
       })}
+      <div
+        className="flex items-center justify-center gap-1 border-b border-border text-[10px] text-muted-foreground"
+        style={{ height: addTrackHeight }}
+      >
+        <span>{t('multitrack.addTrack')}</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <Button type="button" variant="ghost" size="icon" className="h-6 w-6" disabled aria-label={t('multitrack.addVideoTrack')}>
+                <Film className="h-3.5 w-3.5" />
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{t('multitrack.notSupportedYet')}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 cursor-pointer"
+              aria-label={t('multitrack.addAudioTrack')}
+              onClick={() => onAddTrack('audio')}
+            >
+              <Music2 className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t('multitrack.addAudioTrack')}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <Button type="button" variant="ghost" size="icon" className="h-6 w-6" disabled aria-label={t('multitrack.addSubtitleTrack')}>
+                <Captions className="h-3.5 w-3.5" />
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{t('multitrack.notSupportedYet')}</TooltipContent>
+        </Tooltip>
+      </div>
       {dragPlaceholderRect ? (
         <div
           className="pointer-events-none absolute z-10 rounded border border-border bg-muted/60"

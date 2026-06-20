@@ -163,6 +163,11 @@
     -webkit-background-clip: text;
     background-clip: text;
   }
+
+  .__CUSTOM_NODE_CLASS__ .task-image-grid-item,
+  .__CUSTOM_NODE_CLASS__ .task-image-grid-add {
+    transition: opacity 180ms ease;
+  }
 }
 
 /* ── Overlay management ─────────────────────────────────────────────────────

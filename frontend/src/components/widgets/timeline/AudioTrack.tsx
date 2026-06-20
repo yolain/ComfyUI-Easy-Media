@@ -24,6 +24,7 @@ import { uuid } from '@/lib/uuid'
 import { CUSTOM_NODE_CLASS } from '@/lib/constants'
 import { computeSlotItems } from '@/lib/timeline-utils'
 import { audioContentToViewUrl, mediaPathToViewUrl } from '@/lib/media-url'
+import { invalidateMediaListCache } from '@/stores/media-list-store'
 
 interface AudioTrackProps {
   track: Track
@@ -325,6 +326,7 @@ export function AudioTrack({
     if (!canImport) return
     const updated = [...segments]
     let cursor = pendingDropFrame ?? (lastOccupied >= 0 ? lastOccupied + 1 : 0)
+    let uploadedAny = false
     for (const file of files) {
       if (cursor >= totalFrames) break
       try {
@@ -333,6 +335,7 @@ export function AudioTrack({
         const res = await fetch('/easy-media/upload', { method: 'POST', body: form })
         if (!res.ok) continue
         const { file_name: fileName } = await res.json() as { file_name: string }
+        uploadedAny = true
 
         // Detect actual audio duration from the uploaded file
         const src = mediaPathToViewUrl(fileName, 'input')
@@ -366,6 +369,7 @@ export function AudioTrack({
         // skip failed uploads
       }
     }
+    if (uploadedAny) invalidateMediaListCache('inputs')
     onSegmentsChange(updated.toSorted((a, b) => a.start_frame - b.start_frame))
     setPendingDropFrame(null)
   }
