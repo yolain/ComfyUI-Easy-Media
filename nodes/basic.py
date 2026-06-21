@@ -2256,11 +2256,24 @@ class MakeRefsCompositeBySam3(io.ComfyNode):
                 io.Model.Input("model"),
                 io.Clip.Input("clip"),
                 io.Image.Input("images"),
+                io.String.Input("prompt", default="", multiline=True, socketless=True),
                 io.Int.Input("width", default=1024, min=64, max=8096, step=8),
                 io.Int.Input("height", default=1024, min=64, max=8096, step=8),
-                io.String.Input("prompt", default="", multiline=True, socketless=True),
                 io.Float.Input("detection_threshold", default=0.5, min=0.0, max=1.0, step=0.01, socketless=True),
                 io.Combo.Input("background", options=["white", "black"], default="white", socketless=True),
+                io.Combo.Input(
+                    "composite_mode",
+                    options=["original", "sam3_masked"],
+                    default="original",
+                    socketless=True,
+                    tooltip="Use original images or SAM3-segmented subjects in the composite.",
+                ),
+                io.Boolean.Input(
+                    "skip_background",
+                    default=False,
+                    socketless=True,
+                    tooltip="Exclude the last image as a background image before compositing or SAM3 detection.",
+                ),
             ],
             outputs=[
                 io.Image.Output("composite"),
@@ -2279,40 +2292,57 @@ class MakeRefsCompositeBySam3(io.ComfyNode):
         prompt: list[str],
         detection_threshold: list[float],
         background: list[str],
+        composite_mode: list[str],
+        skip_background: list[bool],
     ) -> io.NodeOutput:
-        sam3_model = _first_list_value(model, "model")
-        text_encoder = _first_list_value(clip, "clip")
         target_width = int(_first_list_value(width, "width"))
         target_height = int(_first_list_value(height, "height"))
-        prompt_text = str(_first_list_value(prompt, "prompt"))
-        threshold = float(_first_list_value(detection_threshold, "detection_threshold"))
         background_value = str(_first_list_value(background, "background"))
-        if not prompt_text.strip():
-            raise ValueError("prompt must not be empty.")
+        mode = str(_first_list_value(composite_mode, "composite_mode"))
+        should_skip_background = bool(_first_list_value(skip_background, "skip_background"))
+        if mode not in {"original", "sam3_masked"}:
+            raise ValueError("composite_mode must be either 'original' or 'sam3_masked'.")
 
-        try:
-            from comfy_extras.nodes_sam3 import SAM3_TrackToMask, SAM3_VideoTrack
-        except ImportError as exc:
-            raise RuntimeError("This node requires ComfyUI with SAM3_VideoTrack support.") from exc
+        expanded_images = _expand_ref_images(images)
+        if should_skip_background:
+            expanded_images.pop()
 
-        tokens = text_encoder.tokenize(prompt_text)
-        conditioning = text_encoder.encode_from_tokens_scheduled(tokens)
         refs: list[tuple[torch.Tensor, torch.Tensor]] = []
-        for image in _expand_ref_images(images):
-            track_output = SAM3_VideoTrack.execute(
-                images=image,
-                model=sam3_model,
-                conditioning=conditioning,
-                detection_threshold=threshold,
-                max_objects=0,
-                detect_interval=1,
-            )
-            if track_output.result is None:
-                raise RuntimeError("SAM3_VideoTrack returned no tracking data.")
-            mask_output = SAM3_TrackToMask.execute(track_output.result[0])
-            if mask_output.result is None:
-                raise RuntimeError("SAM3_TrackToMask returned no mask.")
-            refs.append((image, mask_output.result[0]))
+        if mode == "original":
+            refs = [
+                (image, torch.ones((1, image.shape[1], image.shape[2]), device=image.device))
+                for image in expanded_images
+            ]
+        else:
+            sam3_model = _first_list_value(model, "model")
+            text_encoder = _first_list_value(clip, "clip")
+            prompt_text = str(_first_list_value(prompt, "prompt"))
+            threshold = float(_first_list_value(detection_threshold, "detection_threshold"))
+            if not prompt_text.strip():
+                raise ValueError("prompt must not be empty in sam3_masked mode.")
+
+            try:
+                from comfy_extras.nodes_sam3 import SAM3_TrackToMask, SAM3_VideoTrack
+            except ImportError as exc:
+                raise RuntimeError("This node requires ComfyUI with SAM3_VideoTrack support.") from exc
+
+            tokens = text_encoder.tokenize(prompt_text)
+            conditioning = text_encoder.encode_from_tokens_scheduled(tokens)
+            for image in expanded_images:
+                track_output = SAM3_VideoTrack.execute(
+                    images=image,
+                    model=sam3_model,
+                    conditioning=conditioning,
+                    detection_threshold=threshold,
+                    max_objects=0,
+                    detect_interval=1,
+                )
+                if track_output.result is None:
+                    raise RuntimeError("SAM3_VideoTrack returned no tracking data.")
+                mask_output = SAM3_TrackToMask.execute(track_output.result[0])
+                if mask_output.result is None:
+                    raise RuntimeError("SAM3_TrackToMask returned no mask.")
+                refs.append((image, mask_output.result[0]))
 
         composite, composite_mask = _compose_refs(
             refs,

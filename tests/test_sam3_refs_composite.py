@@ -1,5 +1,7 @@
+import json
 import sys
 import types
+from pathlib import Path
 
 import torch
 
@@ -17,13 +19,50 @@ def test_make_refs_composite_schema_accepts_lists_and_exposes_expected_widgets()
         "model",
         "clip",
         "images",
+        "prompt",
         "width",
         "height",
-        "prompt",
         "detection_threshold",
         "background",
+        "composite_mode",
+        "skip_background",
     ]
+    assert schema.inputs[-2].kwargs["options"] == ["original", "sam3_masked"]
+    assert schema.inputs[-2].kwargs["default"] == "original"
+    assert schema.inputs[-1].kwargs["default"] is False
     assert [output.name for output in schema.outputs] == ["composite", "mask"]
+
+
+def test_make_refs_composite_has_complete_chinese_localization():
+    locale_path = Path(__file__).parents[1] / "locales" / "zh" / "nodeDefs.json"
+    node_defs = json.loads(locale_path.read_text(encoding="utf-8"))
+
+    translation = node_defs["easy makeRefsCompositeBySam3"]
+    assert translation["display_name"] == "SAM3 制作参考图拼贴"
+    assert set(translation["inputs"]) == {
+        "model",
+        "clip",
+        "images",
+        "prompt",
+        "width",
+        "height",
+        "detection_threshold",
+        "background",
+        "composite_mode",
+        "skip_background",
+    }
+    assert translation["inputs"]["background"]["options"] == {
+        "white": "白色",
+        "black": "黑色",
+    }
+    assert translation["inputs"]["composite_mode"]["options"] == {
+        "original": "原图",
+        "sam3_masked": "SAM3 遮罩分割",
+    }
+    assert translation["outputs"] == {
+        "0": {"name": "拼贴图"},
+        "1": {"name": "遮罩"},
+    }
 
 
 def test_expand_ref_images_splits_a_single_batched_input():
@@ -84,7 +123,7 @@ def test_compose_refs_uses_grid_when_full_height_items_do_not_fit():
 def test_make_refs_composite_runs_sam3_for_each_image_in_a_batch(monkeypatch):
     module = _load_basic_module()
     calls = []
-    masks = [torch.zeros(1, 2, 2), torch.ones(1, 2, 2)]
+    masks = [torch.ones(1, 2, 2)]
 
     class FakeVideoTrack:
         @classmethod
@@ -126,13 +165,47 @@ def test_make_refs_composite_runs_sam3_for_each_image_in_a_batch(monkeypatch):
         prompt=["person"],
         detection_threshold=[0.7],
         background=["black"],
+        composite_mode=["sam3_masked"],
+        skip_background=[True],
     )
 
     composite, composite_mask = output.values
     assert clip.prompts == ["person"]
-    assert len(calls) == 2
+    assert len(calls) == 1
     assert all(call["detection_threshold"] == 0.7 for call in calls)
     assert all(call["conditioning"] == [({"tokens": "person"}, {})] for call in calls)
     assert composite.shape == (1, 4, 4, 3)
-    assert torch.all(composite == 1)
+    assert torch.all(composite == 0)
+    assert torch.all(composite_mask == 1)
+
+
+def test_original_mode_skips_the_last_background_without_running_sam3():
+    module = _load_basic_module()
+
+    class UnusedClip:
+        def tokenize(self, prompt):
+            raise AssertionError("Original mode must not encode a SAM3 prompt.")
+
+    foreground = torch.zeros(2, 2, 3)
+    foreground[..., 0] = 1
+    background = torch.zeros(2, 2, 3)
+    background[..., 1] = 1
+    batch = torch.stack((foreground, background))
+
+    output = module.MakeRefsCompositeBySam3.execute(
+        model=[object()],
+        clip=[UnusedClip()],
+        images=[batch],
+        width=[4],
+        height=[4],
+        prompt=[""],
+        detection_threshold=[0.5],
+        background=["black"],
+        composite_mode=["original"],
+        skip_background=[True],
+    )
+
+    composite, composite_mask = output.values
+    assert torch.all(composite[..., 0] == 1)
+    assert torch.all(composite[..., 1:] == 0)
     assert torch.all(composite_mask == 1)

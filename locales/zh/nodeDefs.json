@@ -487,5 +487,68 @@
         "name": "图像"
       }
     }
+  },
+  "easy makeRefsCompositeBySam3": {
+    "display_name": "SAM3 制作参考图拼贴",
+    "description": "使用原图或 SAM3 识别并分割提示词对应的主体，将参考图居中排列到指定尺寸的拼贴画布。",
+    "inputs": {
+      "model": {
+        "name": "SAM3 模型",
+        "tooltip": "用于主体识别和遮罩分割的 SAM3 模型。"
+      },
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "用于编码 SAM3 识别提示词的 CLIP 模型。"
+      },
+      "images": {
+        "name": "参考图像",
+        "tooltip": "要识别并加入拼贴的参考图像列表或图像批次。"
+      },
+      "prompt": {
+        "name": "识别提示词",
+        "tooltip": "在 SAM3 遮罩分割模式下用于识别主体的文本提示词。"
+      },
+      "width": {
+        "name": "画布宽度"
+      },
+      "height": {
+        "name": "画布高度"
+      },
+      "detection_threshold": {
+        "name": "检测阈值",
+        "tooltip": "SAM3 文本提示识别的置信度阈值。"
+      },
+      "background": {
+        "name": "背景颜色",
+        "options": {
+          "white": "白色",
+          "black": "黑色"
+        }
+      },
+      "composite_mode": {
+        "name": "拼贴模式",
+        "tooltip": "选择直接拼贴原图或拼贴 SAM3 遮罩分割后的主体。",
+        "options": {
+          "original": "原图",
+          "sam3_masked": "SAM3 遮罩分割"
+        }
+      },
+      "skip_background": {
+        "name": "跳过背景图",
+        "tooltip": "启用时，在识别和拼贴前排除最后一张图像。",
+        "options": {
+          "true": "跳过",
+          "false": "保留"
+        }
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "拼贴图"
+      },
+      "1": {
+        "name": "遮罩"
+      }
+    }
   }
 }
