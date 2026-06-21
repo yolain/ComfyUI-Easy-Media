@@ -197,13 +197,14 @@ def merge_video_track_with_ffmpeg(
         start_frame = max(0, int(segment.get("start_frame", 0)))
         end_frame = min(total_length, max(start_frame, int(segment.get("end_frame", start_frame))))
         start_seconds = start_frame / frame_rate
+        source_start_seconds = max(0, int(segment.get("source_start_frame", 0))) / frame_rate
         duration = (end_frame - start_frame) / frame_rate
         if duration <= 0:
             continue
         clip_label = f"clipv{index}"
         output_label = f"timelinev{index}"
         filters.append(
-            f"[{input_index}:v]fps={frame_rate},trim=duration={duration},"
+            f"[{input_index}:v]fps={frame_rate},trim=start={source_start_seconds}:duration={duration},"
             f"setpts=PTS-STARTPTS+{start_seconds}/TB[{clip_label}]"
         )
         filters.append(
@@ -225,7 +226,7 @@ def merge_video_track_with_ffmpeg(
                 volume_db = 0.0
             volume_filter = "volume=0" if muted else f"volume={volume_db:g}dB"
             filters.append(
-                f"[{input_index}:a]atrim=duration={duration},asetpts=PTS-STARTPTS,"
+                f"[{input_index}:a]atrim=start={source_start_seconds}:duration={duration},asetpts=PTS-STARTPTS,"
                 f"{volume_filter},adelay={delay_ms}:all=1[{audio_label}]"
             )
             audio_labels.append(audio_label)

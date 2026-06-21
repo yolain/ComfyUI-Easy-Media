@@ -22,10 +22,15 @@ Response (JSON):
     }
 """
 
+import asyncio
+import math
 import os
 import json
+import tempfile
+import traceback
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 import aiohttp
 from server import PromptServer
@@ -33,6 +38,9 @@ from aiohttp import web
 import folder_paths
 
 from .utils.prompt_builder import get_system_prompt_options
+
+
+_SMART_SPLIT_LOCK = asyncio.Lock()
 
 try:
     from PIL import Image as PILImage
@@ -71,6 +79,60 @@ _TYPE_MAP: dict[str, set[str]] = {
 
 def _allowed_extensions(media_type: str) -> set[str]:
     return _TYPE_MAP.get(media_type, ALL_EXTENSIONS)
+
+
+def _resolve_video_path(data: dict) -> Path:
+    """Resolve a segment media descriptor to a local video file."""
+    source_type = data.get("source_type", "input")
+    if source_type == "local":
+        raw_path = data.get("local_path") or data.get("file_path")
+        if not isinstance(raw_path, str) or not raw_path:
+            raise ValueError("local_path is required for local video segments")
+        path = Path(raw_path).expanduser().resolve()
+    elif source_type in ("input", "preset", "slot"):
+        raw_path = data.get("file_path")
+        if not isinstance(raw_path, str) or not raw_path:
+            raise ValueError("file_path is required for input video segments")
+        path = (Path(folder_paths.get_input_directory()).resolve() / raw_path).resolve()
+        path.relative_to(Path(folder_paths.get_input_directory()).resolve())
+    elif source_type == "output":
+        raw_path = data.get("file_path")
+        if not isinstance(raw_path, str) or not raw_path:
+            raise ValueError("file_path is required for output video segments")
+        path = (Path(folder_paths.get_output_directory()).resolve() / raw_path).resolve()
+        path.relative_to(Path(folder_paths.get_output_directory()).resolve())
+    else:
+        raise ValueError(f"unsupported video source_type: {source_type}")
+
+    if not path.is_file():
+        raise FileNotFoundError(f"video file not found: {path}")
+    if path.suffix.lower() not in VIDEO_EXTENSIONS:
+        raise ValueError(f"unsupported video extension: {path.suffix}")
+    return path
+
+
+async def _download_video_to_temp(url: str) -> Path:
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("video URL must use http or https")
+    suffix = Path(parsed.path).suffix.lower()
+    if suffix not in VIDEO_EXTENSIONS:
+        suffix = ".mp4"
+    temp_file = tempfile.NamedTemporaryFile(prefix="easy_media_omni_", suffix=suffix, delete=False)
+    temp_path = Path(temp_file.name)
+    try:
+        timeout = aiohttp.ClientTimeout(total=300)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as response:
+                response.raise_for_status()
+                while chunk := await response.content.read(1024 * 1024):
+                    temp_file.write(chunk)
+        temp_file.close()
+        return temp_path
+    except Exception:
+        temp_file.close()
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 def _file_entry(abs_path: str, rel_path: str, source: str) -> dict:
@@ -341,3 +403,44 @@ async def handle_system_prompt_options(request: web.Request) -> web.Response:
             "items": get_system_prompt_options(),
         }),
     )
+
+
+@PromptServer.instance.routes.post("/easy-media/video/smart-split")
+async def handle_video_smart_split(request: web.Request) -> web.Response:
+    """Run OmniShotCut for one video and return its detected frame ranges."""
+    temp_path: Path | None = None
+    try:
+        try:
+            data = await request.json()
+        except Exception as error:
+            raise ValueError("Invalid JSON body") from error
+        if not isinstance(data, dict):
+            raise ValueError("request body must be a JSON object")
+        fps = data.get("fps")
+        if not isinstance(fps, (int, float)) or not math.isfinite(fps) or fps <= 0:
+            raise ValueError("fps must be a positive finite number")
+        if data.get("source_type") == "url":
+            url = data.get("url")
+            if not isinstance(url, str) or not url:
+                raise ValueError("url is required for URL video segments")
+            temp_path = await _download_video_to_temp(url)
+            video_path = temp_path
+        else:
+            video_path = _resolve_video_path(data)
+
+        from .modules.omnishotcut import detect_shots
+
+        async with _SMART_SPLIT_LOCK:
+            ranges = await asyncio.to_thread(detect_shots, video_path, float(fps), mode="clean_shot")
+        return web.json_response({"ranges": ranges})
+    except (ValueError, FileNotFoundError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"OmniShotCut detection failed: {error}"}, status=500)
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError as error:
+                print(f"[Easy Media] Failed to remove OmniShotCut temporary video: {error}")

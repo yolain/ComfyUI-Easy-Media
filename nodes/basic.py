@@ -480,9 +480,17 @@ def _merge_audio_track(
         end_frame = min(total_length, max(start_frame, int(segment.get("end_frame", start_frame))))
         start_sample = round(start_frame * sample_rate / frame_rate)
         segment_samples = max(0, round((end_frame - start_frame) * sample_rate / frame_rate))
-        copy_samples = min(segment_samples, waveform.shape[-1], total_samples - start_sample)
+        origin_start = int(segment.get("origin_start_frame", start_frame))
+        source_start_sample = max(0, round((start_frame - origin_start) * sample_rate / frame_rate))
+        copy_samples = min(
+            segment_samples,
+            max(0, waveform.shape[-1] - source_start_sample),
+            total_samples - start_sample,
+        )
         if copy_samples > 0:
-            merged[..., start_sample:start_sample + copy_samples] = waveform[..., :copy_samples] * gain
+            merged[..., start_sample:start_sample + copy_samples] = (
+                waveform[..., source_start_sample:source_start_sample + copy_samples] * gain
+            )
     return {"waveform": merged, "sample_rate": sample_rate}
 
 
@@ -522,13 +530,18 @@ def _merge_video_track_tensor(
         end_frame = min(total_length, max(start_frame, int(segment.get("end_frame", start_frame))))
         segment_frames = end_frame - start_frame
         source_rate = float(components.frame_rate)
+        origin_start = int(segment.get("origin_start_frame", start_frame))
+        source_start_frame = max(0, math.floor((start_frame - origin_start) * source_rate / frame_rate))
         available_frames = (
-            min(segment_frames, max(0, int(frames.shape[0] * frame_rate / source_rate)))
+            min(
+                segment_frames,
+                max(0, int((frames.shape[0] - source_start_frame) * frame_rate / source_rate)),
+            )
             if frames.shape[0] > 0 and source_rate > 0
             else 0
         )
         if available_frames > 0:
-            indices = torch.floor(
+            indices = source_start_frame + torch.floor(
                 torch.arange(available_frames, device=frames.device) * source_rate / frame_rate
             ).long().clamp(max=frames.shape[0] - 1)
             merged_frames[start_frame:start_frame + available_frames] = frames[indices].cpu()
@@ -572,13 +585,18 @@ def _merge_video_track(
         content = segment.get("content", {})
         if not isinstance(content, dict):
             content = {}
-        file_segments.append({
+        file_segment = {
             "source": source,
             "start_frame": int(segment.get("start_frame", 0)),
             "end_frame": int(segment.get("end_frame", 0)),
             "audio_volume_db": base_volume_db + audio_volume_db(content),
             "audio_muted": audio_muted or audio_is_muted(content),
-        })
+        }
+        origin_start = int(segment.get("origin_start_frame", file_segment["start_frame"]))
+        source_start_frame = max(0, file_segment["start_frame"] - origin_start)
+        if source_start_frame > 0:
+            file_segment["source_start_frame"] = source_start_frame
+        file_segments.append(file_segment)
     else:
         merged_path = merge_video_track_with_ffmpeg(
             file_segments,
