@@ -54,6 +54,7 @@ class EasyMediaExtension(ComfyExtension):
             MultiTrackTaskOutput,
             TimelineSegmentOutput,
             TimelineSegmentCount,
+            MakeRefsCompositeBySam3,
             ImageIndexesToIntList,
             MatchLine,
             SplitImages,

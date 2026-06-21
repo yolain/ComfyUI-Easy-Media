@@ -46,6 +46,9 @@ class _FakeIO:
     class Boolean:
         Input = _FakeInput
 
+    class Clip:
+        Input = _FakeInput
+
     class Combo:
         Input = _FakeInput
 
@@ -54,6 +57,15 @@ class _FakeIO:
         Output = _FakeInput
 
     class Int:
+        Input = _FakeInput
+
+    class Float:
+        Input = _FakeInput
+
+    class Mask:
+        Output = _FakeInput
+
+    class Model:
         Input = _FakeInput
 
     class String:
@@ -68,22 +80,41 @@ class _FakeIO:
 def _load_basic_module(monkeypatch):
     latest = types.ModuleType("comfy_api.latest")
     latest.io = _FakeIO()
+    latest.InputImpl = object
+    latest.Types = types.SimpleNamespace()
     comfy_api = types.ModuleType("comfy_api")
     comfy_api.latest = latest
 
     utils = types.ModuleType("easy_media.utils")
+    utils.FFMPEG_RESIZE_METHODS = frozenset()
+    utils.audio_db_to_gain = lambda value: value
+    utils.audio_is_muted = lambda value: False
+    utils.audio_volume_db = lambda value: 0.0
     utils.frames_to_seconds = lambda frames, frame_rate: (frames - 1) / frame_rate
     utils.load_audio_waveform = lambda *args, **kwargs: None
     utils.load_image_tensor = lambda *args, **kwargs: None
     utils.resize_image = lambda image, *args, **kwargs: image
+    utils.merge_video_track_with_ffmpeg = lambda *args, **kwargs: None
+    utils.resize_video_with_ffmpeg = lambda *args, **kwargs: None
+    utils.resolve_video_path = lambda *args, **kwargs: None
     utils.silence = lambda *args, **kwargs: None
     utils.trim_audio = lambda audio, *args, **kwargs: audio
 
     monkeypatch.setitem(sys.modules, "comfy_api", comfy_api)
     monkeypatch.setitem(sys.modules, "comfy_api.latest", latest)
+    comfy = types.ModuleType("comfy")
+    comfy_utils = types.ModuleType("comfy.utils")
+    comfy_utils.ProgressBar = object
+    comfy.utils = comfy_utils
+    monkeypatch.setitem(sys.modules, "comfy", comfy)
+    monkeypatch.setitem(sys.modules, "comfy.utils", comfy_utils)
     monkeypatch.setitem(sys.modules, "easy_media", types.ModuleType("easy_media"))
     monkeypatch.setitem(sys.modules, "easy_media.nodes", types.ModuleType("easy_media.nodes"))
     monkeypatch.setitem(sys.modules, "easy_media.utils", utils)
+    prompt_builder = types.ModuleType("easy_media.utils.prompt_builder")
+    prompt_builder.build_llm_prompt = lambda *args, **kwargs: ""
+    prompt_builder.build_prompt_request = lambda *args, **kwargs: ("", "", False)
+    monkeypatch.setitem(sys.modules, "easy_media.utils.prompt_builder", prompt_builder)
 
     module_path = Path(__file__).resolve().parents[1] / "nodes" / "basic.py"
     spec = importlib.util.spec_from_file_location("easy_media.nodes.basic", module_path)
