@@ -1,4 +1,4 @@
-import { Maximize2, Minimize2, Trash2, ZoomOut } from 'lucide-react'
+import { Maximize2, Minimize2, TextCursor, Trash2, ZoomOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { useT } from '@/lib/i18n'
@@ -16,6 +16,8 @@ interface MultiTrackToolbarProps {
   onToggleTimeline: () => void
   canDelete: boolean
   onDeleteSelected: () => void
+  cutMode: boolean
+  onToggleCutMode: () => void
 }
 
 export function MultiTrackToolbar({
@@ -30,6 +32,8 @@ export function MultiTrackToolbar({
   onToggleTimeline,
   canDelete,
   onDeleteSelected,
+  cutMode,
+  onToggleCutMode,
 }: Readonly<MultiTrackToolbarProps>) {
   const t = useT()
   return (
@@ -48,6 +52,21 @@ export function MultiTrackToolbar({
           }}
         >
           <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          type="button"
+          variant={cutMode ? 'secondary' : 'ghost'}
+          size="icon"
+          className="h-6 w-6 text-muted-foreground"
+          aria-label={t('multitrack.cutMode')}
+          aria-pressed={cutMode}
+          data-cut-mode-toggle
+          onClick={(event) => {
+            event.stopPropagation()
+            onToggleCutMode()
+          }}
+        >
+          <TextCursor className={`h-3.5 w-3.5 ${cutMode ? 'text-highlight' : 'text-muted-foreground'}`} />
         </Button>
       </div>
 

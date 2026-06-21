@@ -278,6 +278,7 @@ describe('multitrack utilities', () => {
           id: 'second-video',
           start_frame: 96,
           end_frame: 168,
+          origin_start_frame: 96,
           color: data.tracks[1].color,
           content: { media_type: 'video' as const, duration: 3, file_name: 'b.mp4' },
         },
@@ -292,6 +293,11 @@ describe('multitrack utilities', () => {
       localTime: 1,
     })
     expect(getActivePreviewVideoSegment(trackData, 72, 'second-video')).toBeNull()
+
+    videoTrack.segments[1].origin_start_frame = 48
+    expect(getActivePreviewVideoSegment(trackData, 120, 'second-video')).toMatchObject({
+      localTime: 3,
+    })
   })
 
   it('collects all active audio sources and applies track solo, mute, and dB settings', () => {

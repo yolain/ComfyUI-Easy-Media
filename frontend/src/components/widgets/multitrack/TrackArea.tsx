@@ -41,6 +41,10 @@ interface TrackAreaProps {
   onCloneTaskSegment: (trackId: string, segmentId: string) => void
   onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
   onMoveSegment: (segmentId: string, targetTrackId: string, nextStartTime: number) => void
+  onSmartSplit: (segmentId: string) => void
+  onSmartSplitTasks: (segmentId: string) => void
+  cutMode: boolean
+  onCutSegment: (segmentId: string, splitFrame: number) => void
 }
 
 function trackHeight(type: string): number {
@@ -92,6 +96,10 @@ export function TrackArea({
   onCloneTaskSegment,
   onResizeSegment,
   onMoveSegment,
+  onSmartSplit,
+  onSmartSplitTasks,
+  cutMode,
+  onCutSegment,
 }: Readonly<TrackAreaProps>) {
   const t = useT()
   const trackAreaRef = useRef<HTMLDivElement>(null)
@@ -162,7 +170,12 @@ export function TrackArea({
   }
 
   return (
-    <div ref={trackAreaRef} className="relative shrink-0" style={{ width, height: trackAreaHeight }}>
+    <div
+      ref={trackAreaRef}
+      className="relative shrink-0"
+      style={{ width, height: trackAreaHeight }}
+      data-multitrack-track-area
+    >
       <div
         className="pointer-events-none absolute top-0 z-10 bg-black/30"
         style={{ left: reserveLeft, width: MULTITRACK_RIGHT_RESERVE, height: tracksHeight }}
@@ -186,6 +199,10 @@ export function TrackArea({
               onReplaceVideo={onReplaceVideo}
               onSelectSegment={onSelectSegment}
               onDeleteSegment={onDeleteSegment}
+              onSmartSplit={onSmartSplit}
+              onSmartSplitTasks={onSmartSplitTasks}
+              cutMode={cutMode}
+              onCutSegment={onCutSegment}
               canDeleteTrack={track.id !== firstVideoTrackId}
               onDeleteTrack={onDeleteTrack}
               onTrackAudioSettingsChange={onTrackAudioSettingsChange}
@@ -220,6 +237,8 @@ export function TrackArea({
               onMoveSegment={(segmentId, nextStartTime, clientY) => handleMoveSegment(segmentId, track.id, nextStartTime, clientY)}
               onDragPreviewChange={updateDragPlaceholder}
               onDragPreviewEnd={() => setDragPlaceholder(null)}
+              cutMode={cutMode}
+              onCutSegment={onCutSegment}
             />
           )
         }
@@ -252,6 +271,8 @@ export function TrackArea({
                   onDelete={onDeleteSegment}
                   onDistribute={track.type === 'task' ? () => onDistributeTaskSegments(track.id) : undefined}
                   onClone={track.type === 'task' ? (segmentId) => onCloneTaskSegment(track.id, segmentId) : undefined}
+                  cutMode={cutMode}
+                  onCut={onCutSegment}
                   onResize={onResizeSegment}
                   onMove={(segmentId, nextStartTime, clientY) => {
                     handleMoveSegment(segmentId, track.id, nextStartTime, clientY)

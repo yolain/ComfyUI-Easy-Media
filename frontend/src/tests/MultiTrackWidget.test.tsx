@@ -26,19 +26,23 @@ vi.mock('@/components/widgets/multitrack/MultiTrackRuler', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
-  TrackArea: ({ data, node, app, onCloneTaskSegment, onAddTrack, onAddAudio }: {
+  TrackArea: ({ data, node, app, onCloneTaskSegment, onAddTrack, onAddAudio, onSmartSplit, onSmartSplitTasks, cutMode }: {
     data: TrackData
     node: unknown
     app: unknown
     onCloneTaskSegment: (trackId: string, segmentId: string) => void
     onAddTrack: (type: 'audio') => void
     onAddAudio: (trackId: string, filePath: string, sourceType: 'input', previewUrl?: string) => void
+    onSmartSplit: (segmentId: string) => void
+    onSmartSplitTasks: (segmentId: string) => void
+    cutMode: boolean
   }) => {
     const taskTrack = data.tracks.find((track) => track.type === 'task')
     const audioTrack = data.tracks.find((track) => track.type === 'audio')
     const segment = taskTrack?.segments[0]
+    const videoSegment = data.tracks.find((track) => track.type === 'video')?.segments[0]
     return (
-      <div data-testid="multitrack-track-area">
+      <div data-testid="multitrack-track-area" data-cut-mode={cutMode}>
         <div data-testid="audio-slot-context">{node && app ? 'connected' : 'missing'}</div>
         {taskTrack && segment ? (
           <button type="button" onClick={() => onCloneTaskSegment(taskTrack.id, segment.id)}>
@@ -48,6 +52,12 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
         <button type="button" onClick={() => onAddTrack('audio')}>add audio track</button>
         {audioTrack ? (
           <button type="button" onClick={() => onAddAudio(audioTrack.id, 'audio.wav', 'input')}>add audio segment</button>
+        ) : null}
+        {videoSegment ? (
+          <button type="button" onClick={() => onSmartSplit(videoSegment.id)}>smart split video</button>
+        ) : null}
+        {videoSegment ? (
+          <button type="button" onClick={() => onSmartSplitTasks(videoSegment.id)}>smart split tasks</button>
         ) : null}
         {audioTrack ? (
           <button
@@ -63,8 +73,15 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/MultiTrackToolbar', () => ({
-  MultiTrackToolbar: ({ onToggleTimeline }: { onToggleTimeline: () => void }) => (
-    <button type="button" onClick={onToggleTimeline}>toggle timeline</button>
+  MultiTrackToolbar: ({ onToggleTimeline, onToggleCutMode, cutMode }: {
+    onToggleTimeline: () => void
+    onToggleCutMode: () => void
+    cutMode: boolean
+  }) => (
+    <div>
+      <button type="button" onClick={onToggleTimeline}>toggle timeline</button>
+      <button type="button" data-cut-mode-toggle onClick={onToggleCutMode} aria-pressed={cutMode}>toggle cut</button>
+    </div>
   ),
 }))
 
@@ -202,5 +219,73 @@ describe('MultiTrackWidget', () => {
         duration: 2,
       },
     })
+  })
+
+  it('covers the whole widget while smart split is pending and clears it on success', async () => {
+    const data = createDefaultTrackData()
+    data.total_length = 240
+    data.tracks[1].segments = [{
+      id: 'video',
+      start_frame: 0,
+      end_frame: 240,
+      color: data.tracks[1].color,
+      content: { media_type: 'video', source_type: 'input', file_path: 'clip.mp4' },
+    }]
+    const onChange = vi.fn()
+    let resolveFetch: ((response: Response) => void) | undefined
+    const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) => new Promise<Response>((resolve) => {
+      resolveFetch = resolve
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'smart split video' }))
+
+    expect(await screen.findByTestId('smart-split-overlay')).not.toBeNull()
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ fps: 24 })
+    resolveFetch?.({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ranges: [[0, 120], [120, 240]],
+      }),
+    } as Response)
+
+    await waitFor(() => expect(screen.queryByTestId('smart-split-overlay')).toBeNull())
+    expect(onChange).toHaveBeenCalledOnce()
+    vi.unstubAllGlobals()
+  })
+
+  it('does not request task-only smart split when no task range matches', () => {
+    const data = createDefaultTrackData()
+    data.tracks[1].segments = [{
+      id: 'video', start_frame: 0, end_frame: 240, color: data.tracks[1].color,
+      content: { media_type: 'video', source_type: 'input', file_path: 'clip.mp4' },
+    }]
+    const toastAdd = vi.fn()
+    const props = widgetProps()
+    props.app = {
+      ...props.app,
+      extensionManager: { toast: { add: toastAdd } },
+    } as unknown as ReactWidgetProps<TrackData>['app']
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<MultiTrackWidget {...props} value={data} />)
+    fireEvent.click(screen.getByRole('button', { name: 'smart split tasks' }))
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(toastAdd).toHaveBeenCalledWith(expect.objectContaining({ severity: 'warn' }))
+    vi.unstubAllGlobals()
+  })
+
+  it('exits cut mode when clicking outside the track area', () => {
+    render(<MultiTrackWidget {...widgetProps()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'toggle cut' }))
+    expect(screen.getByTestId('multitrack-track-area').getAttribute('data-cut-mode')).toBe('true')
+
+    fireEvent.click(screen.getByTestId('preview-area'))
+
+    expect(screen.getByTestId('multitrack-track-area').getAttribute('data-cut-mode')).toBe('false')
   })
 })

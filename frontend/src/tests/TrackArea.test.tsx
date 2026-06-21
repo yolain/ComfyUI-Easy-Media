@@ -44,6 +44,10 @@ describe('TrackArea track controls', () => {
           onCloneTaskSegment={vi.fn()}
           onResizeSegment={vi.fn()}
           onMoveSegment={vi.fn()}
+          onSmartSplit={vi.fn()}
+          onSmartSplitTasks={vi.fn()}
+          cutMode={false}
+          onCutSegment={vi.fn()}
         />
       </TooltipProvider>,
     )
@@ -91,6 +95,10 @@ describe('TrackArea track controls', () => {
           onCloneTaskSegment={vi.fn()}
           onResizeSegment={vi.fn()}
           onMoveSegment={vi.fn()}
+          onSmartSplit={vi.fn()}
+          onSmartSplitTasks={vi.fn()}
+          cutMode={false}
+          onCutSegment={vi.fn()}
         />
       </TooltipProvider>,
     )

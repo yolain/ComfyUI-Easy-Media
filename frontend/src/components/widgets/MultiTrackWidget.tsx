@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
+import { Loader2 } from 'lucide-react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { useCanvasScale } from '@/hooks/use-canvas-scale'
 import { useElementWidth } from '@/hooks/use-element-width'
 import type { ReactWidgetProps } from '@/lib/create-react-widget'
-import { LocaleContext } from '@/lib/i18n'
+import { LocaleContext, translate } from '@/lib/i18n'
 import {
   addDefaultTaskSegmentIfRangeEmpty,
   createDefaultTrackData,
@@ -27,6 +28,13 @@ import {
   updateMultiTrackSegmentDuration,
 } from '@/lib/multitrack-utils'
 import { mediaContentToViewUrl } from '@/lib/media-url'
+import {
+  applySmartSplit,
+  applySmartSplitToMatchingTasks,
+  hasMatchingTaskSegment,
+  requestSmartSplit,
+  splitTrackSegmentAtFrame,
+} from '@/lib/smart-split'
 import { loadBrowserAudioMetadata } from '@/lib/audio-utils'
 import { uuid } from '@/lib/uuid'
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
@@ -53,6 +61,8 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   const [zoom, setZoom] = useState(1)
   const [timelineCollapsed, setTimelineCollapsed] = useState(false)
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null)
+  const [isSmartSplitting, setIsSmartSplitting] = useState(false)
+  const [cutMode, setCutMode] = useState(false)
   const rafRef = useRef<number | null>(null)
   const timelineContainerRef = useRef<HTMLDivElement>(null)
   const startedAtRef = useRef(0)
@@ -66,6 +76,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     ? data.tracks.find((track) => track.id === selectedSegment.trackId && track.type === 'task')?.segments ?? [selectedSegment.segment]
     : undefined
   const locale = app?.ui?.settings?.settingsValues?.['Comfy.Locale']
+  const t = (path: string) => translate(locale, path)
 
   useEffect(() => {
     currentTimeRef.current = currentTime
@@ -461,12 +472,97 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     onChange(updateMultiTrackSegmentDuration(data, selectedSegmentId, duration, data.frame_rate))
   }
 
+  async function handleSmartSplit(segmentId: string) {
+    const segment = data.tracks
+      .find((track) => track.type === 'video' && track.segments.some((item) => item.id === segmentId))
+      ?.segments.find((item) => item.id === segmentId)
+    if (!segment || isSmartSplitting) return
+
+    setIsPlaying(false)
+    setIsSmartSplitting(true)
+    try {
+      const result = await requestSmartSplit(segment, data.frame_rate)
+      onChange(applySmartSplit(data, segmentId, result))
+    } catch (error) {
+      console.error('[MultiTrackWidget] smart split failed:', error)
+      const message = error instanceof Error ? error.message : String(error)
+      try {
+        app.extensionManager.toast.add({
+          severity: 'error',
+          summary: t('multitrack.smartSplitFailed'),
+          detail: message,
+          life: 5000,
+        })
+      } catch (toastError) {
+        console.error('[MultiTrackWidget] failed to show smart split error:', toastError)
+      }
+    } finally {
+      setIsSmartSplitting(false)
+    }
+  }
+
+  async function handleSmartSplitTasks(segmentId: string) {
+    const segment = data.tracks
+      .find((track) => track.type === 'video' && track.segments.some((item) => item.id === segmentId))
+      ?.segments.find((item) => item.id === segmentId)
+    if (!segment || isSmartSplitting) return
+    if (!hasMatchingTaskSegment(data, segmentId)) {
+      try {
+        app.extensionManager.toast.add({
+          severity: 'warn',
+          summary: t('multitrack.smartSplitTasksOnly'),
+          detail: t('multitrack.noMatchingTaskSegment'),
+          life: 4000,
+        })
+      } catch (toastError) {
+        console.error('[MultiTrackWidget] failed to show task split warning:', toastError)
+      }
+      return
+    }
+
+    setIsPlaying(false)
+    setIsSmartSplitting(true)
+    try {
+      const result = await requestSmartSplit(segment, data.frame_rate)
+      onChange(applySmartSplitToMatchingTasks(data, segmentId, result))
+    } catch (error) {
+      console.error('[MultiTrackWidget] task-only smart split failed:', error)
+      const message = error instanceof Error ? error.message : String(error)
+      try {
+        app.extensionManager.toast.add({
+          severity: 'error',
+          summary: t('multitrack.smartSplitFailed'),
+          detail: message,
+          life: 5000,
+        })
+      } catch (toastError) {
+        console.error('[MultiTrackWidget] failed to show smart split error:', toastError)
+      }
+    } finally {
+      setIsSmartSplitting(false)
+    }
+  }
+
+  function handleCutSegment(segmentId: string, splitFrame: number) {
+    onChange(splitTrackSegmentAtFrame(data, segmentId, splitFrame))
+  }
+
   return (
     <LocaleContext.Provider value={locale}>
       <TooltipProvider>
         <div
-          className="flex h-full w-full flex-col overflow-hidden rounded text-foreground font-sans text-xs select-none"
-          onClick={() => setSelectedSegmentId(null)}
+          className="relative flex h-full w-full flex-col overflow-hidden rounded text-foreground font-sans text-xs select-none"
+          aria-busy={isSmartSplitting}
+          onClickCapture={(event) => {
+            const target = event.target as Element
+            if (
+              !target.closest('[data-multitrack-track-area]')
+              && !target.closest('[data-cut-mode-toggle]')
+            ) setCutMode(false)
+          }}
+          onClick={() => {
+            setSelectedSegmentId(null)
+          }}
         >
           <PreviewArea
             data={data}
@@ -495,6 +591,8 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             onDeleteSelected={() => {
               if (selectedSegmentId) handleDeleteSegment(selectedSegmentId)
             }}
+            cutMode={cutMode}
+            onToggleCutMode={() => setCutMode((active) => !active)}
           />
           <div
             data-testid="multitrack-timeline-panel"
@@ -533,11 +631,28 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     onCloneTaskSegment={handleCloneTaskSegment}
                     onResizeSegment={handleResizeSegment}
                     onMoveSegment={handleMoveSegment}
+                    onSmartSplit={handleSmartSplit}
+                    onSmartSplitTasks={handleSmartSplitTasks}
+                    cutMode={cutMode}
+                    onCutSegment={handleCutSegment}
                   />
                 </div>
               </div>
             </div>
           </div>
+          {isSmartSplitting ? (
+            <div
+              className="absolute inset-0 z-50 flex items-center justify-center bg-background/80"
+              data-testid="smart-split-overlay"
+              role="status"
+              aria-live="polite"
+            >
+              <div className="flex items-center gap-2 rounded border border-border bg-background px-3 py-2 text-foreground shadow-sm">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>{t('multitrack.smartSplitting')}</span>
+              </div>
+            </div>
+          ) : null}
         </div>
       </TooltipProvider>
     </LocaleContext.Provider>

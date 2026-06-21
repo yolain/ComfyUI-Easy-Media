@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { audioContentToViewUrl, mediaContentToViewUrl, mediaPathToViewUrl } from './media-url'
+import { audioContentToViewUrl, mediaContentToViewUrl, mediaPathToViewUrl } from '@/lib/media-url'
 import type { AudioContent } from '@/types/timeline'
 
 describe('media view urls', () => {

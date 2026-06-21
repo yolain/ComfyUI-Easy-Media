@@ -78,6 +78,10 @@ describe('VideoTrack', () => {
         onDragPreviewChange={vi.fn()}
         onDragPreviewEnd={vi.fn()}
         onReplaceVideo={vi.fn()}
+        onSmartSplit={vi.fn()}
+        onSmartSplitTasks={vi.fn()}
+        cutMode={false}
+        onCutSegment={vi.fn()}
         />
       </TooltipProvider>,
     )

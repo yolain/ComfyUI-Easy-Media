@@ -39,6 +39,7 @@ export interface MultiTrackSegment {
   id: string
   start_frame: number
   end_frame: number
+  origin_start_frame?: number
   content: MultiTrackSegmentContent
   color: string
 }

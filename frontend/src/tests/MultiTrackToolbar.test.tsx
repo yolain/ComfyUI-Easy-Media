@@ -32,11 +32,39 @@ function renderToolbar(timelineCollapsed: boolean, onToggleTimeline = vi.fn()) {
       onToggleTimeline={onToggleTimeline}
       canDelete={false}
       onDeleteSelected={vi.fn()}
+      cutMode={false}
+      onToggleCutMode={vi.fn()}
     />,
   )
 }
 
 describe('MultiTrackToolbar', () => {
+  it('toggles segment cut mode from the text cursor button', () => {
+    const onToggleCutMode = vi.fn()
+    render(
+      <MultiTrackToolbar
+        currentTime={0}
+        totalLength={24}
+        frameRate={24}
+        isPlaying={false}
+        zoom={1}
+        timelineCollapsed={false}
+        onPlayPause={vi.fn()}
+        onZoomChange={vi.fn()}
+        onToggleTimeline={vi.fn()}
+        canDelete={false}
+        onDeleteSelected={vi.fn()}
+        cutMode
+        onToggleCutMode={onToggleCutMode}
+      />,
+    )
+
+    const button = screen.getByRole('button', { name: 'multitrack.cutMode' })
+    expect(button.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(button)
+    expect(onToggleCutMode).toHaveBeenCalledOnce()
+  })
+
   it('shows the reversed timeline toggle icons and handles clicks', () => {
     const onToggleTimeline = vi.fn()
     const { container, rerender } = renderToolbar(false, onToggleTimeline)
@@ -59,6 +87,8 @@ describe('MultiTrackToolbar', () => {
         onToggleTimeline={onToggleTimeline}
         canDelete={false}
         onDeleteSelected={vi.fn()}
+        cutMode={false}
+        onToggleCutMode={vi.fn()}
       />,
     )
 

@@ -29,6 +29,10 @@ interface VideoTrackProps {
   onDragPreviewChange: (segmentId: string, nextStartTime: number, clientY: number) => void
   onDragPreviewEnd: () => void
   onReplaceVideo: (trackId: string, segmentId: string, filePath: string, sourceType: MultiTrackSourceType) => void
+  onSmartSplit: (segmentId: string) => void
+  onSmartSplitTasks: (segmentId: string) => void
+  cutMode: boolean
+  onCutSegment: (segmentId: string, splitFrame: number) => void
 }
 
 function sourceTypeToTab(sourceType: MultiTrackSourceType | undefined): MediaTab {
@@ -56,6 +60,10 @@ export function VideoTrack({
   onDragPreviewChange,
   onDragPreviewEnd,
   onReplaceVideo,
+  onSmartSplit,
+  onSmartSplitTasks,
+  cutMode,
+  onCutSegment,
 }: Readonly<VideoTrackProps>) {
   const t = useT()
   const contentRef = useRef<HTMLDivElement>(null)
@@ -94,6 +102,10 @@ export function VideoTrack({
             selected={selectedSegmentId === segment.id}
             onSelect={onSelectSegment}
             onDelete={onDeleteSegment}
+            onSmartSplit={onSmartSplit}
+            onSmartSplitTasks={onSmartSplitTasks}
+            cutMode={cutMode}
+            onCut={onCutSegment}
             onResize={onResizeSegment}
             onMove={onMoveSegment}
             onDragPreviewChange={onDragPreviewChange}

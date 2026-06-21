@@ -14,6 +14,25 @@ function resolveLocale(raw: string | undefined): Locale {
   return (lang in messages ? lang : 'en') as Locale
 }
 
+export function translate(
+  raw: string | undefined,
+  path: string,
+  params?: Record<string, string | number>,
+): string {
+  const locale = resolveLocale(raw)
+  const m = messages[locale] as Record<string, MessageSection>
+  const dot = path.indexOf('.')
+  const section = dot === -1 ? path : path.slice(0, dot)
+  const key = dot === -1 ? '' : path.slice(dot + 1)
+  let str = m[section]?.[key] ?? path
+  if (params) {
+    for (const [name, value] of Object.entries(params)) {
+      str = str.replaceAll(`{${name}}`, String(value))
+    }
+  }
+  return str
+}
+
 /**
  * Returns a `t(path, params?)` function that resolves a dot-path key against
  * the current locale's message catalog.
@@ -25,19 +44,5 @@ function resolveLocale(raw: string | undefined): Locale {
  */
 export function useT() {
   const raw = useContext(LocaleContext)
-  const locale = resolveLocale(raw)
-  const m = messages[locale] as Record<string, MessageSection>
-
-  return function t(path: string, params?: Record<string, string | number>): string {
-    const dot = path.indexOf('.')
-    const section = dot === -1 ? path : path.slice(0, dot)
-    const key = dot === -1 ? '' : path.slice(dot + 1)
-    let str = m[section]?.[key] ?? path
-    if (params) {
-      for (const [k, v] of Object.entries(params)) {
-        str = str.replaceAll(`{${k}}`, String(v))
-      }
-    }
-    return str
-  }
+  return (path: string, params?: Record<string, string | number>) => translate(raw, path, params)
 }

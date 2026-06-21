@@ -69,6 +69,8 @@ describe('AudioTrack', () => {
           onMoveSegment={vi.fn()}
           onDragPreviewChange={vi.fn()}
           onDragPreviewEnd={vi.fn()}
+          cutMode={false}
+          onCutSegment={vi.fn()}
         />
       </TooltipProvider>,
     )

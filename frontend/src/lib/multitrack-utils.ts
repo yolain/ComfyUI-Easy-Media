@@ -212,6 +212,22 @@ function insertIndexForTrack(
   return insertionIndexForCenter(sorted, targetStart)
 }
 
+function repositionSegment(
+  segment: MultiTrackSegment,
+  startFrame: number,
+  endFrame: number,
+): MultiTrackSegment {
+  const shift = startFrame - segment.start_frame
+  return {
+    ...segment,
+    start_frame: startFrame,
+    end_frame: endFrame,
+    origin_start_frame: segment.origin_start_frame === undefined
+      ? undefined
+      : segment.origin_start_frame + shift,
+  }
+}
+
 function packSegmentsFromZero(segments: MultiTrackSegment[], frameRate: number): MultiTrackSegment[] {
   void frameRate
   let cursor = 0
@@ -220,11 +236,7 @@ function packSegmentsFromZero(segments: MultiTrackSegment[], frameRate: number):
     const startFrame = Math.round(cursor)
     const endFrame = Math.round(startFrame + duration)
     cursor = endFrame
-    return {
-      ...segment,
-      start_frame: startFrame,
-      end_frame: endFrame,
-    }
+    return repositionSegment(segment, startFrame, endFrame)
   })
 }
 
@@ -241,7 +253,7 @@ function arrangeAudioDrop(
   const movedStart = Math.max(requestedStart, previousEnd)
   const arranged = [
     ...targetSegments.slice(0, insertIndex),
-    { ...movingSegment, start_frame: movedStart, end_frame: movedStart + duration },
+    repositionSegment(movingSegment, movedStart, movedStart + duration),
     ...targetSegments.slice(insertIndex),
   ]
 
@@ -256,11 +268,7 @@ function arrangeAudioDrop(
       const segmentStart = Math.max(segment.start_frame, cursor)
       const shifted = segmentStart === segment.start_frame
         ? segment
-        : {
-            ...segment,
-            start_frame: segmentStart,
-            end_frame: segmentStart + segmentDuration(segment),
-          }
+        : repositionSegment(segment, segmentStart, segmentStart + segmentDuration(segment))
       cursor = shifted.end_frame
       return shifted
     }),
@@ -467,14 +475,9 @@ export function moveSegmentBetweenCompatibleTracks(
     })
   }
 
-  const movedSegment = {
-    ...movingSegment,
-    start_frame: 0,
-    end_frame: duration,
-  }
   const nextTargetSegments = packSegmentsFromZero([
     ...targetSegments.slice(0, insertIndex),
-    movedSegment,
+    movingSegment,
     ...targetSegments.slice(insertIndex),
   ], frameRate)
 
@@ -536,14 +539,9 @@ export function getSegmentDragPlaceholder(
       end_frame: placeholder.end_frame,
     }
   }
-  const placeholderSegment: MultiTrackSegment = {
-    ...movingSegment,
-    start_frame: 0,
-    end_frame: duration,
-  }
   const packed = packSegmentsFromZero([
     ...targetSegments.slice(0, insertIndex),
-    placeholderSegment,
+    movingSegment,
     ...targetSegments.slice(insertIndex),
   ], frameRate)
   const placeholder = packed[insertIndex]
@@ -583,15 +581,9 @@ export function getSegmentDragPreviewSegments(
       frameRate,
     ).segments.filter((segment) => segment.id !== placeholder.segmentId)
   }
-  const placeholderSegment: MultiTrackSegment = {
-    ...movingSegment,
-    start_frame: 0,
-    end_frame: duration,
-  }
-
   return packSegmentsFromZero([
     ...targetSegments.slice(0, placeholder.insertIndex),
-    placeholderSegment,
+    movingSegment,
     ...targetSegments.slice(placeholder.insertIndex),
   ], frameRate).filter((segment) => segment.id !== placeholder.segmentId)
 }
@@ -604,6 +596,10 @@ export interface ActivePreviewVideoSegment {
 
 function segmentContainsTime(segment: MultiTrackSegment, time: number): boolean {
   return time >= segment.start_frame && time < segment.end_frame
+}
+
+function segmentSourceFrame(segment: MultiTrackSegment, currentFrame: number): number {
+  return Math.max(0, currentFrame - (segment.origin_start_frame ?? segment.start_frame))
 }
 
 export function getActivePreviewVideoSegment(
@@ -620,7 +616,7 @@ export function getActivePreviewVideoSegment(
       return {
         trackId: track.id,
         segment,
-        localTime: frameToSeconds(Math.max(0, currentFrame - segment.start_frame), data.frame_rate),
+        localTime: frameToSeconds(segmentSourceFrame(segment, currentFrame), data.frame_rate),
       }
     }
     return null
@@ -634,7 +630,7 @@ export function getActivePreviewVideoSegment(
     return {
       trackId: track.id,
       segment,
-      localTime: frameToSeconds(Math.max(0, currentFrame - segment.start_frame), data.frame_rate),
+      localTime: frameToSeconds(segmentSourceFrame(segment, currentFrame), data.frame_rate),
     }
   }
   return null
@@ -678,7 +674,7 @@ export function getActivePreviewAudioSources(
       return [{
         trackId: track.id,
         segment,
-        localTime: frameToSeconds(Math.max(0, currentFrame - segment.start_frame), data.frame_rate),
+        localTime: frameToSeconds(segmentSourceFrame(segment, currentFrame), data.frame_rate),
         volumeDb: (data.volume_db ?? 0) + (track.volume_db ?? 0) + (segment.content.volume_db ?? 0),
       }]
     })
@@ -773,6 +769,9 @@ export function remapTrackDataFrameRate(data: TrackData, nextFrameRate: number):
         ...segment,
         start_frame: startFrame,
         end_frame: endFrame,
+        origin_start_frame: segment.origin_start_frame === undefined
+          ? undefined
+          : Math.round(segment.origin_start_frame * safeNextFrameRate / data.frame_rate),
       }
     }),
   }))
@@ -1011,6 +1010,11 @@ function normalizeFrameValue(value: unknown): number | null {
   return numeric === null ? null : Math.max(0, Math.round(numeric))
 }
 
+function normalizeSignedFrameValue(value: unknown): number | null {
+  const numeric = finiteNumber(value)
+  return numeric === null ? null : Math.round(numeric)
+}
+
 function omitLegacyVolume<T extends object>(value: T): Omit<T, 'volume'> {
   const copy = { ...value } as T & { volume?: unknown }
   delete copy.volume
@@ -1027,6 +1031,7 @@ function normalizeLegacySegment(segment: LegacyMultiTrackSegment): MultiTrackSeg
     ...omitLegacyVolume(segment),
     start_frame: startFrame,
     end_frame: Math.max(startFrame + 1, endFrame),
+    origin_start_frame: normalizeSignedFrameValue(segment.origin_start_frame) ?? undefined,
     content: {
       ...omitLegacyVolume(segment.content),
       muted: segment.content.muted === true,

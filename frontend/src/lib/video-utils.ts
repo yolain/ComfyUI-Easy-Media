@@ -21,7 +21,7 @@ export function loadBrowserVideoMetadata(src: string): Promise<BrowserVideoMetad
   })
 }
 
-export function captureVideoPosterFrame(src: string): Promise<string> {
+export function captureVideoPosterFrame(src: string, sourceTime = 0.1): Promise<string> {
   return new Promise((resolve, reject) => {
     const video = document.createElement('video')
     video.preload = 'auto'
@@ -60,8 +60,11 @@ export function captureVideoPosterFrame(src: string): Promise<string> {
     }
 
     video.onloadeddata = () => {
-      if (Number.isFinite(video.duration) && video.duration > 0.1) {
-        video.currentTime = 0.1
+      const targetTime = Number.isFinite(video.duration)
+        ? Math.max(0, Math.min(sourceTime, Math.max(0, video.duration - 0.001)))
+        : Math.max(0, sourceTime)
+      if (targetTime > 0) {
+        video.currentTime = targetTime
         return
       }
       drawFrame()

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { preserveTimelineEditorNodeHeight } from './timeline-node-size'
-import { scaleImageItemsToDuration } from './timeline-utils'
+import { preserveTimelineEditorNodeHeight } from '@/lib/timeline-node-size'
+import { scaleImageItemsToDuration } from '@/lib/timeline-utils'
 import type { ImageItem } from '@/types/timeline'
 
 function installTimelineHeightHooks() {

@@ -30,6 +30,10 @@ interface MultiTrackSegmentBlockProps {
   onDelete: (segmentId: string) => void
   onDistribute?: () => void
   onClone?: (segmentId: string) => void
+  onSmartSplit?: (segmentId: string) => void
+  onSmartSplitTasks?: (segmentId: string) => void
+  cutMode?: boolean
+  onCut?: (segmentId: string, splitFrame: number) => void
   onResize: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
   onMove: (segmentId: string, nextStartTime: number, clientY: number) => void
   onDragPreviewChange?: (segmentId: string, nextStartTime: number, clientY: number) => void
@@ -57,6 +61,10 @@ export function MultiTrackSegmentBlock({
   onDelete,
   onDistribute,
   onClone,
+  onSmartSplit,
+  onSmartSplitTasks,
+  cutMode = false,
+  onCut,
   onResize,
   onMove,
   onDragPreviewChange,
@@ -95,6 +103,10 @@ export function MultiTrackSegmentBlock({
     url: segment.content.url,
   })
   const segmentDuration = Math.max(0, segment.end_frame - segment.start_frame)
+  const sourceStartTime = Math.max(
+    0,
+    (segment.start_frame - (segment.origin_start_frame ?? segment.start_frame)) / Math.max(frameRate, 1),
+  )
   const label = trackType === 'task'
     ? t('multitrackSegment.taskLabel', {
       n: segmentIndex,
@@ -130,7 +142,7 @@ export function MultiTrackSegmentBlock({
     let cancelled = false
     let objectUrl: string | null = null
 
-    captureVideoPosterFrame(mediaUrl)
+    captureVideoPosterFrame(mediaUrl, sourceStartTime)
       .then((nextPosterUrl) => {
         if (cancelled) {
           URL.revokeObjectURL(nextPosterUrl)
@@ -148,7 +160,7 @@ export function MultiTrackSegmentBlock({
       cancelled = true
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [mediaUrl, presentation.showThumbnail])
+  }, [mediaUrl, presentation.showThumbnail, sourceStartTime])
 
   useEffect(() => {
     return () => {
@@ -168,6 +180,7 @@ export function MultiTrackSegmentBlock({
   }
 
   function handleMouseMove(event: React.MouseEvent) {
+    if (cutMode) return
     const rect = event.currentTarget.getBoundingClientRect()
     const relX = (event.clientX - rect.left) / Math.max(canvasScale, 0.01)
     const zone = resizeZone()
@@ -178,6 +191,7 @@ export function MultiTrackSegmentBlock({
     if (event.button !== 0) return
     event.preventDefault()
     event.stopPropagation()
+    if (cutMode) return
     didDragRef.current = false
     isDraggingRef.current = false
     onSelect(segment.id)
@@ -283,7 +297,7 @@ export function MultiTrackSegmentBlock({
             backgroundColor: presentation.backgroundColor,
             color: presentation.textColor,
             border: `1px solid ${borderColor}`,
-            cursor: cursorStyle ?? 'grab',
+            cursor: cutMode ? 'text' : cursorStyle ?? 'grab',
             zIndex: isDragging ? 9999 : selected ? 30 : 1,
             boxShadow: isDragging ? '0 8px 24px rgb(0 0 0 / 0.35)' : undefined,
             pointerEvents: dragPreview ? 'none' : undefined,
@@ -293,6 +307,17 @@ export function MultiTrackSegmentBlock({
           onMouseLeave={() => setCursorStyle(null)}
           onClick={(event) => {
             event.stopPropagation()
+            if (cutMode && onCut) {
+              const rect = event.currentTarget.getBoundingClientRect()
+              const visualWidth = rect.width / Math.max(canvasScale, 0.01)
+              const x = (event.clientX - rect.left) / Math.max(canvasScale, 0.01)
+              const ratio = Math.max(0, Math.min(1, x / Math.max(visualWidth, 1)))
+              const splitFrame = Math.round(
+                segment.start_frame + ratio * (segment.end_frame - segment.start_frame),
+              )
+              onCut(segment.id, splitFrame)
+              return
+            }
             if (!didDragRef.current) onSelect(segment.id)
           }}
           onContextMenu={(event) => {
@@ -302,6 +327,7 @@ export function MultiTrackSegmentBlock({
           onDoubleClick={(event) => {
             event.preventDefault()
             event.stopPropagation()
+            if (cutMode) return
             onDoubleClick?.(segment.id, event)
           }}
           onKeyDown={(event) => {
@@ -367,6 +393,16 @@ export function MultiTrackSegmentBlock({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
+        {trackType === 'video' && onSmartSplit ? (
+          <ContextMenuItem onClick={() => onSmartSplit(segment.id)}>
+            {t('multitrack.smartSplit')}
+          </ContextMenuItem>
+        ) : null}
+        {trackType === 'video' && onSmartSplitTasks ? (
+          <ContextMenuItem onClick={() => onSmartSplitTasks(segment.id)}>
+            {t('multitrack.smartSplitTasksOnly')}
+          </ContextMenuItem>
+        ) : null}
         {trackType === 'task' && onDistribute ? (
           <ContextMenuItem onClick={onDistribute}>
             {t('multitrack.distributeTaskSegments')}

@@ -30,6 +30,8 @@ function renderBlock(trackType: MultiTrackType) {
   const onDelete = vi.fn()
   const onDistribute = vi.fn()
   const onClone = vi.fn()
+  const onSmartSplit = vi.fn()
+  const onSmartSplitTasks = vi.fn()
   render(
     <MultiTrackSegmentBlock
       trackType={trackType}
@@ -44,11 +46,13 @@ function renderBlock(trackType: MultiTrackType) {
       onDelete={onDelete}
       onDistribute={trackType === 'task' ? onDistribute : undefined}
       onClone={trackType === 'task' ? onClone : undefined}
+      onSmartSplit={trackType === 'video' ? onSmartSplit : undefined}
+      onSmartSplitTasks={trackType === 'video' ? onSmartSplitTasks : undefined}
       onResize={vi.fn()}
       onMove={vi.fn()}
     />,
   )
-  return { onDelete, onDistribute, onClone }
+  return { onDelete, onDistribute, onClone, onSmartSplit, onSmartSplitTasks }
 }
 
 describe('MultiTrackSegmentBlock context menu', () => {
@@ -76,6 +80,76 @@ describe('MultiTrackSegmentBlock context menu', () => {
     expect(screen.queryByRole('button', { name: 'Distribute segments evenly' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Clone segment' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Delete segment' })).not.toBeNull()
+  })
+
+  it('offers smart split for video segments', () => {
+    const { onSmartSplit, onSmartSplitTasks } = renderBlock('video')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Smart split' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Smart split (tasks only)' }))
+
+    expect(onSmartSplit).toHaveBeenCalledWith('video-segment')
+    expect(onSmartSplitTasks).toHaveBeenCalledWith('video-segment')
+  })
+
+  it('cuts at the clicked frame without starting a drag', () => {
+    const onCut = vi.fn()
+    const { container } = render(
+      <MultiTrackSegmentBlock
+        trackType="video"
+        segmentIndex={0}
+        segment={segment('video')}
+        totalLength={10}
+        frameRate={24}
+        areaWidth={200}
+        canvasScale={1}
+        selected={false}
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        onResize={vi.fn()}
+        onMove={vi.fn()}
+        cutMode
+        onCut={onCut}
+      />,
+    )
+    const block = container.querySelector('[role="button"]') as HTMLElement
+    vi.spyOn(block, 'getBoundingClientRect').mockReturnValue({
+      left: 0, right: 200, top: 0, bottom: 50, width: 200, height: 50, x: 0, y: 0,
+      toJSON: () => ({}),
+    })
+
+    fireEvent.mouseDown(block, { button: 0, clientX: 100 })
+    fireEvent.click(block, { clientX: 100 })
+
+    expect(block.style.cursor).toBe('text')
+    expect(onCut).toHaveBeenCalledWith('video-segment', 3)
+  })
+
+  it('does not open the video replacement action when double-clicking in cut mode', () => {
+    const onDoubleClick = vi.fn()
+    const { container } = render(
+      <MultiTrackSegmentBlock
+        trackType="video"
+        segmentIndex={0}
+        segment={segment('video')}
+        totalLength={10}
+        frameRate={24}
+        areaWidth={200}
+        canvasScale={1}
+        selected={false}
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        onResize={vi.fn()}
+        onMove={vi.fn()}
+        onDoubleClick={onDoubleClick}
+        cutMode
+        onCut={vi.fn()}
+      />,
+    )
+
+    fireEvent.doubleClick(container.querySelector('[role="button"]') as HTMLElement)
+
+    expect(onDoubleClick).not.toHaveBeenCalled()
   })
 
   it('renders a waveform canvas for audio segments', () => {

@@ -35,6 +35,8 @@ interface AudioTrackProps {
   onMoveSegment: (segmentId: string, nextStartTime: number, clientY: number) => void
   onDragPreviewChange: (segmentId: string, nextStartTime: number, clientY: number) => void
   onDragPreviewEnd: () => void
+  cutMode: boolean
+  onCutSegment: (segmentId: string, splitFrame: number) => void
 }
 
 export function AudioTrack({
@@ -55,6 +57,8 @@ export function AudioTrack({
   onMoveSegment,
   onDragPreviewChange,
   onDragPreviewEnd,
+  cutMode,
+  onCutSegment,
 }: Readonly<AudioTrackProps>) {
   const t = useT()
   const [mediaSelectorOpen, setMediaSelectorOpen] = useState(false)
@@ -93,6 +97,8 @@ export function AudioTrack({
             onMove={onMoveSegment}
             onDragPreviewChange={onDragPreviewChange}
             onDragPreviewEnd={onDragPreviewEnd}
+            cutMode={cutMode}
+            onCut={onCutSegment}
           />
         ))}
         <div
