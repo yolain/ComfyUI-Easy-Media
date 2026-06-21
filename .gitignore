@@ -16,5 +16,6 @@ config.yaml
 .codegraph/
 .claude/skills/comfyui-node-*/
 !.claude/skills/comfyui-node-i18n/
+.superpowers/
 superpowers/
 docs/superpowers/
