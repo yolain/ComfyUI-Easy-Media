@@ -2,7 +2,6 @@ __pycache__
 .DS_Store
 node_modules/
 docs/
-/tests/
 dist/dev/
 config.yaml
 *.cache
