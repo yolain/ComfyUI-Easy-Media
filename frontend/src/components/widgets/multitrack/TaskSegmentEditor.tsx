@@ -491,7 +491,7 @@ export function TaskSegmentEditor({
                         draggable
                         data-testid={`task-image-${image.id}`}
                         className={cn(
-                          'task-image-grid-item group relative flex aspect-square items-center justify-center overflow-hidden rounded-md border border-border bg-black',
+                          'task-image-grid-item group relative flex aspect-square cursor-pointer items-center justify-center overflow-hidden rounded-md border border-border bg-black',
                           focusedImageId !== null && 'opacity-0',
                           focusedImageId !== null && focusedImageId !== image.id && 'pointer-events-none',
                         )}
@@ -578,7 +578,7 @@ export function TaskSegmentEditor({
                         <img
                           src={focusedImageUrl}
                           alt={imageDisplayName(focusedImage)}
-                          className="block h-auto w-full"
+                          className="block h-full w-full object-contain"
                           draggable={false}
                         />
                       ) : (

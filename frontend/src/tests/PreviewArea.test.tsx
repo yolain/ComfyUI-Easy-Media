@@ -56,6 +56,39 @@ function trackData(): { data: TrackData; selectedSegment: SelectedMultiTrackSegm
   }
 }
 
+function addActiveTaskTrack(data: TrackData): void {
+  data.tracks.unshift({
+    id: 'task-track',
+    name: 'Task 1',
+    type: 'task',
+    color: 'var(--primary)',
+    muted: false,
+    locked: false,
+    segments: [
+      {
+        id: 'task-before',
+        start_frame: 0,
+        end_frame: 24,
+        color: 'var(--primary)',
+        content: { media_type: 'none', images: [] },
+      },
+      {
+        id: 'active-task',
+        start_frame: 24,
+        end_frame: 48,
+        color: 'var(--primary)',
+        content: {
+          media_type: 'none',
+          images: [
+            { id: 'first', source_type: 'input', file_path: 'tasks/first.png', file_name: 'first.png' },
+            { id: 'second', source_type: 'url', url: 'https://example.com/second.png', file_name: 'second.png' },
+          ],
+        },
+      },
+    ],
+  })
+}
+
 describe('PreviewArea', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -132,36 +165,7 @@ describe('PreviewArea', () => {
 
   it('shows images from the task segment at the current time when no segment is selected', () => {
     const { data } = trackData()
-    data.tracks.unshift({
-      id: 'task-track',
-      name: 'Task 1',
-      type: 'task',
-      color: 'var(--primary)',
-      muted: false,
-      locked: false,
-      segments: [
-        {
-          id: 'task-before',
-          start_frame: 0,
-          end_frame: 24,
-          color: 'var(--primary)',
-          content: { media_type: 'none', images: [] },
-        },
-        {
-          id: 'active-task',
-          start_frame: 24,
-          end_frame: 48,
-          color: 'var(--primary)',
-          content: {
-            media_type: 'none',
-            images: [
-              { id: 'first', source_type: 'input', file_path: 'tasks/first.png', file_name: 'first.png' },
-              { id: 'second', source_type: 'url', url: 'https://example.com/second.png', file_name: 'second.png' },
-            ],
-          },
-        },
-      ],
-    })
+    addActiveTaskTrack(data)
 
     const props = {
       data,
@@ -185,6 +189,75 @@ describe('PreviewArea', () => {
 
     rerender(<PreviewArea {...props} currentTime={48} />)
     expect(screen.queryByTestId('task-preview-images')).toBeNull()
+  })
+
+  it('deletes an active task image from the global preview', () => {
+    const { data } = trackData()
+    addActiveTaskTrack(data)
+    const onTrackSegmentsContentChange = vi.fn()
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={36}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    const firstImage = screen.getByTestId('task-preview-image-first')
+    expect(firstImage.className).toContain('cursor-pointer')
+    const deleteButton = screen.getByRole('button', { name: 'Delete image first.png' })
+    expect(deleteButton.parentElement?.className).toContain('group-hover:opacity-100')
+    expect(deleteButton.className).toContain('text-destructive')
+
+    fireEvent.click(deleteButton)
+
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
+      segmentId: 'active-task',
+      patch: {
+        images: [expect.objectContaining({ id: 'second' })],
+      },
+    }])
+  })
+
+  it('reorders active task images by dragging in the global preview', () => {
+    const { data } = trackData()
+    addActiveTaskTrack(data)
+    const onTrackSegmentsContentChange = vi.fn()
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={36}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    fireEvent.dragStart(screen.getByTestId('task-preview-image-first'))
+    fireEvent.dragOver(screen.getByTestId('task-preview-image-second'))
+    fireEvent.drop(screen.getByTestId('task-preview-image-second'))
+
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
+      segmentId: 'active-task',
+      patch: {
+        images: [
+          expect.objectContaining({ id: 'second' }),
+          expect.objectContaining({ id: 'first' }),
+        ],
+      },
+    }])
   })
 
   it('does not show task images while another segment is selected', () => {

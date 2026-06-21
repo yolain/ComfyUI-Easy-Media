@@ -227,9 +227,9 @@ describe('TaskSegmentEditor', () => {
     expect(preview.className).toContain('inset-3')
     expect(preview.className).toContain('pointer-events-none')
     expect(preview.className).toContain('bg-black')
-    expect(preview.querySelector('img')?.className).toContain('h-auto')
-    expect(preview.querySelector('img')?.className).not.toContain('object-cover')
+    expect(preview.querySelector('img')?.className).toContain('object-contain')
     expect(secondImage.className).toContain('relative')
+    expect(secondImage.className).toContain('cursor-pointer')
     expect(secondImage.className).toContain('opacity-0')
     expect(firstImage.className).toContain('opacity-0')
 

@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import {
   collectMultiTrackPreviewResolutionInput,
   frameToSeconds,
@@ -46,7 +48,24 @@ function resolutionInputSignature(input: unknown): string {
 
 interface ActiveTaskImages {
   index: number
+  segmentId: string
+  allImages: MultiTrackTaskImage[]
   images: Array<{ image: MultiTrackTaskImage; url: string }>
+}
+
+function moveTaskImage(
+  images: MultiTrackTaskImage[],
+  sourceId: string,
+  targetId: string,
+): MultiTrackTaskImage[] {
+  const sourceIndex = images.findIndex((image) => image.id === sourceId)
+  const targetIndex = images.findIndex((image) => image.id === targetId)
+  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return images
+
+  const nextImages = [...images]
+  const [movedImage] = nextImages.splice(sourceIndex, 1)
+  nextImages.splice(targetIndex, 0, movedImage)
+  return nextImages
 }
 
 function getActiveTaskImages(data: TrackData, currentTime: number): ActiveTaskImages | null {
@@ -59,7 +78,9 @@ function getActiveTaskImages(data: TrackData, currentTime: number): ActiveTaskIm
     ))
     if (index < 0) continue
 
-    const images = (track.segments[index].content.images ?? []).flatMap((image) => {
+    const segment = track.segments[index]
+    const allImages = segment.content.images ?? []
+    const images = allImages.flatMap((image) => {
       const url = mediaContentToViewUrl({
         source_type: image.source_type ?? 'input',
         file_path: image.file_path,
@@ -69,7 +90,7 @@ function getActiveTaskImages(data: TrackData, currentTime: number): ActiveTaskIm
       })
       return url ? [{ image, url }] : []
     })
-    return images.length > 0 ? { index, images } : null
+    return images.length > 0 ? { index, segmentId: segment.id, allImages, images } : null
   }
 
   return null
@@ -89,6 +110,7 @@ export function PreviewArea({
   onSelectedSegmentDurationChange,
 }: Readonly<PreviewAreaProps>) {
   const t = useT()
+  const draggedTaskImageIdRef = useRef<string | null>(null)
   const [firstVideoMetadata, setFirstVideoMetadata] = useState<MultiTrackVideoMetadata | null>(null)
   const [resolutionInput, setResolutionInput] = useState(() => collectMultiTrackPreviewResolutionInput(node))
   const videoSegments = useMemo(() => (
@@ -207,14 +229,59 @@ export function PreviewArea({
               {t('multitrack.previewTaskLabel', { n: activeTaskImages.index })}
             </div>
             <div className="flex min-h-0 flex-col gap-2 overflow-y-auto pb-2">
-              {activeTaskImages.images.map(({ image, url }) => (
-                <img
-                  key={image.id}
-                  className="aspect-square w-full shrink-0 rounded-sm border border-border bg-black object-contain"
-                  src={url}
-                  alt={image.file_name ?? image.file_path ?? image.local_path ?? image.url ?? image.id}
-                />
-              ))}
+              {activeTaskImages.images.map(({ image, url }) => {
+                const imageName = image.file_name ?? image.file_path ?? image.local_path ?? image.url ?? image.id
+                return (
+                  <div
+                    key={image.id}
+                    data-testid={`task-preview-image-${image.id}`}
+                    className="group relative aspect-square w-full shrink-0 cursor-pointer overflow-hidden rounded-sm border border-border bg-black"
+                    draggable
+                    onDragStart={() => {
+                      draggedTaskImageIdRef.current = image.id
+                    }}
+                    onDragEnd={() => {
+                      draggedTaskImageIdRef.current = null
+                    }}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={() => {
+                      const sourceId = draggedTaskImageIdRef.current
+                      draggedTaskImageIdRef.current = null
+                      if (!sourceId) return
+                      onTrackSegmentsContentChange?.([{
+                        segmentId: activeTaskImages.segmentId,
+                        patch: { images: moveTaskImage(activeTaskImages.allImages, sourceId, image.id) },
+                      }])
+                    }}
+                  >
+                    <img
+                      className="h-full w-full object-contain"
+                      src={url}
+                      alt={imageName}
+                      draggable={false}
+                    />
+                    <div className="absolute right-0 top-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-5 w-5 cursor-pointer bg-background/70 text-destructive hover:bg-background/90 hover:text-destructive [&_svg]:!size-3"
+                        aria-label={`${t('multitrack.deleteImage')} ${imageName}`}
+                        onClick={() => {
+                          onTrackSegmentsContentChange?.([{
+                            segmentId: activeTaskImages.segmentId,
+                            patch: {
+                              images: activeTaskImages.allImages.filter((item) => item.id !== image.id),
+                            },
+                          }])
+                        }}
+                      >
+                        <X />
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}
