@@ -28,6 +28,7 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-highlight: var(--highlight);
+  --color-panorama-axis-z: var(--panorama-axis-z);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -61,6 +62,7 @@
     --destructive: oklch(0.577 0.245 27.325);
     --destructive-foreground: oklch(0.985 0 0);
     --highlight: oklab(0.961 -0.07365 0.16792);
+    --panorama-axis-z: oklch(0.58 0.2 255);
     --warning: oklch(0.922 0.191 90);
     --multitrack-video-bg: oklch(0.42 0.08 195);
     --multitrack-video-bg-strong: oklch(0.34 0.09 195);
@@ -108,6 +110,7 @@
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);
     --destructive-foreground: oklch(0.985 0 0);
+    --panorama-axis-z: oklch(0.72 0.16 250);
     --multitrack-video-bg: oklch(0.42 0.08 195);
     --multitrack-video-bg-strong: oklch(0.34 0.09 195);
     --multitrack-video-border: oklch(0.82 0.08 195);

@@ -90,6 +90,7 @@ def _load_basic_module(monkeypatch):
     utils.audio_db_to_gain = lambda value: value
     utils.audio_is_muted = lambda value: False
     utils.audio_volume_db = lambda value: 0.0
+    utils.equirectangular_to_perspective = lambda image, *args, **kwargs: image
     utils.frames_to_seconds = lambda frames, frame_rate: (frames - 1) / frame_rate
     utils.load_audio_waveform = lambda *args, **kwargs: None
     utils.load_image_tensor = lambda *args, **kwargs: None

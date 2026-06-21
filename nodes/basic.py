@@ -12,6 +12,7 @@ from ..utils import (
     audio_db_to_gain,
     audio_is_muted,
     audio_volume_db,
+    equirectangular_to_perspective,
     frames_to_seconds,
     load_audio_waveform,
     load_image_tensor,
@@ -371,6 +372,7 @@ def _media_info_entry(index: int, track_id: str, segment: dict, content: dict) -
         "slot_name": content.get("slot_name"),
         "file_name": content.get("file_name"),
         "duration": content.get("duration"),
+        "panorama_view": content.get("panorama_view"),
     }
 
 
@@ -718,6 +720,20 @@ def _build_tracks_info_and_media_outputs(
                         normalized_image = dict(image_item)
                         image = _resolve_timeline_image_item(image_item, image_input)
                         if image is not None:
+                            panorama_view = image_item.get("panorama_view")
+                            if panorama_view is not None:
+                                try:
+                                    image = equirectangular_to_perspective(
+                                        image,
+                                        panorama_view,
+                                        width,
+                                        height,
+                                    )
+                                except (TypeError, ValueError, RuntimeError) as exc:
+                                    image_id = image_item.get("id", "")
+                                    raise ValueError(
+                                        f"Failed to project panorama image {image_id!r}: {exc}"
+                                    ) from exc
                             media_index = len(images_out)
                             images_out.append(image)
                             normalized_image["media_index"] = media_index

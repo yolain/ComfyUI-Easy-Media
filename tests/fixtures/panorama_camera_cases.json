@@ -1,0 +1,7 @@
+[
+  { "name": "center", "yaw": 0, "pitch": 0, "u": 0.5, "v": 0.5 },
+  { "name": "right", "yaw": 90, "pitch": 0, "u": 0.75, "v": 0.5 },
+  { "name": "left", "yaw": -90, "pitch": 0, "u": 0.25, "v": 0.5 },
+  { "name": "up", "yaw": 0, "pitch": 45, "u": 0.5, "v": 0.25 },
+  { "name": "down", "yaw": 0, "pitch": -45, "u": 0.5, "v": 0.75 }
+]

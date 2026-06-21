@@ -16,9 +16,12 @@ import { useT } from '@/lib/i18n'
 import { AudioWaveform } from '@/components/widgets/timeline/AudioWaveform'
 import { mediaContentToViewUrl } from '@/lib/media-url'
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
-import type { MultiTrackSegment, MultiTrackSegmentContent, MultiTrackTaskImage, TrackData } from '@/types/multitrack'
+import type { MultiTrackPanoramaView, MultiTrackSegment, MultiTrackSegmentContent, MultiTrackTaskImage, TrackData } from '@/types/multitrack'
 import { PreviewFloatingToolbar } from './PreviewFloatingToolbar'
 import { PreviewAudioPlayback } from './PreviewAudioPlayback'
+import { PanoramaViewerOverlay } from '@/components/widgets/panorama/PanoramaViewerOverlay'
+import { PanoramaIcon } from '@/components/widgets/panorama/PanoramaIcon'
+import { PanoramaImagePreview } from '@/components/widgets/panorama/PanoramaImagePreview'
 import { TaskSegmentEditor } from './TaskSegmentEditor'
 import { VideoPreview } from './VideoPreview'
 
@@ -53,6 +56,12 @@ interface ActiveTaskImages {
   images: Array<{ image: MultiTrackTaskImage; url: string }>
 }
 
+interface ActivePanoramaTarget {
+  imageId: string
+  segmentId: string
+  source: 'active' | 'selected'
+}
+
 function moveTaskImage(
   images: MultiTrackTaskImage[],
   sourceId: string,
@@ -66,6 +75,20 @@ function moveTaskImage(
   const [movedImage] = nextImages.splice(sourceIndex, 1)
   nextImages.splice(targetIndex, 0, movedImage)
   return nextImages
+}
+
+function updateTaskImagePanoramaView(
+  images: MultiTrackTaskImage[],
+  imageId: string,
+  panoramaView: MultiTrackPanoramaView | undefined,
+): MultiTrackTaskImage[] {
+  return images.map((image) => {
+    if (image.id !== imageId) return image
+    if (panoramaView) return { ...image, panorama_view: panoramaView }
+    const restored = { ...image }
+    delete restored.panorama_view
+    return restored
+  })
 }
 
 function getActiveTaskImages(data: TrackData, currentTime: number): ActiveTaskImages | null {
@@ -111,6 +134,7 @@ export function PreviewArea({
 }: Readonly<PreviewAreaProps>) {
   const t = useT()
   const draggedTaskImageIdRef = useRef<string | null>(null)
+  const [activePanoramaTarget, setActivePanoramaTarget] = useState<ActivePanoramaTarget | null>(null)
   const [firstVideoMetadata, setFirstVideoMetadata] = useState<MultiTrackVideoMetadata | null>(null)
   const [resolutionInput, setResolutionInput] = useState(() => collectMultiTrackPreviewResolutionInput(node))
   const videoSegments = useMemo(() => (
@@ -139,6 +163,24 @@ export function PreviewArea({
     ? frameToSeconds(segmentDuration(selectedSegment.segment), data.frame_rate)
     : null
   const selectedAudio = selectedSegment?.trackType === 'audio' ? selectedSegment.segment : null
+  const selectedTaskImages = selectedSegment?.trackType === 'task'
+    ? selectedSegment.segment.content.images ?? []
+    : []
+  const activePanoramaImage = activePanoramaTarget?.source === 'selected'
+    ? selectedTaskImages.find((image) => image.id === activePanoramaTarget.imageId) ?? null
+    : activePanoramaTarget?.source === 'active'
+      ? activeTaskImages?.allImages.find((image) => image.id === activePanoramaTarget.imageId) ?? null
+      : null
+
+  useEffect(() => {
+    setActivePanoramaTarget(null)
+  }, [selectedSegment?.segment.id])
+
+  useEffect(() => {
+    if (activePanoramaTarget?.source === 'active' && activePanoramaTarget.segmentId !== activeTaskImages?.segmentId) {
+      setActivePanoramaTarget(null)
+    }
+  }, [activePanoramaTarget, activeTaskImages?.segmentId])
 
   useEffect(() => {
     if (!firstVideoUrl) {
@@ -183,29 +225,87 @@ export function PreviewArea({
   if (selectedSegment?.trackType === 'task') {
     return (
       <div
-        className="flex min-h-24 flex-1 overflow-hidden rounded-sm bg-background"
+        data-multitrack-preview-area
+        className="relative flex min-h-24 flex-1 overflow-hidden rounded-sm bg-background"
         onClick={(event) => event.stopPropagation()}
       >
-        <TaskSegmentEditor
-          segment={selectedSegment.segment}
-          trackSegments={taskSegments}
-          videoSegments={videoSegments}
-          frameRate={data.frame_rate}
-          totalFrames={data.total_length}
-          onContentChange={onSelectedSegmentContentChange}
-          onTrackSegmentsContentChange={onTrackSegmentsContentChange}
-          onTrackSegmentsChange={onTaskTrackSegmentsChange}
-          onDurationChange={onSelectedSegmentDurationChange}
-        />
+        {activePanoramaImage ? (
+          <PanoramaViewerOverlay
+            key={`${selectedSegment.segment.id}:${activePanoramaImage.id}`}
+            imageUrl={mediaContentToViewUrl({
+              source_type: activePanoramaImage.source_type ?? 'input',
+              file_path: activePanoramaImage.file_path,
+              local_path: activePanoramaImage.local_path,
+              url: activePanoramaImage.url,
+              slot_name: activePanoramaImage.slot_name,
+            }) ?? ''}
+            savedView={activePanoramaImage.panorama_view}
+            onPanoramaViewChange={(panoramaView) => {
+              onSelectedSegmentContentChange({
+                images: updateTaskImagePanoramaView(
+                  selectedTaskImages,
+                  activePanoramaImage.id,
+                  panoramaView,
+                ),
+              })
+            }}
+            onExit={() => setActivePanoramaTarget(null)}
+          />
+        ) : (
+          <TaskSegmentEditor
+            segment={selectedSegment.segment}
+            trackSegments={taskSegments}
+            videoSegments={videoSegments}
+            frameRate={data.frame_rate}
+            totalFrames={data.total_length}
+            onContentChange={onSelectedSegmentContentChange}
+            onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+            onTrackSegmentsChange={onTaskTrackSegmentsChange}
+            onDurationChange={onSelectedSegmentDurationChange}
+            onOpenPanorama={(imageId) => setActivePanoramaTarget({
+              imageId,
+              segmentId: selectedSegment.segment.id,
+              source: 'selected',
+            })}
+          />
+        )}
       </div>
     )
   }
 
   return (
     <div
+      data-multitrack-preview-area
       className="relative flex min-h-24 flex-1 items-center justify-center overflow-hidden rounded-sm bg-black text-xs text-muted-foreground"
       onClick={(event) => event.stopPropagation()}
     >
+      {activePanoramaImage && activePanoramaTarget?.source === 'active' ? (
+        <PanoramaViewerOverlay
+          key={`${activePanoramaTarget.segmentId}:${activePanoramaImage.id}`}
+          imageUrl={mediaContentToViewUrl({
+            source_type: activePanoramaImage.source_type ?? 'input',
+            file_path: activePanoramaImage.file_path,
+            local_path: activePanoramaImage.local_path,
+            url: activePanoramaImage.url,
+            slot_name: activePanoramaImage.slot_name,
+          }) ?? ''}
+          savedView={activePanoramaImage.panorama_view}
+          onPanoramaViewChange={(panoramaView) => {
+            if (!activeTaskImages) return
+            onTrackSegmentsContentChange?.([{
+              segmentId: activePanoramaTarget.segmentId,
+              patch: {
+                images: updateTaskImagePanoramaView(
+                  activeTaskImages.allImages,
+                  activePanoramaImage.id,
+                  panoramaView,
+                ),
+              },
+            }])
+          }}
+          onExit={() => setActivePanoramaTarget(null)}
+        />
+      ) : null}
       <div className="flex h-full min-h-24 w-full items-center justify-center gap-3">
         {selectedAudio ? (
           <div data-testid="selected-audio-waveform" className="h-20 max-h-full w-full overflow-hidden px-2">
@@ -254,12 +354,38 @@ export function PreviewArea({
                       }])
                     }}
                   >
-                    <img
-                      className="h-full w-full object-contain"
-                      src={url}
-                      alt={imageName}
-                      draggable={false}
-                    />
+                    {image.panorama_view ? (
+                      <PanoramaImagePreview
+                        imageId={image.id}
+                        imageUrl={url}
+                        alt={imageName}
+                        view={image.panorama_view}
+                        className="absolute inset-0 m-auto"
+                      />
+                    ) : (
+                      <img
+                        className="h-full w-full object-contain"
+                        src={url}
+                        alt={imageName}
+                        draggable={false}
+                      />
+                    )}
+                    <div className={`absolute left-0 top-0 ${image.panorama_view ? '' : ' opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100'}`}>
+                      <div
+                        className={`flex size-4 cursor-pointer items-center justify-center bg-background/70 hover:bg-background/90 ${image.panorama_view ? 'text-highlight' : 'text-foreground'}`}
+                        aria-label={t('panorama.preview')}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          setActivePanoramaTarget({
+                            imageId: image.id,
+                            segmentId: activeTaskImages.segmentId,
+                            source: 'active',
+                          })
+                        }}
+                      >
+                        <PanoramaIcon />
+                      </div>
+                    </div>
                     <div className="absolute right-0 top-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                       <Button
                         type="button"

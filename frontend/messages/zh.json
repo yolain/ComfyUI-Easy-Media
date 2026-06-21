@@ -168,6 +168,19 @@
     "insertBefore": "在此之前插入片段",
     "insertAfter": "在此之后插入片段"
   },
+  "panorama": {
+    "preview": "720° 全景预览",
+    "applyView": "应用视角",
+    "cancel": "取消全景",
+    "cancelHint": "删除已保存的全景视角并退出",
+    "orientation": "横 {yaw}° · 纵 {pitch}°",
+    "zoom": "视场 {fov}° ×{ratio}",
+    "exit": "退出全景查看",
+    "loading": "正在加载全景图...",
+    "invalidView": "已保存的全景视角无效。",
+    "webglUnavailable": "当前环境无法使用 WebGL 全景渲染。",
+    "textureLoadFailed": "无法将此图片加载为全景纹理。"
+  },
   "mediaSelector": {
     "tabInputs": "输入",
     "tabOutputs": "输出",

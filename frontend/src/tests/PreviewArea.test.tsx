@@ -16,6 +16,31 @@ vi.mock('@/components/widgets/timeline/AudioWaveform', () => ({
   AudioWaveform: () => <canvas data-testid="audio-waveform" />,
 }))
 
+vi.mock('@/components/widgets/panorama/PanoramaViewerOverlay', () => ({
+  PanoramaViewerOverlay: ({ onPanoramaViewChange, onExit }: {
+    onPanoramaViewChange: (view: unknown) => void
+    onExit: () => void
+  }) => (
+    <div data-testid="mock-panorama-overlay">
+      <button
+        type="button"
+        onClick={() => onPanoramaViewChange({
+          version: 1,
+          projection: 'equirectangular',
+          yaw: 30,
+          pitch: -10,
+          hfov: 75,
+          aspect_ratio: 1.6,
+        })}
+      >
+        mock apply panorama
+      </button>
+      <button type="button" onClick={() => onPanoramaViewChange(undefined)}>mock restore panorama</button>
+      <button type="button" onClick={onExit}>mock exit panorama</button>
+    </div>
+  ),
+}))
+
 function trackData(): { data: TrackData; selectedSegment: SelectedMultiTrackSegment } {
   const videoSegment = {
     id: 'selected-video',
@@ -80,7 +105,20 @@ function addActiveTaskTrack(data: TrackData): void {
         content: {
           media_type: 'none',
           images: [
-            { id: 'first', source_type: 'input', file_path: 'tasks/first.png', file_name: 'first.png' },
+            {
+              id: 'first',
+              source_type: 'input',
+              file_path: 'tasks/first.png',
+              file_name: 'first.png',
+              panorama_view: {
+                version: 1,
+                projection: 'equirectangular',
+                yaw: 30,
+                pitch: -10,
+                hfov: 75,
+                aspect_ratio: 16 / 9,
+              },
+            },
             { id: 'second', source_type: 'url', url: 'https://example.com/second.png', file_name: 'second.png' },
           ],
         },
@@ -122,6 +160,75 @@ describe('PreviewArea', () => {
     fireEvent.click(screen.getByTestId('multitrack-black-frame'))
 
     expect(onParentClick).not.toHaveBeenCalled()
+  })
+
+  it('opens panorama mode and updates only the selected task image metadata', () => {
+    const { data } = trackData()
+    const taskSegment = {
+      id: 'selected-task',
+      start_frame: 0,
+      end_frame: 24,
+      color: 'var(--primary)',
+      content: {
+        media_type: 'none' as const,
+        images: [
+          { id: 'a', source_type: 'input' as const, file_path: 'a.png', file_name: 'a.png' },
+          { id: 'b', source_type: 'input' as const, file_path: 'b.png', file_name: 'b.png' },
+        ],
+      },
+    }
+    data.tracks.unshift({
+      id: 'task-track',
+      name: 'Task',
+      type: 'task',
+      color: 'var(--primary)',
+      muted: false,
+      locked: false,
+      segments: [taskSegment],
+    })
+    const selectedSegment: SelectedMultiTrackSegment = {
+      trackId: 'task-track',
+      trackType: 'task',
+      segment: taskSegment,
+    }
+    const onSelectedSegmentContentChange = vi.fn()
+    const props = {
+      data,
+      currentTime: 0,
+      selectedSegment,
+      isPlaying: false,
+      node: { widgets: [] },
+      onGlobalSettingsChange: vi.fn(),
+      onSelectedSegmentContentChange,
+      onSelectedSegmentDurationChange: vi.fn(),
+    }
+    const { rerender } = render(<PreviewArea {...props} />)
+
+    expect(screen.getByTestId('task-image-drop-zone')).not.toBeNull()
+    fireEvent.click(screen.getAllByRole('button', { name: '720° panorama preview' })[0])
+    expect(screen.getByTestId('mock-panorama-overlay')).not.toBeNull()
+    expect(screen.queryByTestId('task-image-drop-zone')).toBeNull()
+    expect(screen.getByTestId('mock-panorama-overlay').closest('[data-multitrack-preview-area]')).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'mock apply panorama' }))
+    expect(onSelectedSegmentContentChange).toHaveBeenLastCalledWith({
+      images: [
+        expect.objectContaining({ id: 'a', panorama_view: expect.objectContaining({ yaw: 30 }) }),
+        expect.objectContaining({ id: 'b' }),
+      ],
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'mock restore panorama' }))
+    const restoredImages = onSelectedSegmentContentChange.mock.lastCall?.[0].images
+    expect(restoredImages[0]).toEqual(expect.objectContaining({ id: 'a' }))
+    expect(restoredImages[0]).not.toHaveProperty('panorama_view')
+
+    fireEvent.click(screen.getByRole('button', { name: 'mock exit panorama' }))
+    expect(screen.getByTestId('task-image-drop-zone')).not.toBeNull()
+
+    fireEvent.click(screen.getAllByRole('button', { name: '720° panorama preview' })[0])
+    rerender(<PreviewArea {...props} selectedSegment={{ ...selectedSegment, segment: { ...taskSegment, id: 'other-task' } }} />)
+    expect(screen.queryByTestId('mock-panorama-overlay')).toBeNull()
   })
 
   it('updates preview aspect ratio when resolution child widgets change after render', () => {
@@ -185,10 +292,46 @@ describe('PreviewArea', () => {
       '/view?filename=first.png&type=input&subfolder=tasks',
       'https://example.com/second.png',
     ])
-    expect(screen.getAllByRole('img').every((image) => image.className.includes('object-contain'))).toBe(true)
+    expect(screen.getByRole('img', { name: 'second.png' }).className).toContain('object-contain')
+    expect(screen.getByTestId('panorama-image-preview-first').className).toContain('aspect-video')
+    expect(screen.getAllByLabelText('720° panorama preview')[0].className).toContain('text-highlight')
 
     rerender(<PreviewArea {...props} currentTime={48} />)
     expect(screen.queryByTestId('task-preview-images')).toBeNull()
+  })
+
+  it('opens and updates panorama mode from an unselected active task image', () => {
+    const { data } = trackData()
+    addActiveTaskTrack(data)
+    const onTrackSegmentsContentChange = vi.fn()
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={36}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getAllByLabelText('720° panorama preview')[0])
+    expect(screen.getByTestId('mock-panorama-overlay')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'mock apply panorama' }))
+
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
+      segmentId: 'active-task',
+      patch: {
+        images: [
+          expect.objectContaining({ id: 'first', panorama_view: expect.objectContaining({ yaw: 30 }) }),
+          expect.objectContaining({ id: 'second' }),
+        ],
+      },
+    }])
   })
 
   it('deletes an active task image from the global preview', () => {

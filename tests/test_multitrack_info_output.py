@@ -162,6 +162,7 @@ def _load_basic_module():
         "audio_db_to_gain",
         "audio_is_muted",
         "audio_volume_db",
+        "equirectangular_to_perspective",
         "frames_to_seconds",
         "load_audio_waveform",
         "load_image_tensor",
@@ -412,6 +413,97 @@ def test_multitrack_editor_outputs_task_images_as_unresized_list_items():
         for image in segment["content"]["images"]
     ]
     assert [image["media_index"] for image in task_images] == [0, 1]
+
+
+def test_multitrack_editor_projects_panorama_images_to_video_dimensions_for_task_output():
+    module = _load_basic_module()
+    panorama = torch.zeros(1, 180, 360, 3)
+    video = _FakeVideo(
+        _VideoComponents(torch.zeros(2, 360, 640, 3), None, Fraction(24))
+    )
+    projection_calls = []
+
+    def fake_projection(image, view, width, height):
+        projection_calls.append((image, view, width, height))
+        return torch.full((1, height, width, 3), 0.25)
+
+    module.equirectangular_to_perspective = fake_projection
+    panorama_view = {
+        "version": 1,
+        "projection": "equirectangular",
+        "yaw": 30,
+        "pitch": -10,
+        "hfov": 75,
+        "aspect_ratio": 1.6,
+    }
+    track_data = {
+        "total_length": 2,
+        "frame_rate": 24,
+        "tracks": [
+            {
+                "id": "task-track",
+                "type": "task",
+                "segments": [{
+                    "id": "task-1",
+                    "start_frame": 0,
+                    "end_frame": 2,
+                    "content": {
+                        "media_type": "none",
+                        "images": [{
+                            "id": "pano",
+                            "source_type": "slot",
+                            "slot_name": "image1",
+                            "panorama_view": panorama_view,
+                        }],
+                    },
+                }],
+            },
+            {
+                "id": "video-track",
+                "type": "video",
+                "segments": [{
+                    "id": "video-1",
+                    "start_frame": 0,
+                    "end_frame": 2,
+                    "content": {
+                        "media_type": "video",
+                        "source_type": "slot",
+                        "slot_name": "video1",
+                    },
+                }],
+            },
+        ],
+    }
+
+    editor_result = module.MultiTrackEditor.execute(
+        {"resolution": "width x height (auto)", "resize_method": "stretch"},
+        "None",
+        track_data,
+        image=[panorama],
+        video=[video],
+    )
+
+    tracks_info, images, _audio, videos = editor_result.values
+    task_image = tracks_info["tracks"][0]["segments"][0]["content"]["images"][0]
+    assert len(projection_calls) == 1
+    assert torch.equal(projection_calls[0][0], panorama)
+    assert projection_calls[0][1] == panorama_view
+    assert projection_calls[0][2:] == (640, 360)
+    assert images[0].shape == (1, 360, 640, 3)
+    assert task_image["panorama_view"] == panorama_view
+    assert tracks_info["media"]["images"][0]["panorama_view"] == panorama_view
+
+    task_result = module.MultiTrackTaskOutput.execute(
+        [tracks_info],
+        [images],
+        [],
+        [videos],
+        [0],
+        ["default"],
+    )
+
+    assert task_result.values[4] == [images[0]]
+    assert task_result.values[4][0].shape == (1, 360, 640, 3)
 
 
 def test_multitrack_editor_splits_connected_image_batches_into_list_items():

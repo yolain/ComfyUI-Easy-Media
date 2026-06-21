@@ -168,6 +168,19 @@
     "insertBefore": "Insert segment before",
     "insertAfter": "Insert segment after"
   },
+  "panorama": {
+    "preview": "720° panorama preview",
+    "applyView": "Apply view",
+    "cancel": "Cancel panorama",
+    "cancelHint": "Remove the saved panorama view and exit",
+    "orientation": "Yaw {yaw}° · Pitch {pitch}°",
+    "zoom": "FOV {fov}° ×{ratio}",
+    "exit": "Exit panorama view",
+    "loading": "Loading panorama...",
+    "invalidView": "Saved panorama view is invalid.",
+    "webglUnavailable": "WebGL panorama rendering is unavailable.",
+    "textureLoadFailed": "Failed to load this image as a panorama texture."
+  },
   "mediaSelector": {
     "tabInputs": "Inputs",
     "tabOutputs": "Outputs",

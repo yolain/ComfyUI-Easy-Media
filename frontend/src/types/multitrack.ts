@@ -6,6 +6,15 @@ export type MultiTrackMediaType = 'image' | 'audio' | 'video' | 'subtitle' | 'no
 
 export type MultiTrackSourceType = 'preset' | 'input' | 'output' | 'local' | 'url' | 'slot'
 
+export interface MultiTrackPanoramaView {
+  version: 1
+  projection: 'equirectangular'
+  yaw: number
+  pitch: number
+  hfov: number
+  aspect_ratio: number
+}
+
 export interface MultiTrackTaskImage {
   id: string
   source_type?: MultiTrackSourceType
@@ -14,6 +23,7 @@ export interface MultiTrackTaskImage {
   url?: string
   slot_name?: string
   file_name?: string
+  panorama_view?: MultiTrackPanoramaView
 }
 
 export interface MultiTrackSegmentContent {
@@ -77,6 +87,7 @@ export interface TracksInfoMediaItem {
   slot_name?: string
   file_name?: string
   duration?: number
+  panorama_view?: MultiTrackPanoramaView
 }
 
 export interface TracksInfo {

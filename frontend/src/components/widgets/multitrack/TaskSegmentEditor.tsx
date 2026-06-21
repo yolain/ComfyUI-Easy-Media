@@ -29,6 +29,8 @@ import type {
   MultiTrackTaskImage,
   MultiTrackTaskMode,
 } from '@/types/multitrack'
+import { PanoramaIcon } from '@/components/widgets/panorama/PanoramaIcon'
+import { PanoramaImagePreview } from '@/components/widgets/panorama/PanoramaImagePreview'
 
 type PromptTab = 'user' | 'system'
 type EditMode = 'individual' | 'combined'
@@ -48,6 +50,7 @@ interface TaskSegmentEditorProps {
   onTrackSegmentsContentChange?: (updates: TrackSegmentContentUpdate[]) => void
   onTrackSegmentsChange?: (segments: MultiTrackSegment[]) => void
   onDurationChange?: (duration: number) => void
+  onOpenPanorama?: (imageId: string) => void
 }
 
 interface SystemPromptResponse {
@@ -198,6 +201,7 @@ export function TaskSegmentEditor({
   onTrackSegmentsContentChange,
   onTrackSegmentsChange,
   onDurationChange,
+  onOpenPanorama,
 }: Readonly<TaskSegmentEditorProps>) {
   const t = useT()
   const draggedImageIdRef = useRef<string | null>(null)
@@ -471,7 +475,7 @@ export function TaskSegmentEditor({
                 <div
                   data-testid="task-image-grid"
                   className={cn(
-                    'task-image-grid relative grid h-full content-start gap-2 overflow-y-auto rounded-md p-3 transition-colors',
+                    'task-image-grid relative grid h-full w-full content-start gap-2 overflow-y-auto rounded-md p-3 transition-colors',
                     imageGridColumns,
                     imagePickerSurfaceClass,
                   )}
@@ -508,7 +512,15 @@ export function TaskSegmentEditor({
                           onContentChange({ images: moveImage(images, sourceId, image.id) })
                         }}
                       >
-                        {imageUrl ? (
+                        {imageUrl && image.panorama_view ? (
+                          <PanoramaImagePreview
+                            imageId={image.id}
+                            imageUrl={imageUrl}
+                            alt={imageDisplayName(image)}
+                            view={image.panorama_view}
+                            className="absolute inset-0 m-auto"
+                          />
+                        ) : imageUrl ? (
                           <img
                             src={imageUrl}
                             alt={imageDisplayName(image)}
@@ -524,6 +536,22 @@ export function TaskSegmentEditor({
                           data-testid={`task-image-actions-${image.id}`}
                           className="absolute right-1 top-1 z-10 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
                         >
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className={cn(
+                              'h-6 w-6 cursor-pointer bg-background/70 hover:bg-background/90 [&_svg]:!size-4',
+                              image.panorama_view ? 'text-highlight' : 'text-foreground',
+                            )}
+                            aria-label={t('panorama.preview')}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              onOpenPanorama?.(image.id)
+                            }}
+                          >
+                            <PanoramaIcon />
+                          </Button>
                           <Button
                             type="button"
                             size="icon"
@@ -574,7 +602,14 @@ export function TaskSegmentEditor({
                       data-testid="task-image-focus-preview"
                       className="pointer-events-none absolute inset-3 z-20 flex aspect-square items-center justify-center overflow-hidden rounded-md border border-border bg-black shadow-lg"
                     >
-                      {focusedImageUrl ? (
+                      {focusedImageUrl && focusedImage.panorama_view ? (
+                        <PanoramaImagePreview
+                          imageId={focusedImage.id}
+                          imageUrl={focusedImageUrl}
+                          alt={imageDisplayName(focusedImage)}
+                          view={focusedImage.panorama_view}
+                        />
+                      ) : focusedImageUrl ? (
                         <img
                           src={focusedImageUrl}
                           alt={imageDisplayName(focusedImage)}
@@ -587,6 +622,22 @@ export function TaskSegmentEditor({
                         </div>
                       )}
                       <div className="pointer-events-auto absolute right-1 top-1 z-10 flex gap-1">
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className={cn(
+                            'h-6 w-6 cursor-pointer bg-background/70 hover:bg-background/90 [&_svg]:!size-4',
+                            focusedImage.panorama_view ? 'text-highlight' : 'text-foreground',
+                          )}
+                          aria-label={t('panorama.preview')}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            onOpenPanorama?.(focusedImage.id)
+                          }}
+                        >
+                          <PanoramaIcon />
+                        </Button>
                         <Button
                           type="button"
                           size="icon"
