@@ -492,6 +492,22 @@ describe('multitrack utilities', () => {
 
   it('updates segment duration on frame boundaries and recalculates total duration', () => {
     const data = createDefaultTrackData()
+    data.tracks[0].segments = [
+      {
+        id: 'task-matching',
+        start_frame: 24,
+        end_frame: 48,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+      {
+        id: 'task-overlapping',
+        start_frame: 24,
+        end_frame: 36,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+    ]
     const videoSegment = {
       id: 'video-duration',
       start_frame: 24,
@@ -513,6 +529,14 @@ describe('multitrack utilities', () => {
       start_frame: 24,
       end_frame: 73,
     })
+    expect(updated.tracks[0].segments.map((segment) => ({
+      id: segment.id,
+      start_frame: segment.start_frame,
+      end_frame: segment.end_frame,
+    }))).toEqual([
+      { id: 'task-matching', start_frame: 24, end_frame: 73 },
+      { id: 'task-overlapping', start_frame: 24, end_frame: 36 },
+    ])
     expect(updated.total_length).toBe(120)
   })
 

@@ -722,6 +722,38 @@ export function updateMultiTrackSegmentContent(
   }
 }
 
+export function syncMatchingTasksToPrimaryVideoSegment(
+  originalTracks: MultiTrack[],
+  updatedTracks: MultiTrack[],
+  segmentId: string,
+): MultiTrack[] {
+  const primaryVideoTrack = originalTracks.find((track) => track.type === 'video')
+  const originalSegment = primaryVideoTrack?.segments.find((segment) => segment.id === segmentId)
+  if (!primaryVideoTrack || !originalSegment) return updatedTracks
+
+  const updatedSegment = updatedTracks
+    .find((track) => track.id === primaryVideoTrack.id)
+    ?.segments.find((segment) => segment.id === segmentId)
+  if (!updatedSegment) return updatedTracks
+
+  return updatedTracks.map((track) => {
+    if (track.type !== 'task') return track
+    return {
+      ...track,
+      segments: track.segments.map((segment) => (
+        segment.start_frame === originalSegment.start_frame &&
+        segment.end_frame === originalSegment.end_frame
+          ? {
+              ...segment,
+              start_frame: updatedSegment.start_frame,
+              end_frame: updatedSegment.end_frame,
+            }
+          : segment
+      )),
+    }
+  })
+}
+
 export function updateMultiTrackSegmentDuration(
   data: TrackData,
   segmentId: string,
@@ -729,7 +761,7 @@ export function updateMultiTrackSegmentDuration(
   frameRate: number,
 ): TrackData {
   const nextDuration = Math.max(1, snapSecondsToFrame(duration, frameRate))
-  const tracks = data.tracks.map((track) => {
+  const resizedTracks = data.tracks.map((track) => {
     const selected = track.segments.find((segment) => segment.id === segmentId)
     if (!selected) return track
     const nextSegmentStart = track.segments
@@ -745,6 +777,7 @@ export function updateMultiTrackSegmentDuration(
       )),
     }
   })
+  const tracks = syncMatchingTasksToPrimaryVideoSegment(data.tracks, resizedTracks, segmentId)
 
   return {
     ...data,

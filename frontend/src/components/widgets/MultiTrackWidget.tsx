@@ -24,6 +24,7 @@ import {
   secondsToFrame,
   snapSecondsToFrame,
   snapTimeToFrame,
+  syncMatchingTasksToPrimaryVideoSegment,
   updateMultiTrackSegmentContent,
   updateMultiTrackSegmentDuration,
 } from '@/lib/multitrack-utils'
@@ -354,7 +355,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   }
 
   function handleResizeSegment(segmentId: string, edge: 'start' | 'end', nextTime: number) {
-    const updatedTracks = data.tracks.map((track) => ({
+    const resizedTracks = data.tracks.map((track) => ({
       ...track,
       segments: track.segments.map((segment) => {
         if (segment.id !== segmentId) return segment
@@ -387,6 +388,11 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         }
       }).sort((a, b) => a.start_frame - b.start_frame),
     }))
+    const updatedTracks = syncMatchingTasksToPrimaryVideoSegment(
+      data.tracks,
+      resizedTracks,
+      segmentId,
+    )
     onChange({
       ...data,
       tracks: updatedTracks,

@@ -804,7 +804,9 @@ def _build_tracks_info_and_media_outputs(
         progress.update_absolute(progress.total)
 
     tracks_info = {
-        "total_length": total_length,
+        # The editor stores an exclusive timeline end; TRACKS_INFO exposes the
+        # inclusive frame sequence used by generation nodes (0..end).
+        "total_length": total_length + 1,
         "frame_rate": frame_rate,
         "muted": global_muted,
         "volume_db": global_volume_db,
@@ -1874,7 +1876,8 @@ class MultiTrackTaskOutput(io.ComfyNode):
         content = task.get("content", {}) if isinstance(task.get("content", {}), dict) else {}
         start_frame = max(0, int(task.get("start_frame", 0)))
         end_frame = max(start_frame, int(task.get("end_frame", start_frame)))
-        length = end_frame - start_frame
+        duration_frames = end_frame - start_frame
+        length = duration_frames + 1 if task else 0
         frame_rate = float(info.get("frame_rate", 24))
 
         selected_images: list[torch.Tensor] = []
@@ -1898,12 +1901,12 @@ class MultiTrackTaskOutput(io.ComfyNode):
             if track.get("type") == "audio" and media_index is not None and 0 <= media_index < len(audio_items):
                 track_audio = audio_items[media_index]
                 if isinstance(track_audio, dict):
-                    selected_audio.append(_trim_track_audio(track_audio, start_frame, length, frame_rate))
+                    selected_audio.append(_trim_track_audio(track_audio, start_frame, duration_frames, frame_rate))
             elif track.get("type") == "video" and media_index is not None and 0 <= media_index < len(video_items):
                 track_video = video_items[media_index]
                 trimmed = track_video.as_trimmed(
                     start_time=start_frame / frame_rate,
-                    duration=length / frame_rate,
+                    duration=duration_frames / frame_rate,
                     strict_duration=False,
                 )
                 if trimmed is not None:

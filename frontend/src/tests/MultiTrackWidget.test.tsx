@@ -26,7 +26,7 @@ vi.mock('@/components/widgets/multitrack/MultiTrackRuler', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
-  TrackArea: ({ data, node, app, onCloneTaskSegment, onAddTrack, onAddAudio, onSmartSplit, onSmartSplitTasks, cutMode }: {
+  TrackArea: ({ data, node, app, onCloneTaskSegment, onAddTrack, onAddAudio, onSmartSplit, onSmartSplitTasks, onResizeSegment, cutMode }: {
     data: TrackData
     node: unknown
     app: unknown
@@ -35,6 +35,7 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
     onAddAudio: (trackId: string, filePath: string, sourceType: 'input', previewUrl?: string) => void
     onSmartSplit: (segmentId: string) => void
     onSmartSplitTasks: (segmentId: string) => void
+    onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
     cutMode: boolean
   }) => {
     const taskTrack = data.tracks.find((track) => track.type === 'task')
@@ -58,6 +59,12 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
         ) : null}
         {videoSegment ? (
           <button type="button" onClick={() => onSmartSplitTasks(videoSegment.id)}>smart split tasks</button>
+        ) : null}
+        {videoSegment ? (
+          <button type="button" onClick={() => onResizeSegment(videoSegment.id, 'start', 2)}>trim video start</button>
+        ) : null}
+        {videoSegment ? (
+          <button type="button" onClick={() => onResizeSegment(videoSegment.id, 'end', 8)}>trim video end</button>
         ) : null}
         {audioTrack ? (
           <button
@@ -99,6 +106,37 @@ function widgetProps(): ReactWidgetProps<TrackData> {
 }
 
 describe('MultiTrackWidget', () => {
+  it.each([
+    ['trim video start', 2, 10],
+    ['trim video end', 0, 8],
+  ])('syncs a matching task when using %s', (buttonName, expectedStart, expectedEnd) => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [{
+      id: 'task-matching',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[0].color,
+      content: { media_type: 'none', task_mode: 'default' },
+    }]
+    data.tracks[1].segments = [{
+      id: 'video-main',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[1].color,
+      content: { media_type: 'video', duration: 10 },
+    }]
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: buttonName }))
+
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    expect(updated.tracks[0].segments[0]).toMatchObject({
+      start_frame: expectedStart,
+      end_frame: expectedEnd,
+    })
+  })
+
   it('animates the ruler and track region to zero height when toggled', () => {
     render(<MultiTrackWidget {...widgetProps()} />)
 
