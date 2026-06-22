@@ -21,6 +21,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { useT } from '@/lib/i18n'
 import { $error } from '@/lib/comfy-api'
+import { uploadInputMediaFile } from '@/lib/media-upload'
 import type { SlotItem } from '@/lib/timeline-utils'
 import {
   getMediaList,
@@ -661,7 +662,7 @@ export function MediaSelector({
       if (input.files.length === 1) {
         const file = input.files[0]
         try {
-          const uploaded = await uploadFile(file)
+          const uploaded = await uploadInputMediaFile(file)
           invalidateMediaListCache('inputs')
           onChange(uploaded)
         } catch (err) {
@@ -674,7 +675,7 @@ export function MediaSelector({
       const paths: string[] = []
       for (const file of input.files) {
         try {
-          const uploaded = await uploadFile(file)
+          const uploaded = await uploadInputMediaFile(file)
           paths.push(uploaded)
         } catch (err) {
           console.error('[MediaSelector] upload failed:', err)
@@ -687,18 +688,6 @@ export function MediaSelector({
       }
     }
     input.click()
-  }
-
-  async function uploadFile(file: File): Promise<string> {
-    const form = new FormData()
-    form.append('image', file)
-    form.append('type', 'input')
-    form.append('overwrite', 'false')
-    const res = await fetch('/upload/image', { method: 'POST', body: form })
-    if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
-    const json = await res.json() as { name: string; subfolder?: string }
-    const sub = json.subfolder ? `${json.subfolder}/` : ''
-    return `${sub}${json.name}`
   }
 
   return (

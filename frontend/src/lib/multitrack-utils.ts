@@ -11,6 +11,7 @@ import { uuid } from './uuid'
 
 export const MULTITRACK_DEFAULT_FRAME_RATE = 24
 export const MULTITRACK_DEFAULT_TOTAL_LENGTH = 120
+export const MULTITRACK_MIN_DURATION_SECONDS = 5
 export const MULTITRACK_TASK_MODES = ['default', 'ref', 'edit'] as const
 export const MULTITRACK_DEFAULT_TASK_MODE: MultiTrackTaskMode = 'default'
 export const MULTITRACK_DEFAULT_VOLUME_DB = 0
@@ -169,9 +170,14 @@ export function segmentDuration(segment: MultiTrackSegment): number {
   return Math.max(0, segment.end_frame - segment.start_frame)
 }
 
-export function calculateTotalLength(tracks: MultiTrack[]): number {
+export function calculateTotalLength(
+  tracks: MultiTrack[],
+  frameRate: number = MULTITRACK_DEFAULT_FRAME_RATE,
+): number {
+  const safeFrameRate = Math.max(1, Math.round(frameRate))
+  const minimumLength = MULTITRACK_MIN_DURATION_SECONDS * safeFrameRate
   const maxEnd = calculateMaxSegmentEnd(tracks)
-  return Math.max(MULTITRACK_DEFAULT_TOTAL_LENGTH, maxEnd)
+  return Math.max(minimumLength, maxEnd)
 }
 
 export const calculateTotalDuration = calculateTotalLength
@@ -273,6 +279,42 @@ function arrangeAudioDrop(
       return shifted
     }),
   }
+}
+
+export function syncMatchingTasksToPrimaryVideoTrack(
+  originalTracks: MultiTrack[],
+  updatedTracks: MultiTrack[],
+): MultiTrack[] {
+  const originalVideoTrack = originalTracks.find((track) => track.type === 'video')
+  if (!originalVideoTrack) return updatedTracks
+
+  const updatedVideoSegments = updatedTracks
+    .filter((track) => track.type === 'video')
+    .flatMap((track) => track.segments)
+  const rangeUpdates = originalVideoTrack.segments.flatMap((originalSegment) => {
+    const updatedSegment = updatedVideoSegments.find((segment) => segment.id === originalSegment.id)
+    return updatedSegment ? [{ originalSegment, updatedSegment }] : []
+  })
+
+  return updatedTracks.map((track) => {
+    if (track.type !== 'task') return track
+    return {
+      ...track,
+      segments: track.segments.map((segment) => {
+        const match = rangeUpdates.find(({ originalSegment }) => (
+          segment.start_frame === originalSegment.start_frame &&
+          segment.end_frame === originalSegment.end_frame
+        ))
+        return match
+          ? {
+              ...segment,
+              start_frame: match.updatedSegment.start_frame,
+              end_frame: match.updatedSegment.end_frame,
+            }
+          : segment
+      }),
+    }
+  })
 }
 
 export function addDefaultTaskSegmentIfRangeEmpty(
@@ -481,7 +523,7 @@ export function moveSegmentBetweenCompatibleTracks(
     ...targetSegments.slice(insertIndex),
   ], frameRate)
 
-  return tracks.map((track) => {
+  const movedTracks = tracks.map((track) => {
     if (track.id === sourceTrack.id && track.id !== targetTrack.id) {
       return {
         ...track,
@@ -497,6 +539,7 @@ export function moveSegmentBetweenCompatibleTracks(
       segments: nextTargetSegments,
     }
   })
+  return syncMatchingTasksToPrimaryVideoTrack(tracks, movedTracks)
 }
 
 export interface SegmentDragPlaceholder {
@@ -581,11 +624,35 @@ export function getSegmentDragPreviewSegments(
       frameRate,
     ).segments.filter((segment) => segment.id !== placeholder.segmentId)
   }
-  return packSegmentsFromZero([
+  const nextTargetSegments = packSegmentsFromZero([
     ...targetSegments.slice(0, placeholder.insertIndex),
     movingSegment,
     ...targetSegments.slice(placeholder.insertIndex),
-  ], frameRate).filter((segment) => segment.id !== placeholder.segmentId)
+  ], frameRate)
+  const previewTracks = tracks.map((track) => (
+    track.id === targetTrack.id ? { ...track, segments: nextTargetSegments } : track
+  ))
+  const syncedPreviewTracks = syncMatchingTasksToPrimaryVideoTrack(tracks, previewTracks)
+  const originalTaskSegments = new Map(
+    tracks
+      .filter((track) => track.type === 'task')
+      .flatMap((track) => track.segments)
+      .map((segment) => [segment.id, segment]),
+  )
+  const changedTaskSegments = syncedPreviewTracks
+    .filter((track) => track.type === 'task')
+    .flatMap((track) => track.segments)
+    .filter((segment) => {
+      const original = originalTaskSegments.get(segment.id)
+      return original && (
+        original.start_frame !== segment.start_frame ||
+        original.end_frame !== segment.end_frame
+      )
+    })
+  return [
+    ...nextTargetSegments.filter((segment) => segment.id !== placeholder.segmentId),
+    ...changedTaskSegments,
+  ]
 }
 
 export interface ActivePreviewVideoSegment {
@@ -782,7 +849,7 @@ export function updateMultiTrackSegmentDuration(
   return {
     ...data,
     tracks,
-    total_length: calculateTotalLength(tracks),
+    total_length: calculateTotalLength(tracks, frameRate),
   }
 }
 
@@ -813,10 +880,7 @@ export function remapTrackDataFrameRate(data: TrackData, nextFrameRate: number):
     ...data,
     frame_rate: safeNextFrameRate,
     tracks,
-    total_length: Math.max(
-      calculateMaxSegmentEnd(tracks),
-      remapFrameToRate(data.total_length, data.frame_rate, safeNextFrameRate),
-    ),
+    total_length: calculateTotalLength(tracks, safeNextFrameRate),
   }
 }
 
@@ -1079,11 +1143,8 @@ function normalizeTrackSegments(track: LegacyMultiTrack): MultiTrackSegment[] {
     .sort((a, b) => a.start_frame - b.start_frame)
 }
 
-function normalizeTotalLength(raw: LegacyTrackData, tracks: MultiTrack[]): number {
-  const totalLength = normalizeFrameValue(raw.total_length)
-  if (totalLength !== null) return Math.max(1, totalLength)
-
-  return calculateTotalLength(tracks)
+function normalizeTotalLength(tracks: MultiTrack[], frameRate: number): number {
+  return calculateTotalLength(tracks, frameRate)
 }
 
 export function createDefaultTrackData(): TrackData {
@@ -1192,7 +1253,7 @@ export function normalizeTrackData(raw: LegacyTrackData): TrackData {
     muted: raw.muted ?? false,
     volume_db: normalizedVolumeDb(raw.volume_db),
     frame_rate: frameRate,
-    total_length: normalizeTotalLength(raw, namedTracks),
+    total_length: normalizeTotalLength(namedTracks, frameRate),
     tracks: namedTracks,
   }
 }

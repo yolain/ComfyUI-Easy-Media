@@ -262,6 +262,60 @@ describe('multitrack utilities', () => {
     })
   })
 
+  it('derives normalized total length from segment ranges instead of stale serialized data', () => {
+    const normalized = normalizeTrackData({
+      tracks: [
+        {
+          id: 'task',
+          name: 'Task 0',
+          type: 'task',
+          color: 'var(--multitrack-task-bg)',
+          muted: false,
+          locked: false,
+          segments: [
+            {
+              id: 'task-1',
+              start_frame: 0,
+              end_frame: 29,
+              color: 'var(--multitrack-task-bg)',
+              content: { media_type: 'none' },
+            },
+            {
+              id: 'task-2',
+              start_frame: 29,
+              end_frame: 86,
+              color: 'var(--multitrack-task-bg)',
+              content: { media_type: 'none' },
+            },
+          ],
+        },
+        {
+          id: 'video',
+          name: 'Video 0',
+          type: 'video',
+          color: 'var(--primary)',
+          muted: false,
+          locked: false,
+          segments: [{
+            id: 'video-1',
+            start_frame: 0,
+            end_frame: 86,
+            color: 'var(--primary)',
+            content: { media_type: 'video' },
+          }],
+        },
+      ],
+      total_length: 120,
+      frame_rate: 16,
+    })
+
+    expect(normalized.total_length).toBe(86)
+    expect(formatMultiTrackTime(normalized.total_length, {
+      frameRate: normalized.frame_rate,
+      showFrames: true,
+    })).toBe('00:05:06')
+  })
+
   it('finds the active preview video segment for default and selected-video modes', () => {
     const data = createDefaultTrackData()
     const videoTrack = {
@@ -646,6 +700,20 @@ describe('multitrack utilities', () => {
     expect(calculateTotalLength(data.tracks)).toBe(205)
   })
 
+  it('uses five seconds at the current frame rate as the timeline minimum', () => {
+    const data = createDefaultTrackData()
+    data.tracks[1].segments = [{
+      id: 'short',
+      start_frame: 0,
+      end_frame: 86,
+      color: 'var(--primary)',
+      content: { media_type: 'video' },
+    }]
+
+    expect(calculateTotalLength(data.tracks, 16)).toBe(86)
+    expect(calculateTotalLength(data.tracks, 20)).toBe(100)
+  })
+
   it('adds a default task segment when a video range has no task coverage', () => {
     const data = createDefaultTrackData()
     const updated = addDefaultTaskSegmentIfRangeEmpty(data.tracks, 2, 5)
@@ -842,6 +910,55 @@ describe('multitrack utilities', () => {
     ])
   })
 
+  it('moves matching task ranges together with reordered video segments', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [
+      {
+        id: 'task-first',
+        start_frame: 0,
+        end_frame: 2,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+      {
+        id: 'task-second',
+        start_frame: 2,
+        end_frame: 5,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+    ]
+    data.tracks[1].segments = [
+      {
+        id: 'video-first',
+        start_frame: 0,
+        end_frame: 2,
+        color: data.tracks[1].color,
+        content: { media_type: 'video', duration: 2 },
+      },
+      {
+        id: 'video-second',
+        start_frame: 2,
+        end_frame: 5,
+        color: data.tracks[1].color,
+        content: { media_type: 'video', duration: 3 },
+      },
+    ]
+
+    const moved = moveSegmentBetweenCompatibleTracks(
+      data.tracks,
+      'video-first',
+      data.tracks[1].id,
+      4,
+      data.frame_rate,
+    )
+
+    expect(moved[0].segments.map((segment) => [segment.id, segment.start_frame, segment.end_frame])).toEqual([
+      ['task-first', 3, 5],
+      ['task-second', 0, 3],
+    ])
+  })
+
   it('keeps audio drop positions and source-track gaps while preventing overlaps', () => {
     const data = createDefaultTrackData()
     const audioTrack = {
@@ -965,6 +1082,23 @@ describe('multitrack utilities', () => {
     }
     const placeholder = getSegmentDragPlaceholder([data.tracks[0], videoTrack], 'second', 'video1', 0, 24)
 
+    data.tracks[0].segments = [
+      {
+        id: 'task-first',
+        start_frame: 0,
+        end_frame: 2,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+      {
+        id: 'task-second',
+        start_frame: 2,
+        end_frame: 5,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+    ]
+
     expect(placeholder).not.toBeNull()
     expect(getSegmentDragPreviewSegments([data.tracks[0], videoTrack], placeholder!, 24)?.map((segment) => ({
       id: segment.id,
@@ -972,6 +1106,8 @@ describe('multitrack utilities', () => {
       end_frame: segment.end_frame,
     }))).toEqual([
       { id: 'first', start_frame: 3, end_frame: 5 },
+      { id: 'task-first', start_frame: 3, end_frame: 5 },
+      { id: 'task-second', start_frame: 0, end_frame: 3 },
     ])
   })
 })

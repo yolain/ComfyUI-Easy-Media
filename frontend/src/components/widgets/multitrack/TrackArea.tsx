@@ -3,6 +3,8 @@ import { Captions, Film, ListTree, Clapperboard, Layers2, Music2, Plus, Trash2, 
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useT } from '@/lib/i18n'
+import { uploadInputMediaFile } from '@/lib/media-upload'
+import { invalidateMediaListCache } from '@/stores/media-list-store'
 import {
   getSegmentDragPlaceholder,
   getSegmentDragPreviewSegments,
@@ -23,12 +25,13 @@ interface TrackAreaProps {
   currentTime: number
   canvasScale: number
   selectedSegmentId: string | null
-  onAddVideo: (trackId: string, filePath: string, sourceType: MultiTrackSourceType) => void
+  onAddVideo: (trackId: string, filePath: string, sourceType: MultiTrackSourceType, startFrame?: number) => void
   onAddAudio: (
     trackId: string,
     filePath: string,
     sourceType: MultiTrackSourceType,
     previewUrl?: string,
+    startFrame?: number,
   ) => void
   onAddTrack: (type: MultiTrackType) => void
   onReplaceVideo: (trackId: string, segmentId: string, filePath: string, sourceType: MultiTrackSourceType) => void
@@ -75,6 +78,51 @@ function samePlaceholder(left: SegmentDragPlaceholder | null, right: SegmentDrag
     left.end_frame === right.end_frame
 }
 
+const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus', 'wma'])
+const VIDEO_EXTENSIONS = new Set(['mp4', 'webm', 'mov', 'mkv', 'avi', 'm4v'])
+
+function externalMediaType(file: File): 'audio' | 'video' | null {
+  if (file.type.startsWith('audio/')) return 'audio'
+  if (file.type.startsWith('video/')) return 'video'
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+  if (AUDIO_EXTENSIONS.has(extension)) return 'audio'
+  if (VIDEO_EXTENSIONS.has(extension)) return 'video'
+  return null
+}
+
+function draggedMediaType(dataTransfer: DataTransfer): 'audio' | 'video' | null {
+  const file = firstDraggedFile(dataTransfer)
+  if (file) return externalMediaType(file)
+  for (const item of Array.from(dataTransfer.items)) {
+    if (item.kind !== 'file') continue
+    if (item.type.startsWith('audio/')) return 'audio'
+    if (item.type.startsWith('video/')) return 'video'
+  }
+  return null
+}
+
+function hasExternalFiles(dataTransfer: DataTransfer): boolean {
+  return Array.from(dataTransfer.types).includes('Files') ||
+    dataTransfer.files.length > 0 ||
+    Array.from(dataTransfer.items).some((item) => item.kind === 'file')
+}
+
+function firstDraggedFile(dataTransfer: DataTransfer): File | null {
+  const file = Array.from(dataTransfer.files)[0]
+  if (file) return file
+  for (const item of Array.from(dataTransfer.items)) {
+    if (item.kind !== 'file') continue
+    const itemFile = item.getAsFile()
+    if (itemFile) return itemFile
+  }
+  return null
+}
+
+interface ExternalDropSlot {
+  trackId: string
+  frame: number
+}
+
 export function TrackArea({
   data,
   node,
@@ -104,6 +152,7 @@ export function TrackArea({
   const t = useT()
   const trackAreaRef = useRef<HTMLDivElement>(null)
   const [dragPlaceholder, setDragPlaceholder] = useState<SegmentDragPlaceholder | null>(null)
+  const [externalDropSlot, setExternalDropSlot] = useState<ExternalDropSlot | null>(null)
   const safeLength = Math.max(data.total_length, 1)
   const timelineWidth = Math.max(1, width - MULTITRACK_LEFT_GUTTER)
   const playableWidth = Math.max(1, timelineWidth - MULTITRACK_RIGHT_RESERVE)
@@ -125,6 +174,56 @@ export function TrackArea({
     if (!rect) return null
     const y = (clientY - rect.top) / Math.max(canvasScale, 0.01)
     return trackBounds.find((track) => y >= track.top && y < track.bottom)?.id ?? null
+  }
+
+  function externalDropTarget(
+    clientX: number,
+    clientY: number,
+    mediaType: 'audio' | 'video' | null,
+  ): ExternalDropSlot | null {
+    const rect = trackAreaRef.current?.getBoundingClientRect()
+    const trackId = targetTrackIdFromClientY(clientY)
+    const track = data.tracks.find((item) => item.id === trackId)
+    if (!rect || !track || mediaType !== track.type) return null
+    const x = (clientX - rect.left) / Math.max(canvasScale, 0.01) - MULTITRACK_LEFT_GUTTER
+    const requestedFrame = Math.round((Math.max(0, Math.min(playableWidth, x)) / playableWidth) * safeLength)
+    const sortedSegments = [...track.segments].sort((left, right) => left.start_frame - right.start_frame)
+    const insertIndex = sortedSegments.filter((segment) => (
+      segment.start_frame + (segment.end_frame - segment.start_frame) / 2 < requestedFrame
+    )).length
+    const previousEnd = sortedSegments[insertIndex - 1]?.end_frame ?? 0
+    return { trackId: track.id, frame: Math.max(requestedFrame, previousEnd) }
+  }
+
+  function handleExternalDragOver(event: React.DragEvent<HTMLDivElement>) {
+    if (!hasExternalFiles(event.dataTransfer)) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'copy'
+    const target = externalDropTarget(event.clientX, event.clientY, draggedMediaType(event.dataTransfer))
+    setExternalDropSlot(target)
+  }
+
+  async function handleExternalDrop(event: React.DragEvent<HTMLDivElement>) {
+    if (!hasExternalFiles(event.dataTransfer)) return
+    event.preventDefault()
+    event.stopPropagation()
+    const file = firstDraggedFile(event.dataTransfer)
+    const mediaType = file ? externalMediaType(file) : null
+    const target = externalDropTarget(event.clientX, event.clientY, mediaType)
+    setExternalDropSlot(null)
+    if (!file || !target) return
+    try {
+      const filePath = await uploadInputMediaFile(file)
+      invalidateMediaListCache('inputs')
+      if (mediaType === 'video') {
+        onAddVideo(target.trackId, filePath, 'input', target.frame)
+      } else {
+        onAddAudio(target.trackId, filePath, 'input', undefined, target.frame)
+      }
+    } catch (error) {
+      console.error('[TrackArea] failed to upload dropped media:', error)
+    }
   }
 
   function placeholderRect(placeholder: SegmentDragPlaceholder) {
@@ -162,8 +261,8 @@ export function TrackArea({
     ? getSegmentDragPreviewSegments(data.tracks, dragPlaceholder, data.frame_rate)
     : null
 
-  function previewSegment(trackId: string, segment: MultiTrackSegment): MultiTrackSegment {
-    if (!dragPlaceholder || dragPlaceholder.targetTrackId !== trackId || segment.id === dragPlaceholder.segmentId) {
+  function previewSegment(segment: MultiTrackSegment): MultiTrackSegment {
+    if (!dragPlaceholder || segment.id === dragPlaceholder.segmentId) {
       return segment
     }
     return dragPreviewSegments?.find((item) => item.id === segment.id) ?? segment
@@ -175,6 +274,12 @@ export function TrackArea({
       className="relative shrink-0"
       style={{ width, height: trackAreaHeight }}
       data-multitrack-track-area
+      onDragOverCapture={handleExternalDragOver}
+      onDragLeave={(event) => {
+        const nextTarget = event.relatedTarget
+        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) setExternalDropSlot(null)
+      }}
+      onDropCapture={handleExternalDrop}
     >
       <div
         className="pointer-events-none absolute top-0 z-10 bg-black/30"
@@ -188,7 +293,7 @@ export function TrackArea({
               key={track.id}
               track={{
                 ...track,
-                segments: track.segments.map((segment) => previewSegment(track.id, segment)),
+                segments: track.segments.map((segment) => previewSegment(segment)),
               }}
               totalLength={data.total_length}
               frameRate={data.frame_rate}
@@ -220,7 +325,7 @@ export function TrackArea({
           return (
             <AudioTrack
               key={track.id}
-              track={{ ...track, segments: track.segments.map((segment) => previewSegment(track.id, segment)) }}
+              track={{ ...track, segments: track.segments.map((segment) => previewSegment(segment)) }}
               totalLength={data.total_length}
               frameRate={data.frame_rate}
               width={playableWidth}
@@ -261,7 +366,7 @@ export function TrackArea({
                   key={segment.id}
                   trackType={track.type}
                   segmentIndex={index}
-                  segment={previewSegment(track.id, segment)}
+                  segment={previewSegment(segment)}
                   totalLength={data.total_length}
                   frameRate={data.frame_rate}
                   areaWidth={playableWidth}
@@ -374,6 +479,21 @@ export function TrackArea({
           style={dragPlaceholderRect}
         />
       ) : null}
+      {externalDropSlot ? (() => {
+        const bounds = trackBounds.find((track) => track.id === externalDropSlot.trackId)
+        if (!bounds) return null
+        return (
+          <div
+            data-testid="external-media-drop-slot"
+            className="pointer-events-none absolute z-30 w-1 rounded bg-primary"
+            style={{
+              left: MULTITRACK_LEFT_GUTTER + (externalDropSlot.frame / safeLength) * playableWidth,
+              top: bounds.top + 4,
+              height: bounds.bottom - bounds.top - 8,
+            }}
+          />
+        )
+      })() : null}
     </div>
   )
 }

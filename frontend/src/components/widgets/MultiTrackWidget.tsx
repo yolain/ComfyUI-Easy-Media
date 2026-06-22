@@ -24,6 +24,7 @@ import {
   secondsToFrame,
   snapSecondsToFrame,
   snapTimeToFrame,
+  syncMatchingTasksToPrimaryVideoTrack,
   syncMatchingTasksToPrimaryVideoSegment,
   updateMultiTrackSegmentContent,
   updateMultiTrackSegmentDuration,
@@ -55,8 +56,33 @@ function ensureTrackData(raw: unknown): TrackData {
   return createDefaultTrackData()
 }
 
+function insertSegmentAtFrame(
+  segments: MultiTrackSegment[],
+  nextSegment: MultiTrackSegment,
+): MultiTrackSegment[] {
+  const sorted = [...segments].sort((left, right) => left.start_frame - right.start_frame)
+  const insertIndex = sorted.filter((segment) => (
+    segment.start_frame + (segment.end_frame - segment.start_frame) / 2 < nextSegment.start_frame
+  )).length
+  const before = sorted.slice(0, insertIndex)
+  const previousEnd = before.at(-1)?.end_frame ?? 0
+  const duration = nextSegment.end_frame - nextSegment.start_frame
+  const insertedStart = Math.max(nextSegment.start_frame, previousEnd)
+  const inserted = { ...nextSegment, start_frame: insertedStart, end_frame: insertedStart + duration }
+  let cursor = inserted.end_frame
+  const after = sorted.slice(insertIndex).map((segment) => {
+    const segmentDuration = segment.end_frame - segment.start_frame
+    const shiftedStart = Math.max(segment.start_frame, cursor)
+    cursor = shiftedStart + segmentDuration
+    return { ...segment, start_frame: shiftedStart, end_frame: cursor }
+  })
+  return [...before, inserted, ...after]
+}
+
 export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactWidgetProps<TrackData>>) {
   const data = ensureTrackData(value)
+  const dataRef = useRef(data)
+  dataRef.current = data
   const [currentTime, setCurrentTime] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [zoom, setZoom] = useState(1)
@@ -113,7 +139,12 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     }
   }, [isPlaying, data.frame_rate, data.total_length])
 
-  async function handleAddVideo(trackId: string, filePath: string, sourceType: MultiTrackSourceType) {
+  async function handleAddVideo(
+    trackId: string,
+    filePath: string,
+    sourceType: MultiTrackSourceType,
+    requestedStartFrame?: number,
+  ) {
     const content = createMultiTrackVideoContent(filePath, sourceType)
     const src = mediaContentToViewUrl(content)
     let duration = 1
@@ -126,22 +157,21 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       }
     }
 
+    const latestData = dataRef.current
     const addedVideoRange = { added: false, startFrame: 0, endFrame: 0 }
-    const videoUpdatedTracks = data.tracks.map((track) => {
+    const videoUpdatedTracks = latestData.tracks.map((track) => {
       if (track.id !== trackId) return track
-      const startFrame = snapTimeToFrame(
-        track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0),
-        data.frame_rate,
-      )
-      const endFrame = startFrame + Math.max(1, snapSecondsToFrame(duration, data.frame_rate))
+      const startFrame = requestedStartFrame === undefined
+        ? snapTimeToFrame(track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0), latestData.frame_rate)
+        : Math.max(0, Math.round(requestedStartFrame))
+      const endFrame = startFrame + Math.max(1, snapSecondsToFrame(duration, latestData.frame_rate))
       addedVideoRange.added = true
       addedVideoRange.startFrame = startFrame
       addedVideoRange.endFrame = endFrame
       return {
         ...track,
-        segments: [
-          ...track.segments,
-          {
+        segments: (() => {
+          const nextSegment: MultiTrackSegment = {
             id: uuid(),
             start_frame: startFrame,
             end_frame: endFrame,
@@ -150,18 +180,23 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
               ...content,
               duration,
             },
-          },
-        ],
+          }
+          if (requestedStartFrame === undefined) return [...track.segments, nextSegment]
+          return insertSegmentAtFrame(track.segments, nextSegment)
+        })(),
       }
     })
+    const taskSyncedTracks = requestedStartFrame === undefined
+      ? videoUpdatedTracks
+      : syncMatchingTasksToPrimaryVideoTrack(latestData.tracks, videoUpdatedTracks)
     const updatedTracks = addedVideoRange.added
-      ? addDefaultTaskSegmentIfRangeEmpty(videoUpdatedTracks, addedVideoRange.startFrame, addedVideoRange.endFrame)
-      : videoUpdatedTracks
+      ? addDefaultTaskSegmentIfRangeEmpty(taskSyncedTracks, addedVideoRange.startFrame, addedVideoRange.endFrame)
+      : taskSyncedTracks
 
     onChange({
-      ...data,
+      ...latestData,
       tracks: updatedTracks,
-      total_length: calculateTotalLength(updatedTracks),
+      total_length: calculateTotalLength(updatedTracks, latestData.frame_rate),
     })
   }
 
@@ -170,6 +205,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     filePath: string,
     sourceType: MultiTrackSourceType,
     previewUrl?: string,
+    requestedStartFrame?: number,
   ) {
     const content = createMultiTrackAudioContent(filePath, sourceType)
     if (previewUrl) content.url = previewUrl
@@ -182,22 +218,29 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         console.error('[MultiTrackWidget] failed to read audio metadata:', error)
       }
     }
-    const updatedTracks = data.tracks.map((track) => {
+    const latestData = dataRef.current
+    const updatedTracks = latestData.tracks.map((track) => {
       if (track.id !== trackId || track.type !== 'audio') return track
-      const startFrame = track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0)
-      const endFrame = startFrame + Math.max(1, snapSecondsToFrame(duration, data.frame_rate))
+      const startFrame = requestedStartFrame === undefined
+        ? track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0)
+        : Math.max(0, Math.round(requestedStartFrame))
+      const endFrame = startFrame + Math.max(1, snapSecondsToFrame(duration, latestData.frame_rate))
       return {
         ...track,
-        segments: [...track.segments, {
-          id: uuid(),
-          start_frame: startFrame,
-          end_frame: endFrame,
-          color: track.color,
-          content: { ...content, duration },
-        }],
+        segments: (() => {
+          const nextSegment: MultiTrackSegment = {
+            id: uuid(),
+            start_frame: startFrame,
+            end_frame: endFrame,
+            color: track.color,
+            content: { ...content, duration },
+          }
+          if (requestedStartFrame === undefined) return [...track.segments, nextSegment]
+          return insertSegmentAtFrame(track.segments, nextSegment)
+        })(),
       }
     })
-    onChange({ ...data, tracks: updatedTracks, total_length: calculateTotalLength(updatedTracks) })
+    onChange({ ...latestData, tracks: updatedTracks, total_length: calculateTotalLength(updatedTracks, latestData.frame_rate) })
   }
 
   function handleAddTrack(type: MultiTrackType) {
@@ -223,7 +266,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     if (!target || target.type === 'task' || target.id === firstVideoTrackId) return
     const segmentIds = new Set(target.segments.map((segment) => segment.id))
     const updatedTracks = data.tracks.filter((track) => track.id !== trackId)
-    onChange({ ...data, tracks: updatedTracks, total_length: calculateTotalLength(updatedTracks) })
+    onChange({ ...data, tracks: updatedTracks, total_length: calculateTotalLength(updatedTracks, data.frame_rate) })
     setSelectedSegmentId((current) => current && segmentIds.has(current) ? null : current)
   }
 
@@ -276,7 +319,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     onChange({
       ...data,
       tracks: updatedTracks,
-      total_length: calculateTotalLength(updatedTracks),
+      total_length: calculateTotalLength(updatedTracks, data.frame_rate),
     })
   }
 
@@ -309,13 +352,13 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     onChange({
       ...data,
       tracks: updatedTracks,
-      total_length: calculateTotalLength(updatedTracks),
+      total_length: calculateTotalLength(updatedTracks, data.frame_rate),
     })
   }
 
   function handleDeleteSegment(segmentId: string) {
     const updatedTracks = deleteSegmentWithLinkedTasks(data.tracks, segmentId)
-    const totalLength = calculateTotalLength(updatedTracks)
+    const totalLength = calculateTotalLength(updatedTracks, data.frame_rate)
     onChange({
       ...data,
       tracks: updatedTracks,
@@ -396,7 +439,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     onChange({
       ...data,
       tracks: updatedTracks,
-      total_length: calculateTotalLength(updatedTracks),
+      total_length: calculateTotalLength(updatedTracks, data.frame_rate),
     })
   }
 
@@ -412,7 +455,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     onChange({
       ...data,
       tracks: updatedTracks,
-      total_length: calculateTotalLength(updatedTracks),
+      total_length: calculateTotalLength(updatedTracks, data.frame_rate),
     })
   }
 
@@ -469,7 +512,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     onChange({
       ...data,
       tracks: updatedTracks,
-      total_length: calculateTotalLength(updatedTracks),
+      total_length: calculateTotalLength(updatedTracks, data.frame_rate),
     })
   }
 

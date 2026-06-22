@@ -1,11 +1,20 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { createEvent, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { TrackArea } from '@/components/widgets/multitrack/TrackArea'
 import { createDefaultTrackData } from '@/lib/multitrack-utils'
 
 vi.mock('@/components/widgets/multitrack/VideoTrack', () => ({
-  VideoTrack: () => <div data-testid="video-track" />,
+  VideoTrack: ({ onDragPreviewChange }: {
+    onDragPreviewChange: (segmentId: string, nextStartTime: number, clientY: number) => void
+  }) => (
+    <div data-testid="video-track">
+      <button
+        data-testid="preview-video-drag"
+        onClick={() => onDragPreviewChange('video-first', 4, 50)}
+      />
+    </div>
+  ),
 }))
 
 vi.mock('@/components/widgets/multitrack/AudioTrack', () => ({
@@ -15,7 +24,13 @@ vi.mock('@/components/widgets/multitrack/AudioTrack', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/MultiTrackSegmentBlock', () => ({
-  MultiTrackSegmentBlock: () => null,
+  MultiTrackSegmentBlock: ({ segment }: { segment: { id: string; start_frame: number; end_frame: number } }) => (
+    <div
+      data-testid={`segment-${segment.id}`}
+      data-start-frame={segment.start_frame}
+      data-end-frame={segment.end_frame}
+    />
+  ),
 }))
 
 describe('TrackArea track controls', () => {
@@ -104,5 +119,189 @@ describe('TrackArea track controls', () => {
     )
 
     expect(screen.getByTestId('audio-track').textContent).toBe('connected')
+  })
+
+  it('previews matching task segments together with a dragged video segment', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [
+      {
+        id: 'task-first',
+        start_frame: 0,
+        end_frame: 2,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+      {
+        id: 'task-second',
+        start_frame: 2,
+        end_frame: 5,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+    ]
+    data.tracks[1].segments = [
+      {
+        id: 'video-first',
+        start_frame: 0,
+        end_frame: 2,
+        color: data.tracks[1].color,
+        content: { media_type: 'video', duration: 2 },
+      },
+      {
+        id: 'video-second',
+        start_frame: 2,
+        end_frame: 5,
+        color: data.tracks[1].color,
+        content: { media_type: 'video', duration: 3 },
+      },
+    ]
+
+    render(
+      <TooltipProvider>
+        <TrackArea
+          data={data}
+          width={480}
+          currentTime={0}
+          canvasScale={1}
+          selectedSegmentId={null}
+          node={{}}
+          app={{}}
+          onAddVideo={vi.fn()}
+          onAddAudio={vi.fn()}
+          onAddTrack={vi.fn()}
+          onReplaceVideo={vi.fn()}
+          onAddTaskSegment={vi.fn()}
+          onSelectSegment={vi.fn()}
+          onDeleteSegment={vi.fn()}
+          onDeleteTrack={vi.fn()}
+          onTrackAudioSettingsChange={vi.fn()}
+          onDistributeTaskSegments={vi.fn()}
+          onCloneTaskSegment={vi.fn()}
+          onResizeSegment={vi.fn()}
+          onMoveSegment={vi.fn()}
+          onSmartSplit={vi.fn()}
+          onSmartSplitTasks={vi.fn()}
+          cutMode={false}
+          onCutSegment={vi.fn()}
+        />
+      </TooltipProvider>,
+    )
+
+    fireEvent.click(screen.getByTestId('preview-video-drag'))
+
+    expect(screen.getByTestId('segment-task-first').getAttribute('data-start-frame')).toBe('3')
+    expect(screen.getByTestId('segment-task-second').getAttribute('data-end-frame')).toBe('3')
+  })
+
+  it('uploads external audio and video files at canvas-scaled pointer positions', async () => {
+    const data = createDefaultTrackData()
+    data.tracks.push({
+      id: 'audio-track',
+      name: 'Audio 0',
+      type: 'audio',
+      color: 'var(--highlight)',
+      muted: false,
+      locked: false,
+      segments: [],
+    })
+    const onAddAudio = vi.fn()
+    const onAddVideo = vi.fn()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ name: 'clip.wav', subfolder: 'uploads' }),
+    }))
+
+    render(
+      <TooltipProvider>
+        <TrackArea
+          data={data}
+          width={480}
+          currentTime={0}
+          canvasScale={0.5}
+          selectedSegmentId={null}
+          node={{}}
+          app={{}}
+          onAddVideo={onAddVideo}
+          onAddAudio={onAddAudio}
+          onAddTrack={vi.fn()}
+          onReplaceVideo={vi.fn()}
+          onAddTaskSegment={vi.fn()}
+          onSelectSegment={vi.fn()}
+          onDeleteSegment={vi.fn()}
+          onDeleteTrack={vi.fn()}
+          onTrackAudioSettingsChange={vi.fn()}
+          onDistributeTaskSegments={vi.fn()}
+          onCloneTaskSegment={vi.fn()}
+          onResizeSegment={vi.fn()}
+          onMoveSegment={vi.fn()}
+          onSmartSplit={vi.fn()}
+          onSmartSplitTasks={vi.fn()}
+          cutMode={false}
+          onCutSegment={vi.fn()}
+        />
+      </TooltipProvider>,
+    )
+
+    const area = document.querySelector('[data-multitrack-track-area]') as HTMLDivElement
+    vi.spyOn(area, 'getBoundingClientRect').mockReturnValue({
+      left: 100,
+      top: 200,
+      width: 240,
+      height: 111,
+      right: 340,
+      bottom: 311,
+      x: 100,
+      y: 200,
+      toJSON: () => ({}),
+    })
+    const file = new File(['audio'], 'clip.wav', { type: 'audio/wav' })
+
+    const dataTransfer = {
+      files: [],
+      items: [{ kind: 'file', type: 'audio/wav', getAsFile: () => null }],
+      types: ['Files'],
+      dropEffect: 'none',
+    }
+    const dragOver = createEvent.dragOver(area)
+    Object.defineProperties(dragOver, {
+      clientX: { value: 220 },
+      clientY: { value: 250 },
+      dataTransfer: { value: dataTransfer },
+    })
+    fireEvent(area, dragOver)
+    expect(dragOver.defaultPrevented).toBe(true)
+    expect(screen.getByTestId('external-media-drop-slot')).toBeTruthy()
+    dataTransfer.files = [file] as never[]
+    dataTransfer.items = [{ kind: 'file', type: 'audio/wav', getAsFile: () => file }] as never[]
+    const drop = createEvent.drop(area)
+    Object.defineProperties(drop, {
+      clientX: { value: 220 },
+      clientY: { value: 250 },
+      dataTransfer: { value: dataTransfer },
+    })
+    fireEvent(area, drop)
+
+    await vi.waitFor(() => {
+      expect(onAddAudio).toHaveBeenCalledWith('audio-track', 'uploads/clip.wav', 'input', undefined, 63)
+    })
+
+    const videoFile = new File(['video'], 'clip.mp4', { type: 'video/mp4' })
+    const videoDataTransfer = {
+      files: [videoFile],
+      items: [{ kind: 'file', type: 'video/mp4', getAsFile: () => videoFile }],
+      types: ['Files'],
+      dropEffect: 'none',
+    }
+    const videoDrop = createEvent.drop(area)
+    Object.defineProperties(videoDrop, {
+      clientX: { value: 220 },
+      clientY: { value: 225 },
+      dataTransfer: { value: videoDataTransfer },
+    })
+    fireEvent(area, videoDrop)
+
+    await vi.waitFor(() => {
+      expect(onAddVideo).toHaveBeenCalledWith(data.tracks[1].id, 'uploads/clip.wav', 'input', 63)
+    })
   })
 })
