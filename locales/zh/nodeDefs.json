@@ -81,6 +81,20 @@
       }
     }
   },
+  "easy getAudioFromVideo": {
+    "display_name": "从视频中提取音频",
+    "description": "从 VIDEO 中提取音频轨。优先使用 FFmpeg，失败时回退到 ComfyUI VIDEO components。",
+    "inputs": {
+      "video": {
+        "name": "视频"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "音频"
+      }
+    }
+  },
   "easy timelineEditor": {
     "display_name": "时间线编辑器",
     "description": "加载时间线媒体项目（提示词、图像、音频轨道）并输出结构化数据。",
@@ -248,6 +262,23 @@
       }
     }
   },
+  "easy matchLine": {
+    "display_name": "匹配行",
+    "description": "返回第一行包含匹配文本的从 0 开始的行索引；未找到时返回 -1。",
+    "inputs": {
+      "text": {
+        "name": "文本"
+      },
+      "match": {
+        "name": "匹配文本"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "行索引"
+      }
+    }
+  },
   "easy makeImageList": {
     "display_name": "创建图像列表",
     "description": "将多个可选的图像输入组合成图像列表。",
@@ -307,6 +338,27 @@
       }
     }
   },
+  "easy splitImages": {
+    "display_name": "图像拆分V2",
+    "description": "将图像列表或单个图像批次拆分为最多 10 个单图输出。",
+    "inputs": {
+      "images": {
+        "name": "图像"
+      }
+    },
+    "outputs": {
+      "0": { "name": "图像 0" },
+      "1": { "name": "图像 1" },
+      "2": { "name": "图像 2" },
+      "3": { "name": "图像 3" },
+      "4": { "name": "图像 4" },
+      "5": { "name": "图像 5" },
+      "6": { "name": "图像 6" },
+      "7": { "name": "图像 7" },
+      "8": { "name": "图像 8" },
+      "9": { "name": "图像 9" }
+    }
+  },
   "easy makeAudioList": {
     "display_name": "创建音频列表",
     "description": "将多个可选的音频输入组合成音频列表。",
@@ -363,6 +415,34 @@
     "outputs": {
       "0": {
         "name": "音频列表"
+      }
+    }
+  },
+  "easy makeVideoList": {
+    "display_name": "创建视频列表",
+    "description": "将最多 10 个可选视频输入组合成视频列表。",
+    "inputs": {
+      "skip_empty": {
+        "name": "跳过空输入",
+        "options": {
+          "true": "跳过",
+          "false": "填充"
+        }
+      },
+      "video1": { "name": "视频 1" },
+      "video2": { "name": "视频 2" },
+      "video3": { "name": "视频 3" },
+      "video4": { "name": "视频 4" },
+      "video5": { "name": "视频 5" },
+      "video6": { "name": "视频 6" },
+      "video7": { "name": "视频 7" },
+      "video8": { "name": "视频 8" },
+      "video9": { "name": "视频 9" },
+      "video10": { "name": "视频 10" }
+    },
+    "outputs": {
+      "0": {
+        "name": "视频"
       }
     }
   },
@@ -531,14 +611,6 @@
         "options": {
           "original": "原图",
           "sam3_masked": "SAM3 遮罩分割"
-        }
-      },
-      "skip_background": {
-        "name": "跳过背景图",
-        "tooltip": "启用时，在识别和拼贴前排除最后一张图像。",
-        "options": {
-          "true": "跳过",
-          "false": "保留"
         }
       }
     },

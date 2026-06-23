@@ -210,6 +210,16 @@ def _load_basic_module():
     return module
 
 
+def _load_image_module():
+    _load_basic_module()
+    path = Path(__file__).parents[1] / "nodes" / "image.py"
+    spec = importlib.util.spec_from_file_location("easy_media.nodes.image", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _load_video_utils_module(input_directory):
     folder_paths = types.ModuleType("folder_paths")
     folder_paths.get_annotated_filepath = lambda path: str(input_directory / path)
@@ -1013,8 +1023,19 @@ def test_match_line_returns_minus_one_for_empty_or_missing_match():
     assert module.MatchLine.execute("alpha\nbeta", "").values == (-1,)
 
 
+def test_match_line_has_chinese_localization():
+    locale_path = Path(__file__).parents[1] / "locales" / "zh" / "nodeDefs.json"
+    node_defs = json.loads(locale_path.read_text(encoding="utf-8"))
+
+    translation = node_defs["easy matchLine"]
+
+    assert translation["display_name"] == "匹配行"
+    assert set(translation["inputs"]) == {"text", "match"}
+    assert translation["outputs"] == {"0": {"name": "行索引"}}
+
+
 def test_split_images_splits_a_single_batched_tensor_into_single_images():
-    module = _load_basic_module()
+    module = _load_image_module()
     batch = torch.arange(3 * 2 * 2 * 3).reshape(3, 2, 2, 3)
 
     result = module.SplitImages.execute([batch])
@@ -1027,7 +1048,7 @@ def test_split_images_splits_a_single_batched_tensor_into_single_images():
 
 
 def test_split_images_uses_multiple_list_items_without_batch_splitting():
-    module = _load_basic_module()
+    module = _load_image_module()
     images = [torch.full((1, 2, 2, 3), value) for value in (1, 2)]
     schema = module.SplitImages.define_schema()
 
@@ -1038,3 +1059,14 @@ def test_split_images_uses_multiple_list_items_without_batch_splitting():
     assert torch.equal(result.values[0], images[0])
     assert torch.equal(result.values[1], images[1])
     assert result.values[2:] == (None,) * 8
+
+
+def test_split_images_has_chinese_localization():
+    locale_path = Path(__file__).parents[1] / "locales" / "zh" / "nodeDefs.json"
+    node_defs = json.loads(locale_path.read_text(encoding="utf-8"))
+
+    translation = node_defs["easy splitImages"]
+
+    assert translation["display_name"] == "拆分图像"
+    assert set(translation["inputs"]) == {"images"}
+    assert set(translation["outputs"]) == {str(index) for index in range(10)}

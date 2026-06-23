@@ -60,6 +60,7 @@ class EasyMediaExtension(ComfyExtension):
             SplitImages,
             MakeImageList,
             MakeAudioList,
+            MakeVideoList,
             # Wan
             BerniniModelPatch,
             # LTXV
@@ -67,6 +68,7 @@ class EasyMediaExtension(ComfyExtension):
             LTXVMakeRefVideo,
             # Video
             EasySaveVideo,
+            EasyGetAudioFromVideo,
             EasyMergeVideos,
             EasyMergeVideosFromPaths,
         ]

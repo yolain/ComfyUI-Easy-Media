@@ -168,8 +168,10 @@ bun run build:release
 | easy timelineSegmentCount | Output the total number of segments in the timeline |
 | easy makeImageList | Combine multiple image inputs into an image list |
 | easy makeAudioList | Combine multiple audio inputs into an audio list |
+| easy makeVideoList | Combine multiple video inputs into a video list |
 | easy imageIndexesToIntList | Convert comma-separated image index string to integer list |
 | easy saveVideo | Save images and optional audio as video file |
+| easy videoToAudio | Extract audio from a VIDEO input |
 | easy mergeVideos | Concatenate multiple compatible VIDEO segments |
 | easy mergeVideosFromPaths | Load and concatenate videos from file path list |
 | LTXVAddGuidesFromBatchIndexes | Add guide images from batch images to specified frame indexes of latent variables |

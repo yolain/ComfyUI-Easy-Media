@@ -57,6 +57,7 @@ class _FakeIO:
 
     class Audio:
         Input = _FakeInput
+        Output = _FakeInput
 
     class Video:
         Input = _FakeInput
@@ -117,7 +118,10 @@ def _install_comfy_stubs(monkeypatch, tmp_path: Path):
 
     latest = types.ModuleType("comfy_api.latest")
     latest.Input = types.SimpleNamespace(Video=object)
-    latest.InputImpl = types.SimpleNamespace(VideoFromComponents=lambda components: components)
+    latest.InputImpl = types.SimpleNamespace(
+        VideoFromComponents=lambda components: components,
+        VideoFromFile=lambda source: source,
+    )
     latest.Types = fake_types
     latest.io = fake_io
     latest.ui = fake_ui
@@ -144,6 +148,7 @@ def _install_comfy_stubs(monkeypatch, tmp_path: Path):
     utils_video.extract_merge_spec = lambda video: None
     utils_video.ffmpeg_concat = lambda *args, **kwargs: False
     utils_video.ffmpeg_concat_with_fade = lambda *args, **kwargs: False
+    utils_video.ffmpeg_extract_audio = lambda *args, **kwargs: None
     utils_video.ffmpeg_replace_audio = lambda *args, **kwargs: False
     utils_video.ffmpeg_supports_xfade = lambda: False
     utils_video.normalize_video_images = lambda images: (images, False)
@@ -199,3 +204,52 @@ def test_hide_save_writes_output_without_preview(monkeypatch, tmp_path):
     assert result.values == (source_video, "output/clip_00001_.mp4")
     assert source_video.saved[0][0] == str(tmp_path / "output" / "clip_00001_.mp4")
     assert result.ui is None
+
+
+def test_make_video_list_fills_missing_inputs_with_empty_video(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    source_video = _FakeVideo()
+
+    result = video_module.MakeVideoList.execute(False, video1=source_video)
+
+    videos = result.values[0]
+    assert len(videos) == 10
+    assert videos[0] is source_video
+    assert videos[1].images.shape == (1, 2, 2, 3)
+    assert videos[1].audio is None
+
+
+def test_video_to_audio_prefers_ffmpeg_extraction(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    source_video = _FakeVideo()
+    ffmpeg_audio = {"waveform": object(), "sample_rate": 44100}
+    calls = []
+
+    def fake_ffmpeg_extract_audio(path):
+        calls.append(path)
+        return ffmpeg_audio
+
+    monkeypatch.setattr(video_module, "ffmpeg_extract_audio", fake_ffmpeg_extract_audio)
+    monkeypatch.setattr(
+        video_module,
+        "_fallback_video_audio",
+        lambda video: (_ for _ in ()).throw(AssertionError("fallback should not run")),
+    )
+
+    result = video_module.EasyGetAudioFromVideo.execute(source_video)
+
+    assert result.values == (ffmpeg_audio,)
+    assert len(calls) == 1
+
+
+def test_video_to_audio_falls_back_to_components(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    source_video = _FakeVideo()
+    component_audio = {"waveform": object(), "sample_rate": 48000}
+
+    monkeypatch.setattr(video_module, "_extract_audio_with_ffmpeg", lambda video: None)
+    monkeypatch.setattr(video_module, "_fallback_video_audio", lambda video: component_audio)
+
+    result = video_module.EasyGetAudioFromVideo.execute(source_video)
+
+    assert result.values == (component_audio,)

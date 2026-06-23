@@ -15,11 +15,11 @@ from comfy_api.latest import Input, InputImpl, Types, io, ui
 from comfy.utils import ProgressBar
 from server import PromptServer
 
-from ..utils.video import extract_merge_spec, ffmpeg_concat, ffmpeg_concat_with_fade, ffmpeg_replace_audio, ffmpeg_supports_xfade, normalize_video_images, tensor_crossfade_audio, tensor_crossfade_images, validate_merge_compatibility
+from ..utils.video import extract_merge_spec, ffmpeg_concat, ffmpeg_concat_with_fade, ffmpeg_extract_audio, ffmpeg_replace_audio, ffmpeg_supports_xfade, normalize_video_images, tensor_crossfade_audio, tensor_crossfade_images, validate_merge_compatibility
 
 logger = logging.getLogger(__name__)
 
-CATEGORY = "EasyUse/Media"
+CATEGORY_VIDEO = "EasyUse/Video"
 
 _OUTPUT_MODE_OPTIONS = [
     io.DynamicCombo.Option(
@@ -55,13 +55,64 @@ _INPUT_MODE_OPTIONS = [
 ]
 
 
+class MakeVideoList(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="easy makeVideoList",
+            display_name="Make Video List",
+            category=CATEGORY_VIDEO,
+            description="Combine up to 10 optional video inputs into a video list.",
+            inputs=[
+                io.Boolean.Input("skip_empty", default=False, label_on="Skip", label_off="Fill"),
+                io.Video.Input("video1", optional=True),
+                io.Video.Input("video2", optional=True),
+                io.Video.Input("video3", optional=True),
+                io.Video.Input("video4", optional=True),
+                io.Video.Input("video5", optional=True),
+                io.Video.Input("video6", optional=True),
+                io.Video.Input("video7", optional=True),
+                io.Video.Input("video8", optional=True),
+                io.Video.Input("video9", optional=True),
+                io.Video.Input("video10", optional=True),
+            ],
+            outputs=[
+                io.Video.Output("VIDEO", is_output_list=True),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, skip_empty: bool, **kwargs: object) -> io.NodeOutput:
+        videos: list[Input.Video] = []
+        for i in range(1, 11):
+            key = f"video{i}"
+            value = kwargs.get(key)
+            if value is not None:
+                videos.append(value)
+            elif not skip_empty:
+                videos.append(_empty_video())
+
+        return io.NodeOutput(videos)
+
+
+def _empty_video() -> InputImpl.VideoFromComponents:  # type: ignore[return-value]
+    images = torch.zeros(1, 2, 2, 3, dtype=torch.float32, device="cpu")
+    return InputImpl.VideoFromComponents(
+        Types.VideoComponents(
+            images=images,
+            audio=None,
+            frame_rate=Fraction(24),
+        )
+    )
+
+
 class EasySaveVideo(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
             node_id="easy saveVideo",
             display_name="Save Video",
-            category=CATEGORY,
+            category=CATEGORY_VIDEO,
             description=(
                 "Save images and optional audio to a video file. "
                 "Returns the VIDEO for downstream use and the full written file path."
@@ -244,13 +295,101 @@ def _replace_video_audio(source_video, audio: dict):
         )
     )
 
+
+def _video_to_local_file(video: Input.Video) -> "tuple[str | None, list[str]]":
+    """Return a local file path for ffmpeg, creating temp files when needed."""
+    temp_files: list[str] = []
+    try:
+        source = video.get_stream_source()
+    except (AttributeError, RuntimeError, ValueError, TypeError):
+        source = None
+
+    if isinstance(source, str) and os.path.isfile(source):
+        return source, temp_files
+    if isinstance(source, _io.BytesIO):
+        source.seek(0)
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp4", dir=folder_paths.get_temp_directory())
+        try:
+            os.write(tmp_fd, source.read())
+        finally:
+            os.close(tmp_fd)
+        temp_files.append(tmp_path)
+        return tmp_path, temp_files
+
+    ext = Types.VideoContainer.get_extension(Types.VideoContainer.AUTO)
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=f".{ext}", dir=folder_paths.get_temp_directory())
+    os.close(tmp_fd)
+    try:
+        video.save_to(tmp_path, format=Types.VideoContainer.AUTO, codec=Types.VideoCodec.AUTO)
+    except Exception as exc:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        logger.warning("[EasyGetAudioFromVideo] Failed to serialize VIDEO for FFmpeg: %s", exc)
+        return None, temp_files
+    temp_files.append(tmp_path)
+    return tmp_path, temp_files
+
+
+def _extract_audio_with_ffmpeg(video: Input.Video) -> "dict | None":
+    source_path, temp_files = _video_to_local_file(video)
+    if source_path is None:
+        return None
+
+    try:
+        return ffmpeg_extract_audio(source_path)
+    finally:
+        for path in temp_files:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+
+def _fallback_video_audio(video: Input.Video) -> "dict | None":
+    try:
+        components = video.get_components()
+    except Exception as exc:
+        raise RuntimeError("Failed to read VIDEO components for audio fallback.") from exc
+    audio = getattr(components, "audio", None)
+    if isinstance(audio, dict) and audio.get("waveform") is not None and audio.get("sample_rate") is not None:
+        return audio
+    return None
+
+
+class EasyGetAudioFromVideo(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="easy getAudioFromVideo",
+            display_name="Get Audio From Video",
+            category=CATEGORY_VIDEO,
+            description="Extract the audio track from a VIDEO. Uses FFmpeg first, then falls back to ComfyUI VIDEO components.",
+            inputs=[
+                io.Video.Input("video"),
+            ],
+            outputs=[
+                io.Audio.Output("AUDIO"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, video: Input.Video) -> io.NodeOutput:
+        audio = _extract_audio_with_ffmpeg(video)
+        if audio is None:
+            audio = _fallback_video_audio(video)
+        if audio is None:
+            raise ValueError("The input VIDEO does not contain an audio track.")
+        return io.NodeOutput(audio)
+
 class EasyMergeVideos(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
             node_id="easy mergeVideos",
             display_name="Merge Videos",
-            category=CATEGORY,
+            category=CATEGORY_VIDEO,
             description=(
                 "Concatenate multiple compatible VIDEO clips in order. "
                 "All clips must share the same fps, dimensions, and audio configuration."
@@ -506,7 +645,7 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
         return io.Schema(
             node_id="easy mergeVideosFromPaths",
             display_name="Merge Videos From Paths",
-            category=CATEGORY,
+            category=CATEGORY_VIDEO,
             description=(
                 "Load and concatenate videos from a list of file paths or URLs. "
                 "Supports ComfyUI temp/output paths, absolute local paths, and HTTP(S) URLs. "
@@ -656,4 +795,3 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
                     os.unlink(f)
                 except OSError:
                     pass
-

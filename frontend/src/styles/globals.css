@@ -61,7 +61,7 @@
     --accent-foreground: oklch(0.205 0 0);
     --destructive: oklch(0.577 0.245 27.325);
     --destructive-foreground: oklch(0.985 0 0);
-    --highlight: oklab(0.961 -0.07365 0.16792);
+    --highlight: oklch(96.109% 0.18336 113.683);
     --panorama-axis-z: oklch(0.58 0.2 255);
     --warning: oklch(0.922 0.191 90);
     --multitrack-video-bg: oklch(0.42 0.08 195);

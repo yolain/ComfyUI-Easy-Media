@@ -783,3 +783,63 @@ def ffmpeg_replace_audio(
             f"FFmpeg replace-audio failed:\n{result.stderr.decode(errors='replace')[-600:]}"
         )
     return True
+
+
+def _load_wav_audio(path: str) -> dict:
+    try:
+        import soundfile as sf  # type: ignore[import]
+
+        data, sample_rate = sf.read(path, dtype="float32", always_2d=True)
+        waveform = torch.from_numpy(data.T).unsqueeze(0)
+        return {"waveform": waveform, "sample_rate": int(sample_rate)}
+    except Exception:
+        try:
+            import torchaudio  # type: ignore[import]
+
+            waveform, sample_rate = torchaudio.load(path)
+            return {"waveform": waveform.unsqueeze(0), "sample_rate": int(sample_rate)}
+        except Exception as exc:
+            raise RuntimeError("Failed to load extracted audio with soundfile or torchaudio.") from exc
+
+
+def ffmpeg_extract_audio(video_path: str) -> dict | None:
+    """Extract a video's audio track to a ComfyUI AUDIO dict using FFmpeg.
+
+    Returns None when FFmpeg is unavailable, the source path is not file-backed,
+    or FFmpeg reports that audio extraction failed.
+    """
+    ffmpeg = get_ffmpeg_path("ffmpeg")
+    if not ffmpeg:
+        return None
+    if not os.path.isfile(video_path):
+        return None
+
+    tmp_fd, audio_path = tempfile.mkstemp(suffix=".wav", dir=folder_paths.get_temp_directory())
+    os.close(tmp_fd)
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-i",
+        video_path,
+        "-vn",
+        "-acodec",
+        "pcm_s16le",
+        audio_path,
+    ]
+    try:
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        if result.returncode != 0:
+            logger.warning(
+                "[ffmpeg_extract_audio] FFmpeg audio extraction failed: %s",
+                result.stderr.decode("utf-8", errors="replace").strip()[-600:],
+            )
+            return None
+        return _load_wav_audio(audio_path)
+    except Exception as exc:
+        logger.warning("[ffmpeg_extract_audio] FFmpeg audio extraction error: %s", exc)
+        return None
+    finally:
+        try:
+            os.unlink(audio_path)
+        except OSError:
+            pass

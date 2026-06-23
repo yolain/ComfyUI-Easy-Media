@@ -172,8 +172,10 @@ bun run build:release
 | easy timelineSegmentCount | 输出时间线中的片段总数 |
 | easy makeImageList | 将多个图片输入组合成图片列表 |
 | easy makeAudioList | 将多个音频输入组合成音频列表 |
+| easy makeVideoList | 将多个视频输入组合成视频列表 |
 | easy imageIndexesToIntList | 将逗号分隔的图片索引字符串转换为整数列表 |
 | easy saveVideo | 将图片和可选音频保存为视频文件 |
+| easy videoToAudio | 从 VIDEO 输入中提取音频 |
 | easy mergeVideos | 串联多个兼容的 VIDEO 片段 |
 | easy mergeVideosFromPaths | 从文件路径列表加载并串联视频 |
 | LTXVAddGuidesFromBatchIndexes | 从批量图像添加引导图到潜在变量的指定帧索引 |
