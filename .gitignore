@@ -9,6 +9,7 @@ config.yaml
 *.bak
 *.bat
 *.log
+.pytest_cache
 .env
 .vscode/
 .idea/
