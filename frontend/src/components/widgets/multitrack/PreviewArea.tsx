@@ -135,6 +135,7 @@ export function PreviewArea({
   const t = useT()
   const draggedTaskImageIdRef = useRef<string | null>(null)
   const [activePanoramaTarget, setActivePanoramaTarget] = useState<ActivePanoramaTarget | null>(null)
+  const [activeTaskPreviewImageId, setActiveTaskPreviewImageId] = useState<string | null>(null)
   const [firstVideoMetadata, setFirstVideoMetadata] = useState<MultiTrackVideoMetadata | null>(null)
   const [resolutionInput, setResolutionInput] = useState(() => collectMultiTrackPreviewResolutionInput(node))
   const videoSegments = useMemo(() => (
@@ -171,10 +172,23 @@ export function PreviewArea({
     : activePanoramaTarget?.source === 'active'
       ? activeTaskImages?.allImages.find((image) => image.id === activePanoramaTarget.imageId) ?? null
       : null
+  const activeTaskPreviewImage = activeTaskImages?.images.find(({ image }) => image.id === activeTaskPreviewImageId)
+    ?? activeTaskImages?.images[0]
+    ?? null
+  const usesTaskImageOnlyPreview = Boolean(activeTaskImages && !selectedAudio && !activeVideo)
 
   useEffect(() => {
     setActivePanoramaTarget(null)
   }, [selectedSegment?.segment.id])
+
+  useEffect(() => {
+    if (!activeTaskImages) {
+      setActiveTaskPreviewImageId(null)
+      return
+    }
+    if (activeTaskImages.images.some(({ image }) => image.id === activeTaskPreviewImageId)) return
+    setActiveTaskPreviewImageId(activeTaskImages.images[0]?.image.id ?? null)
+  }, [activeTaskImages, activeTaskPreviewImageId])
 
   useEffect(() => {
     if (activePanoramaTarget?.source === 'active' && activePanoramaTarget.segmentId !== activeTaskImages?.segmentId) {
@@ -221,6 +235,164 @@ export function PreviewArea({
 
     return () => window.clearInterval(timer)
   }, [node])
+
+  function handleActiveTaskImageDrop(targetImageId: string) {
+    if (!activeTaskImages) return
+    const sourceId = draggedTaskImageIdRef.current
+    draggedTaskImageIdRef.current = null
+    if (!sourceId) return
+    onTrackSegmentsContentChange?.([{
+      segmentId: activeTaskImages.segmentId,
+      patch: { images: moveTaskImage(activeTaskImages.allImages, sourceId, targetImageId) },
+    }])
+  }
+
+  function handleActiveTaskImageDelete(imageId: string) {
+    if (!activeTaskImages) return
+    onTrackSegmentsContentChange?.([{
+      segmentId: activeTaskImages.segmentId,
+      patch: {
+        images: activeTaskImages.allImages.filter((item) => item.id !== imageId),
+      },
+    }])
+  }
+
+  function renderActiveTaskImagePreview(
+    image: MultiTrackTaskImage,
+    url: string,
+    imageName: string,
+    className: string,
+  ) {
+    return image.panorama_view ? (
+      <PanoramaImagePreview
+        imageId={image.id}
+        imageUrl={url}
+        alt={imageName}
+        view={image.panorama_view}
+        className={className}
+      />
+    ) : (
+      <img
+        className={className}
+        src={url}
+        alt={imageName}
+        draggable={false}
+      />
+    )
+  }
+
+  function renderActiveTaskImageThumbnail(
+    image: MultiTrackTaskImage,
+    url: string,
+    selected: boolean,
+    className = 'aspect-square w-full',
+    showControls = true,
+  ) {
+    if (!activeTaskImages) return null
+    const imageName = image.file_name ?? image.file_path ?? image.local_path ?? image.url ?? image.id
+    return (
+      <div
+        key={image.id}
+        data-testid={`task-preview-image-${image.id}`}
+        className={`group relative shrink-0 cursor-pointer overflow-hidden rounded-sm border bg-black ${
+          selected ? 'border-primary' : 'border-border'
+        } ${className}`}
+        draggable
+        onDragStart={() => {
+          draggedTaskImageIdRef.current = image.id
+        }}
+        onDragEnd={() => {
+          draggedTaskImageIdRef.current = null
+        }}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={() => handleActiveTaskImageDrop(image.id)}
+      >
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-full w-full rounded-none p-0 hover:bg-transparent"
+          aria-label={imageName}
+          onClick={() => setActiveTaskPreviewImageId(image.id)}
+        >
+          {renderActiveTaskImagePreview(image, url, imageName, 'h-full w-full object-contain')}
+        </Button>
+        {showControls ? renderActiveTaskImageControls(image, imageName, 'split') : null}
+      </div>
+    )
+  }
+
+  function renderActiveTaskImageControls(
+    image: MultiTrackTaskImage,
+    imageName: string,
+    layout: 'split' | 'corner',
+  ) {
+    if (!activeTaskImages) return null
+    const panoramaClassName = image.panorama_view ? 'text-highlight' : 'text-foreground'
+    const wrapperClassName = layout === 'corner'
+      ? 'absolute right-2 top-2 flex gap-1'
+      : `absolute left-0 top-0 ${image.panorama_view ? '' : ' opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100'}`
+    const deleteWrapperClassName = layout === 'corner'
+      ? ''
+      : 'absolute right-0 top-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100'
+    const controlClassName = layout === 'corner' ? 'h-7 w-7' : 'h-5 w-5'
+    const iconClassName = layout === 'corner' ? '[&_svg]:!size-4' : '[&_svg]:!size-3'
+
+    return (
+      <>
+        <div className={wrapperClassName}>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className={`${controlClassName} cursor-pointer rounded-none bg-background/70 hover:bg-background/90 ${iconClassName} ${panoramaClassName}`}
+            aria-label={t('panorama.preview')}
+            onClick={(event) => {
+              event.stopPropagation()
+              setActivePanoramaTarget({
+                imageId: image.id,
+                segmentId: activeTaskImages.segmentId,
+                source: 'active',
+              })
+            }}
+          >
+            <PanoramaIcon />
+          </Button>
+          {layout === 'corner' ? (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className={`${controlClassName} cursor-pointer rounded-none bg-background/70 text-destructive hover:bg-background/90 hover:text-destructive ${iconClassName}`}
+              aria-label={`${t('multitrack.deleteImage')} ${imageName}`}
+              onClick={(event) => {
+                event.stopPropagation()
+                handleActiveTaskImageDelete(image.id)
+              }}
+            >
+              <X />
+            </Button>
+          ) : null}
+        </div>
+        {layout === 'split' ? (
+          <div className={deleteWrapperClassName}>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className={`${controlClassName} cursor-pointer rounded-none bg-background/70 text-destructive hover:bg-background/90 hover:text-destructive ${iconClassName}`}
+              aria-label={`${t('multitrack.deleteImage')} ${imageName}`}
+              onClick={(event) => {
+                event.stopPropagation()
+                handleActiveTaskImageDelete(image.id)
+              }}
+            >
+              <X />
+            </Button>
+          </div>
+        ) : null}
+      </>
+    )
+  }
 
   if (selectedSegment?.trackType === 'task') {
     return (
@@ -320,6 +492,43 @@ export function PreviewArea({
               className="h-full w-full"
             />
           </div>
+        ) : usesTaskImageOnlyPreview && activeTaskImages && activeTaskPreviewImage ? (
+          <div
+            data-testid="task-preview-images"
+            className="flex h-full min-h-0 w-full flex-col bg-black"
+          >
+            <div className="relative flex min-h-0 flex-[9] items-center justify-center overflow-hidden p-2">
+              {(() => {
+                const imageName = activeTaskPreviewImage.image.file_name
+                  ?? activeTaskPreviewImage.image.file_path
+                  ?? activeTaskPreviewImage.image.local_path
+                  ?? activeTaskPreviewImage.image.url
+                  ?? activeTaskPreviewImage.image.id
+                return (
+                  <>
+                    {renderActiveTaskImagePreview(
+                      activeTaskPreviewImage.image,
+                      activeTaskPreviewImage.url,
+                      imageName,
+                      'max-h-full h-full max-w-full w-auto object-contain',
+                    )}
+                    {renderActiveTaskImageControls(activeTaskPreviewImage.image, imageName, 'corner')}
+                  </>
+                )
+              })()}
+            </div>
+            <div className="flex min-h-0 flex-[1] items-center justify-center gap-2 overflow-x-auto p-2">
+              {activeTaskImages.images.map(({ image, url }) => (
+                renderActiveTaskImageThumbnail(
+                  image,
+                  url,
+                  image.id === activeTaskPreviewImage.image.id,
+                  'h-full aspect-square',
+                  false,
+                )
+              ))}
+            </div>
+          </div>
         ) : activeTaskImages && (
           <div
             data-testid="task-preview-images"
@@ -330,88 +539,12 @@ export function PreviewArea({
             </div>
             <div className="flex min-h-0 flex-col gap-2 overflow-y-auto pb-2">
               {activeTaskImages.images.map(({ image, url }) => {
-                const imageName = image.file_name ?? image.file_path ?? image.local_path ?? image.url ?? image.id
-                return (
-                  <div
-                    key={image.id}
-                    data-testid={`task-preview-image-${image.id}`}
-                    className="group relative aspect-square w-full shrink-0 cursor-pointer overflow-hidden rounded-sm border border-border bg-black"
-                    draggable
-                    onDragStart={() => {
-                      draggedTaskImageIdRef.current = image.id
-                    }}
-                    onDragEnd={() => {
-                      draggedTaskImageIdRef.current = null
-                    }}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={() => {
-                      const sourceId = draggedTaskImageIdRef.current
-                      draggedTaskImageIdRef.current = null
-                      if (!sourceId) return
-                      onTrackSegmentsContentChange?.([{
-                        segmentId: activeTaskImages.segmentId,
-                        patch: { images: moveTaskImage(activeTaskImages.allImages, sourceId, image.id) },
-                      }])
-                    }}
-                  >
-                    {image.panorama_view ? (
-                      <PanoramaImagePreview
-                        imageId={image.id}
-                        imageUrl={url}
-                        alt={imageName}
-                        view={image.panorama_view}
-                        className="absolute inset-0 m-auto"
-                      />
-                    ) : (
-                      <img
-                        className="h-full w-full object-contain"
-                        src={url}
-                        alt={imageName}
-                        draggable={false}
-                      />
-                    )}
-                    <div className={`absolute left-0 top-0 ${image.panorama_view ? '' : ' opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100'}`}>
-                      <div
-                        className={`flex size-4 cursor-pointer items-center justify-center bg-background/70 hover:bg-background/90 ${image.panorama_view ? 'text-highlight' : 'text-foreground'}`}
-                        aria-label={t('panorama.preview')}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          setActivePanoramaTarget({
-                            imageId: image.id,
-                            segmentId: activeTaskImages.segmentId,
-                            source: 'active',
-                          })
-                        }}
-                      >
-                        <PanoramaIcon />
-                      </div>
-                    </div>
-                    <div className="absolute right-0 top-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="h-5 w-5 cursor-pointer bg-background/70 text-destructive hover:bg-background/90 hover:text-destructive [&_svg]:!size-3"
-                        aria-label={`${t('multitrack.deleteImage')} ${imageName}`}
-                        onClick={() => {
-                          onTrackSegmentsContentChange?.([{
-                            segmentId: activeTaskImages.segmentId,
-                            patch: {
-                              images: activeTaskImages.allImages.filter((item) => item.id !== image.id),
-                            },
-                          }])
-                        }}
-                      >
-                        <X />
-                      </Button>
-                    </div>
-                  </div>
-                )
+                return renderActiveTaskImageThumbnail(image, url, image.id === activeTaskPreviewImage?.image.id)
               })}
             </div>
           </div>
         )}
-        {!selectedAudio ? (
+        {!selectedAudio && !usesTaskImageOnlyPreview ? (
           <VideoPreview
             activeVideo={activeVideo}
             resolution={resolution}

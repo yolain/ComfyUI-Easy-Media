@@ -95,4 +95,13 @@ describe('MultiTrackToolbar', () => {
     expect(screen.getByRole('button', { name: 'multitrack.showTimeline' })).not.toBeNull()
     expect(container.querySelector('.lucide-maximize-2')).not.toBeNull()
   })
+
+  it('uses a consistent icon size across toolbar controls', () => {
+    const { container } = renderToolbar(false)
+
+    const iconClasses = Array.from(container.querySelectorAll('svg')).map((icon) => icon.getAttribute('class') ?? '')
+
+    expect(iconClasses.length).toBeGreaterThan(0)
+    expect(iconClasses.every((className) => className.includes('h-3.5') && className.includes('w-3.5'))).toBe(true)
+  })
 })

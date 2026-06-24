@@ -13,6 +13,7 @@ import folder_paths
 import numpy as np
 import torch
 
+from ...utils.models import require_model_path
 
 MODEL_CATEGORY = "checkpoints"
 MODEL_DIRECTORY = Path(folder_paths.models_dir) / MODEL_CATEGORY
@@ -57,9 +58,7 @@ def find_checkpoint() -> Path:
         checkpoint_path = folder_paths.get_full_path(MODEL_CATEGORY, model_name)
         if checkpoint_path:
             return Path(checkpoint_path)
-    raise FileNotFoundError(
-        f"No OmniShotCut .pth checkpoint found in {MODEL_DIRECTORY}"
-    )
+    return require_model_path("omnishotcut")
 
 
 def _load_model(checkpoint_path: Path) -> tuple[torch.nn.Module, Any, torch.device]:

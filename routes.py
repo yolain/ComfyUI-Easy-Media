@@ -38,6 +38,12 @@ from aiohttp import web
 import folder_paths
 
 from .utils.prompt_builder import get_system_prompt_options
+from .utils.models import (
+    MissingEasyMediaModelError,
+    download_model,
+    model_payload,
+    get_model_info,
+)
 
 
 _SMART_SPLIT_LOCK = asyncio.Lock()
@@ -405,6 +411,37 @@ async def handle_system_prompt_options(request: web.Request) -> web.Response:
     )
 
 
+@PromptServer.instance.routes.post("/easy-media/models/download")
+async def handle_model_download(request: web.Request) -> web.Response:
+    try:
+        try:
+            data = await request.json()
+        except Exception as error:
+            raise ValueError("Invalid JSON body") from error
+        if not isinstance(data, dict):
+            raise ValueError("request body must be a JSON object")
+        model_name = data.get("model_name")
+        if not isinstance(model_name, str) or not model_name:
+            raise ValueError("model_name is required")
+
+        model = get_model_info(model_name)
+        path = await download_model(model.name)
+        return web.json_response({
+            "ok": True,
+            "model": model_payload(model),
+            "path": str(path),
+        })
+    except TimeoutError as error:
+        return web.json_response({"error": str(error)}, status=504)
+    except ValueError as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except aiohttp.ClientError as error:
+        return web.json_response({"error": f"Automatic download failed: {error}"}, status=502)
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"Automatic download failed: {error}"}, status=500)
+
+
 @PromptServer.instance.routes.post("/easy-media/video/smart-split")
 async def handle_video_smart_split(request: web.Request) -> web.Response:
     """Run OmniShotCut for one video and return its detected frame ranges."""
@@ -433,6 +470,11 @@ async def handle_video_smart_split(request: web.Request) -> web.Response:
         async with _SMART_SPLIT_LOCK:
             ranges = await asyncio.to_thread(detect_shots, video_path, float(fps), mode="clean_shot")
         return web.json_response({"ranges": ranges})
+    except MissingEasyMediaModelError as error:
+        return web.json_response({
+            "error": str(error),
+            "model_missing": model_payload(error.model),
+        }, status=428)
     except (ValueError, FileNotFoundError) as error:
         return web.json_response({"error": str(error)}, status=400)
     except Exception as error:

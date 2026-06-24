@@ -1,4 +1,5 @@
 import { uuid } from '@/lib/uuid'
+import { throwIfMissingModelResponse } from '@/lib/model-download'
 import type { MultiTrackSegment, TrackData } from '@/types/multitrack'
 
 export interface SmartSplitResult {
@@ -40,6 +41,7 @@ export async function requestSmartSplit(segment: MultiTrackSegment, fps: number)
     throw new Error(`Smart split returned invalid JSON: ${String(error)}`)
   }
   if (!response.ok) {
+    throwIfMissingModelResponse(payload)
     const message = payload && typeof payload === 'object' && 'error' in payload
       ? String((payload as { error: unknown }).error)
       : `Smart split failed (${response.status})`

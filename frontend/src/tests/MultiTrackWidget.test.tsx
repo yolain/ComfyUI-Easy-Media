@@ -368,6 +368,92 @@ describe('MultiTrackWidget', () => {
     vi.unstubAllGlobals()
   })
 
+  it('shows missing model actions and downloads the requested model', async () => {
+    const data = createDefaultTrackData()
+    data.total_length = 240
+    data.tracks[1].segments = [{
+      id: 'video',
+      start_frame: 0,
+      end_frame: 240,
+      color: data.tracks[1].color,
+      content: { media_type: 'video', source_type: 'input', file_path: 'clip.mp4' },
+    }]
+    const model = {
+      name: 'omnishotcut',
+      display_name: 'OmniShotCut',
+      filename: 'OmniShotCut_ckpt.pth',
+      directory: '/ComfyUI/models/checkpoints',
+      path: '/ComfyUI/models/checkpoints/OmniShotCut_ckpt.pth',
+      url: 'https://huggingface.co/uva-cv-lab/OmniShotCut/resolve/main/OmniShotCut_ckpt.pth',
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 428,
+        json: async () => ({
+          error: 'OmniShotCut model is not installed.',
+          model_missing: model,
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, model }),
+      } as Response)
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} />)
+    fireEvent.click(screen.getByRole('button', { name: 'smart split video' }))
+
+    expect(await screen.findByTestId('missing-model-overlay')).not.toBeNull()
+    expect(screen.getByText('OmniShotCut is missing')).not.toBeNull()
+    expect(screen.getByText(/installed under checkpoints/)).not.toBeNull()
+    expect(screen.getByText('/ComfyUI/models/checkpoints/OmniShotCut_ckpt.pth')).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'Exit' })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Auto download' }))
+
+    await waitFor(() => expect(screen.queryByTestId('missing-model-overlay')).toBeNull())
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/easy-media/models/download', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ model_name: 'omnishotcut' }),
+    }))
+    vi.unstubAllGlobals()
+  })
+
+  it('opens the source URL for manual model download', async () => {
+    const data = createDefaultTrackData()
+    data.tracks[1].segments = [{
+      id: 'video',
+      start_frame: 0,
+      end_frame: 240,
+      color: data.tracks[1].color,
+      content: { media_type: 'video', source_type: 'input', file_path: 'clip.mp4' },
+    }]
+    const model = {
+      name: 'omnishotcut',
+      display_name: 'OmniShotCut',
+      filename: 'OmniShotCut_ckpt.pth',
+      directory: '/ComfyUI/models/checkpoints',
+      path: '/ComfyUI/models/checkpoints/OmniShotCut_ckpt.pth',
+      url: 'https://huggingface.co/uva-cv-lab/OmniShotCut/resolve/main/OmniShotCut_ckpt.pth',
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 428,
+      json: async () => ({ error: 'missing', model_missing: model }),
+    }))
+    const openMock = vi.fn()
+    vi.stubGlobal('open', openMock)
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} />)
+    fireEvent.click(screen.getByRole('button', { name: 'smart split video' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Manual download' }))
+
+    expect(openMock).toHaveBeenCalledWith(model.url, '_blank', 'noopener,noreferrer')
+    vi.unstubAllGlobals()
+  })
+
   it('does not request task-only smart split when no task range matches', () => {
     const data = createDefaultTrackData()
     data.tracks[1].segments = [{

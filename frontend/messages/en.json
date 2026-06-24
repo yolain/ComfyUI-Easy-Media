@@ -86,6 +86,17 @@
     "showTimeline": "Show timeline",
     "timelineZoom": "Timeline zoom"
   },
+  "modelDownload": {
+    "title": "{name} is missing",
+    "description": "{name} must be installed under {directory}. Download it automatically or open the source link and place the file there manually.",
+    "auto": "Auto download",
+    "manual": "Manual download",
+    "exit": "Exit",
+    "close": "Close",
+    "downloading": "Downloading...",
+    "downloadComplete": "Model installed",
+    "downloadCompleteDetail": "{name} was downloaded. Run the action again."
+  },
   "trackRow": {
     "trackColor": "Track color"
   },

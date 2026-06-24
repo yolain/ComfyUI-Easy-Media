@@ -4,6 +4,9 @@ import { Slider } from '@/components/ui/slider'
 import { useT } from '@/lib/i18n'
 import { formatMultiTrackTime } from '@/lib/multitrack-utils'
 
+const TOOLBAR_ICON_BUTTON_CLASS = 'h-6 w-6 shrink-0'
+const TOOLBAR_ICON_CLASS = 'h-3.5 w-3.5'
+
 interface MultiTrackToolbarProps {
   currentTime: number
   totalLength: number
@@ -43,7 +46,7 @@ export function MultiTrackToolbar({
           type="button"
           variant="ghost"
           size="icon"
-          className="h-6 w-6 text-muted-foreground"
+          className={`${TOOLBAR_ICON_BUTTON_CLASS} text-muted-foreground`}
           disabled={!canDelete}
           aria-label={t('multitrack.deleteSelectedSegment')}
           onClick={(event) => {
@@ -51,13 +54,13 @@ export function MultiTrackToolbar({
             onDeleteSelected()
           }}
         >
-          <Trash2 className="h-3.5 w-3.5" />
+          <Trash2 className={TOOLBAR_ICON_CLASS} />
         </Button>
         <Button
           type="button"
           variant={cutMode ? 'secondary' : 'ghost'}
           size="icon"
-          className="h-6 w-6 text-muted-foreground"
+          className={`${TOOLBAR_ICON_BUTTON_CLASS} text-muted-foreground`}
           aria-label={t('multitrack.cutMode')}
           aria-pressed={cutMode}
           data-cut-mode-toggle
@@ -66,7 +69,7 @@ export function MultiTrackToolbar({
             onToggleCutMode()
           }}
         >
-          <TextCursor className={`h-3.5 w-3.5 ${cutMode ? 'text-highlight' : 'text-muted-foreground'}`} />
+          <TextCursor className={`${TOOLBAR_ICON_CLASS} ${cutMode ? 'text-highlight' : 'text-muted-foreground'}`} />
         </Button>
       </div>
 
@@ -76,12 +79,12 @@ export function MultiTrackToolbar({
           type="button"
           variant="secondary"
           size="icon"
-          className="h-6 w-6 text-foreground rounded-full cursor-pointer"
+          className={`${TOOLBAR_ICON_BUTTON_CLASS} text-foreground rounded-full cursor-pointer`}
           aria-label={isPlaying ? t('multitrack.pause') : t('multitrack.play')}
           onClick={onPlayPause}
         >
           {isPlaying ? (
-            <svg className="h-2 w-2" viewBox="0 0 24 24" fill="none">
+            <svg className={TOOLBAR_ICON_CLASS} viewBox="0 0 24 24" fill="none">
               <defs>
                 <linearGradient id="icon-gradient-pause" x1="0%" y1="0%" x2="100%" y2="0%">
                   <stop offset="0%" stopColor="var(--primary)" />
@@ -92,7 +95,7 @@ export function MultiTrackToolbar({
               <rect x="14" y="5" width="4" height="14" rx="1" fill="url(#icon-gradient-pause)" />
             </svg>
           ) : (
-            <svg className="h-2 w-2" viewBox="0 0 24 24" fill="none">
+            <svg className={TOOLBAR_ICON_CLASS} viewBox="0 0 24 24" fill="none">
               <defs>
                 <linearGradient id="icon-gradient-play" x1="0%" y1="0%" x2="100%" y2="0%">
                   <stop offset="0%" stopColor="var(--primary)" />
@@ -106,12 +109,12 @@ export function MultiTrackToolbar({
         <span className="w-16 tabular-nums">{formatMultiTrackTime(totalLength, { frameRate, showFrames: true })}</span>
       </div>
 
-      <div className="ml-auto flex h-5 max-h-5 min-h-5 items-center gap-1 overflow-hidden">
+      <div className="ml-auto flex h-6 max-h-6 min-h-6 items-center gap-1 overflow-hidden">
         <Button
           type="button"
           variant="ghost"
           size="icon"
-          className="h-5 w-5 shrink-0 text-muted-foreground"
+          className={`${TOOLBAR_ICON_BUTTON_CLASS} text-muted-foreground`}
           aria-label={timelineCollapsed ? t('multitrack.showTimeline') : t('multitrack.hideTimeline')}
           onClick={(event) => {
             event.stopPropagation()
@@ -119,12 +122,12 @@ export function MultiTrackToolbar({
           }}
         >
           {timelineCollapsed ? (
-            <Maximize2 className="h-3 w-3" />
+            <Maximize2 className={TOOLBAR_ICON_CLASS} />
           ) : (
-            <Minimize2 className="h-3 w-3" />
+            <Minimize2 className={TOOLBAR_ICON_CLASS} />
           )}
         </Button>
-        <ZoomOut className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <ZoomOut className={`${TOOLBAR_ICON_CLASS} shrink-0 text-muted-foreground`} />
         <div className="relative h-3 max-h-3 min-h-3 w-12 overflow-visible">
           <Slider
             min={1}

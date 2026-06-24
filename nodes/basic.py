@@ -2184,36 +2184,6 @@ class MakeAudioList(io.ComfyNode):
 
         return io.NodeOutput(audios)
 
-
-class ImageIndexesToIntList(io.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id="easy imageIndexesToIntList",
-            display_name="Image Indexes To Int List",
-            category=CATEGORY_IMAGE,
-            description="Convert comma-separated image index string to integer list.",
-            inputs=[
-                io.String.Input("image_indexes"),
-            ],
-            outputs=[
-                io.Int.Output("INDEXES", is_output_list=True),
-            ],
-        )
-
-    @classmethod
-    def execute(cls, image_indexes: str) -> io.NodeOutput:
-        if not image_indexes:
-            indexes: list[int] = []
-        else:
-            try:
-                indexes = [int(x.strip()) for x in str(image_indexes).split(",") if x.strip()]
-            except ValueError:
-                raise ValueError(f"Invalid image_indexes input: {image_indexes}. Must be a comma-separated string of integers.")
-
-        return io.NodeOutput(indexes)
-
-
 class MatchLine(io.ComfyNode):
     @classmethod
     def define_schema(cls):

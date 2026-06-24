@@ -86,6 +86,17 @@
     "showTimeline": "显示轨道区域",
     "timelineZoom": "时间线缩放"
   },
+  "modelDownload": {
+    "title": "缺少 {name} 模型",
+    "description": "需要将 {name} 安装到 {directory}。可以自动下载，或打开下载链接后手动放入该目录。自动下载将从 Hugging Face 中进行下载，如果您的网络不太稳定或长时间没有下载成功，请重启 ComfyUI，重新使用手动进行下载。",
+    "auto": "自动下载",
+    "manual": "手动下载",
+    "exit": "退出",
+    "close": "关闭",
+    "downloading": "下载中...",
+    "downloadComplete": "模型已安装",
+    "downloadCompleteDetail": "{name} 已下载，请重新执行操作。"
+  },
   "trackRow": {
     "trackColor": "轨道颜色"
   },

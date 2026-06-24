@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Download, ExternalLink, Loader2, X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { useCanvasScale } from '@/hooks/use-canvas-scale'
 import { useElementWidth } from '@/hooks/use-element-width'
@@ -31,6 +32,13 @@ import {
 } from '@/lib/multitrack-utils'
 import { mediaContentToViewUrl } from '@/lib/media-url'
 import {
+  MODEL_MISSING_EVENT,
+  MissingModelError,
+  downloadEasyMediaModel,
+  parseMissingModelPayload,
+  type MissingModelInfo,
+} from '@/lib/model-download'
+import {
   applySmartSplit,
   applySmartSplitToMatchingTasks,
   hasMatchingTaskSegment,
@@ -45,6 +53,13 @@ import { MultiTrackRuler } from './multitrack/MultiTrackRuler'
 import { MultiTrackToolbar } from './multitrack/MultiTrackToolbar'
 import { PreviewArea } from './multitrack/PreviewArea'
 import { TrackArea } from './multitrack/TrackArea'
+
+type CustomEventCallback = (event: CustomEvent<unknown>) => void
+
+interface EasyMediaEventApi {
+  addCustomEventListener?: (type: string, callback: CustomEventCallback) => void
+  removeCustomEventListener?: (type: string, callback: CustomEventCallback) => void
+}
 
 function ensureTrackData(raw: unknown): TrackData {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
@@ -89,6 +104,9 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   const [timelineCollapsed, setTimelineCollapsed] = useState(false)
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null)
   const [isSmartSplitting, setIsSmartSplitting] = useState(false)
+  const [missingModel, setMissingModel] = useState<MissingModelInfo | null>(null)
+  const [isDownloadingModel, setIsDownloadingModel] = useState(false)
+  const [modelDownloadError, setModelDownloadError] = useState<string | null>(null)
   const [cutMode, setCutMode] = useState(false)
   const rafRef = useRef<number | null>(null)
   const timelineContainerRef = useRef<HTMLDivElement>(null)
@@ -103,11 +121,26 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     ? data.tracks.find((track) => track.id === selectedSegment.trackId && track.type === 'task')?.segments ?? [selectedSegment.segment]
     : undefined
   const locale = app?.ui?.settings?.settingsValues?.['Comfy.Locale']
-  const t = (path: string) => translate(locale, path)
+  const t = (path: string, params?: Record<string, string | number>) => translate(locale, path, params)
+  const missingModelDirectoryName = missingModel?.directory.split(/[\\/]/).filter(Boolean).at(-1) ?? ''
 
   useEffect(() => {
     currentTimeRef.current = currentTime
   }, [currentTime])
+
+  useEffect(() => {
+    const api = app.api as EasyMediaEventApi | undefined
+    if (!api?.addCustomEventListener || !api.removeCustomEventListener) return
+    const handleMissingModel: CustomEventCallback = (event) => {
+      const model = parseMissingModelPayload(event.detail)
+      if (!model) return
+      setMissingModel(model)
+      setModelDownloadError(null)
+      setIsDownloadingModel(false)
+    }
+    api.addCustomEventListener(MODEL_MISSING_EVENT, handleMissingModel)
+    return () => api.removeCustomEventListener?.(MODEL_MISSING_EVENT, handleMissingModel)
+  }, [app])
 
   useEffect(() => {
     if (!isPlaying) {
@@ -533,6 +566,11 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       const result = await requestSmartSplit(segment, data.frame_rate)
       onChange(applySmartSplit(data, segmentId, result))
     } catch (error) {
+      if (error instanceof MissingModelError) {
+        setMissingModel(error.model)
+        setModelDownloadError(null)
+        return
+      }
       console.error('[MultiTrackWidget] smart split failed:', error)
       const message = error instanceof Error ? error.message : String(error)
       try {
@@ -575,6 +613,11 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       const result = await requestSmartSplit(segment, data.frame_rate)
       onChange(applySmartSplitToMatchingTasks(data, segmentId, result))
     } catch (error) {
+      if (error instanceof MissingModelError) {
+        setMissingModel(error.model)
+        setModelDownloadError(null)
+        return
+      }
       console.error('[MultiTrackWidget] task-only smart split failed:', error)
       const message = error instanceof Error ? error.message : String(error)
       try {
@@ -594,6 +637,36 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
 
   function handleCutSegment(segmentId: string, splitFrame: number) {
     onChange(splitTrackSegmentAtFrame(data, segmentId, splitFrame))
+  }
+
+  async function handleDownloadMissingModel() {
+    if (!missingModel || isDownloadingModel) return
+    setIsDownloadingModel(true)
+    setModelDownloadError(null)
+    try {
+      const downloadedModel = await downloadEasyMediaModel(missingModel.name)
+      setMissingModel(null)
+      try {
+        app.extensionManager?.toast?.add({
+          severity: 'success',
+          summary: t('modelDownload.downloadComplete'),
+          detail: t('modelDownload.downloadCompleteDetail', { name: downloadedModel.display_name }),
+          life: 5000,
+        })
+      } catch (toastError) {
+        console.error('[MultiTrackWidget] failed to show model download success:', toastError)
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setModelDownloadError(message)
+    } finally {
+      setIsDownloadingModel(false)
+    }
+  }
+
+  function handleManualDownload() {
+    if (!missingModel) return
+    globalThis.open(missingModel.url, '_blank', 'noopener,noreferrer')
   }
 
   return (
@@ -699,6 +772,68 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
               <div className="flex items-center gap-2 rounded border border-border bg-background px-3 py-2 text-foreground shadow-sm">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 <span>{t('multitrack.smartSplitting')}</span>
+              </div>
+            </div>
+          ) : null}
+          {missingModel ? (
+            <div
+              className="absolute inset-0 z-[60] flex items-center justify-center bg-background/90 p-4"
+              data-testid="missing-model-overlay"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="missing-model-title"
+            >
+              <div className="w-full max-w-md rounded border border-border bg-background p-4 text-foreground shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 id="missing-model-title" className="text-sm font-semibold">
+                      {t('modelDownload.title', { name: missingModel.display_name })}
+                    </h3>
+                    <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                      {t('modelDownload.description', {
+                        name: missingModel.display_name,
+                        directory: missingModelDirectoryName,
+                      })}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setMissingModel(null)}
+                    aria-label={t('modelDownload.close')}
+                    disabled={isDownloadingModel}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="mt-3 rounded border border-border bg-muted px-2 py-1.5 font-mono text-[8px] leading-4 text-foreground break-all">
+                  {missingModel.path}
+                </div>
+                {modelDownloadError ? (
+                  <p className="mt-3 text-xs leading-5 text-destructive">{modelDownloadError}</p>
+                ) : null}
+                <div className="mt-4 flex flex-wrap justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleManualDownload}
+                    disabled={isDownloadingModel}
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    {t('modelDownload.manual')}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleDownloadMissingModel}
+                    disabled={isDownloadingModel}
+                  >
+                    {isDownloadingModel ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                    {isDownloadingModel ? t('modelDownload.downloading') : t('modelDownload.auto')}
+                  </Button>
+                </div>
               </div>
             </div>
           ) : null}

@@ -286,15 +286,19 @@ describe('PreviewArea', () => {
     const { rerender } = render(<PreviewArea {...props} currentTime={36} />)
 
     const imageArea = screen.getByTestId('task-preview-images')
-    expect(imageArea.className).toContain('w-20')
-    expect(screen.getByText('Task1')).toBeTruthy()
-    expect(screen.getAllByRole('img').map((image) => image.getAttribute('src'))).toEqual([
+    expect(imageArea.className).toContain('flex-col')
+    expect(imageArea.className).toContain('w-full')
+    expect(screen.queryByTestId('multitrack-video-preview')).toBeNull()
+    expect(screen.getAllByRole('img').map((image) => image.getAttribute('src'))).toContain(
       '/view?filename=first.png&type=input&subfolder=tasks',
-      'https://example.com/second.png',
-    ])
+    )
+    expect(screen.getAllByRole('img').map((image) => image.getAttribute('src'))).toContain('https://example.com/second.png')
     expect(screen.getByRole('img', { name: 'second.png' }).className).toContain('object-contain')
-    expect(screen.getByTestId('panorama-image-preview-first').className).toContain('aspect-video')
+    expect(screen.getAllByTestId('panorama-image-preview-first')[0].className).toContain('aspect-video')
     expect(screen.getAllByLabelText('720° panorama preview')[0].className).toContain('text-highlight')
+
+    fireEvent.click(screen.getByRole('button', { name: 'second.png' }))
+    expect(screen.getAllByRole('img', { name: 'second.png' })).toHaveLength(2)
 
     rerender(<PreviewArea {...props} currentTime={48} />)
     expect(screen.queryByTestId('task-preview-images')).toBeNull()
@@ -355,8 +359,9 @@ describe('PreviewArea', () => {
 
     const firstImage = screen.getByTestId('task-preview-image-first')
     expect(firstImage.className).toContain('cursor-pointer')
+    expect(firstImage.querySelector('[aria-label="Delete image first.png"]')).toBeNull()
     const deleteButton = screen.getByRole('button', { name: 'Delete image first.png' })
-    expect(deleteButton.parentElement?.className).toContain('group-hover:opacity-100')
+    expect(deleteButton.parentElement?.className).toContain('right-2')
     expect(deleteButton.className).toContain('text-destructive')
 
     fireEvent.click(deleteButton)
