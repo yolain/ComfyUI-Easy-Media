@@ -19,6 +19,16 @@ import torch
 logger = logging.getLogger(__name__)
 
 FFMPEG_RESIZE_METHODS = frozenset({"stretch", "resize", "pad", "pad (white)", "crop"})
+_VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"})
+
+
+def _video_output_suffix(path: str) -> str:
+    """Return a standard video suffix, ignoring ComfyUI URL-style annotations."""
+    clean_path = path.split("?", 1)[0].split("&", 1)[0]
+    suffix = os.path.splitext(clean_path)[1].lower()
+    if suffix in _VIDEO_EXTENSIONS:
+        return suffix
+    return ".mp4"
 
 
 def resolve_video_path(
@@ -450,6 +460,83 @@ def ffmpeg_concat(
             os.unlink(list_path)
         except OSError:
             pass
+
+
+def trim_video_with_ffmpeg(
+    input_path: str,
+    frame_count: int,
+    progress_callback: "callable[[str], None] | None" = None,
+) -> str | None:
+    """Trim a video to ``frame_count`` frames based on its detected fps.
+
+    Returns a temp output path when trimming succeeds. Returns ``None`` when
+    trimming is disabled, FFmpeg is unavailable, or fps cannot be detected.
+    """
+    if frame_count <= 0:
+        return None
+
+    ffmpeg = get_ffmpeg_path("ffmpeg")
+    if not ffmpeg or not os.path.isfile(input_path):
+        return None
+
+    fps = ffprobe_info(input_path).get("fps")
+    if not isinstance(fps, (int, float)) or fps <= 0:
+        return None
+
+    duration = frame_count / float(fps)
+    suffix = _video_output_suffix(input_path)
+    output_fd, output_path = tempfile.mkstemp(
+        suffix=suffix,
+        dir=folder_paths.get_temp_directory(),
+    )
+    os.close(output_fd)
+
+    base_cmd = [
+        ffmpeg,
+        "-y",
+        "-t",
+        f"{duration:.6f}",
+        "-i",
+        input_path,
+        "-map",
+        "0",
+    ]
+
+    if progress_callback:
+        progress_callback(f"FFmpeg trim to {frame_count} frames ({duration:.3f}s)…")
+
+    result = subprocess.run(
+        base_cmd + ["-c", "copy", "-avoid_negative_ts", "make_zero", output_path],
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        return output_path
+
+    logger.warning(
+        "[trim_video_with_ffmpeg] stream copy failed (rc=%d), retrying with re-encode. "
+        "stderr: %s",
+        result.returncode,
+        result.stderr.decode(errors="replace")[-400:],
+    )
+
+    result2 = subprocess.run(
+        base_cmd + [
+            "-c:v", "libx264", "-preset", "fast",
+            "-c:a", "aac",
+            output_path,
+        ],
+        capture_output=True,
+    )
+    if result2.returncode == 0:
+        return output_path
+
+    try:
+        os.unlink(output_path)
+    except OSError:
+        pass
+    raise RuntimeError(
+        f"FFmpeg trim failed:\n{result2.stderr.decode(errors='replace')[-600:]}"
+    )
 
 
 def _parse_video_stream(stream: dict) -> "tuple[int | None, int | None, float | None]":

@@ -36,7 +36,7 @@ class _FakeInput:
 
 
 class _FakeComfyNode:
-    hidden = types.SimpleNamespace(prompt=None, extra_pnginfo=None)
+    hidden = types.SimpleNamespace(prompt=None, extra_pnginfo=None, unique_id=None)
 
 
 class _FakeIO:
@@ -55,6 +55,9 @@ class _FakeIO:
     class Float:
         Input = _FakeInput
 
+    class Int:
+        Input = _FakeInput
+
     class Audio:
         Input = _FakeInput
         Output = _FakeInput
@@ -70,6 +73,7 @@ class _FakeIO:
     class Hidden:
         prompt = "prompt"
         extra_pnginfo = "extra_pnginfo"
+        unique_id = "unique_id"
 
     class Schema:
         def __init__(self, **kwargs):
@@ -154,21 +158,34 @@ def _install_comfy_stubs(monkeypatch, tmp_path: Path):
     utils_video.normalize_video_images = lambda images: (images, False)
     utils_video.tensor_crossfade_audio = lambda *args, **kwargs: None
     utils_video.tensor_crossfade_images = lambda *args, **kwargs: None
+    utils_video.trim_video_with_ffmpeg = lambda *args, **kwargs: None
     utils_video.validate_merge_compatibility = lambda specs: None
 
     monkeypatch.setitem(sys.modules, "folder_paths", folder_paths)
     monkeypatch.setitem(sys.modules, "comfy_api", comfy_api)
     monkeypatch.setitem(sys.modules, "comfy_api.latest", latest)
     monkeypatch.setitem(sys.modules, "comfy", types.ModuleType("comfy"))
+
+    class _FakeProgressBar:
+        def __init__(self, total):
+            self.total = total
+            self.updates = []
+
+        def update_absolute(self, step, total):
+            self.updates.append((step, total))
+
     monkeypatch.setitem(
         sys.modules,
         "comfy.utils",
-        types.SimpleNamespace(ProgressBar=object),
+        types.SimpleNamespace(ProgressBar=_FakeProgressBar),
+    )
+    fake_prompt_server = types.SimpleNamespace(
+        instance=types.SimpleNamespace(send_progress_text=lambda *args, **kwargs: None)
     )
     monkeypatch.setitem(
         sys.modules,
         "server",
-        types.SimpleNamespace(PromptServer=object),
+        types.SimpleNamespace(PromptServer=fake_prompt_server),
     )
     monkeypatch.setitem(sys.modules, "easy_media", types.ModuleType("easy_media"))
     monkeypatch.setitem(sys.modules, "easy_media.nodes", types.ModuleType("easy_media.nodes"))
@@ -253,3 +270,101 @@ def test_video_to_audio_falls_back_to_components(monkeypatch, tmp_path):
     result = video_module.EasyGetAudioFromVideo.execute(source_video)
 
     assert result.values == (component_audio,)
+
+
+def test_merge_videos_from_paths_schema_has_frame_count_widget(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+
+    schema = video_module.EasyMergeVideosFromPaths.define_schema()
+
+    frame_input = next(item for item in schema.inputs if item.args[0] == "frame_count")
+    assert frame_input.kwargs["default"] == -1
+    assert frame_input.kwargs["min"] == -1
+    assert frame_input.kwargs["step"] == 1
+
+
+def test_merge_videos_from_paths_trims_ffmpeg_output(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    first = tmp_path / "output" / "a.mp4"
+    second = tmp_path / "output" / "b.mp4"
+    first.write_bytes(b"a")
+    second.write_bytes(b"b")
+    calls = []
+
+    def fake_concat(inputs, output, progress_callback=None):
+        calls.append(("concat", list(inputs), output))
+        Path(output).write_bytes(b"merged")
+        return True
+
+    def fake_trim(source, frame_count, progress_callback=None):
+        calls.append(("trim", source, frame_count))
+        trimmed = tmp_path / "temp" / "trimmed.mp4"
+        trimmed.write_bytes(b"trimmed")
+        return str(trimmed)
+
+    monkeypatch.setattr(video_module, "ffmpeg_concat", fake_concat)
+    monkeypatch.setattr(video_module, "trim_video_with_ffmpeg", fake_trim)
+
+    result = video_module.EasyMergeVideosFromPaths.execute("a.mp4\nb.mp4", frame_count=24)
+
+    assert calls[0][0] == "concat"
+    assert calls[1][0] == "trim"
+    assert calls[1][2] == 24
+    assert result.values == (str(tmp_path / "temp" / "trimmed.mp4"),)
+
+
+def test_merge_videos_from_single_path_trims_loaded_video(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    source = tmp_path / "output" / "clip.mp4"
+    source.write_bytes(b"clip")
+    calls = []
+
+    def fake_trim(path, frame_count, progress_callback=None):
+        calls.append((path, frame_count))
+        trimmed = tmp_path / "temp" / "clip-trimmed.mp4"
+        trimmed.write_bytes(b"trimmed")
+        return str(trimmed)
+
+    monkeypatch.setattr(video_module, "trim_video_with_ffmpeg", fake_trim)
+
+    result = video_module.EasyMergeVideosFromPaths.execute("clip.mp4", frame_count=12)
+
+    assert calls == [(str(source), 12)]
+    assert result.values == (str(tmp_path / "temp" / "clip-trimmed.mp4"),)
+
+
+def test_trim_video_uses_standard_suffix_for_comfy_annotated_paths(monkeypatch, tmp_path):
+    utils_module_path = Path(__file__).resolve().parents[1] / "utils" / "video.py"
+    folder_paths = types.ModuleType("folder_paths")
+    folder_paths.get_temp_directory = lambda: str(tmp_path)
+    folder_paths.get_output_directory = lambda: str(tmp_path)
+    folder_paths.get_annotated_filepath = lambda path: path
+    monkeypatch.setitem(sys.modules, "folder_paths", folder_paths)
+
+    spec = importlib.util.spec_from_file_location("easy_media.utils.video_real", utils_module_path)
+    assert spec is not None
+    utils_module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "easy_media.utils.video_real", utils_module)
+    assert spec.loader is not None
+    spec.loader.exec_module(utils_module)
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    annotated_source = f"{source}&type=input&subfolder="
+    outputs = []
+
+    monkeypatch.setattr(utils_module, "get_ffmpeg_path", lambda name="ffmpeg": "ffmpeg")
+    monkeypatch.setattr(utils_module, "ffprobe_info", lambda path: {"fps": 24.0})
+    monkeypatch.setattr(utils_module.os.path, "isfile", lambda path: path == annotated_source)
+
+    def fake_run(cmd, capture_output=False, text=False):
+        outputs.append(cmd[-1])
+        return types.SimpleNamespace(returncode=0, stderr=b"", stdout="")
+
+    monkeypatch.setattr(utils_module.subprocess, "run", fake_run)
+
+    output = utils_module.trim_video_with_ffmpeg(annotated_source, 12)
+
+    assert output == outputs[0]
+    assert output.endswith(".mp4")
+    assert "&type=" not in Path(output).name

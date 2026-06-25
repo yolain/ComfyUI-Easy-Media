@@ -15,7 +15,7 @@ from comfy_api.latest import Input, InputImpl, Types, io, ui
 from comfy.utils import ProgressBar
 from server import PromptServer
 
-from ..utils.video import extract_merge_spec, ffmpeg_concat, ffmpeg_concat_with_fade, ffmpeg_extract_audio, ffmpeg_replace_audio, ffmpeg_supports_xfade, normalize_video_images, tensor_crossfade_audio, tensor_crossfade_images, validate_merge_compatibility
+from ..utils.video import extract_merge_spec, ffmpeg_concat, ffmpeg_concat_with_fade, ffmpeg_extract_audio, ffmpeg_replace_audio, ffmpeg_supports_xfade, normalize_video_images, tensor_crossfade_audio, tensor_crossfade_images, trim_video_with_ffmpeg, validate_merge_compatibility
 
 logger = logging.getLogger(__name__)
 
@@ -586,6 +586,27 @@ def _log_ffmpeg_unavailable_hint(tag: str, need_xfade: bool = False) -> None:
         )
 
 
+def _trim_video_to_frame_count(
+    source: str,
+    frame_count: int,
+    tag: str,
+    progress: "callable[[str], None] | None" = None,
+) -> str:
+    """Trim source when requested, raising if the requested trim cannot be performed."""
+    if frame_count <= 0:
+        return source
+    try:
+        trimmed = trim_video_with_ffmpeg(source, frame_count, progress_callback=progress)
+    except RuntimeError as exc:
+        raise RuntimeError(f"{tag} failed to trim merged video to {frame_count} frames.") from exc
+    if trimmed is None:
+        raise RuntimeError(
+            f"{tag} cannot trim to {frame_count} frames. "
+            "Install FFmpeg/FFprobe and ensure the merged video has a detectable frame rate."
+        )
+    return trimmed
+
+
 def _resolve_video_path(raw: str) -> str | _io.BytesIO:
     """Resolve a raw path string to a local file path or BytesIO buffer.
 
@@ -661,6 +682,13 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
                         "Accepts ComfyUI output/temp filenames, absolute paths, or URLs."
                     ),
                 ),
+                io.Int.Input(
+                    "frame_count",
+                    default=-1,
+                    min=-1,
+                    step=1,
+                    tooltip="Maximum frames to keep after merging. Use -1 to keep all frames.",
+                ),
                 # io.Combo.Input("transition", default="None", options=['None', 'Fade'], tooltip="Transition type to apply between clips."),
                 # io.Float.Input(
                 #     "transition_duration",
@@ -678,7 +706,7 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, paths: str,) -> io.NodeOutput:
+    def execute(cls, paths: str, frame_count: int = -1) -> io.NodeOutput:
         raw_paths = _parse_path_list(paths)
         if len(raw_paths) == 0:
             raise ValueError("At least 1 video path is required.")
@@ -705,6 +733,12 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
                 os.write(tmp_fd, source.read())
                 os.close(tmp_fd)
                 source = tmp_path
+            source = _trim_video_to_frame_count(
+                source,
+                frame_count,
+                "[EasyMergeVideosFromPaths]",
+                progress=lambda msg: _progress(1, msg),
+            )
             merged_video = InputImpl.VideoFromFile(source)
             _progress(2, "Done — loaded single video")
             return io.NodeOutput(merged_video)
@@ -755,6 +789,12 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
                         logger.info(
                             "%s backend=ffmpeg-xfade, transition=fade(%.2fs) ✓", tag, fade_duration
                         )
+                        tmp_path = _trim_video_to_frame_count(
+                            tmp_path,
+                            frame_count,
+                            tag,
+                            progress=lambda msg: _progress(total + 1, msg),
+                        )
                         merged_video = InputImpl.VideoFromFile(tmp_path)
                         _progress(total + 2, f"Done — merged {total} clips with fade")
                         return io.NodeOutput(merged_video)
@@ -774,6 +814,12 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
                 )
                 if success:
                     logger.info("%s backend=ffmpeg-concat (stream copy), transition=none ✓", tag)
+                    tmp_path = _trim_video_to_frame_count(
+                        tmp_path,
+                        frame_count,
+                        tag,
+                        progress=lambda msg: _progress(total + 1, msg),
+                    )
                     merged_video = InputImpl.VideoFromFile(tmp_path)
                     _progress(total + 2, f"Done — merged {total} clips")
                     return io.NodeOutput(merged_video)
