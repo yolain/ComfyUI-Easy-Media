@@ -35,7 +35,7 @@ function drawWaveform(canvas: HTMLCanvasElement, peaks: Float32Array, startRatio
   const step = sliceLength / w
 
   ctx.clearRect(0, 0, w, h)
-  ctx.fillStyle = getComputedStyle(canvas).getPropertyValue('--multitrack-waveform').trim() || '#1D7456'
+  ctx.fillStyle = '#1D7456'
 
   for (let x = 0; x < w; x++) {
     const idx = Math.min(sliceStart + Math.floor(x * step), sliceEnd - 1)
