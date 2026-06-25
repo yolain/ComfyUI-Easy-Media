@@ -30,19 +30,39 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 安装完成后，打开 ComfyUI，在左侧侧边栏的 `Templates（模板）` 面板中即可找到内置的示例工作流，查找 `ComfyUI-Easy-Media` 相关条目。
 
-
-## 核心功能
+## ✨ 核心功能
 
 ### 多轨编辑器 MultiTrack Editor
 
 ![multiTrackEditor](https://github.com/user-attachments/assets/fc9ebcc6-d5e6-4f43-9825-6432c17d340d)
 
+#### 轨道
+
 | 轨道类型    | 功能描述                                           |
 |-------------|----------------------------------------------------|
 | 任务轨道    | 支持t2v、i2v、r2v、v2v等多种任务类型定义                |
-| 视频轨道    | 导入并管理视频片段，支持多段视频拼接、智能分割           |
+| 视频轨道    | 导入并管理视频片段，支持多段视频拼接、智能分割镜头           |
 | 音频轨道    | 导入并管理音频片段，支持多段音频拼接                   |
 | 字幕轨道    | 暂未开发            |
+
+- 任务片段是该节点的核心，工作流可根据任务轨道中片段的数量，设计自动循环执行
+- 视频轨道添加视频片段时也将自动添加对应时长的任务片段
+- 选中任务片段可设置图片、任务类型、用户提示词/系统提示词（根据任务类型会有默认值也可以自行编写）
+- 在 `多轨信息输出` 节点将输出视频的宽高尺寸、视频总帧数、帧率、任务数量
+- 在 `多轨任务输出` 节点将输出对应片段任务的 用户提示词&系统提示词，用户可自行抉择是否外接LLM节点以进行提示词扩写或结合片段中图像进行反推
+
+
+#### 适用场景
+
+| 场景 | 描述 | 条件 
+|------|------|------|
+| 视频生成 | wan/bernini/ltx t2v、i2v、r2v | 任务轨道有片段即可 
+| 视频编辑 | bernini v2v、bernini vi2v、wan animate、ltx video replace、ltx iclora edit/inpaint/outpaint | 视频轨道片段及任务轨道片段必要
+| 视频参考 | wan scail2、wan animate、ltx iclora guide | 视频轨道片段及任务轨道片段必要
+| 视频配音 | wan infinititalk、longcat avatar、ltx ai2v | 任务轨道片段和音频轨道片段必要
+| 视频字幕 | 暂未开发 | -
+
+- 仅统计了热门开源模型常见的生成类型，理论上任何视频模型流程都可以通过多轨编辑器作为前置处理工具
 
 
 ### 媒体时间线编辑器 Timeline Editor
@@ -84,6 +104,8 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 ### 从路径合并视频 MergeVideoFromPath
 
 > 该节点可以从指定路径加载视频文件，并将它们合并成一个视频输出。
+
+`截取帧数` 默认值为 `-1`，表示保留合并后的全部帧；当设置为大于 `0` 的数值时，节点会按合并后视频帧率换算为时长，并使用 FFmpeg 截取得到最终视频。
 
 **推荐安装 FFmpeg** 以获得最佳性能和转场质量：
 

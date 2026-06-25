@@ -9,6 +9,7 @@
 - **MultiTrack Editor**: Add initial version of multitrack editor with supporting nodes, supporting multitrack video, audio editing, segment editing and preview
 - **Media Selector**: Add directory store cache for media selector to solve the problem of frequent fetching of list data from backend
 - **Split Image**: Support image list or image batch type image splitting, applicable to `Bernini multi-reference` scenario
+- **Merge Videos From Paths**: Add `frame_count` to support clipping
 
 ---
 

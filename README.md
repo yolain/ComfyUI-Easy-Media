@@ -37,6 +37,33 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 
 ![multiTrackEditor](https://github.com/user-attachments/assets/8d4dd7a0-361a-4e19-814a-f19d9b2f31cb)
 
+#### Tracks
+
+| Track Type | Description |
+| - | - |
+| Task Track | Supports multiple task type definitions such as t2v, i2v, r2v, v2v |
+| Video Track | Import and manage video clips, supporting multi-segment video stitching and intelligent segmentation |
+| Audio Track | Import and manage audio clips, supporting multi-segment audio stitching |
+| Subtitle Track | Not yet developed |
+
+- Task segments are the core of this node; workflows can be designed for automatic looping based on the number of task track segments
+- When adding video clips to the video track, corresponding task segments will be automatically added with matching duration
+- Selecting a task segment allows you to set image, task type, and user prompt / system prompt (defaults exist based on task type, or you can write your own)
+- The MultiTrack Info Output node outputs video dimensions, total frame count, frame rate, and task count
+- The MultiTrack Task Output node outputs user prompt & system prompt for corresponding segments; users can decide whether to connect LLM nodes for prompt expansion or use images in segments for reverse inference
+
+#### Use Cases
+
+| Scenario | Description | Requirements |
+|----------|-------------|-------------|
+| Video Generation | wan/bernini/ltx t2v, i2v, r2v | Task track segments only |
+| Video Editing | bernini v2v, bernini vi2v, wan animate, ltx video replace, ltx iclora edit/inpaint/outpaint | Video track segments + task track segments |
+| Video Reference | wan scail2, wan animate, ltx iclora guide | Video track segments + task track segments |
+| Video Dubbing | wan infinititalk, longcat avatar, ltx ai2v | Task track segments + audio track segments |
+| Video Subtitles | Not yet developed | - |
+
+- Only the most common open-source model generation types are listed; theoretically any video model pipeline can use the multi-track editor as a preprocessing tool
+
 
 ### Timeline Editor
 
@@ -60,10 +87,10 @@ The editor can be used for single video segment generation (e.g., combined with 
 **Prompt Example**:
 
 ```text
-@image1 @audio1 镜头晃动，老者正望着光亮处神色慌张地喊话：别学那玩意，别连线啊。[0-120]|@image2 @audio2 镜头缓慢推进，男人正在操作电脑，说道：有意思，这ComfyUI能火，我指定得学它 [121-296]
+@image1 @audio1 镜头晃动，老者正望着光亮处神色慌张地喊话：别学那玩意，别连线啊。[0-120]|@image2 @audio2 镜头缓慢推进，男人正在操作电脑，说道：有意思，这ComfyUI能火，我指定得学它 [121-241]
 ```
 
-- `[0-120]` and `[121-296]` represent the start and end frame ranges of segments on the timeline, in frames. If no time range is specified, the total duration set on the original timeline editor will be equally distributed.
+- `[0-120]` and `[121-241]` represent the start and end frame ranges of segments on the timeline, in frames. If no time range is specified, the total duration set on the original timeline editor will be equally distributed.
 - Segments are separated by `|`, representing different time periods. Each segment can contain `media placeholder`, `text prompt`, and `start-end frame range`.
 - Image injection: Supports `@image{n}`, `@img{n}`, `@图{n}`, `@图片{n}`, `@图像{n}` as placeholders to inject image resources, where `{n}` represents the n-th image in the image list (starting from 1). For example, `@image1` will inject the first image from the image list.
 - Audio injection: Supports `@audio{n}`, `@音频{n}` as placeholders to inject audio resources, where `{n}` represents the n-th audio in the audio list (starting from 1). For example, `@audio1` will inject the first audio from the audio list.
@@ -82,6 +109,8 @@ The editor can be used for single video segment generation (e.g., combined with 
 ### Merge Videos From Paths
 
 > Load video files from a list of file paths (or URLs) and concatenate them into a single video output.
+
+The `trim_frame_count` parameter defaults to `-1`, which keeps all frames of the merged video. When set to a value greater than `0`, the node calculates the duration based on the merged video's frame rate and uses FFmpeg to trim the final video.
 
 **Installing FFmpeg** is recommended for best performance and transition quality:
 
@@ -131,10 +160,19 @@ bun run build:release
 | easy makeVideoList | Combine multiple video inputs into a video list |
 | easy imageIndexesToIntList | Convert comma-separated image index string to integer list |
 | easy saveVideo | Save images and optional audio as video file |
-| easy videoToAudio | Extract audio from a VIDEO input |
+| easy getAudioFromVideo | Extract audio from a VIDEO input |
 | easy mergeVideos | Concatenate multiple compatible VIDEO segments |
-| easy mergeVideosFromPaths | Load and concatenate videos from file path list |
+| easy mergeVideosFromPaths | Load and concatenate videos from file path list, optionally trimming the merged output by frame count |
+| easy multiTrackEditor | Multi-track editor for editing and transferring multi-track media data |
+| easy multiTrackInfoOutput | Output multi-track dimensions, duration, frame rate, and task count |
+| easy multiTrackTaskOutput | Output multi-track task segment prompts and task-ranged media |
+| easy makeRefsCompositeBySam3 | Detect subject in prompt using SAM3 and composite reference images onto canvas |
+| easy splitImages | Split an image list or batch into multiple single-image outputs |
+| easy matchLine | Return zero-based index of the first line containing matching text |
 | LTXVAddGuidesFromBatchIndexes | Add guide images from batch images to specified frame indexes of latent variables |
+| LTXVMakeRefVideo | Expand a reference image batch into an IC-LoRA reference video |
+| BerniniModelPatch | Add Bernini context latent support for Wan model |
+| BerniniConditioning | Bernini context conditioning for video/image condition injection |
 
 ## Credits
 
