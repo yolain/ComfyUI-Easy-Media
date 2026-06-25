@@ -12,17 +12,21 @@ from ..utils import (
     audio_db_to_gain,
     audio_is_muted,
     audio_volume_db,
+    build_multitrack_data_from_prompt_override,
     equirectangular_to_perspective,
     frames_to_seconds,
     load_audio_waveform,
     load_image_tensor,
     merge_video_track_with_ffmpeg,
+    parse_override_segments,
+    prompt_override_has_frame_ranges,
+    prompt_override_has_value,
     resize_image,
     resize_video_with_ffmpeg,
     resolve_video_path,
     silence,
     trim_audio,
-) 
+)
 from ..utils.prompt_builder import build_llm_prompt, build_prompt_request
 
 
@@ -109,78 +113,8 @@ PROMPT_FORMAT_OPTIONS = ["default", "promptRelay"]
 # ---------------------------------------------------------------------------
 # prompt_override parsing helpers
 # ---------------------------------------------------------------------------
-
-_IMAGE_REF_RE = re.compile(r'@(?:图像|图片|图|image|img)(\d+)', re.IGNORECASE)
-_AUDIO_REF_RE = re.compile(r'@(?:audio|auido|音频)(\d+)', re.IGNORECASE)
-_FRAME_RANGE_RE = re.compile(
-    r'\[(\d+(?:\.\d+)?)(s?)-(\d+(?:\.\d+)?)(s?)(?:,(\w+))?\]',
-    re.IGNORECASE,
-)
 _SLOT_ONE_BASED_INDEX_RE = re.compile(r'(?:image|audio|video)(\d+)$', re.IGNORECASE)
-
-
-def _seconds_to_override_frame(seconds: float, frame_rate: int) -> int:
-    if seconds <= 0:
-        return 0
-    return math.ceil((seconds * frame_rate) / 4) * 4 + 1
-
-
-def _parse_override_segments(prompt_override, total_length: int = 121, frame_rate: int = 24) -> list[dict]:
-    """Parse prompt_override (str with | separators, or list) into segment dicts."""
-    if isinstance(prompt_override, list):
-        parts = [
-            part.strip()
-            for item in prompt_override
-            for part in str(item).split('|')
-            if part.strip()
-        ]
-    else:
-        parts = [p.strip() for p in str(prompt_override).split('|') if p.strip()]
-
-    segments: list[dict] = []
-    safe_total_length = max(1, int(total_length))
-    safe_frame_rate = max(1, int(frame_rate))
-    part_count = max(1, len(parts))
-    for part_idx, part in enumerate(parts):
-        m = _FRAME_RANGE_RE.search(part)
-        if m:
-            is_seconds_range = bool(m.group(2) or m.group(4))
-            if is_seconds_range:
-                start_seconds = float(m.group(1))
-                end_seconds = float(m.group(3))
-                start_frame = _seconds_to_override_frame(start_seconds, safe_frame_rate)
-                end_frame = max(
-                    start_frame,
-                    _seconds_to_override_frame(end_seconds, safe_frame_rate) - 1,
-                )
-            else:
-                start_frame = int(m.group(1))
-                end_frame = int(m.group(3))
-            seg_type = (m.group(5) or 'flf').lower()
-        else:
-            start_frame = round(part_idx * safe_total_length / part_count)
-            end_frame = round((part_idx + 1) * safe_total_length / part_count) - 1
-            seg_type = 'flf'
-        if seg_type not in ('flf', 'fmlf', 'ref'):
-            seg_type = 'flf'
-
-        image_indices = [int(r.group(1)) for r in _IMAGE_REF_RE.finditer(part)]
-        audio_indices = [int(r.group(1)) for r in _AUDIO_REF_RE.finditer(part)]
-
-        clean = _IMAGE_REF_RE.sub('', part)
-        clean = _AUDIO_REF_RE.sub('', clean)
-        clean = _FRAME_RANGE_RE.sub('', clean)
-        clean = clean.strip()
-
-        segments.append({
-            'start_frame': start_frame,
-            'end_frame': end_frame,
-            'type': seg_type,
-            'text': clean,
-            'image_indices': image_indices,
-            'audio_indices': audio_indices,
-        })
-    return segments
+_parse_override_segments = parse_override_segments
 
 
 def _is_valid_audio(audio) -> bool:
@@ -1058,8 +992,8 @@ class TimelineEditor(io.ComfyNode):
             if isinstance(inner, list):
                 audio_input = inner
 
-        # Segment parsing override: only needs prompt_override
-        use_prompt_override = prompt_override is not None
+        # Segment parsing override: only needs non-empty prompt_override
+        use_prompt_override = prompt_override_has_value(prompt_override)
 
         # Audio override: prompt_override + audio (image is NOT required)
         audio_override = (
@@ -1089,7 +1023,7 @@ class TimelineEditor(io.ComfyNode):
                 total_length=total_length,
                 frame_rate=frame_rate,
             )
-            if any(_FRAME_RANGE_RE.search(str(part)) for part in str(prompt_override).split('|')):
+            if prompt_override_has_frame_ranges(prompt_override):
                 total_length = max((s['end_frame'] for s in override_segs), default=120) + 1
 
             # Build maintain_segs — images stored as slot refs with _tensor_idx
@@ -1591,8 +1525,12 @@ class MultiTrackEditor(io.ComfyNode):
             track_data = track_data[0]
 
         prompt_override = kwargs.get('prompt_override')
+        if isinstance(prompt_override, list) and len(prompt_override) == 1:
+            prompt_override = prompt_override[0]
 
         data = _parse_track_data(track_data)
+        if prompt_override_has_value(prompt_override):
+            data = build_multitrack_data_from_prompt_override(data, prompt_override)
         tracks_info, images_out, audio_out, video_out = _build_tracks_info_and_media_outputs(
             data,
             kwargs.get("image"),
@@ -1763,6 +1701,9 @@ def _ranges_overlap(start: int, end: int, segment: dict) -> bool:
 
 def _multitrack_task_type(task: dict, image_count: int, has_video: bool) -> str:
     content = task.get("content", {})
+    explicit_task_type = content.get("task_type") if isinstance(content, dict) else None
+    if isinstance(explicit_task_type, str) and explicit_task_type.strip():
+        return explicit_task_type.strip()
     mode = content.get("task_mode", "default") if isinstance(content, dict) else "default"
     if mode == "ref":
         return "rv2v" if has_video else "r2v"
@@ -2211,4 +2152,3 @@ class MatchLine(io.ComfyNode):
             -1,
         )
         return io.NodeOutput(line_index)
-

@@ -177,6 +177,15 @@ def _load_basic_module():
     utils_module.audio_db_to_gain = lambda value: 10 ** (float(value) / 20)
     utils_module.audio_is_muted = lambda value: bool(value.get("muted", False))
     utils_module.audio_volume_db = lambda value: float(value.get("volume_db", 0.0))
+    prompt_override_path = Path(__file__).parents[1] / "utils" / "prompt_override.py"
+    prompt_override_spec = importlib.util.spec_from_file_location(
+        "easy_media.utils.prompt_override",
+        prompt_override_path,
+    )
+    prompt_override_module = importlib.util.module_from_spec(prompt_override_spec)
+    prompt_override_spec.loader.exec_module(prompt_override_module)
+    for name in prompt_override_module.__all__:
+        setattr(utils_module, name, getattr(prompt_override_module, name))
 
     prompt_builder_module = types.ModuleType("easy_media.utils.prompt_builder")
     prompt_builder_module.calls = []
@@ -200,6 +209,7 @@ def _load_basic_module():
         "easy_media.nodes": nodes_package,
         "easy_media.utils": utils_module,
         "easy_media.utils.prompt_builder": prompt_builder_module,
+        "easy_media.utils.prompt_override": prompt_override_module,
     })
 
     path = Path(__file__).parents[1] / "nodes" / "basic.py"
@@ -423,6 +433,129 @@ def test_multitrack_editor_outputs_task_images_as_unresized_list_items():
         for image in segment["content"]["images"]
     ]
     assert [image["media_index"] for image in task_images] == [0, 1]
+
+
+def test_timeline_editor_empty_prompt_override_uses_original_timeline_data():
+    module = _load_basic_module()
+    result = module.TimelineEditor.execute(
+        {"resolution": "1280 x 720 (16:9)", "resize_method": "stretch"},
+        "None",
+        {
+            "total_length": 8,
+            "frame_rate": 2,
+            "tracks": [{
+                "type": "maintain",
+                "segments": [{
+                    "start_frame": 1,
+                    "end_frame": 4,
+                    "content": {"text": "original prompt", "images": [], "type": "flf"},
+                }],
+            }],
+        },
+        prompt_override="",
+    )
+
+    timeline_info = result.values[0]
+    assert timeline_info["segments"] == [{
+        "start_frame": 1,
+        "end_frame": 4,
+        "prompt": "original prompt",
+        "images": [],
+    }]
+
+
+def test_multitrack_editor_prompt_override_builds_slot_audio_and_video_tracks():
+    module = _load_basic_module()
+    image = torch.zeros(1, 10, 20, 3)
+    audio_one = {"waveform": torch.ones(1, 1, 4), "sample_rate": 2}
+    audio_two = {"waveform": torch.full((1, 1, 4), 2.0), "sample_rate": 2}
+    video_one = _FakeVideo(_VideoComponents(torch.ones(2, 2, 2, 3), None, Fraction(2)))
+    video_two = _FakeVideo(_VideoComponents(torch.full((2, 2, 2, 3), 2.0), None, Fraction(2)))
+
+    result = module.MultiTrackEditor.execute(
+        {"resolution": "width x height (auto)", "resize_method": "stretch"},
+        "None",
+        {"total_length": 4, "frame_rate": 2, "tracks": [{"id": "old", "type": "task", "segments": []}]},
+        prompt_override="@image1 @audio2 @视频2 first [0-1,ref]|@video1 second [2-3]",
+        image=[image],
+        audio=[audio_one, audio_two],
+        video=[video_one, video_two],
+    )
+
+    tracks_info, images, audio, videos = result.values
+    assert len(images) == 1
+    assert torch.equal(images[0], image)
+    assert [track["type"] for track in tracks_info["tracks"]] == ["task", "video", "audio"]
+
+    task_track = tracks_info["tracks"][0]
+    assert [segment["content"]["text"] for segment in task_track["segments"]] == ["first", "second"]
+    assert task_track["segments"][0]["content"]["task_mode"] == "ref"
+    assert task_track["segments"][0]["content"]["images"][0]["slot_name"] == "image1"
+    assert task_track["segments"][0]["content"]["images"][0]["media_index"] == 0
+
+    video_track = tracks_info["tracks"][1]
+    assert [segment["content"]["slot_name"] for segment in video_track["segments"]] == ["video2", "video1"]
+    assert len(videos) == 1
+    frames = videos[0].get_components().images
+    assert [float(frames[index].mean()) for index in range(4)] == [2.0, 2.0, 1.0, 1.0]
+
+    audio_track = tracks_info["tracks"][2]
+    assert audio_track["segments"][0]["content"]["slot_name"] == "audio2"
+    assert len(audio) == 1
+    assert audio[0]["waveform"].flatten().tolist() == [2.0, 2.0, 0.0, 0.0]
+
+
+def test_multitrack_editor_prompt_override_preserves_explicit_task_type():
+    module = _load_basic_module()
+    image = torch.zeros(1, 10, 20, 3)
+
+    editor_result = module.MultiTrackEditor.execute(
+        {"resolution": "1280 x 720 (16:9)", "resize_method": "stretch"},
+        "None",
+        {"total_length": 50, "frame_rate": 24, "tracks": []},
+        prompt_override="@image1 text only generation [0-49,t2v]",
+        image=[image],
+    )
+    tracks_info, images, _audio, _videos = editor_result.values
+    task_content = tracks_info["tracks"][0]["segments"][0]["content"]
+
+    task_result = module.MultiTrackTaskOutput.execute(
+        [tracks_info],
+        [images],
+        [],
+        [],
+        [0],
+        ["default"],
+    )
+
+    assert task_content["task_type"] == "t2v"
+    assert task_content["task_mode"] == "default"
+    assert task_result.values[2] == "t2v"
+
+
+def test_multitrack_editor_prompt_override_outputs_custom_task_type_string():
+    module = _load_basic_module()
+
+    editor_result = module.MultiTrackEditor.execute(
+        {"resolution": "1280 x 720 (16:9)", "resize_method": "stretch"},
+        "None",
+        {"total_length": 50, "frame_rate": 24, "tracks": []},
+        prompt_override="custom model route [0-49,wan-2.2-fun]",
+    )
+    tracks_info, images, _audio, _videos = editor_result.values
+    task_content = tracks_info["tracks"][0]["segments"][0]["content"]
+
+    task_result = module.MultiTrackTaskOutput.execute(
+        [tracks_info],
+        [images],
+        [],
+        [],
+        [0],
+        ["default"],
+    )
+
+    assert task_content["task_type"] == "wan-2.2-fun"
+    assert task_result.values[2] == "wan-2.2-fun"
 
 
 def test_multitrack_editor_projects_panorama_images_to_video_dimensions_for_task_output():

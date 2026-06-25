@@ -100,6 +100,17 @@ def _load_basic_module(monkeypatch):
     utils.resolve_video_path = lambda *args, **kwargs: None
     utils.silence = lambda *args, **kwargs: None
     utils.trim_audio = lambda audio, *args, **kwargs: audio
+    prompt_override_path = Path(__file__).resolve().parents[1] / "utils" / "prompt_override.py"
+    prompt_override_spec = importlib.util.spec_from_file_location(
+        "easy_media.utils.prompt_override",
+        prompt_override_path,
+    )
+    assert prompt_override_spec is not None
+    prompt_override = importlib.util.module_from_spec(prompt_override_spec)
+    assert prompt_override_spec.loader is not None
+    prompt_override_spec.loader.exec_module(prompt_override)
+    for name in prompt_override.__all__:
+        setattr(utils, name, getattr(prompt_override, name))
 
     monkeypatch.setitem(sys.modules, "comfy_api", comfy_api)
     monkeypatch.setitem(sys.modules, "comfy_api.latest", latest)
@@ -116,6 +127,7 @@ def _load_basic_module(monkeypatch):
     prompt_builder.build_llm_prompt = lambda *args, **kwargs: ""
     prompt_builder.build_prompt_request = lambda *args, **kwargs: ("", "", False)
     monkeypatch.setitem(sys.modules, "easy_media.utils.prompt_builder", prompt_builder)
+    monkeypatch.setitem(sys.modules, "easy_media.utils.prompt_override", prompt_override)
 
     module_path = Path(__file__).resolve().parents[1] / "nodes" / "basic.py"
     spec = importlib.util.spec_from_file_location("easy_media.nodes.basic", module_path)
@@ -131,7 +143,7 @@ def test_parse_override_segments_preserves_frame_ranges(monkeypatch):
     basic = _load_basic_module(monkeypatch)
 
     segments = basic._parse_override_segments(
-        "@image1 first [0-81]|@audio2 second [82-161,ref]",
+        "@image1 first [0-81]|@audio2 @视频3 second [82-161,ref]",
         total_length=200,
         frame_rate=16,
     )
@@ -144,6 +156,7 @@ def test_parse_override_segments_preserves_frame_ranges(monkeypatch):
     assert segments[1]["end_frame"] == 161
     assert segments[1]["type"] == "ref"
     assert segments[1]["audio_indices"] == [2]
+    assert segments[1]["video_indices"] == [3]
 
 
 def test_parse_override_segments_accepts_second_ranges(monkeypatch):
@@ -166,3 +179,18 @@ def test_parse_override_segments_accepts_second_ranges(monkeypatch):
     assert segments[1]["audio_indices"] == [2]
     assert segments[2]["start_frame"] == 241
     assert segments[2]["end_frame"] == 360
+
+
+def test_parse_override_segments_defaults_to_timeline_types(monkeypatch):
+    basic = _load_basic_module(monkeypatch)
+
+    segments = basic._parse_override_segments(
+        "plain prompt [0-49,t2v]",
+        total_length=100,
+        frame_rate=24,
+    )
+
+    assert segments[0]["start_frame"] == 0
+    assert segments[0]["end_frame"] == 49
+    assert segments[0]["type"] == "flf"
+    assert segments[0]["text"] == "plain prompt"
