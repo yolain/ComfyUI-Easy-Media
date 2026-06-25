@@ -1,78 +1,42 @@
-# ComfyUI Easy Media
-
 <div align="center">
-<a href="./README.md"><img src="https://img.shields.io/badge/🇬🇧English-0b8cf5"></a>
-<a href="./README_CN.md"><img src="https://img.shields.io/badge/🇨🇳中文简体-e9e9e9"></a>
-<br>
-</div>
 
-![Poster](https://github.com/user-attachments/assets/6c76433e-1893-4709-8738-acbed4438757)
+<img src="https://github.com/user-attachments/assets/fb602a3c-4a2a-48da-8c44-d36417f4633b" height="120">
+<h1>ComfyUI-Easy-Media</h1>
+
+[中文文档](./README_CN.md) | [Changelog](./CHANGELOG.md)
 
 A ComfyUI custom node package for streamlined media loading and video pipeline assembly. Provides intuitive nodes that simplify media resource editing and loading with user-friendly parameters, making it easier to build and configure video processing workflows.
 
+[![][github-release-shield]][github-release-link]
+[![][github-stars-shield]][github-stars-link]
+[![][github-forks-shield]][github-forks-link]
+[![][github-license-shield]][github-license-link]
 
-## Installation
+<img src="https://github.com/user-attachments/assets/fd9638fc-7dee-4670-9b74-d7247ccea3dc" style="width:100%">
+</div>
+
+## 📦 Installation
+
+> [!IMPORTANT]
+> It is strongly recommended that before installing this node package, you first ensure that `FFmpeg` has already been installed in your system environment
 
 ```bash
 cd Your_ComfyUI_Path/custom_nodes
 git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 ```
 
-## Example Workflows
+## ✏️ Example Workflows
 
 After installing, open ComfyUI and find the bundled example workflows in the **Templates** panel on the left sidebar — look for entries under **ComfyUI-Easy-Media**.
 
-## Changelog
 
-### v1.0.5
-
-- **[Split Multi-Image]** Added support for splitting images from image list or image batch types, applicable to `Bernini multi-reference` scenarios
-- **[Media Selector]** Added directory store cache for media selector to solve the issue of frequently fetching list data from the backend
-- **[MultiTrack Editor]** Added initial version of multi-track editor with supporting nodes, supporting multi-track video, audio editing, clip editing and preview, providing more powerful media editing features
-
-### v1.0.4
-
-- **[SaveVideo]** Added `hide&save` option to hide the output video node while saving the video
-- **[Timeline Editor: App Mode]** Added time range parsing support like `[0-5s]` for `prompt_override`
-- **[Timeline Editor: UI Mode]** Added drag-and-drop image import for sub-tracks
-- **[Timeline Editor: UI Mode]** Fixed issue where modifying clip duration in main track should proportionally adjust sub-track images
-- **[Timeline Editor: UI Mode]** Fixed audio preview display error after importing audio subdirectory
-
-### v1.0.3
-
-- **[Bernini Temporary Solution]** Added `Bernini conditioning` and `Bernini Model Patch` nodes, providing a temporary solution before ComfyUI officially supports Bernini
-- **[Timeline Editor: UI Mode]** Fixed an issue where `node height` would reset to the default value when `canvas refresh` or `resolution option` was switched
-- **[Timeline Editor: UI Mode]** Fixed an issue where clip content could not be edited in some cases when using `Overall Edit` prompt mode
-- **[Timeline Editor: UI Mode]** Fixed the issue where nodes and track heights didn't adapt automatically; added `Clone Clip` to the right-click menu for better compatibility with wan2's `berinini` and `LTX2.3 R2V`
-- **[LTXV Reference Video]** New node for multi-reference LoRA [model_url](https://huggingface.co/LiconStudio/LTX-2.3-Multiple-Subject-Reference)
-
-<details>
-<summary><b>v1.0.2</b></summary>
-
-- **[Timeline Editor: App Mode]** Fixed an issue where, if `prompt_override` was not written strictly according to the prompt format, the default duration was not evenly distributed across clips
-- **[Timeline Editor: App Mode]** Fixed an issue where filling the entire timeline with a single audio clip required filtering out empty audio before making a determination
-- **[Timeline Editor: UI Mode]** Fixed an issue where the output resources and sorting were incorrect when a single clip contained different formats
-</details>
-
-<details>
-<summary><b>v1.0.1</b></summary>
-
-- **[Workflow]** Added wan2.2 loop segment example workflow
-- **[Frontend Optimization]** Added + button to insert segments before or after the selected segment, and fixed some known bugs
-- **[Bug Fix]** Fixed incorrect image import paths from output and subdirectories, which caused images and outputs to be filtered out in the editor
-</details>
-
-<details>
-<summary><b>v1.0.0</b></summary>
-
-- **Important Changes** `Duration and frame rate` input only takes effect after `blur` (i.e., press Enter or click outside to confirm changes, reducing errors)
-- **Important Changes** Duration input step changes: `4` when format is frames, `1` when format is seconds
-- **Important Changes** Segment duration editing no longer affects other segments; if the total exceeds the timeline length, the timeline will auto-expand to fit all segments
-- The automatic height adjustment of tracks in the Timeline Editor has been adjusted; users must now double-click image and audio clips to open the media selection interface, thereby preventing frequent pop-ups caused by accidental operations.
-- Added dynamic parameter injection support for prompt template format + media input using the timeline editor
-</details>
 
 ## Features
+
+### MultiTrack Editor
+
+![multiTrackEditor](https://github.com/user-attachments/assets/8d4dd7a0-361a-4e19-814a-f19d9b2f31cb)
+
 
 ### Timeline Editor
 
@@ -133,10 +97,6 @@ brew install ffmpeg
 sudo apt install ffmpeg
 ```
 
-### MultiTrack Editor
-
-> Planned...
-
 
 ## Development & Testing
 
@@ -176,9 +136,24 @@ bun run build:release
 | easy mergeVideosFromPaths | Load and concatenate videos from file path list |
 | LTXVAddGuidesFromBatchIndexes | Add guide images from batch images to specified frame indexes of latent variables |
 
+## Credits
+
+- [OmniShotCut](https://github.com/UVA-Computer-Vision-Lab/OmniShotCut)
+
 ## Source of Inspiration
 
 - [WhatDreamsCost-ComfyUI](https://github.com/WhatDreamsCost/WhatDreamsCost-ComfyUI)
 - [ComfyUI-PromptRelay](https://github.com/kijai/ComfyUI-PromptRelay)
 - [ComfyUI-Licon-MSR](https://github.com/liconstudio/ComfyUI-Licon-MSR)
 - [ComfyUI-RH-Bernini](https://github.com/RH-RunningHub/ComfyUI-RH-Bernini)
+
+
+<!-- LINK GROUP -->
+[github-forks-link]: https://github.com/yolain/ComfyUI-Easy-Media/network/members
+[github-forks-shield]: https://img.shields.io/github/forks/yolain/ComfyUI-Easy-Media?color=8ae8ff&labelColor=black&style=flat-square
+[github-license-link]: https://github.com/yolain/ComfyUI-Easy-Media/blob/master/LICENSE
+[github-license-shield]: https://img.shields.io/github/license/yolain/ComfyUI-Easy-Media?color=white&labelColor=black&style=flat-square
+[github-release-link]: https://github.com/yolain/ComfyUI-Easy-Media/releases
+[github-release-shield]: https://img.shields.io/github/v/release/yolain/ComfyUI-Easy-Media?color=f2ff59&labelColor=black&style=flat-square
+[github-stars-link]: https://github.com/yolain/ComfyUI-Easy-Media/network/stargazers
+[github-stars-shield]: https://img.shields.io/github/stars/yolain/ComfyUI-Easy-Media?color=ffcb47&labelColor=black&style=flat-square
