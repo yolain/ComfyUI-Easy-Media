@@ -31,9 +31,9 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 
 
 
-## Features
+## ✨ Features
 
-### MultiTrack Editor
+### 🎞️ MultiTrack Editor
 
 ![multiTrackEditor](https://github.com/user-attachments/assets/8d4dd7a0-361a-4e19-814a-f19d9b2f31cb)
 
@@ -65,7 +65,7 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 - Only the most common open-source model generation types are listed; theoretically any video model pipeline can use the multi-track editor as a preprocessing tool
 
 
-### Timeline Editor
+### 🎞️ Timeline Editor
 
 > I believe the media timeline editor component is better suited as a standalone module node for greater versatility. This node focuses on media import/editing and timeline-related functionality, providing better support for video pipeline creation across different models.<br>
 The editor can be used for single video segment generation (e.g., combined with PromptRelay), as well as segmented generation. Each segment can be combined with different model video pipelines for text-only generation, single image generation, first/last frame generation, multi-frame generation, reference-based generation, etc.
@@ -101,12 +101,12 @@ The editor can be used for single video segment generation (e.g., combined with 
 
 ![dynamicInput2](https://github.com/user-attachments/assets/6dd84d52-1fd3-4b27-a890-2a0e22cecda4)
 
-### SaveVideo
+### 🎞️ SaveVideo
 
 ![SaveVideo](https://github.com/user-attachments/assets/30e2dcc3-9ed3-4d5f-bb15-69e50c3e8fca)
 > Integrated and enhanced the video saving node from the SaveVideoRGBA node package. Supports video export with customizable output path, filename prefix, frame rate, and other parameters.
 
-### Merge Videos From Paths
+### 🎞️ Merge Videos From Paths
 
 > Load video files from a list of file paths (or URLs) and concatenate them into a single video output.
 

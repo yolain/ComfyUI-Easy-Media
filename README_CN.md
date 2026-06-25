@@ -32,7 +32,7 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 ## ✨ 核心功能
 
-### 多轨编辑器 MultiTrack Editor
+### 🎞️ 多轨编辑器 MultiTrack Editor
 
 ![multiTrackEditor](https://github.com/user-attachments/assets/fc9ebcc6-d5e6-4f43-9825-6432c17d340d)
 
@@ -65,7 +65,7 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 - 仅统计了热门开源模型常见的生成类型，理论上任何视频模型流程都可以通过多轨编辑器作为前置处理工具
 
 
-### 媒体时间线编辑器 Timeline Editor
+### 🎞️ 媒体时间线编辑器 Timeline Editor
 
 
 ![timelineEditor](https://github.com/user-attachments/assets/d7c9e894-6e7e-488c-90fb-d3aa8310419d)
@@ -101,7 +101,7 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 ![dynamicInput2](https://github.com/user-attachments/assets/6dd84d52-1fd3-4b27-a890-2a0e22cecda4)
 
 
-### 从路径合并视频 MergeVideoFromPath
+### 🎞️ 从路径合并视频 MergeVideoFromPath
 
 > 该节点可以从指定路径加载视频文件，并将它们合并成一个视频输出。
 
