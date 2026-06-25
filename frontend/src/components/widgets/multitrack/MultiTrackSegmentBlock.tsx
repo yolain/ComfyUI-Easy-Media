@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -16,6 +16,10 @@ import type { MultiTrackSegment, MultiTrackType } from '@/types/multitrack'
 const RESIZE_ZONE_DEFAULT = 8
 const RESIZE_ZONE_SELECTED = 12
 const DRAG_START_DISTANCE = 4
+
+type SegmentBlockStyle = CSSProperties & {
+  '--multitrack-waveform'?: string
+}
 
 interface MultiTrackSegmentBlockProps {
   trackType: MultiTrackType
@@ -120,6 +124,23 @@ export function MultiTrackSegmentBlock({
     : selected
       ? presentation.borderColor
       : presentation.backgroundColorStrong
+  const blockStyle: SegmentBlockStyle = {
+    left: dragPreview ? 0 : left,
+    top: dragPreview ? dragPreview.y : undefined,
+    bottom: dragPreview ? undefined : undefined,
+    width: dragPreview ? dragPreview.width : width,
+    height: dragPreview ? dragPreview.height : undefined,
+    position: 'absolute',
+    transform: dragPreview ? `translate3d(${dragPreview.x}px, 0, 0)` : undefined,
+    backgroundColor: presentation.backgroundColor,
+    color: presentation.textColor,
+    border: `1px solid ${borderColor}`,
+    '--multitrack-waveform': presentation.waveformColor ?? undefined,
+    cursor: cutMode ? 'text' : cursorStyle ?? 'grab',
+    zIndex: isDragging ? 9999 : selected ? 30 : 1,
+    boxShadow: isDragging ? '0 8px 24px rgb(0 0 0 / 0.35)' : undefined,
+    pointerEvents: dragPreview ? 'none' : undefined,
+  }
 
   function updateDragPreview(nextPreview: typeof dragPreviewRef.current) {
     dragPreviewRef.current = nextPreview
@@ -286,22 +307,7 @@ export function MultiTrackSegmentBlock({
           role="button"
           tabIndex={0}
           className="absolute top-1 bottom-1 flex items-center overflow-hidden rounded select-none active:opacity-70"
-          style={{
-            left: dragPreview ? 0 : left,
-            top: dragPreview ? dragPreview.y : undefined,
-            bottom: dragPreview ? undefined : undefined,
-            width: dragPreview ? dragPreview.width : width,
-            height: dragPreview ? dragPreview.height : undefined,
-            position: 'absolute',
-            transform: dragPreview ? `translate3d(${dragPreview.x}px, 0, 0)` : undefined,
-            backgroundColor: presentation.backgroundColor,
-            color: presentation.textColor,
-            border: `1px solid ${borderColor}`,
-            cursor: cutMode ? 'text' : cursorStyle ?? 'grab',
-            zIndex: isDragging ? 9999 : selected ? 30 : 1,
-            boxShadow: isDragging ? '0 8px 24px rgb(0 0 0 / 0.35)' : undefined,
-            pointerEvents: dragPreview ? 'none' : undefined,
-          }}
+          style={blockStyle}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseLeave={() => setCursorStyle(null)}
@@ -336,7 +342,10 @@ export function MultiTrackSegmentBlock({
           }}
         >
           <div className="pointer-events-none flex h-full min-w-0 flex-1 flex-col gap-0.5">
-            <div className={`flex h-3.5 min-w-0 items-center gap-1 leading-none ${presentation.textClassName}`}>
+            <div
+              className={`flex h-3.5 min-w-0 items-center gap-1 leading-none ${presentation.textClassName}`}
+              style={{ backgroundColor: presentation.titleBackgroundColor ?? undefined }}
+            >
               <span
                 className="truncate rounded-sm px-1 font-medium"
               >

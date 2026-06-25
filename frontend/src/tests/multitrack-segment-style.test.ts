@@ -10,6 +10,10 @@ describe('multitrack segment style utilities', () => {
     })
 
     expect(getSegmentTrackPresentation('audio')).toMatchObject({
+      backgroundColor: 'var(--multitrack-audio-bg)',
+      backgroundColorStrong: 'var(--multitrack-audio-bg-strong)',
+      titleBackgroundColor: 'var(--multitrack-audio-title-bg)',
+      waveformColor: 'var(--multitrack-audio-waveform)',
       showThumbnail: false,
       showWaveform: true,
       waveformSource: 'decoded-media',

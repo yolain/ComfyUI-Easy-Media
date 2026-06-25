@@ -6,6 +6,8 @@ export interface SegmentTrackPresentation {
   borderColor: string
   textColor: string
   textClassName: string
+  titleBackgroundColor: string | null
+  waveformColor: string | null
   showThumbnail: boolean
   showWaveform: boolean
   waveformSource: 'decoded-media' | null
@@ -17,6 +19,8 @@ const VIDEO_PRESENTATION: SegmentTrackPresentation = {
   borderColor: 'var(--multitrack-video-border)',
   textColor: 'var(--multitrack-video-text)',
   textClassName: 'text-[10px]',
+  titleBackgroundColor: null,
+  waveformColor: null,
   showThumbnail: true,
   showWaveform: true,
   waveformSource: 'decoded-media',
@@ -28,6 +32,8 @@ const AUDIO_PRESENTATION: SegmentTrackPresentation = {
   borderColor: 'var(--multitrack-audio-border)',
   textColor: 'var(--multitrack-audio-text)',
   textClassName: 'text-[10px]',
+  titleBackgroundColor: 'var(--multitrack-audio-title-bg)',
+  waveformColor: 'var(--multitrack-audio-waveform)',
   showThumbnail: false,
   showWaveform: true,
   waveformSource: 'decoded-media',
@@ -39,6 +45,8 @@ const TASK_PRESENTATION: SegmentTrackPresentation = {
   borderColor: 'var(--multitrack-task-border)',
   textColor: 'var(--multitrack-task-text)',
   textClassName: 'text-[8px]',
+  titleBackgroundColor: null,
+  waveformColor: null,
   showThumbnail: false,
   showWaveform: false,
   waveformSource: null,
