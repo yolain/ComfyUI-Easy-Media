@@ -385,6 +385,7 @@ export function MultiTrackSegmentBlock({
                     slot_name: segment.content.slot_name,
                   }}
                   className="h-full w-full"
+                  color={presentation.waveformColor ?? undefined}
                 />
               </div>
             ) : trackType !== 'audio' ? (

@@ -68,6 +68,7 @@
     --multitrack-video-bg-strong: oklch(0.34 0.09 195);
     --multitrack-video-border: oklch(0.82 0.08 195);
     --multitrack-video-text: oklch(0.96 0.02 195);
+    --multitrack-video-waveform: #0A777E;
     --multitrack-audio-bg: #0E3058;
     --multitrack-audio-bg-strong: #0E3058;
     --multitrack-audio-title-bg: #274569;
@@ -117,6 +118,7 @@
     --multitrack-video-bg-strong: oklch(0.34 0.09 195);
     --multitrack-video-border: oklch(0.82 0.08 195);
     --multitrack-video-text: oklch(0.96 0.02 195);
+    --multitrack-video-waveform: #0A777E;
     --multitrack-audio-bg: #0E3058;
     --multitrack-audio-bg-strong: #0E3058;
     --multitrack-audio-title-bg: #274569;

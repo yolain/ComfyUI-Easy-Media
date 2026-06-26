@@ -20,7 +20,7 @@ const VIDEO_PRESENTATION: SegmentTrackPresentation = {
   textColor: 'var(--multitrack-video-text)',
   textClassName: 'text-[10px]',
   titleBackgroundColor: null,
-  waveformColor: null,
+  waveformColor: 'var(--multitrack-video-waveform)',
   showThumbnail: true,
   showWaveform: true,
   waveformSource: 'decoded-media',

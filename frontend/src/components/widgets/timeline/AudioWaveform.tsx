@@ -8,11 +8,26 @@ interface AudioWaveformProps {
   /** Fraction [0,1] of the full audio where the visible window ends */
   endRatio?: number
   className?: string
+  /** Waveform color (hex or CSS variable). Defaults to --multitrack-waveform CSS variable */
+  color?: string
 }
 
 const waveformPeaksCache = new Map<string, Promise<Float32Array> | Float32Array>()
 
-function drawWaveform(canvas: HTMLCanvasElement, peaks: Float32Array, startRatio: number, endRatio: number) {
+function resolveColor(color: string | undefined, canvas: HTMLCanvasElement): string {
+  if (!color) return getComputedStyle(canvas).getPropertyValue('--multitrack-waveform').trim() || '#1D7456'
+  if (color.startsWith('var(')) {
+    // Extract variable name and resolve from computed style
+    const match = color.match(/^var\((--[^)]+)\)$/)
+    if (match) {
+      const resolved = getComputedStyle(canvas).getPropertyValue(match[1]).trim()
+      return resolved || '#1D7456'
+    }
+  }
+  return color
+}
+
+function drawWaveform(canvas: HTMLCanvasElement, peaks: Float32Array, startRatio: number, endRatio: number, color?: string) {
   const dpr = window.devicePixelRatio || 1
   const rect = canvas.getBoundingClientRect()
   if (rect.width === 0 || rect.height === 0) return
@@ -35,7 +50,7 @@ function drawWaveform(canvas: HTMLCanvasElement, peaks: Float32Array, startRatio
   const step = sliceLength / w
 
   ctx.clearRect(0, 0, w, h)
-  ctx.fillStyle = '#1D7456'
+  ctx.fillStyle = resolveColor(color, canvas)
 
   for (let x = 0; x < w; x++) {
     const idx = Math.min(sliceStart + Math.floor(x * step), sliceEnd - 1)
@@ -85,19 +100,21 @@ async function loadWaveformPeaks(audioUrl: string): Promise<Float32Array> {
   }
 }
 
-export function AudioWaveform({ content, startRatio = 0, endRatio = 1, className }: Readonly<AudioWaveformProps>) {
+export function AudioWaveform({ content, startRatio = 0, endRatio = 1, className, color }: Readonly<AudioWaveformProps>) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const peaksRef = useRef<Float32Array | null>(null)
   const audioUrl = mediaContentToViewUrl(content)
   const startRatioRef = useRef(startRatio)
   const endRatioRef = useRef(endRatio)
+  const colorRef = useRef(color)
   startRatioRef.current = startRatio
   endRatioRef.current = endRatio
+  colorRef.current = color
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas || !peaksRef.current) return
-    drawWaveform(canvas, peaksRef.current, startRatioRef.current, endRatioRef.current)
+    drawWaveform(canvas, peaksRef.current, startRatioRef.current, endRatioRef.current, colorRef.current)
   }, [])
 
   useEffect(() => {

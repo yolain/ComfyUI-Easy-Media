@@ -545,6 +545,7 @@ export function AudioTrack({
                       endRatio={seg.origin_end_frame !== undefined && seg.origin_start_frame !== undefined
                         ? (seg.end_frame - seg.origin_start_frame) / (seg.origin_end_frame - seg.origin_start_frame)
                         : 1}
+                      color="#2E6E53"
                     />}
                     onContextMenu={(_, s) => {
                       onSelectedIdChange(s.id)
