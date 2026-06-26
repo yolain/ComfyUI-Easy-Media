@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-easy-media"
 description = "A ComfyUI custom node package for streamlined media loading and video pipeline assembly. Provides intuitive nodes that simplify media resource loading with user-friendly parameters, making it easier to build and configure video processing workflows."
-version = "1.0.3"
+version = "1.0.4"
 license = { file = "LICENSE" }
 dependencies = []
 

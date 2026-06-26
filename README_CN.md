@@ -12,7 +12,7 @@
 [![][github-forks-shield]][github-forks-link]
 [![][github-license-shield]][github-license-link]
 
-<img src="https://github.com/user-attachments/assets/fd9638fc-7dee-4670-9b74-d7247ccea3dc" style="width:100%">
+<img src="https://github.com/user-attachments/assets/06b20c46-e141-46cc-8a20-31937ec4bb3a" style="width:100%">
 </div>
 
 
