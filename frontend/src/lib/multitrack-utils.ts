@@ -457,29 +457,53 @@ export function cloneMultiTrackSegment(
   }
 }
 
-export function deleteSegmentWithLinkedTasks(tracks: MultiTrack[], segmentId: string): MultiTrack[] {
-  const sourceTrack = tracks.find((track) => track.segments.some((segment) => segment.id === segmentId))
-  const deletedSegment = sourceTrack?.segments.find((segment) => segment.id === segmentId)
-  if (!sourceTrack || !deletedSegment) return tracks
+export function deleteSegmentWithLinkedTasks(
+  tracks: MultiTrack[],
+  segmentId: string,
+  frameRate = MULTITRACK_DEFAULT_FRAME_RATE,
+): MultiTrack[] {
+  return deleteSegmentsWithLinkedTasks(tracks, [segmentId], frameRate)
+}
 
-  const shouldDeleteLinkedTask = (segment: MultiTrackSegment) => (
-    sourceTrack.type === 'video' &&
-    rangesOverlap(segment.start_frame, segment.end_frame, deletedSegment.start_frame, deletedSegment.end_frame)
-  )
+export function deleteSegmentsWithLinkedTasks(
+  tracks: MultiTrack[],
+  segmentIds: Iterable<string>,
+  frameRate = MULTITRACK_DEFAULT_FRAME_RATE,
+): MultiTrack[] {
+  const ids = new Set(segmentIds)
+  if (ids.size === 0) return tracks
 
-  return tracks.map((track) => {
-    if (track.id === sourceTrack.id) {
+  const deletedVideoTrackIds = new Set<string>()
+  const deletedVideoRanges = tracks.flatMap((track) => {
+    if (track.type !== 'video') return []
+    const ranges = track.segments
+      .filter((segment) => ids.has(segment.id))
+      .map((segment) => ({ start: segment.start_frame, end: segment.end_frame }))
+    if (ranges.length > 0) deletedVideoTrackIds.add(track.id)
+    return ranges
+  })
+
+  const updatedTracks = tracks.map((track) => {
+    const remainingSegments = track.segments.filter((segment) => {
+      if (ids.has(segment.id)) return false
+      if (track.type !== 'task') return true
+      return !deletedVideoRanges.some((range) => (
+        rangesOverlap(segment.start_frame, segment.end_frame, range.start, range.end)
+      ))
+    })
+
+    if (track.type === 'video' && deletedVideoTrackIds.has(track.id)) {
       return {
         ...track,
-        segments: track.segments.filter((segment) => segment.id !== segmentId),
+        segments: packSegmentsFromZero(remainingSegments.sort((a, b) => a.start_frame - b.start_frame), frameRate),
       }
     }
-    if (track.type !== 'task') return track
-    return {
-      ...track,
-      segments: track.segments.filter((segment) => !shouldDeleteLinkedTask(segment)),
-    }
+    return { ...track, segments: remainingSegments }
   })
+
+  return deletedVideoRanges.length > 0
+    ? syncMatchingTasksToPrimaryVideoTrack(tracks, updatedTracks)
+    : updatedTracks
 }
 
 export function moveSegmentBetweenCompatibleTracks(
@@ -540,6 +564,84 @@ export function moveSegmentBetweenCompatibleTracks(
     }
   })
   return syncMatchingTasksToPrimaryVideoTrack(tracks, movedTracks)
+}
+
+function moveSegmentsWithinOriginalTracks(
+  tracks: MultiTrack[],
+  segmentIds: Set<string>,
+  anchorSegmentId: string,
+  nextStartTime: number,
+  frameRate: number,
+): MultiTrack[] {
+  const anchorSegment = tracks
+    .flatMap((track) => track.segments)
+    .find((segment) => segment.id === anchorSegmentId)
+  if (!anchorSegment) return tracks
+
+  const delta = snapTimeToFrame(nextStartTime - anchorSegment.start_frame, frameRate)
+  if (delta === 0) return tracks
+
+  const movedTracks = tracks.map((track) => {
+    const selected = track.segments
+      .filter((segment) => segmentIds.has(segment.id))
+      .sort((left, right) => left.start_frame - right.start_frame)
+    if (selected.length === 0) return track
+
+    const remaining = track.segments
+      .filter((segment) => !segmentIds.has(segment.id))
+      .sort((left, right) => left.start_frame - right.start_frame)
+    const moved = selected.map((segment) => {
+      const duration = segmentDuration(segment)
+      const startFrame = Math.max(0, segment.start_frame + delta)
+      return repositionSegment(segment, startFrame, startFrame + duration)
+    })
+
+    if (track.type === 'audio') {
+      const combined = [...remaining, ...moved].sort((left, right) => left.start_frame - right.start_frame)
+      let cursor = 0
+      return {
+        ...track,
+        segments: combined.map((segment) => {
+          const segmentStart = segmentIds.has(segment.id)
+            ? Math.max(segment.start_frame, cursor)
+            : segment.start_frame
+          const shifted = segmentStart === segment.start_frame
+            ? segment
+            : repositionSegment(segment, segmentStart, segmentStart + segmentDuration(segment))
+          cursor = Math.max(cursor, shifted.end_frame)
+          return shifted
+        }),
+      }
+    }
+
+    const insertStart = moved.reduce((min, segment) => Math.min(min, segment.start_frame), Number.POSITIVE_INFINITY)
+    const insertIndex = insertIndexForTrack(remaining, insertStart, frameRate)
+    return {
+      ...track,
+      segments: packSegmentsFromZero([
+        ...remaining.slice(0, insertIndex),
+        ...moved,
+        ...remaining.slice(insertIndex),
+      ], frameRate),
+    }
+  })
+
+  return syncMatchingTasksToPrimaryVideoTrack(tracks, movedTracks)
+}
+
+export function moveSelectedSegments(
+  tracks: MultiTrack[],
+  segmentIds: Iterable<string>,
+  anchorSegmentId: string,
+  targetTrackId: string,
+  nextStartTime: number,
+  frameRate: number,
+): MultiTrack[] {
+  const selectedIds = new Set(segmentIds)
+  if (selectedIds.size <= 1 || !selectedIds.has(anchorSegmentId)) {
+    return moveSegmentBetweenCompatibleTracks(tracks, anchorSegmentId, targetTrackId, nextStartTime, frameRate)
+  }
+  return moveSegmentsWithinOriginalTracks(tracks, selectedIds, anchorSegmentId, nextStartTime, frameRate)
 }
 
 export interface SegmentDragPlaceholder {

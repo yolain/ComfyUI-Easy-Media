@@ -97,8 +97,21 @@ describe('TaskSegmentEditor', () => {
     expect(screen.getByRole('option', { name: 'Reference (rv2v)' })).not.toBeNull()
   })
 
+  it('uses rv2v for reference mode with preset video', () => {
+    render(
+      <TaskSegmentEditor
+        segment={taskSegment()}
+        videoSegments={[videoSegment(2, 5, 'preset')]}
+        onContentChange={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('combobox'))
+
+    expect(screen.getByRole('option', { name: 'Reference (rv2v)' })).not.toBeNull()
+  })
+
   it.each([
-    ['preset video', videoSegment(2, 5, 'preset')],
     ['video ending at the task start', videoSegment(-2, 0)],
     ['video starting at the task end', videoSegment(3, 5)],
   ])('uses r2v for reference mode with %s', (_caseName, video) => {

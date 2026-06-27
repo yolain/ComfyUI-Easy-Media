@@ -27,11 +27,15 @@ vi.mock('@/components/widgets/multitrack/PreviewArea', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/MultiTrackRuler', () => ({
-  MultiTrackRuler: () => <div data-testid="multitrack-ruler" />,
+  MultiTrackRuler: ({ onSeek }: { onSeek: (time: number) => void }) => (
+    <button type="button" data-testid="multitrack-ruler" onClick={() => onSeek(5)}>
+      seek frame 5
+    </button>
+  ),
 }))
 
 vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
-  TrackArea: ({ data, node, app, onCloneTaskSegment, onAddTrack, onAddVideo, onAddAudio, onSmartSplit, onSmartSplitTasks, onResizeSegment, cutMode }: {
+  TrackArea: ({ data, node, app, onCloneTaskSegment, onAddTrack, onAddVideo, onAddAudio, onSmartSplit, onSmartSplitTasks, onResizeSegment, onResizeSegmentPreview, onMoveSegment, selectedSegmentIds, onSelectSegment, onSelectSegments, cutMode }: {
     data: TrackData
     node: unknown
     app: unknown
@@ -42,6 +46,11 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
     onSmartSplit: (segmentId: string) => void
     onSmartSplitTasks: (segmentId: string) => void
     onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
+    onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
+    onMoveSegment: (segmentId: string, targetTrackId: string, nextStartTime: number) => void
+    selectedSegmentIds: Set<string>
+    onSelectSegment: (segmentId: string) => void
+    onSelectSegments: (segmentIds: string[]) => void
     cutMode: boolean
   }) => {
     const taskTrack = data.tracks.find((track) => track.type === 'task')
@@ -50,6 +59,7 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
     const videoSegment = data.tracks.find((track) => track.type === 'video')?.segments[0]
     return (
       <div data-testid="multitrack-track-area" data-cut-mode={cutMode}>
+        <div data-testid="selected-segment-count">{selectedSegmentIds.size}</div>
         <div data-testid="audio-slot-context">{node && app ? 'connected' : 'missing'}</div>
         {taskTrack && segment ? (
           <button type="button" onClick={() => onCloneTaskSegment(taskTrack.id, segment.id)}>
@@ -70,6 +80,28 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
           <button type="button" onClick={() => onSmartSplit(videoSegment.id)}>smart split video</button>
         ) : null}
         {videoSegment ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              onSelectSegment(videoSegment.id)
+            }}
+          >
+            select video segment
+          </button>
+        ) : null}
+        {videoSegment && segment ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              onSelectSegments([videoSegment.id, segment.id])
+            }}
+          >
+            select video and task
+          </button>
+        ) : null}
+        {videoSegment ? (
           <button type="button" onClick={() => onSmartSplitTasks(videoSegment.id)}>smart split tasks</button>
         ) : null}
         {videoSegment ? (
@@ -77,6 +109,25 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
         ) : null}
         {videoSegment ? (
           <button type="button" onClick={() => onResizeSegment(videoSegment.id, 'end', 8)}>trim video end</button>
+        ) : null}
+        {data.tracks[1]?.segments.length >= 2 ? (
+          <button
+            type="button"
+            onClick={() => onMoveSegment(data.tracks[1].segments[0].id, data.tracks[1].id, data.tracks[1].segments[1].end_frame)}
+          >
+            move first video after second
+          </button>
+        ) : null}
+        {videoSegment ? (
+          <button
+            type="button"
+            onClick={() => {
+              onResizeSegmentPreview(videoSegment.id, 'end', 9)
+              onResizeSegmentPreview(videoSegment.id, 'end', 8)
+            }}
+          >
+            preview trim video end
+          </button>
         ) : null}
         {audioTrack ? (
           <button
@@ -92,14 +143,30 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/MultiTrackToolbar', () => ({
-  MultiTrackToolbar: ({ onToggleTimeline, onToggleCutMode, cutMode }: {
+  MultiTrackToolbar: ({ onToggleTimeline, canDelete, onDeleteSelected, onCutAtCurrentTime, canUndo, canRedo, onUndo, onRedo }: {
     onToggleTimeline: () => void
-    onToggleCutMode: () => void
-    cutMode: boolean
+    canDelete: boolean
+    onDeleteSelected: () => void
+    onCutAtCurrentTime: () => void
+    canUndo: boolean
+    canRedo: boolean
+    onUndo: () => void
+    onRedo: () => void
   }) => (
     <div>
       <button type="button" onClick={onToggleTimeline}>toggle timeline</button>
-      <button type="button" data-cut-mode-toggle onClick={onToggleCutMode} aria-pressed={cutMode}>toggle cut</button>
+      <button type="button" disabled={!canDelete} onClick={onDeleteSelected}>delete selected</button>
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation()
+          onCutAtCurrentTime()
+        }}
+      >
+        cut current time
+      </button>
+      <button type="button" onClick={onUndo} disabled={!canUndo}>undo history</button>
+      <button type="button" onClick={onRedo} disabled={!canRedo}>redo history</button>
     </div>
   ),
 }))
@@ -153,6 +220,40 @@ describe('MultiTrackWidget', () => {
     })
   })
 
+  it('records a single history entry when resizing after transient previews', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [{
+      id: 'task-matching',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[0].color,
+      content: { media_type: 'none', task_mode: 'default' },
+    }]
+    data.tracks[1].segments = [{
+      id: 'video-main',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[1].color,
+      content: { media_type: 'video', duration: 10 },
+    }]
+    const onChange = vi.fn()
+    const props = widgetProps()
+    const view = render(<MultiTrackWidget {...props} value={data} onChange={onChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'preview trim video end' }))
+    expect(onChange).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'trim video end' }))
+    expect(onChange).toHaveBeenCalledOnce()
+    const resized = onChange.mock.lastCall?.[0] as TrackData
+    expect(resized.tracks[1].segments[0].end_frame).toBe(8)
+
+    view.rerender(<MultiTrackWidget {...props} value={resized} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'undo history' }))
+    const undone = onChange.mock.lastCall?.[0] as TrackData
+    expect(undone.tracks[1].segments[0].end_frame).toBe(10)
+  })
+
   it('animates the ruler and track region to zero height when toggled', () => {
     render(<MultiTrackWidget {...widgetProps()} />)
 
@@ -164,6 +265,108 @@ describe('MultiTrackWidget', () => {
 
     expect(timelinePanel.className).toContain('grid-rows-[0fr]')
     expect(timelinePanel.getAttribute('aria-hidden')).toBe('true')
+  })
+
+  it('undoes and redoes multitrack widget changes without using canvas history', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [{
+      id: 'task-0',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[0].color,
+      content: { media_type: 'none', task_mode: 'default' },
+    }]
+    const onChange = vi.fn()
+    const props = widgetProps()
+    const view = render(<MultiTrackWidget {...props} value={data} onChange={onChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'clone task' }))
+    const cloned = onChange.mock.lastCall?.[0] as TrackData
+    expect(cloned.tracks[0].segments).toHaveLength(2)
+
+    view.rerender(<MultiTrackWidget {...props} value={cloned} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'undo history' }))
+    const undone = onChange.mock.lastCall?.[0] as TrackData
+    expect(undone.tracks[0].segments).toHaveLength(1)
+    expect(undone.tracks[0].segments[0].id).toBe('task-0')
+
+    view.rerender(<MultiTrackWidget {...props} value={undone} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'redo history' }))
+    expect(onChange.mock.lastCall?.[0]).toEqual(cloned)
+  })
+
+  it('resets local redo history when the canvas restores a different widget value', () => {
+    const initial = createDefaultTrackData()
+    initial.tracks[0].segments = [{
+      id: 'task-0',
+      start_frame: 0,
+      end_frame: 10,
+      color: initial.tracks[0].color,
+      content: { media_type: 'none', task_mode: 'default' },
+    }]
+    const onChange = vi.fn()
+    const props = widgetProps()
+    const view = render(<MultiTrackWidget {...props} value={initial} onChange={onChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'clone task' }))
+    const cloned = onChange.mock.lastCall?.[0] as TrackData
+    view.rerender(<MultiTrackWidget {...props} value={cloned} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'undo history' }))
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'redo history' }).disabled).toBe(false)
+
+    const canvasRestored = {
+      ...initial,
+      frame_rate: 30,
+    }
+    view.rerender(<MultiTrackWidget {...props} value={canvasRestored} onChange={onChange} />)
+
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'redo history' }).disabled).toBe(true)
+  })
+
+  it('keeps local history after dragging video segments to reorder them', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [{
+      id: 'task-0',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[0].color,
+      content: { media_type: 'none', task_mode: 'default' },
+    }]
+    data.tracks[1].segments = [
+      {
+        id: 'video-0',
+        start_frame: 0,
+        end_frame: 10,
+        color: data.tracks[1].color,
+        content: { media_type: 'video', duration: 10 },
+      },
+      {
+        id: 'video-1',
+        start_frame: 10,
+        end_frame: 20,
+        color: data.tracks[1].color,
+        content: { media_type: 'video', duration: 10 },
+      },
+    ]
+    data.total_length = 20
+    const onChange = vi.fn()
+    const props = widgetProps()
+    const view = render(<MultiTrackWidget {...props} value={data} onChange={onChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'clone task' }))
+    const withHistory = onChange.mock.lastCall?.[0] as TrackData
+    view.rerender(<MultiTrackWidget {...props} value={withHistory} onChange={onChange} />)
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'undo history' }).disabled).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: 'move first video after second' }))
+    const moved = onChange.mock.lastCall?.[0] as TrackData
+    expect(moved.tracks[1].segments.map((segment) => segment.id)).toEqual(['video-1', 'video-0'])
+    view.rerender(<MultiTrackWidget {...props} value={moved} onChange={onChange} />)
+
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'undo history' }).disabled).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'undo history' }))
+    const undoneMove = onChange.mock.lastCall?.[0] as TrackData
+    expect(undoneMove.tracks[1].segments.map((segment) => segment.id)).toEqual(['video-0', 'video-1'])
   })
 
   it.each([
@@ -477,13 +680,91 @@ describe('MultiTrackWidget', () => {
     vi.unstubAllGlobals()
   })
 
-  it('exits cut mode when clicking outside the track area', () => {
-    render(<MultiTrackWidget {...widgetProps()} />)
-    fireEvent.click(screen.getByRole('button', { name: 'toggle cut' }))
-    expect(screen.getByTestId('multitrack-track-area').getAttribute('data-cut-mode')).toBe('true')
+  it('cuts all active track segments at the current time when no segment is selected', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [{
+      id: 'task-active',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[0].color,
+      content: { media_type: 'none', task_mode: 'default' },
+    }]
+    data.tracks[1].segments = [{
+      id: 'video-active',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[1].color,
+      content: { media_type: 'video', duration: 10 },
+    }]
+    const onChange = vi.fn()
 
-    fireEvent.click(screen.getByTestId('preview-area'))
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByTestId('multitrack-ruler'))
+    fireEvent.click(screen.getByRole('button', { name: 'cut current time' }))
 
-    expect(screen.getByTestId('multitrack-track-area').getAttribute('data-cut-mode')).toBe('false')
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    expect(updated.tracks[0].segments).toHaveLength(2)
+    expect(updated.tracks[0].segments.map((segment) => [segment.start_frame, segment.end_frame])).toEqual([[0, 5], [5, 10]])
+    expect(updated.tracks[1].segments).toHaveLength(2)
+    expect(updated.tracks[1].segments.map((segment) => [segment.start_frame, segment.end_frame])).toEqual([[0, 5], [5, 10]])
+  })
+
+  it('cuts only selected segments at the current time', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [{
+      id: 'task-active',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[0].color,
+      content: { media_type: 'none', task_mode: 'default' },
+    }]
+    data.tracks[1].segments = [{
+      id: 'video-active',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[1].color,
+      content: { media_type: 'video', duration: 10 },
+    }]
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByTestId('multitrack-ruler'))
+    fireEvent.click(screen.getByRole('button', { name: 'select video segment' }))
+    fireEvent.click(screen.getByRole('button', { name: 'cut current time' }))
+
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    expect(updated.tracks[0].segments).toHaveLength(1)
+    expect(updated.tracks[1].segments).toHaveLength(2)
+    expect(updated.tracks[1].segments.map((segment) => [segment.start_frame, segment.end_frame])).toEqual([[0, 5], [5, 10]])
+  })
+
+  it('clears selected segment ids after deleting selected segments', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [{
+      id: 'task-active',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[0].color,
+      content: { media_type: 'none', task_mode: 'default' },
+    }]
+    data.tracks[1].segments = [{
+      id: 'video-active',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[1].color,
+      content: { media_type: 'video', duration: 10 },
+    }]
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'select video and task' }))
+    expect(screen.getByTestId('selected-segment-count').textContent).toBe('2')
+
+    fireEvent.click(screen.getByRole('button', { name: 'delete selected' }))
+
+    expect(screen.getByTestId('selected-segment-count').textContent).toBe('0')
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'delete selected' }).disabled).toBe(true)
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    expect(updated.tracks.flatMap((track) => track.segments.map((segment) => segment.id))).not.toContain('video-active')
   })
 })

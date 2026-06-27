@@ -304,6 +304,95 @@ describe('PreviewArea', () => {
     expect(screen.queryByTestId('task-preview-images')).toBeNull()
   })
 
+  it('shows and collapses the active task user prompt when no segment is selected', () => {
+    const { data } = trackData()
+    data.tracks.unshift({
+      id: 'task-track',
+      name: 'Task 1',
+      type: 'task',
+      color: 'var(--primary)',
+      muted: false,
+      locked: false,
+      segments: [{
+        id: 'active-task',
+        start_frame: 24,
+        end_frame: 48,
+        color: 'var(--primary)',
+        content: {
+          media_type: 'none',
+          user_prompt: 'A long active task prompt that should stay on one preview line and truncate when needed',
+          text: 'Fallback prompt',
+        },
+      }],
+    })
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={36}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    const overlay = screen.getByTestId('task-prompt-overlay')
+    expect(overlay.className).toContain('bottom-0')
+    expect(overlay.className).toContain('bg-black/')
+    expect(overlay.className).toContain('right-0')
+    expect(screen.getByTestId('task-prompt-text').className).toContain('truncate')
+    expect(screen.getByTestId('task-prompt-text').textContent).toBe(
+      'A long active task prompt that should stay on one preview line and truncate when needed',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide task prompt' }))
+
+    expect(screen.getByTestId('task-prompt-overlay').className).toContain('w-8')
+    expect(screen.queryByTestId('task-prompt-text')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show task prompt' }))
+
+    expect(screen.getByTestId('task-prompt-overlay').className).toContain('right-0')
+    expect(screen.getByTestId('task-prompt-text').textContent).toContain('A long active task prompt')
+  })
+
+  it('does not show the active task prompt while another segment is selected', () => {
+    const { data, selectedSegment } = trackData()
+    data.tracks.unshift({
+      id: 'task-track',
+      name: 'Task 1',
+      type: 'task',
+      color: 'var(--primary)',
+      muted: false,
+      locked: false,
+      segments: [{
+        id: 'active-task',
+        start_frame: 0,
+        end_frame: 48,
+        color: 'var(--primary)',
+        content: { media_type: 'none', user_prompt: 'Hidden prompt' },
+      }],
+    })
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={36}
+        selectedSegment={selectedSegment}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByTestId('task-prompt-overlay')).toBeNull()
+  })
+
   it('opens and updates panorama mode from an unselected active task image', () => {
     const { data } = trackData()
     addActiveTaskTrack(data)

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { useCanvasScale } from '@/hooks/use-canvas-scale'
 import { useElementWidth } from '@/hooks/use-element-width'
+import { useMultiTrackHistory } from '@/hooks/use-multitrack-history'
 import type { ReactWidgetProps } from '@/lib/create-react-widget'
 import { LocaleContext, translate } from '@/lib/i18n'
 import {
@@ -13,11 +14,13 @@ import {
   cloneMultiTrackSegment,
   createMultiTrackAudioContent,
   createMultiTrackVideoContent,
+  deleteSegmentsWithLinkedTasks,
   deleteSegmentWithLinkedTasks,
   distributeMultiTrackSegmentsEvenly,
   getSelectedMultiTrackSegment,
   MULTITRACK_DEFAULT_VOLUME_DB,
   MULTITRACK_TRACK_COLORS,
+  moveSelectedSegments,
   moveSegmentBetweenCompatibleTracks,
   normalizeTrackData,
   remapFrameToRate,
@@ -95,19 +98,22 @@ function insertSegmentAtFrame(
 }
 
 export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactWidgetProps<TrackData>>) {
-  const data = ensureTrackData(value)
-  const dataRef = useRef(data)
-  dataRef.current = data
+  const committedData = ensureTrackData(value)
+  const committedDataKey = JSON.stringify(committedData)
+  const [resizePreviewData, setResizePreviewData] = useState<TrackData | null>(null)
+  const data = resizePreviewData ?? committedData
+  const dataRef = useRef(committedData)
+  dataRef.current = committedData
   const [currentTime, setCurrentTime] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [zoom, setZoom] = useState(1)
   const [timelineCollapsed, setTimelineCollapsed] = useState(false)
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null)
+  const [selectedSegmentIds, setSelectedSegmentIds] = useState<Set<string>>(() => new Set())
   const [isSmartSplitting, setIsSmartSplitting] = useState(false)
   const [missingModel, setMissingModel] = useState<MissingModelInfo | null>(null)
   const [isDownloadingModel, setIsDownloadingModel] = useState(false)
   const [modelDownloadError, setModelDownloadError] = useState<string | null>(null)
-  const [cutMode, setCutMode] = useState(false)
   const rafRef = useRef<number | null>(null)
   const timelineContainerRef = useRef<HTMLDivElement>(null)
   const startedAtRef = useRef(0)
@@ -116,13 +122,69 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   const timelineWidth = Math.max(1, useElementWidth(timelineContainerRef))
   const scaledTimelineWidth = timelineWidth * zoom
   const canvasScale = useCanvasScale(app)
-  const selectedSegment = getSelectedMultiTrackSegment(data, selectedSegmentId)
+  const selectedSegment = selectedSegmentIds.size <= 1
+    ? getSelectedMultiTrackSegment(data, selectedSegmentId)
+    : null
   const selectedTaskTrackSegments = selectedSegment?.trackType === 'task'
     ? data.tracks.find((track) => track.id === selectedSegment.trackId && track.type === 'task')?.segments ?? [selectedSegment.segment]
     : undefined
+  const {
+    canUndo,
+    canRedo,
+    commitChange: commitTrackChange,
+    undo: undoTrackChange,
+    redo: redoTrackChange,
+  } = useMultiTrackHistory(committedData, onChange)
   const locale = app?.ui?.settings?.settingsValues?.['Comfy.Locale']
   const t = (path: string, params?: Record<string, string | number>) => translate(locale, path, params)
   const missingModelDirectoryName = missingModel?.directory.split(/[\\/]/).filter(Boolean).at(-1) ?? ''
+
+  function commitNormalizedTrackChange(nextData: TrackData) {
+    commitTrackChange(normalizeTrackData(nextData))
+  }
+
+  function setSingleSelectedSegment(segmentId: string | null) {
+    setSelectedSegmentId(segmentId)
+    setSelectedSegmentIds(segmentId ? new Set([segmentId]) : new Set())
+  }
+
+  function handleSelectSegment(segmentId: string, mode: 'replace' | 'toggle' | 'add' = 'replace') {
+    setSelectedSegmentIds((current) => {
+      if (mode === 'replace') {
+        setSelectedSegmentId(segmentId)
+        return new Set([segmentId])
+      }
+      const next = new Set(current)
+      if (mode === 'toggle' && next.has(segmentId)) {
+        next.delete(segmentId)
+        setSelectedSegmentId((active) => active === segmentId ? next.values().next().value ?? null : active)
+        return next
+      }
+      next.add(segmentId)
+      setSelectedSegmentId(segmentId)
+      return next
+    })
+  }
+
+  function handleSelectSegments(segmentIds: string[]) {
+    const next = new Set(segmentIds)
+    setSelectedSegmentIds(next)
+    setSelectedSegmentId(segmentIds.at(-1) ?? null)
+  }
+
+  function handleClearSelection() {
+    setSingleSelectedSegment(null)
+  }
+
+  useEffect(() => {
+    setResizePreviewData(null)
+    const validSegmentIds = new Set(committedData.tracks.flatMap((track) => track.segments.map((segment) => segment.id)))
+    setSelectedSegmentIds((current) => {
+      const next = new Set([...current].filter((segmentId) => validSegmentIds.has(segmentId)))
+      setSelectedSegmentId((active) => active && !validSegmentIds.has(active) ? next.values().next().value ?? null : active)
+      return next
+    })
+  }, [committedDataKey])
 
   useEffect(() => {
     currentTimeRef.current = currentTime
@@ -226,7 +288,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       ? addDefaultTaskSegmentIfRangeEmpty(taskSyncedTracks, addedVideoRange.startFrame, addedVideoRange.endFrame)
       : taskSyncedTracks
 
-    onChange({
+    commitNormalizedTrackChange({
       ...latestData,
       tracks: updatedTracks,
       total_length: calculateTotalLength(updatedTracks, latestData.frame_rate),
@@ -273,7 +335,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         })(),
       }
     })
-    onChange({ ...latestData, tracks: updatedTracks, total_length: calculateTotalLength(updatedTracks, latestData.frame_rate) })
+    commitNormalizedTrackChange({ ...latestData, tracks: updatedTracks, total_length: calculateTotalLength(updatedTracks, latestData.frame_rate) })
   }
 
   function handleAddTrack(type: MultiTrackType) {
@@ -290,7 +352,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       locked: false,
       segments: [],
     }
-    onChange({ ...data, tracks: [...data.tracks, track] })
+    commitNormalizedTrackChange({ ...data, tracks: [...data.tracks, track] })
   }
 
   function handleDeleteTrack(trackId: string) {
@@ -299,15 +361,19 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     if (!target || target.type === 'task' || target.id === firstVideoTrackId) return
     const segmentIds = new Set(target.segments.map((segment) => segment.id))
     const updatedTracks = data.tracks.filter((track) => track.id !== trackId)
-    onChange({ ...data, tracks: updatedTracks, total_length: calculateTotalLength(updatedTracks, data.frame_rate) })
-    setSelectedSegmentId((current) => current && segmentIds.has(current) ? null : current)
+    commitNormalizedTrackChange({ ...data, tracks: updatedTracks, total_length: calculateTotalLength(updatedTracks, data.frame_rate) })
+    setSelectedSegmentIds((current) => {
+      const next = new Set([...current].filter((segmentId) => !segmentIds.has(segmentId)))
+      setSelectedSegmentId((active) => active && segmentIds.has(active) ? next.values().next().value ?? null : active)
+      return next
+    })
   }
 
   function handleTrackAudioSettingsChange(
     trackId: string,
     patch: Partial<Pick<MultiTrack, 'muted' | 'solo'>>,
   ) {
-    onChange({
+    commitNormalizedTrackChange({
       ...data,
       tracks: data.tracks.map((track) => track.id === trackId ? { ...track, ...patch } : track),
     })
@@ -349,7 +415,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       }
     })
 
-    onChange({
+    commitNormalizedTrackChange({
       ...data,
       tracks: updatedTracks,
       total_length: calculateTotalLength(updatedTracks, data.frame_rate),
@@ -382,7 +448,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       }
     })
 
-    onChange({
+    commitNormalizedTrackChange({
       ...data,
       tracks: updatedTracks,
       total_length: calculateTotalLength(updatedTracks, data.frame_rate),
@@ -390,14 +456,17 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   }
 
   function handleDeleteSegment(segmentId: string) {
-    const updatedTracks = deleteSegmentWithLinkedTasks(data.tracks, segmentId)
+    const idsToDelete = selectedSegmentIds.has(segmentId) ? selectedSegmentIds : new Set([segmentId])
+    const updatedTracks = idsToDelete.size > 1
+      ? deleteSegmentsWithLinkedTasks(data.tracks, idsToDelete, data.frame_rate)
+      : deleteSegmentWithLinkedTasks(data.tracks, segmentId, data.frame_rate)
     const totalLength = calculateTotalLength(updatedTracks, data.frame_rate)
-    onChange({
+    commitNormalizedTrackChange({
       ...data,
       tracks: updatedTracks,
       total_length: totalLength,
     })
-    setSelectedSegmentId((current) => current === segmentId ? null : current)
+    handleClearSelection()
     setCurrentTime((time) => Math.min(time, totalLength))
   }
 
@@ -407,7 +476,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         ? { ...track, segments: distributeMultiTrackSegmentsEvenly(track.segments, data.total_length) }
         : track
     ))
-    onChange({ ...data, tracks: updatedTracks })
+    commitNormalizedTrackChange({ ...data, tracks: updatedTracks })
   }
 
   function handleCloneTaskSegment(trackId: string, segmentId: string) {
@@ -422,16 +491,16 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       return { ...track, segments: result.segments }
     })
     if (!clonedSegmentId) return
-    onChange({
+    commitNormalizedTrackChange({
       ...data,
       tracks: updatedTracks,
       total_length: Math.max(data.total_length, taskTrackEnd),
     })
-    setSelectedSegmentId(clonedSegmentId)
+    setSingleSelectedSegment(clonedSegmentId)
   }
 
-  function handleResizeSegment(segmentId: string, edge: 'start' | 'end', nextTime: number) {
-    const resizedTracks = data.tracks.map((track) => ({
+  function buildResizedTrackData(sourceData: TrackData, segmentId: string, edge: 'start' | 'end', nextTime: number): TrackData {
+    const resizedTracks = sourceData.tracks.map((track) => ({
       ...track,
       segments: track.segments.map((segment) => {
         if (segment.id !== segmentId) return segment
@@ -442,11 +511,11 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
           ? sortedSegments[segmentIndex + 1]
           : null
         const sourceDuration = segment.content.duration && segment.content.duration > 0
-          ? Math.max(1, snapSecondsToFrame(segment.content.duration, data.frame_rate))
+          ? Math.max(1, snapSecondsToFrame(segment.content.duration, sourceData.frame_rate))
           : Number.POSITIVE_INFINITY
 
         if (edge === 'start') {
-          const nextStart = snapTimeToFrame(nextTime, data.frame_rate)
+          const nextStart = snapTimeToFrame(nextTime, sourceData.frame_rate)
           const minStart = Math.max(0, prevSegment?.end_frame ?? 0, segment.end_frame - sourceDuration)
           const maxStart = segment.end_frame - 1
           return {
@@ -455,7 +524,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
           }
         }
 
-        const nextEnd = snapTimeToFrame(nextTime, data.frame_rate)
+        const nextEnd = snapTimeToFrame(nextTime, sourceData.frame_rate)
         const minEnd = segment.start_frame + 1
         const maxEnd = Math.min(nextSegment?.start_frame ?? Number.POSITIVE_INFINITY, segment.start_frame + sourceDuration)
         return {
@@ -465,27 +534,32 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       }).sort((a, b) => a.start_frame - b.start_frame),
     }))
     const updatedTracks = syncMatchingTasksToPrimaryVideoSegment(
-      data.tracks,
+      sourceData.tracks,
       resizedTracks,
       segmentId,
     )
-    onChange({
-      ...data,
+    return {
+      ...sourceData,
       tracks: updatedTracks,
-      total_length: calculateTotalLength(updatedTracks, data.frame_rate),
-    })
+      total_length: calculateTotalLength(updatedTracks, sourceData.frame_rate),
+    }
+  }
+
+  function handleResizeSegmentPreview(segmentId: string, edge: 'start' | 'end', nextTime: number) {
+    setResizePreviewData(buildResizedTrackData(committedData, segmentId, edge, nextTime))
+  }
+
+  function handleResizeSegment(segmentId: string, edge: 'start' | 'end', nextTime: number) {
+    setResizePreviewData(null)
+    commitNormalizedTrackChange(buildResizedTrackData(committedData, segmentId, edge, nextTime))
   }
 
   function handleMoveSegment(segmentId: string, targetTrackId: string, nextStartTime: number) {
-    const updatedTracks = moveSegmentBetweenCompatibleTracks(
-      data.tracks,
-      segmentId,
-      targetTrackId,
-      nextStartTime,
-      data.frame_rate,
-    )
+    const updatedTracks = selectedSegmentIds.has(segmentId)
+      ? moveSelectedSegments(data.tracks, selectedSegmentIds, segmentId, targetTrackId, nextStartTime, data.frame_rate)
+      : moveSegmentBetweenCompatibleTracks(data.tracks, segmentId, targetTrackId, nextStartTime, data.frame_rate)
 
-    onChange({
+    commitNormalizedTrackChange({
       ...data,
       tracks: updatedTracks,
       total_length: calculateTotalLength(updatedTracks, data.frame_rate),
@@ -499,7 +573,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       const nextCurrentTime = remapFrameToRate(currentTimeRef.current, data.frame_rate, remapped.frame_rate)
       currentTimeRef.current = nextCurrentTime
       setCurrentTime(nextCurrentTime)
-      onChange({
+      commitNormalizedTrackChange({
         ...remapped,
         ...patch,
         frame_rate: remapped.frame_rate,
@@ -507,12 +581,12 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       return
     }
 
-    onChange({ ...data, ...patch, frame_rate: data.frame_rate })
+    commitNormalizedTrackChange({ ...data, ...patch, frame_rate: data.frame_rate })
   }
 
   function handleSelectedSegmentContentChange(patch: Partial<MultiTrackSegmentContent>) {
     if (!selectedSegmentId) return
-    onChange(updateMultiTrackSegmentContent(data, selectedSegmentId, patch))
+    commitNormalizedTrackChange(updateMultiTrackSegmentContent(data, selectedSegmentId, patch))
   }
 
   function handleTrackSegmentsContentChange(updates: Array<{ segmentId: string; patch: Partial<MultiTrackSegmentContent> }>) {
@@ -531,7 +605,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         }
       }),
     }))
-    onChange({
+    commitNormalizedTrackChange({
       ...data,
       tracks: updatedTracks,
     })
@@ -542,7 +616,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     const updatedTracks = data.tracks.map((track) => (
       track.id === selectedSegment.trackId ? { ...track, segments } : track
     ))
-    onChange({
+    commitNormalizedTrackChange({
       ...data,
       tracks: updatedTracks,
       total_length: calculateTotalLength(updatedTracks, data.frame_rate),
@@ -551,7 +625,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
 
   function handleSelectedSegmentDurationChange(duration: number) {
     if (!selectedSegmentId) return
-    onChange(updateMultiTrackSegmentDuration(data, selectedSegmentId, duration, data.frame_rate))
+    commitNormalizedTrackChange(updateMultiTrackSegmentDuration(data, selectedSegmentId, duration, data.frame_rate))
   }
 
   async function handleSmartSplit(segmentId: string) {
@@ -564,7 +638,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     setIsSmartSplitting(true)
     try {
       const result = await requestSmartSplit(segment, data.frame_rate)
-      onChange(applySmartSplit(data, segmentId, result))
+      commitNormalizedTrackChange(applySmartSplit(data, segmentId, result))
     } catch (error) {
       if (error instanceof MissingModelError) {
         setMissingModel(error.model)
@@ -611,7 +685,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     setIsSmartSplitting(true)
     try {
       const result = await requestSmartSplit(segment, data.frame_rate)
-      onChange(applySmartSplitToMatchingTasks(data, segmentId, result))
+      commitNormalizedTrackChange(applySmartSplitToMatchingTasks(data, segmentId, result))
     } catch (error) {
       if (error instanceof MissingModelError) {
         setMissingModel(error.model)
@@ -636,7 +710,29 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   }
 
   function handleCutSegment(segmentId: string, splitFrame: number) {
-    onChange(splitTrackSegmentAtFrame(data, segmentId, splitFrame))
+    commitNormalizedTrackChange(splitTrackSegmentAtFrame(data, segmentId, splitFrame))
+  }
+
+  function handleCutAtCurrentTime() {
+    const splitFrame = snapTimeToFrame(currentTime, data.frame_rate)
+    const targetSegmentIds = selectedSegmentIds.size > 0
+      ? Array.from(selectedSegmentIds)
+      : data.tracks.flatMap((track) => (
+        track.segments
+          .filter((segment) => splitFrame > segment.start_frame && splitFrame < segment.end_frame)
+          .map((segment) => segment.id)
+      ))
+    if (targetSegmentIds.length === 0) return
+
+    const originalSegmentCount = data.tracks.reduce((count, track) => count + track.segments.length, 0)
+    const nextData = targetSegmentIds.reduce(
+      (currentData, segmentId) => splitTrackSegmentAtFrame(currentData, segmentId, splitFrame),
+      data,
+    )
+    const nextSegmentCount = nextData.tracks.reduce((count, track) => count + track.segments.length, 0)
+    if (nextSegmentCount === originalSegmentCount) return
+
+    commitNormalizedTrackChange(nextData)
   }
 
   async function handleDownloadMissingModel() {
@@ -675,15 +771,8 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         <div
           className="relative flex h-full w-full flex-col overflow-hidden rounded text-foreground font-sans text-xs select-none"
           aria-busy={isSmartSplitting}
-          onClickCapture={(event) => {
-            const target = event.target as Element
-            if (
-              !target.closest('[data-multitrack-track-area]')
-              && !target.closest('[data-cut-mode-toggle]')
-            ) setCutMode(false)
-          }}
           onClick={() => {
-            setSelectedSegmentId(null)
+            handleClearSelection()
           }}
         >
           <PreviewArea
@@ -709,12 +798,15 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             onPlayPause={() => setIsPlaying((value) => !value)}
             onZoomChange={setZoom}
             onToggleTimeline={() => setTimelineCollapsed((collapsed) => !collapsed)}
-            canDelete={selectedSegmentId !== null}
+            canDelete={selectedSegmentIds.size > 0}
             onDeleteSelected={() => {
               if (selectedSegmentId) handleDeleteSegment(selectedSegmentId)
             }}
-            cutMode={cutMode}
-            onToggleCutMode={() => setCutMode((active) => !active)}
+            onCutAtCurrentTime={handleCutAtCurrentTime}
+            canUndo={canUndo}
+            canRedo={canRedo}
+            onUndo={undoTrackChange}
+            onRedo={redoTrackChange}
           />
           <div
             data-testid="multitrack-timeline-panel"
@@ -739,23 +831,26 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     width={scaledTimelineWidth}
                     currentTime={currentTime}
                     canvasScale={canvasScale}
-                    selectedSegmentId={selectedSegmentId}
+                    selectedSegmentIds={selectedSegmentIds}
                     onAddVideo={handleAddVideo}
                     onAddAudio={handleAddAudio}
                     onAddTrack={handleAddTrack}
                     onReplaceVideo={handleReplaceVideo}
                     onAddTaskSegment={handleAddTaskSegment}
-                    onSelectSegment={setSelectedSegmentId}
+                    onSelectSegment={handleSelectSegment}
+                    onSelectSegments={handleSelectSegments}
+                    onClearSelection={handleClearSelection}
                     onDeleteSegment={handleDeleteSegment}
                     onDeleteTrack={handleDeleteTrack}
                     onTrackAudioSettingsChange={handleTrackAudioSettingsChange}
                     onDistributeTaskSegments={handleDistributeTaskSegments}
                     onCloneTaskSegment={handleCloneTaskSegment}
                     onResizeSegment={handleResizeSegment}
+                    onResizeSegmentPreview={handleResizeSegmentPreview}
                     onMoveSegment={handleMoveSegment}
                     onSmartSplit={handleSmartSplit}
                     onSmartSplitTasks={handleSmartSplitTasks}
-                    cutMode={cutMode}
+                    cutMode={false}
                     onCutSegment={handleCutSegment}
                   />
                 </div>

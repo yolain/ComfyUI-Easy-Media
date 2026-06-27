@@ -7,6 +7,7 @@ import {
   createDefaultTrackData,
   createMultiTrackAudioContent,
   createMultiTrackVideoContent,
+  deleteSegmentsWithLinkedTasks,
   deleteSegmentWithLinkedTasks,
   distributeMultiTrackSegmentsEvenly,
   formatMultiTrackDurationTimecode,
@@ -19,6 +20,7 @@ import {
   getSegmentDragPlaceholder,
   getSegmentDragPreviewSegments,
   MULTITRACK_TASK_MODES,
+  moveSelectedSegments,
   moveSegmentBetweenCompatibleTracks,
   multiTrackDbToLinearGain,
   normalizeTrackData,
@@ -819,6 +821,108 @@ describe('multitrack utilities', () => {
     expect(updated[1].segments.map((segment) => segment.id)).toEqual(['video-keep'])
   })
 
+  it('deletes multiple selected segments through the same linked-task rules', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [
+      {
+        id: 'task-linked',
+        start_frame: 0,
+        end_frame: 2,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+      {
+        id: 'task-selected',
+        start_frame: 2,
+        end_frame: 4,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+    ]
+    data.tracks[1].segments = [
+      {
+        id: 'video-selected',
+        start_frame: 0,
+        end_frame: 2,
+        color: data.tracks[1].color,
+        content: { media_type: 'video', duration: 2 },
+      },
+      {
+        id: 'video-keep',
+        start_frame: 2,
+        end_frame: 4,
+        color: data.tracks[1].color,
+        content: { media_type: 'video', duration: 2 },
+      },
+    ]
+
+    const updated = deleteSegmentsWithLinkedTasks(data.tracks, ['video-selected', 'task-selected'])
+
+    expect(updated[0].segments).toHaveLength(0)
+    expect(updated[1].segments.map((segment) => segment.id)).toEqual(['video-keep'])
+  })
+
+  it('packs later primary video segments forward after deleting selected middle clips', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [
+      {
+        id: 'task-first',
+        start_frame: 0,
+        end_frame: 2,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+      {
+        id: 'task-middle',
+        start_frame: 2,
+        end_frame: 5,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+      {
+        id: 'task-last',
+        start_frame: 5,
+        end_frame: 7,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+    ]
+    data.tracks[1].segments = [
+      {
+        id: 'video-first',
+        start_frame: 0,
+        end_frame: 2,
+        color: data.tracks[1].color,
+        content: { media_type: 'video', duration: 2 },
+      },
+      {
+        id: 'video-middle',
+        start_frame: 2,
+        end_frame: 5,
+        color: data.tracks[1].color,
+        content: { media_type: 'video', duration: 3 },
+      },
+      {
+        id: 'video-last',
+        start_frame: 5,
+        end_frame: 7,
+        color: data.tracks[1].color,
+        content: { media_type: 'video', duration: 2 },
+      },
+    ]
+
+    const updated = deleteSegmentsWithLinkedTasks(data.tracks, ['video-middle'])
+
+    expect(updated[1].segments.map((segment) => [segment.id, segment.start_frame, segment.end_frame])).toEqual([
+      ['video-first', 0, 2],
+      ['video-last', 2, 4],
+    ])
+    expect(updated[0].segments.map((segment) => [segment.id, segment.start_frame, segment.end_frame])).toEqual([
+      ['task-first', 0, 2],
+      ['task-last', 2, 4],
+    ])
+  })
+
   it('moves segments only between compatible tracks and clamps to avoid overlaps', () => {
     const data = createDefaultTrackData()
     const firstVideoTrack = data.tracks[1]
@@ -907,6 +1011,84 @@ describe('multitrack utilities', () => {
     expect(moved[1].segments.map((segment) => [segment.start_frame, segment.end_frame])).toEqual([
       [0, 3],
       [3, 5],
+    ])
+  })
+
+  it('moves selected segments together while preserving each track type rules', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [
+      {
+        id: 'task-first',
+        start_frame: 0,
+        end_frame: 2,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+      {
+        id: 'task-second',
+        start_frame: 2,
+        end_frame: 5,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+    ]
+    data.tracks[1].segments = [
+      {
+        id: 'video-first',
+        start_frame: 0,
+        end_frame: 2,
+        color: data.tracks[1].color,
+        content: { media_type: 'video', duration: 2 },
+      },
+      {
+        id: 'video-second',
+        start_frame: 2,
+        end_frame: 5,
+        color: data.tracks[1].color,
+        content: { media_type: 'video', duration: 3 },
+      },
+    ]
+    data.tracks.push({
+      id: 'audio-track',
+      name: 'Audio 0',
+      type: 'audio',
+      color: 'var(--highlight)',
+      muted: false,
+      solo: false,
+      volume_db: 0,
+      locked: false,
+      segments: [
+        {
+          id: 'audio-first',
+          start_frame: 0,
+          end_frame: 2,
+          color: 'var(--highlight)',
+          content: { media_type: 'audio', duration: 2 },
+        },
+        {
+          id: 'audio-second',
+          start_frame: 3,
+          end_frame: 5,
+          color: 'var(--highlight)',
+          content: { media_type: 'audio', duration: 2 },
+        },
+      ],
+    })
+
+    const moved = moveSelectedSegments(
+      data.tracks,
+      ['task-first', 'video-first', 'audio-first'],
+      'video-first',
+      data.tracks[1].id,
+      4,
+      24,
+    )
+
+    expect(moved[0].segments.map((segment) => segment.id)).toEqual(['task-second', 'task-first'])
+    expect(moved[1].segments.map((segment) => segment.id)).toEqual(['video-second', 'video-first'])
+    expect(moved[2].segments.map((segment) => [segment.id, segment.start_frame, segment.end_frame])).toEqual([
+      ['audio-second', 3, 5],
+      ['audio-first', 5, 7],
     ])
   })
 

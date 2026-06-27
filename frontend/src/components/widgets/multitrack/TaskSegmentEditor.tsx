@@ -96,7 +96,6 @@ function getTaskType(mode: MultiTrackTaskMode, imageCount: number, hasVideoInRan
 function hasVideoInRange(segment: MultiTrackSegment, videoSegments: MultiTrackSegment[]): boolean {
   return videoSegments.some((videoSegment) => (
     videoSegment.content.media_type === 'video' &&
-    videoSegment.content.source_type !== 'preset' &&
     videoSegment.start_frame < segment.end_frame &&
     videoSegment.end_frame > segment.start_frame
   ))

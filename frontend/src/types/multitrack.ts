@@ -35,6 +35,7 @@ export interface MultiTrackSegmentContent {
   slot_name?: string
   file_name?: string
   text?: string
+  user_prompt?: string
   system_prompt?: string
   task_mode?: MultiTrackTaskMode
   images?: MultiTrackTaskImage[]

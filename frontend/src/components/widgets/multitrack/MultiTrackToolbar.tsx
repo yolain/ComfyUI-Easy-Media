@@ -1,4 +1,4 @@
-import { Maximize2, Minimize2, TextCursor, Trash2, ZoomOut } from 'lucide-react'
+import { Maximize2, Minimize2, Redo2, Scissors, Trash2, Undo2, ZoomOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { useT } from '@/lib/i18n'
@@ -19,8 +19,11 @@ interface MultiTrackToolbarProps {
   onToggleTimeline: () => void
   canDelete: boolean
   onDeleteSelected: () => void
-  cutMode: boolean
-  onToggleCutMode: () => void
+  onCutAtCurrentTime: () => void
+  canUndo: boolean
+  canRedo: boolean
+  onUndo: () => void
+  onRedo: () => void
 }
 
 export function MultiTrackToolbar({
@@ -35,8 +38,11 @@ export function MultiTrackToolbar({
   onToggleTimeline,
   canDelete,
   onDeleteSelected,
-  cutMode,
-  onToggleCutMode,
+  onCutAtCurrentTime,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
 }: Readonly<MultiTrackToolbarProps>) {
   const t = useT()
   return (
@@ -46,7 +52,35 @@ export function MultiTrackToolbar({
           type="button"
           variant="ghost"
           size="icon"
-          className={`${TOOLBAR_ICON_BUTTON_CLASS} text-muted-foreground`}
+          className={`${TOOLBAR_ICON_BUTTON_CLASS} text-muted-foreground cursor-pointer`}
+          disabled={!canUndo}
+          aria-label={t('multitrack.undo')}
+          onClick={(event) => {
+            event.stopPropagation()
+            onUndo()
+          }}
+        >
+          <Undo2 className={TOOLBAR_ICON_CLASS} />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={`${TOOLBAR_ICON_BUTTON_CLASS} text-muted-foreground cursor-pointer`}
+          disabled={!canRedo}
+          aria-label={t('multitrack.redo')}
+          onClick={(event) => {
+            event.stopPropagation()
+            onRedo()
+          }}
+        >
+          <Redo2 className={TOOLBAR_ICON_CLASS} />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={`${TOOLBAR_ICON_BUTTON_CLASS} text-muted-foreground cursor-pointer`}
           disabled={!canDelete}
           aria-label={t('multitrack.deleteSelectedSegment')}
           onClick={(event) => {
@@ -58,18 +92,16 @@ export function MultiTrackToolbar({
         </Button>
         <Button
           type="button"
-          variant={cutMode ? 'secondary' : 'ghost'}
+          variant="ghost"
           size="icon"
-          className={`${TOOLBAR_ICON_BUTTON_CLASS} text-muted-foreground`}
+          className={`${TOOLBAR_ICON_BUTTON_CLASS} text-muted-foreground cursor-pointer`}
           aria-label={t('multitrack.cutMode')}
-          aria-pressed={cutMode}
-          data-cut-mode-toggle
           onClick={(event) => {
             event.stopPropagation()
-            onToggleCutMode()
+            onCutAtCurrentTime()
           }}
         >
-          <TextCursor className={`${TOOLBAR_ICON_CLASS} ${cutMode ? 'text-highlight' : 'text-muted-foreground'}`} />
+          <Scissors className={`${TOOLBAR_ICON_CLASS} text-muted-foreground`} />
         </Button>
       </div>
 
@@ -114,7 +146,7 @@ export function MultiTrackToolbar({
           type="button"
           variant="ghost"
           size="icon"
-          className={`${TOOLBAR_ICON_BUTTON_CLASS} text-muted-foreground`}
+          className={`${TOOLBAR_ICON_BUTTON_CLASS} text-muted-foreground cursor-pointer`}
           aria-label={timelineCollapsed ? t('multitrack.showTimeline') : t('multitrack.hideTimeline')}
           onClick={(event) => {
             event.stopPropagation()

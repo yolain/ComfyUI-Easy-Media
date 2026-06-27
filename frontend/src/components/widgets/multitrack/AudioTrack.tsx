@@ -18,7 +18,7 @@ interface AudioTrackProps {
   frameRate: number
   width: number
   canvasScale: number
-  selectedSegmentId: string | null
+  selectedSegmentIds: Set<string>
   node: unknown
   app: unknown
   onAddAudio: (
@@ -27,11 +27,12 @@ interface AudioTrackProps {
     sourceType: MultiTrackSourceType,
     previewUrl?: string,
   ) => void
-  onSelectSegment: (segmentId: string) => void
+  onSelectSegment: (segmentId: string, mode?: 'replace' | 'toggle' | 'add') => void
   onDeleteSegment: (segmentId: string) => void
   onDeleteTrack: (trackId: string) => void
   onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo'>>) => void
   onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
+  onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
   onMoveSegment: (segmentId: string, nextStartTime: number, clientY: number) => void
   onDragPreviewChange: (segmentId: string, nextStartTime: number, clientY: number) => void
   onDragPreviewEnd: () => void
@@ -45,7 +46,7 @@ export function AudioTrack({
   frameRate,
   width,
   canvasScale,
-  selectedSegmentId,
+  selectedSegmentIds,
   node,
   app,
   onAddAudio,
@@ -54,6 +55,7 @@ export function AudioTrack({
   onDeleteTrack,
   onTrackAudioSettingsChange,
   onResizeSegment,
+  onResizeSegmentPreview,
   onMoveSegment,
   onDragPreviewChange,
   onDragPreviewEnd,
@@ -75,7 +77,7 @@ export function AudioTrack({
         <TrackAudioControls
           track={track}
           icon={<Music2 className="h-3.5 w-3.5 text-muted-foreground" />}
-          preserveSelection={track.segments.some((segment) => segment.id === selectedSegmentId)}
+          preserveSelection={track.segments.some((segment) => selectedSegmentIds.has(segment.id))}
           onChange={(patch) => onTrackAudioSettingsChange(track.id, patch)}
         />
       </div>
@@ -90,10 +92,11 @@ export function AudioTrack({
             frameRate={frameRate}
             areaWidth={width}
             canvasScale={canvasScale}
-            selected={selectedSegmentId === segment.id}
+            selected={selectedSegmentIds.has(segment.id)}
             onSelect={onSelectSegment}
             onDelete={onDeleteSegment}
             onResize={onResizeSegment}
+            onResizePreview={onResizeSegmentPreview}
             onMove={onMoveSegment}
             onDragPreviewChange={onDragPreviewChange}
             onDragPreviewEnd={onDragPreviewEnd}

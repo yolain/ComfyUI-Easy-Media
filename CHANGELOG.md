@@ -11,6 +11,11 @@
 - **Split Image**: Support image list or image batch type image splitting, applicable to `Bernini multi-reference` scenario
 - **Merge Videos From Paths**: Add `frame_count` to support clipping
 
+### 🐛 Bug Fixes
+
+- **Media Selector**: Fix resource sorting should be by `name`, `creation time`, `folder first`
+- **Media Selector**: Fix issues where keyword is not cleared when entering subdirectory after searching
+
 ---
 
 ## [1.0.4] — 2026-06-16

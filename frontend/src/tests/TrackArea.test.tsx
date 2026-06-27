@@ -43,7 +43,7 @@ describe('TrackArea track controls', () => {
           width={480}
           currentTime={0}
           canvasScale={1}
-          selectedSegmentId={null}
+          selectedSegmentIds={new Set()}
           node={{}}
           app={{}}
           onAddVideo={vi.fn()}
@@ -52,12 +52,15 @@ describe('TrackArea track controls', () => {
           onReplaceVideo={vi.fn()}
           onAddTaskSegment={vi.fn()}
           onSelectSegment={vi.fn()}
+          onSelectSegments={vi.fn()}
+          onClearSelection={vi.fn()}
           onDeleteSegment={vi.fn()}
           onDeleteTrack={vi.fn()}
           onTrackAudioSettingsChange={vi.fn()}
           onDistributeTaskSegments={vi.fn()}
           onCloneTaskSegment={vi.fn()}
           onResizeSegment={vi.fn()}
+          onResizeSegmentPreview={vi.fn()}
           onMoveSegment={vi.fn()}
           onSmartSplit={vi.fn()}
           onSmartSplitTasks={vi.fn()}
@@ -94,7 +97,7 @@ describe('TrackArea track controls', () => {
           width={480}
           currentTime={0}
           canvasScale={1}
-          selectedSegmentId={null}
+          selectedSegmentIds={new Set()}
           node={{ inputs: [] }}
           app={{ graph: {} }}
           onAddVideo={vi.fn()}
@@ -103,12 +106,15 @@ describe('TrackArea track controls', () => {
           onReplaceVideo={vi.fn()}
           onAddTaskSegment={vi.fn()}
           onSelectSegment={vi.fn()}
+          onSelectSegments={vi.fn()}
+          onClearSelection={vi.fn()}
           onDeleteSegment={vi.fn()}
           onDeleteTrack={vi.fn()}
           onTrackAudioSettingsChange={vi.fn()}
           onDistributeTaskSegments={vi.fn()}
           onCloneTaskSegment={vi.fn()}
           onResizeSegment={vi.fn()}
+          onResizeSegmentPreview={vi.fn()}
           onMoveSegment={vi.fn()}
           onSmartSplit={vi.fn()}
           onSmartSplitTasks={vi.fn()}
@@ -163,7 +169,7 @@ describe('TrackArea track controls', () => {
           width={480}
           currentTime={0}
           canvasScale={1}
-          selectedSegmentId={null}
+          selectedSegmentIds={new Set()}
           node={{}}
           app={{}}
           onAddVideo={vi.fn()}
@@ -172,12 +178,15 @@ describe('TrackArea track controls', () => {
           onReplaceVideo={vi.fn()}
           onAddTaskSegment={vi.fn()}
           onSelectSegment={vi.fn()}
+          onSelectSegments={vi.fn()}
+          onClearSelection={vi.fn()}
           onDeleteSegment={vi.fn()}
           onDeleteTrack={vi.fn()}
           onTrackAudioSettingsChange={vi.fn()}
           onDistributeTaskSegments={vi.fn()}
           onCloneTaskSegment={vi.fn()}
           onResizeSegment={vi.fn()}
+          onResizeSegmentPreview={vi.fn()}
           onMoveSegment={vi.fn()}
           onSmartSplit={vi.fn()}
           onSmartSplitTasks={vi.fn()}
@@ -191,6 +200,152 @@ describe('TrackArea track controls', () => {
 
     expect(screen.getByTestId('segment-task-first').getAttribute('data-start-frame')).toBe('3')
     expect(screen.getByTestId('segment-task-second').getAttribute('data-end-frame')).toBe('3')
+  })
+
+  it('selects segments across tracks with a marquee drag', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [{
+      id: 'task-first',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[0].color,
+      content: { media_type: 'none', task_mode: 'default' },
+    }]
+    data.tracks[1].segments = [{
+      id: 'video-first',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[1].color,
+      content: { media_type: 'video', duration: 10 },
+    }]
+    const onSelectSegments = vi.fn()
+    const onClearSelection = vi.fn()
+
+    render(
+      <TooltipProvider>
+        <div data-testid="outer-clear-zone" onClick={onClearSelection}>
+          <TrackArea
+            data={data}
+            width={480}
+            currentTime={0}
+            canvasScale={1}
+            selectedSegmentIds={new Set()}
+            node={{}}
+            app={{}}
+            onAddVideo={vi.fn()}
+            onAddAudio={vi.fn()}
+            onAddTrack={vi.fn()}
+            onReplaceVideo={vi.fn()}
+            onAddTaskSegment={vi.fn()}
+            onSelectSegment={vi.fn()}
+            onSelectSegments={onSelectSegments}
+            onClearSelection={onClearSelection}
+            onDeleteSegment={vi.fn()}
+            onDeleteTrack={vi.fn()}
+            onTrackAudioSettingsChange={vi.fn()}
+            onDistributeTaskSegments={vi.fn()}
+            onCloneTaskSegment={vi.fn()}
+            onResizeSegment={vi.fn()}
+            onResizeSegmentPreview={vi.fn()}
+            onMoveSegment={vi.fn()}
+            onSmartSplit={vi.fn()}
+            onSmartSplitTasks={vi.fn()}
+            cutMode={false}
+            onCutSegment={vi.fn()}
+          />
+        </div>
+      </TooltipProvider>,
+    )
+
+    const area = document.querySelector('[data-multitrack-track-area]') as HTMLDivElement
+    vi.spyOn(area, 'getBoundingClientRect').mockReturnValue({
+      left: 100,
+      top: 200,
+      width: 480,
+      height: 111,
+      right: 580,
+      bottom: 311,
+      x: 100,
+      y: 200,
+      toJSON: () => ({}),
+    })
+
+    fireEvent.mouseDown(area, { button: 0, clientX: 120, clientY: 202 })
+    fireEvent.mouseMove(window, { clientX: 190, clientY: 292 })
+    expect(document.querySelector('.bg-primary\\/10')).toBeTruthy()
+    fireEvent.mouseUp(window, { clientX: 190, clientY: 292 })
+
+    expect(onSelectSegments).toHaveBeenCalledWith(['task-first', 'video-first'])
+  })
+
+  it('keeps selecting when an add-track marquee drag leaves above the track area', () => {
+    const data = createDefaultTrackData()
+    data.tracks[1].segments = [{
+      id: 'video-first',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[1].color,
+      content: { media_type: 'video', duration: 10 },
+    }]
+    const onSelectSegments = vi.fn()
+    const onClearSelection = vi.fn()
+
+    render(
+      <TooltipProvider>
+        <div data-testid="outer-clear-zone" onClick={onClearSelection}>
+          <TrackArea
+            data={data}
+            width={480}
+            currentTime={0}
+            canvasScale={1}
+            selectedSegmentIds={new Set()}
+            node={{}}
+            app={{}}
+            onAddVideo={vi.fn()}
+            onAddAudio={vi.fn()}
+            onAddTrack={vi.fn()}
+            onReplaceVideo={vi.fn()}
+            onAddTaskSegment={vi.fn()}
+            onSelectSegment={vi.fn()}
+            onSelectSegments={onSelectSegments}
+            onClearSelection={onClearSelection}
+            onDeleteSegment={vi.fn()}
+            onDeleteTrack={vi.fn()}
+            onTrackAudioSettingsChange={vi.fn()}
+            onDistributeTaskSegments={vi.fn()}
+            onCloneTaskSegment={vi.fn()}
+            onResizeSegment={vi.fn()}
+            onResizeSegmentPreview={vi.fn()}
+            onMoveSegment={vi.fn()}
+            onSmartSplit={vi.fn()}
+            onSmartSplitTasks={vi.fn()}
+            cutMode={false}
+            onCutSegment={vi.fn()}
+          />
+        </div>
+      </TooltipProvider>,
+    )
+
+    const area = document.querySelector('[data-multitrack-track-area]') as HTMLDivElement
+    vi.spyOn(area, 'getBoundingClientRect').mockReturnValue({
+      left: 100,
+      top: 200,
+      width: 480,
+      height: 118,
+      right: 580,
+      bottom: 318,
+      x: 100,
+      y: 200,
+      toJSON: () => ({}),
+    })
+
+    fireEvent.mouseDown(area, { button: 0, clientX: 190, clientY: 313 })
+    fireEvent.mouseMove(window, { clientX: 120, clientY: 180 })
+    fireEvent.mouseUp(window, { clientX: 120, clientY: 180 })
+    fireEvent.click(screen.getByTestId('outer-clear-zone'))
+
+    expect(onSelectSegments).toHaveBeenCalledWith(['video-first'])
+    expect(onClearSelection).not.toHaveBeenCalled()
   })
 
   it('uploads external audio and video files at canvas-scaled pointer positions', async () => {
@@ -218,7 +373,7 @@ describe('TrackArea track controls', () => {
           width={480}
           currentTime={0}
           canvasScale={0.5}
-          selectedSegmentId={null}
+          selectedSegmentIds={new Set()}
           node={{}}
           app={{}}
           onAddVideo={onAddVideo}
@@ -227,12 +382,15 @@ describe('TrackArea track controls', () => {
           onReplaceVideo={vi.fn()}
           onAddTaskSegment={vi.fn()}
           onSelectSegment={vi.fn()}
+          onSelectSegments={vi.fn()}
+          onClearSelection={vi.fn()}
           onDeleteSegment={vi.fn()}
           onDeleteTrack={vi.fn()}
           onTrackAudioSettingsChange={vi.fn()}
           onDistributeTaskSegments={vi.fn()}
           onCloneTaskSegment={vi.fn()}
           onResizeSegment={vi.fn()}
+          onResizeSegmentPreview={vi.fn()}
           onMoveSegment={vi.fn()}
           onSmartSplit={vi.fn()}
           onSmartSplitTasks={vi.fn()}

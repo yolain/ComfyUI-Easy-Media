@@ -30,7 +30,7 @@ interface MultiTrackSegmentBlockProps {
   areaWidth: number
   canvasScale: number
   selected: boolean
-  onSelect: (segmentId: string) => void
+  onSelect: (segmentId: string, mode?: 'replace' | 'toggle' | 'add') => void
   onDelete: (segmentId: string) => void
   onDistribute?: () => void
   onClone?: (segmentId: string) => void
@@ -39,6 +39,7 @@ interface MultiTrackSegmentBlockProps {
   cutMode?: boolean
   onCut?: (segmentId: string, splitFrame: number) => void
   onResize: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
+  onResizePreview: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
   onMove: (segmentId: string, nextStartTime: number, clientY: number) => void
   onDragPreviewChange?: (segmentId: string, nextStartTime: number, clientY: number) => void
   onDragPreviewEnd?: () => void
@@ -70,6 +71,7 @@ export function MultiTrackSegmentBlock({
   cutMode = false,
   onCut,
   onResize,
+  onResizePreview,
   onMove,
   onDragPreviewChange,
   onDragPreviewEnd,
@@ -215,7 +217,7 @@ export function MultiTrackSegmentBlock({
     if (cutMode) return
     didDragRef.current = false
     isDraggingRef.current = false
-    onSelect(segment.id)
+    onSelect(segment.id, event.metaKey || event.ctrlKey ? 'toggle' : event.shiftKey || selected ? 'add' : 'replace')
 
     const rect = event.currentTarget.getBoundingClientRect()
     const relX = (event.clientX - rect.left) / Math.max(canvasScale, 0.01)
@@ -286,10 +288,12 @@ export function MultiTrackSegmentBlock({
     function handleMove(moveEvent: MouseEvent) {
       const deltaFrames = resizeDeltaFromClientX(moveEvent.clientX, startX)
       if (Math.abs(deltaFrames) > 0) didDragRef.current = true
-      onResize(segment.id, resizeEdge, originalTime + deltaFrames)
+      onResizePreview(segment.id, resizeEdge, originalTime + deltaFrames)
     }
 
-    function handleUp() {
+    function handleUp(upEvent: MouseEvent) {
+      const deltaFrames = resizeDeltaFromClientX(upEvent.clientX, startX)
+      if (didDragRef.current) onResize(segment.id, resizeEdge, originalTime + deltaFrames)
       setIsResizing(false)
       globalThis.removeEventListener('mousemove', handleMove)
       globalThis.removeEventListener('mouseup', handleUp)
@@ -305,6 +309,7 @@ export function MultiTrackSegmentBlock({
         <ContextMenuTrigger asChild>
         <div
           role="button"
+          data-multitrack-segment=""
           tabIndex={0}
           className="absolute top-1 bottom-1 flex items-center overflow-hidden rounded select-none active:opacity-70"
           style={blockStyle}
@@ -324,11 +329,11 @@ export function MultiTrackSegmentBlock({
               onCut(segment.id, splitFrame)
               return
             }
-            if (!didDragRef.current) onSelect(segment.id)
+            if (!didDragRef.current) event.preventDefault()
           }}
           onContextMenu={(event) => {
             event.stopPropagation()
-            onSelect(segment.id)
+            onSelect(segment.id, selected ? 'add' : 'replace')
           }}
           onDoubleClick={(event) => {
             event.preventDefault()
@@ -337,7 +342,7 @@ export function MultiTrackSegmentBlock({
             onDoubleClick?.(segment.id, event)
           }}
           onKeyDown={(event) => {
-            if (event.key === 'Enter') onSelect(segment.id)
+            if (event.key === 'Enter') onSelect(segment.id, event.metaKey || event.ctrlKey ? 'toggle' : event.shiftKey ? 'add' : 'replace')
             if (event.key === 'Delete' || event.key === 'Backspace') onDelete(segment.id)
           }}
         >

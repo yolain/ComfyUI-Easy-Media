@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Captions, Film, ListTree, Clapperboard, Layers2, Music2, Plus, Trash2, Volume2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -24,7 +24,7 @@ interface TrackAreaProps {
   width: number
   currentTime: number
   canvasScale: number
-  selectedSegmentId: string | null
+  selectedSegmentIds: Set<string>
   onAddVideo: (trackId: string, filePath: string, sourceType: MultiTrackSourceType, startFrame?: number) => void
   onAddAudio: (
     trackId: string,
@@ -36,13 +36,16 @@ interface TrackAreaProps {
   onAddTrack: (type: MultiTrackType) => void
   onReplaceVideo: (trackId: string, segmentId: string, filePath: string, sourceType: MultiTrackSourceType) => void
   onAddTaskSegment: (trackId: string) => void
-  onSelectSegment: (segmentId: string) => void
+  onSelectSegment: (segmentId: string, mode?: 'replace' | 'toggle' | 'add') => void
+  onSelectSegments: (segmentIds: string[]) => void
+  onClearSelection: () => void
   onDeleteSegment: (segmentId: string) => void
   onDeleteTrack: (trackId: string) => void
   onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo'>>) => void
   onDistributeTaskSegments: (trackId: string) => void
   onCloneTaskSegment: (trackId: string, segmentId: string) => void
   onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
+  onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
   onMoveSegment: (segmentId: string, targetTrackId: string, nextStartTime: number) => void
   onSmartSplit: (segmentId: string) => void
   onSmartSplitTasks: (segmentId: string) => void
@@ -130,19 +133,22 @@ export function TrackArea({
   width,
   currentTime,
   canvasScale,
-  selectedSegmentId,
+  selectedSegmentIds,
   onAddVideo,
   onAddAudio,
   onAddTrack,
   onReplaceVideo,
   onAddTaskSegment,
   onSelectSegment,
+  onSelectSegments,
+  onClearSelection,
   onDeleteSegment,
   onDeleteTrack,
   onTrackAudioSettingsChange,
   onDistributeTaskSegments,
   onCloneTaskSegment,
   onResizeSegment,
+  onResizeSegmentPreview,
   onMoveSegment,
   onSmartSplit,
   onSmartSplitTasks,
@@ -151,8 +157,13 @@ export function TrackArea({
 }: Readonly<TrackAreaProps>) {
   const t = useT()
   const trackAreaRef = useRef<HTMLDivElement>(null)
+  const marqueeStartRef = useRef<{ x: number, y: number } | null>(null)
+  const marqueeMovedRef = useRef(false)
+  const suppressNextClickRef = useRef(false)
+  const suppressGlobalClickCleanupRef = useRef<(() => void) | null>(null)
   const [dragPlaceholder, setDragPlaceholder] = useState<SegmentDragPlaceholder | null>(null)
   const [externalDropSlot, setExternalDropSlot] = useState<ExternalDropSlot | null>(null)
+  const [marqueeRect, setMarqueeRect] = useState<{ left: number, top: number, width: number, height: number } | null>(null)
   const safeLength = Math.max(data.total_length, 1)
   const timelineWidth = Math.max(1, width - MULTITRACK_LEFT_GUTTER)
   const playableWidth = Math.max(1, timelineWidth - MULTITRACK_RIGHT_RESERVE)
@@ -169,11 +180,133 @@ export function TrackArea({
     return bounds
   }, [])
 
+  useEffect(() => {
+    return () => {
+      suppressGlobalClickCleanupRef.current?.()
+    }
+  }, [])
+
   function targetTrackIdFromClientY(clientY: number): string | null {
     const rect = trackAreaRef.current?.getBoundingClientRect()
     if (!rect) return null
     const y = (clientY - rect.top) / Math.max(canvasScale, 0.01)
     return trackBounds.find((track) => y >= track.top && y < track.bottom)?.id ?? null
+  }
+
+  function localPoint(clientX: number, clientY: number): { x: number, y: number } | null {
+    const rect = trackAreaRef.current?.getBoundingClientRect()
+    if (!rect) return null
+    const scale = Math.max(canvasScale, 0.01)
+    return {
+      x: (clientX - rect.left) / scale,
+      y: (clientY - rect.top) / scale,
+    }
+  }
+
+  function clampedLocalPoint(clientX: number, clientY: number): { x: number, y: number } | null {
+    const point = localPoint(clientX, clientY)
+    if (!point) return null
+    return {
+      x: Math.max(0, Math.min(width, point.x)),
+      y: Math.max(0, Math.min(trackAreaHeight, point.y)),
+    }
+  }
+
+  function normalizedRect(start: { x: number, y: number }, end: { x: number, y: number }) {
+    return {
+      left: Math.min(start.x, end.x),
+      top: Math.min(start.y, end.y),
+      width: Math.abs(end.x - start.x),
+      height: Math.abs(end.y - start.y),
+    }
+  }
+
+  function segmentIntersectsRect(trackId: string, segment: MultiTrackSegment, rect: { left: number, top: number, width: number, height: number }): boolean {
+    const bounds = trackBounds.find((track) => track.id === trackId)
+    if (!bounds) return false
+    const left = MULTITRACK_LEFT_GUTTER + (segment.start_frame / safeLength) * playableWidth
+    const right = MULTITRACK_LEFT_GUTTER + (segment.end_frame / safeLength) * playableWidth
+    const top = bounds.top + 4
+    const bottom = bounds.bottom - 4
+    const rectRight = rect.left + rect.width
+    const rectBottom = rect.top + rect.height
+    return left < rectRight && right > rect.left && top < rectBottom && bottom > rect.top
+  }
+
+  function selectedIdsForRect(rect: { left: number, top: number, width: number, height: number }): string[] {
+    return data.tracks.flatMap((track) => (
+      track.segments
+        .filter((segment) => segmentIntersectsRect(track.id, segment, rect))
+        .map((segment) => segment.id)
+    ))
+  }
+
+  function canStartMarquee(event: React.MouseEvent<HTMLDivElement>): boolean {
+    if (event.button !== 0 || cutMode) return false
+    const target = event.target as Element
+    return !target.closest('[data-multitrack-segment]') &&
+      !target.closest('button') &&
+      !target.closest('[role="button"]') &&
+      !target.closest('[data-radix-popper-content-wrapper]')
+  }
+
+  function suppressNextGlobalClick() {
+    suppressGlobalClickCleanupRef.current?.()
+    let timeoutId: ReturnType<typeof globalThis.setTimeout> | null = null
+    const handleClick = (event: MouseEvent) => {
+      event.preventDefault()
+      event.stopPropagation()
+      event.stopImmediatePropagation()
+      cleanup()
+    }
+    function cleanup() {
+      globalThis.removeEventListener('click', handleClick, true)
+      if (timeoutId !== null) globalThis.clearTimeout(timeoutId)
+      if (suppressGlobalClickCleanupRef.current === cleanup) suppressGlobalClickCleanupRef.current = null
+    }
+    suppressGlobalClickCleanupRef.current = cleanup
+    globalThis.addEventListener('click', handleClick, true)
+    timeoutId = globalThis.setTimeout(cleanup, 0)
+  }
+
+  function handleMarqueeMouseDown(event: React.MouseEvent<HTMLDivElement>) {
+    if (!canStartMarquee(event)) return
+    const point = localPoint(event.clientX, event.clientY)
+    if (!point || point.y > trackAreaHeight) return
+    event.preventDefault()
+    event.stopPropagation()
+    marqueeStartRef.current = point
+    marqueeMovedRef.current = false
+
+    function handleMove(moveEvent: MouseEvent) {
+      const start = marqueeStartRef.current
+      const current = clampedLocalPoint(moveEvent.clientX, moveEvent.clientY)
+      if (!start || !current) return
+      const rect = normalizedRect(start, current)
+      if (rect.width > 3 || rect.height > 3) marqueeMovedRef.current = true
+      setMarqueeRect(rect)
+    }
+
+    function handleUp(upEvent: MouseEvent) {
+      const start = marqueeStartRef.current
+      const current = clampedLocalPoint(upEvent.clientX, upEvent.clientY)
+      marqueeStartRef.current = null
+      setMarqueeRect(null)
+      globalThis.removeEventListener('mousemove', handleMove)
+      globalThis.removeEventListener('mouseup', handleUp)
+      if (!start || !current) return
+      if (!marqueeMovedRef.current) {
+        onClearSelection()
+        return
+      }
+      suppressNextClickRef.current = true
+      suppressNextGlobalClick()
+      const ids = selectedIdsForRect(normalizedRect(start, current))
+      onSelectSegments(ids)
+    }
+
+    globalThis.addEventListener('mousemove', handleMove)
+    globalThis.addEventListener('mouseup', handleUp)
   }
 
   function externalDropTarget(
@@ -280,6 +413,18 @@ export function TrackArea({
         if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) setExternalDropSlot(null)
       }}
       onDropCapture={handleExternalDrop}
+      onMouseDown={handleMarqueeMouseDown}
+      onClick={(event) => {
+        event.stopPropagation()
+        if (suppressNextClickRef.current) {
+          suppressNextClickRef.current = false
+          return
+        }
+        const target = event.target as Element
+        if (!target.closest('[data-multitrack-segment]') && !target.closest('button') && !target.closest('[role="button"]')) {
+          onClearSelection()
+        }
+      }}
     >
       <div
         className="pointer-events-none absolute top-0 z-10 bg-black/30"
@@ -299,7 +444,7 @@ export function TrackArea({
               frameRate={data.frame_rate}
               width={playableWidth}
               canvasScale={canvasScale}
-              selectedSegmentId={selectedSegmentId}
+              selectedSegmentIds={selectedSegmentIds}
               onAddVideo={onAddVideo}
               onReplaceVideo={onReplaceVideo}
               onSelectSegment={onSelectSegment}
@@ -312,6 +457,7 @@ export function TrackArea({
               onDeleteTrack={onDeleteTrack}
               onTrackAudioSettingsChange={onTrackAudioSettingsChange}
               onResizeSegment={onResizeSegment}
+              onResizeSegmentPreview={onResizeSegmentPreview}
               onMoveSegment={(segmentId, nextStartTime, clientY) => {
                 handleMoveSegment(segmentId, track.id, nextStartTime, clientY)
               }}
@@ -330,7 +476,7 @@ export function TrackArea({
               frameRate={data.frame_rate}
               width={playableWidth}
               canvasScale={canvasScale}
-              selectedSegmentId={selectedSegmentId}
+              selectedSegmentIds={selectedSegmentIds}
               node={node}
               app={app}
               onAddAudio={onAddAudio}
@@ -339,6 +485,7 @@ export function TrackArea({
               onDeleteTrack={onDeleteTrack}
               onTrackAudioSettingsChange={onTrackAudioSettingsChange}
               onResizeSegment={onResizeSegment}
+              onResizeSegmentPreview={onResizeSegmentPreview}
               onMoveSegment={(segmentId, nextStartTime, clientY) => handleMoveSegment(segmentId, track.id, nextStartTime, clientY)}
               onDragPreviewChange={updateDragPlaceholder}
               onDragPreviewEnd={() => setDragPlaceholder(null)}
@@ -371,7 +518,7 @@ export function TrackArea({
                   frameRate={data.frame_rate}
                   areaWidth={playableWidth}
                   canvasScale={canvasScale}
-                  selected={selectedSegmentId === segment.id}
+                  selected={selectedSegmentIds.has(segment.id)}
                   onSelect={onSelectSegment}
                   onDelete={onDeleteSegment}
                   onDistribute={track.type === 'task' ? () => onDistributeTaskSegments(track.id) : undefined}
@@ -379,6 +526,7 @@ export function TrackArea({
                   cutMode={cutMode}
                   onCut={onCutSegment}
                   onResize={onResizeSegment}
+                  onResizePreview={onResizeSegmentPreview}
                   onMove={(segmentId, nextStartTime, clientY) => {
                     handleMoveSegment(segmentId, track.id, nextStartTime, clientY)
                   }}
@@ -477,6 +625,12 @@ export function TrackArea({
         <div
           className="pointer-events-none absolute z-10 rounded border border-border bg-muted/60"
           style={dragPlaceholderRect}
+        />
+      ) : null}
+      {marqueeRect ? (
+        <div
+          className="pointer-events-none absolute z-40 rounded border border-primary bg-primary/10"
+          style={marqueeRect}
         />
       ) : null}
       {externalDropSlot ? (() => {

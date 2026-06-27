@@ -160,15 +160,15 @@ def _file_entry(abs_path: str, rel_path: str, source: str) -> dict:
         "size":  stat.st_size,
         "mtime": stat.st_mtime,
     }
-    # Attach pixel dimensions for image files
+    # Attach pixel dimensions for image files only; probing each video would make large media directories slow.
     ext = Path(abs_path).suffix.lower()
     if _HAS_PIL and ext in IMAGE_EXTENSIONS:
         try:
             with PILImage.open(abs_path) as img:
                 entry["width"] = img.width
                 entry["height"] = img.height
-        except Exception:
-            pass
+        except Exception as error:
+            print(f"[Easy Media] Failed to read image dimensions for {abs_path}: {error}")
     return entry
 
 

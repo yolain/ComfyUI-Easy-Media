@@ -49,6 +49,7 @@ function renderBlock(trackType: MultiTrackType) {
       onSmartSplit={trackType === 'video' ? onSmartSplit : undefined}
       onSmartSplitTasks={trackType === 'video' ? onSmartSplitTasks : undefined}
       onResize={vi.fn()}
+      onResizePreview={vi.fn()}
       onMove={vi.fn()}
     />,
   )
@@ -107,6 +108,7 @@ describe('MultiTrackSegmentBlock context menu', () => {
         onSelect={vi.fn()}
         onDelete={vi.fn()}
         onResize={vi.fn()}
+      onResizePreview={vi.fn()}
         onMove={vi.fn()}
         cutMode
         onCut={onCut}
@@ -140,6 +142,7 @@ describe('MultiTrackSegmentBlock context menu', () => {
         onSelect={vi.fn()}
         onDelete={vi.fn()}
         onResize={vi.fn()}
+      onResizePreview={vi.fn()}
         onMove={vi.fn()}
         onDoubleClick={onDoubleClick}
         cutMode
@@ -169,6 +172,7 @@ describe('MultiTrackSegmentBlock context menu', () => {
         onSelect={vi.fn()}
         onDelete={vi.fn()}
         onResize={vi.fn()}
+      onResizePreview={vi.fn()}
         onMove={vi.fn()}
       />,
     )

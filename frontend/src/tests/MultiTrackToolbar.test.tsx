@@ -32,15 +32,18 @@ function renderToolbar(timelineCollapsed: boolean, onToggleTimeline = vi.fn()) {
       onToggleTimeline={onToggleTimeline}
       canDelete={false}
       onDeleteSelected={vi.fn()}
-      cutMode={false}
-      onToggleCutMode={vi.fn()}
+      onCutAtCurrentTime={vi.fn()}
+      canUndo={false}
+      canRedo={false}
+      onUndo={vi.fn()}
+      onRedo={vi.fn()}
     />,
   )
 }
 
 describe('MultiTrackToolbar', () => {
-  it('toggles segment cut mode from the text cursor button', () => {
-    const onToggleCutMode = vi.fn()
+  it('cuts at the current time from the scissors button', () => {
+    const onCutAtCurrentTime = vi.fn()
     render(
       <MultiTrackToolbar
         currentTime={0}
@@ -54,15 +57,18 @@ describe('MultiTrackToolbar', () => {
         onToggleTimeline={vi.fn()}
         canDelete={false}
         onDeleteSelected={vi.fn()}
-        cutMode
-        onToggleCutMode={onToggleCutMode}
+        onCutAtCurrentTime={onCutAtCurrentTime}
+        canUndo={false}
+        canRedo={false}
+        onUndo={vi.fn()}
+        onRedo={vi.fn()}
       />,
     )
 
     const button = screen.getByRole('button', { name: 'multitrack.cutMode' })
-    expect(button.getAttribute('aria-pressed')).toBe('true')
+    expect(button.hasAttribute('aria-pressed')).toBe(false)
     fireEvent.click(button)
-    expect(onToggleCutMode).toHaveBeenCalledOnce()
+    expect(onCutAtCurrentTime).toHaveBeenCalledOnce()
   })
 
   it('shows the reversed timeline toggle icons and handles clicks', () => {
@@ -87,8 +93,11 @@ describe('MultiTrackToolbar', () => {
         onToggleTimeline={onToggleTimeline}
         canDelete={false}
         onDeleteSelected={vi.fn()}
-        cutMode={false}
-        onToggleCutMode={vi.fn()}
+        onCutAtCurrentTime={vi.fn()}
+        canUndo={false}
+        canRedo={false}
+        onUndo={vi.fn()}
+        onRedo={vi.fn()}
       />,
     )
 
@@ -103,5 +112,59 @@ describe('MultiTrackToolbar', () => {
 
     expect(iconClasses.length).toBeGreaterThan(0)
     expect(iconClasses.every((className) => className.includes('h-3.5') && className.includes('w-3.5'))).toBe(true)
+  })
+
+  it('renders undo and redo history buttons with disabled states', () => {
+    const onUndo = vi.fn()
+    const onRedo = vi.fn()
+    const { rerender } = render(
+      <MultiTrackToolbar
+        currentTime={0}
+        totalLength={24}
+        frameRate={24}
+        isPlaying={false}
+        zoom={1}
+        timelineCollapsed={false}
+        onPlayPause={vi.fn()}
+        onZoomChange={vi.fn()}
+        onToggleTimeline={vi.fn()}
+        canDelete={false}
+        onDeleteSelected={vi.fn()}
+        onCutAtCurrentTime={vi.fn()}
+        canUndo
+        canRedo={false}
+        onUndo={onUndo}
+        onRedo={onRedo}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'multitrack.undo' }))
+    fireEvent.click(screen.getByRole('button', { name: 'multitrack.redo' }))
+    expect(onUndo).toHaveBeenCalledOnce()
+    expect(onRedo).not.toHaveBeenCalled()
+
+    rerender(
+      <MultiTrackToolbar
+        currentTime={0}
+        totalLength={24}
+        frameRate={24}
+        isPlaying={false}
+        zoom={1}
+        timelineCollapsed={false}
+        onPlayPause={vi.fn()}
+        onZoomChange={vi.fn()}
+        onToggleTimeline={vi.fn()}
+        canDelete={false}
+        onDeleteSelected={vi.fn()}
+        onCutAtCurrentTime={vi.fn()}
+        canUndo={false}
+        canRedo
+        onUndo={onUndo}
+        onRedo={onRedo}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'multitrack.redo' }))
+    expect(onRedo).toHaveBeenCalledOnce()
   })
 })

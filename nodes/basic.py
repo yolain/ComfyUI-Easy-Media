@@ -1875,7 +1875,6 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 has_video = has_video or any(
                     isinstance(segment, dict)
                     and isinstance(segment.get("content"), dict)
-                    and segment["content"].get("source_type") != "preset"
                     and _ranges_overlap(start_frame, end_frame, segment)
                     for segment in track.get("segments", [])
                 )

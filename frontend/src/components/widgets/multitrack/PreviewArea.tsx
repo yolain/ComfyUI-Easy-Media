@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   collectMultiTrackPreviewResolutionInput,
@@ -54,6 +54,11 @@ interface ActiveTaskImages {
   segmentId: string
   allImages: MultiTrackTaskImage[]
   images: Array<{ image: MultiTrackTaskImage; url: string }>
+}
+
+interface ActiveTaskPrompt {
+  segmentId: string
+  prompt: string
 }
 
 interface ActivePanoramaTarget {
@@ -119,6 +124,23 @@ function getActiveTaskImages(data: TrackData, currentTime: number): ActiveTaskIm
   return null
 }
 
+function getActiveTaskPrompt(data: TrackData, currentTime: number): ActiveTaskPrompt | null {
+  const currentFrame = snapTimeToFrame(currentTime, data.frame_rate)
+
+  for (const track of data.tracks) {
+    if (track.type !== 'task') continue
+    const segment = track.segments.find((item) => (
+      currentFrame >= item.start_frame && currentFrame < item.end_frame
+    ))
+    if (!segment) continue
+
+    const prompt = (segment.content.user_prompt ?? segment.content.text ?? '').trim()
+    if (prompt.length > 0) return { segmentId: segment.id, prompt }
+  }
+
+  return null
+}
+
 export function PreviewArea({
   data,
   currentTime,
@@ -136,6 +158,7 @@ export function PreviewArea({
   const draggedTaskImageIdRef = useRef<string | null>(null)
   const [activePanoramaTarget, setActivePanoramaTarget] = useState<ActivePanoramaTarget | null>(null)
   const [activeTaskPreviewImageId, setActiveTaskPreviewImageId] = useState<string | null>(null)
+  const [taskPromptExpanded, setTaskPromptExpanded] = useState(true)
   const [firstVideoMetadata, setFirstVideoMetadata] = useState<MultiTrackVideoMetadata | null>(null)
   const [resolutionInput, setResolutionInput] = useState(() => collectMultiTrackPreviewResolutionInput(node))
   const videoSegments = useMemo(() => (
@@ -159,6 +182,7 @@ export function PreviewArea({
     : getActivePreviewVideoSegment(data, currentTime, selectedSegment?.trackType === 'video' ? selectedSegment.segment.id : null)
   const activeAudioSources = getActivePreviewAudioSources(data, currentTime, selectedSegment)
   const activeTaskImages = selectedSegment === null ? getActiveTaskImages(data, currentTime) : null
+  const activeTaskPrompt = selectedSegment === null ? getActiveTaskPrompt(data, currentTime) : null
   const resolution = parseMultiTrackPreviewResolution(resolutionInput, firstVideoMetadata)
   const selectedMediaDuration = selectedSegment?.trackType === 'video' || selectedSegment?.trackType === 'audio'
     ? frameToSeconds(segmentDuration(selectedSegment.segment), data.frame_rate)
@@ -180,6 +204,10 @@ export function PreviewArea({
   useEffect(() => {
     setActivePanoramaTarget(null)
   }, [selectedSegment?.segment.id])
+
+  useEffect(() => {
+    setTaskPromptExpanded(true)
+  }, [activeTaskPrompt?.segmentId])
 
   useEffect(() => {
     if (!activeTaskImages) {
@@ -478,80 +506,113 @@ export function PreviewArea({
           onExit={() => setActivePanoramaTarget(null)}
         />
       ) : null}
-      <div className="flex h-full min-h-24 w-full items-center justify-center gap-3">
-        {selectedAudio ? (
-          <div data-testid="selected-audio-waveform" className="h-20 max-h-full w-full overflow-hidden px-2">
-            <AudioWaveform
-              content={{
-                source_type: selectedAudio.content.source_type ?? 'input',
-                file_path: selectedAudio.content.file_path,
-                local_path: selectedAudio.content.local_path,
-                url: selectedAudio.content.url,
-                slot_name: selectedAudio.content.slot_name,
-              }}
-              className="h-full w-full"
+      <div className="flex h-full min-h-24 w-full flex-col items-center justify-center gap-0.5">
+        <div className="flex h-full min-h-24 w-full items-center justify-center gap-3">
+          {selectedAudio ? (
+            <div data-testid="selected-audio-waveform" className="h-20 max-h-full w-full overflow-hidden px-2">
+              <AudioWaveform
+                content={{
+                  source_type: selectedAudio.content.source_type ?? 'input',
+                  file_path: selectedAudio.content.file_path,
+                  local_path: selectedAudio.content.local_path,
+                  url: selectedAudio.content.url,
+                  slot_name: selectedAudio.content.slot_name,
+                }}
+                className="h-full w-full"
+              />
+            </div>
+          ) : usesTaskImageOnlyPreview && activeTaskImages && activeTaskPreviewImage ? (
+            <div
+              data-testid="task-preview-images"
+              className="flex h-full min-h-0 w-full flex-col bg-black"
+            >
+              <div className="relative flex min-h-0 flex-[9] items-center justify-center overflow-hidden p-2">
+                {(() => {
+                  const imageName = activeTaskPreviewImage.image.file_name
+                    ?? activeTaskPreviewImage.image.file_path
+                    ?? activeTaskPreviewImage.image.local_path
+                    ?? activeTaskPreviewImage.image.url
+                    ?? activeTaskPreviewImage.image.id
+                  return (
+                    <>
+                      {renderActiveTaskImagePreview(
+                        activeTaskPreviewImage.image,
+                        activeTaskPreviewImage.url,
+                        imageName,
+                        'max-h-full h-full max-w-full w-auto object-contain',
+                      )}
+                      {renderActiveTaskImageControls(activeTaskPreviewImage.image, imageName, 'corner')}
+                    </>
+                  )
+                })()}
+              </div>
+              <div className="flex min-h-0 flex-[1] items-center justify-center gap-2 overflow-x-auto p-2">
+                {activeTaskImages.images.map(({ image, url }) => (
+                  renderActiveTaskImageThumbnail(
+                    image,
+                    url,
+                    image.id === activeTaskPreviewImage.image.id,
+                    'h-full aspect-square',
+                    false,
+                  )
+                ))}
+              </div>
+            </div>
+          ) : activeTaskImages && (
+            <div
+              data-testid="task-preview-images"
+              className="flex max-h-full w-20 shrink-0 flex-col gap-2 overflow-hidden"
+            >
+              <div className="shrink-0 text-center text-[10px] font-medium text-foreground pt-2">
+                {t('multitrack.previewTaskLabel', { n: activeTaskImages.index })}
+              </div>
+              <div className="flex min-h-0 flex-col gap-2 overflow-y-auto pb-2">
+                {activeTaskImages.images.map(({ image, url }) => {
+                  return renderActiveTaskImageThumbnail(image, url, image.id === activeTaskPreviewImage?.image.id)
+                })}
+              </div>
+            </div>
+          )}
+          {!selectedAudio && !usesTaskImageOnlyPreview ? (
+            <VideoPreview
+              activeVideo={activeVideo}
+              resolution={resolution}
+              isPlaying={isPlaying}
+              muted
+              volume={0}
             />
-          </div>
-        ) : usesTaskImageOnlyPreview && activeTaskImages && activeTaskPreviewImage ? (
+          ) : null}
+        </div>
+        {activeTaskPrompt ? (
           <div
-            data-testid="task-preview-images"
-            className="flex h-full min-h-0 w-full flex-col bg-black"
+            data-testid="task-prompt-overlay"
+            className={`flex w-full items-center bg-black/70 text-primary-foreground ${
+              taskPromptExpanded ? 'px-2' : 'w-8 justify-center'
+            }`}
           >
-            <div className="relative flex min-h-0 flex-[9] items-center justify-center overflow-hidden p-2">
-              {(() => {
-                const imageName = activeTaskPreviewImage.image.file_name
-                  ?? activeTaskPreviewImage.image.file_path
-                  ?? activeTaskPreviewImage.image.local_path
-                  ?? activeTaskPreviewImage.image.url
-                  ?? activeTaskPreviewImage.image.id
-                return (
-                  <>
-                    {renderActiveTaskImagePreview(
-                      activeTaskPreviewImage.image,
-                      activeTaskPreviewImage.url,
-                      imageName,
-                      'max-h-full h-full max-w-full w-auto object-contain',
-                    )}
-                    {renderActiveTaskImageControls(activeTaskPreviewImage.image, imageName, 'corner')}
-                  </>
-                )
-              })()}
-            </div>
-            <div className="flex min-h-0 flex-[1] items-center justify-center gap-2 overflow-x-auto p-2">
-              {activeTaskImages.images.map(({ image, url }) => (
-                renderActiveTaskImageThumbnail(
-                  image,
-                  url,
-                  image.id === activeTaskPreviewImage.image.id,
-                  'h-full aspect-square',
-                  false,
-                )
-              ))}
-            </div>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="h-6 w-6 shrink-0 rounded-none text-primary [&_svg]:!size-3 cursor-pointer"
+              aria-label={taskPromptExpanded ? t('multitrack.hideTaskPrompt') : t('multitrack.showTaskPrompt')}
+              onClick={(event) => {
+                event.stopPropagation()
+                setTaskPromptExpanded((expanded) => !expanded)
+              }}
+            >
+              {taskPromptExpanded ? <ChevronLeft /> : <ChevronRight />}
+            </Button>
+            {taskPromptExpanded ? (
+              <div
+                data-testid="task-prompt-text"
+                className="min-w-0 flex-1 truncate text-primary px-1 text-[9px] leading-4"
+                title={activeTaskPrompt.prompt}
+              >
+                {activeTaskPrompt.prompt}
+              </div>
+            ) : null}
           </div>
-        ) : activeTaskImages && (
-          <div
-            data-testid="task-preview-images"
-            className="flex max-h-full w-20 shrink-0 flex-col gap-2 overflow-hidden"
-          >
-            <div className="shrink-0 text-center text-[10px] font-medium text-foreground pt-2">
-              {t('multitrack.previewTaskLabel', { n: activeTaskImages.index })}
-            </div>
-            <div className="flex min-h-0 flex-col gap-2 overflow-y-auto pb-2">
-              {activeTaskImages.images.map(({ image, url }) => {
-                return renderActiveTaskImageThumbnail(image, url, image.id === activeTaskPreviewImage?.image.id)
-              })}
-            </div>
-          </div>
-        )}
-        {!selectedAudio && !usesTaskImageOnlyPreview ? (
-          <VideoPreview
-            activeVideo={activeVideo}
-            resolution={resolution}
-            isPlaying={isPlaying}
-            muted
-            volume={0}
-          />
         ) : null}
       </div>
       <PreviewAudioPlayback sources={activeAudioSources} isPlaying={isPlaying} />

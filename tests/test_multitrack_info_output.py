@@ -1200,6 +1200,6 @@ def test_split_images_has_chinese_localization():
 
     translation = node_defs["easy splitImages"]
 
-    assert translation["display_name"] == "拆分图像"
+    assert translation["display_name"] == "图像拆分V2"
     assert set(translation["inputs"]) == {"images"}
     assert set(translation["outputs"]) == {str(index) for index in range(10)}

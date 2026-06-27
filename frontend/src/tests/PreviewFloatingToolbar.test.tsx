@@ -29,7 +29,7 @@ describe('PreviewFloatingToolbar', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Audio settings' }))
-    expect(screen.getAllByText('Audio (g)').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Audio (GV)').length).toBeGreaterThan(0)
     fireEvent.click(screen.getByRole('button', { name: 'Mute preview audio' }))
 
     expect(onGlobalSettingsChange).toHaveBeenCalledWith({ muted: true })
