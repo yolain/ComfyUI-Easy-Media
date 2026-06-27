@@ -732,15 +732,14 @@ export function TaskSegmentEditor({
                   ref={combinedPromptOverlayRef}
                   data-testid="combined-prompt-highlight"
                   aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 overflow-auto whitespace-pre-wrap wrap-break-word px-3 py-2 text-[10px] leading-normal text-foreground"
+                  className="pointer-events-none absolute inset-0 z-0 overflow-auto whitespace-pre-wrap wrap-break-word px-3 py-2 text-[10px] leading-normal text-foreground"
                 >
                   {renderCombinedPromptHighlight(promptValue)}
                 </div>
                 <Textarea
                   aria-label={t('multitrack.prompt')}
                   placeholder={t('multitrack.promptPlaceholder')}
-                  className="absolute inset-0 h-full min-h-0 resize-none border-none bg-transparent text-[10px] leading-normal shadow-none focus-visible:ring-1"
-                  style={{ color: 'transparent', caretColor: 'var(--foreground)' }}
+                  className="absolute inset-0 z-10 h-full min-h-0 resize-none border-none bg-transparent text-[10px] leading-normal text-transparent caret-foreground shadow-none focus-visible:ring-1"
                   value={promptValue}
                   onChange={(event) => handlePromptChange(event.currentTarget.value)}
                   onKeyDown={handleCombinedPromptShortcut}
@@ -763,7 +762,7 @@ export function TaskSegmentEditor({
               <Textarea
                 aria-label={t('multitrack.prompt')}
                 placeholder={t('multitrack.promptPlaceholder')}
-                className="h-full min-h-24 resize-none border-none bg-card text-[10px] shadow-none focus-visible:ring-1"
+                className="h-full min-h-24 resize-none border-none bg-card text-[10px] caret-foreground shadow-none focus-visible:ring-1"
                 value={promptValue}
                 onChange={(event) => handlePromptChange(event.currentTarget.value)}
               />
@@ -774,15 +773,14 @@ export function TaskSegmentEditor({
                 <div
                   ref={systemPromptOverlayRef}
                   aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap wrap-break-word px-3 py-2 text-[10px] leading-normal text-foreground"
+                  className="pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap wrap-break-word px-3 py-2 text-[10px] leading-normal text-foreground"
                 >
                   {renderSystemPromptHighlight(systemPromptValue)}
                 </div>
                 <Textarea
                   aria-label={t('multitrack.systemPrompt')}
                   placeholder={systemPromptLoading ? t('multitrack.loadingSystemPrompt') : t('multitrack.systemPromptPlaceholder')}
-                  className="absolute inset-0 h-full min-h-0 resize-none border-none bg-transparent text-[10px] leading-normal shadow-none focus-visible:ring-1"
-                  style={{ color: 'transparent', caretColor: 'var(--foreground)' }}
+                  className="absolute inset-0 z-10 h-full min-h-0 resize-none border-none bg-transparent text-[10px] leading-normal text-transparent caret-foreground shadow-none focus-visible:ring-1"
                   value={systemPromptValue}
                   onChange={(event) => handleSystemPromptChange(event.currentTarget.value)}
                   onScroll={handleSystemPromptScroll}

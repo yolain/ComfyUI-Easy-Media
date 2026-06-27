@@ -384,8 +384,9 @@ describe('TaskSegmentEditor', () => {
     const highlightedVariables = container.querySelectorAll('[data-system-prompt-variable="true"]')
 
     expect(textarea.readOnly).toBe(false)
-    expect(textarea.style.color).toBe('transparent')
-    expect(textarea.style.caretColor).toBe('var(--foreground)')
+    expect(textarea.classList.contains('text-transparent')).toBe(true)
+    expect(textarea.classList.contains('caret-foreground')).toBe(true)
+    expect(textarea.classList.contains('z-10')).toBe(true)
     expect(Array.from(highlightedVariables, (item) => item.textContent)).toEqual(['{subject}', '{style}'])
 
     fireEvent.change(textarea, { target: { value: 'Create {character}' } })
