@@ -102,6 +102,7 @@ describe('VideoPreview', () => {
         activeVideo={activeVideo(0)}
         resolution={resolution}
         isPlaying
+        playbackNonce={0}
         muted={false}
         volume={1}
       />,
@@ -114,11 +115,53 @@ describe('VideoPreview', () => {
         activeVideo={activeVideo(1 / 24)}
         resolution={resolution}
         isPlaying
+        playbackNonce={0}
         muted={false}
         volume={1}
       />,
     )
 
     expect(seekTimes).toEqual([])
+  })
+
+  it('seeks while already playing when a new playback session starts', () => {
+    const seekTimes: number[] = []
+    const currentTimes = new WeakMap<HTMLMediaElement, number>()
+    Object.defineProperty(HTMLMediaElement.prototype, 'currentTime', {
+      configurable: true,
+      get() {
+        return currentTimes.get(this) ?? 0
+      },
+      set(value: number) {
+        currentTimes.set(this, value)
+        seekTimes.push(value)
+      },
+    })
+
+    const { rerender } = render(
+      <VideoPreview
+        activeVideo={activeVideo(3)}
+        resolution={resolution}
+        isPlaying
+        playbackNonce={0}
+        muted={false}
+        volume={1}
+      />,
+    )
+
+    seekTimes.length = 0
+
+    rerender(
+      <VideoPreview
+        activeVideo={activeVideo(0)}
+        resolution={resolution}
+        isPlaying
+        playbackNonce={1}
+        muted={false}
+        volume={1}
+      />,
+    )
+
+    expect(seekTimes).toEqual([0])
   })
 })

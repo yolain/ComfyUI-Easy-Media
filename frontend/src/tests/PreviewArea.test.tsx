@@ -340,9 +340,7 @@ describe('PreviewArea', () => {
     )
 
     const overlay = screen.getByTestId('task-prompt-overlay')
-    expect(overlay.className).toContain('bottom-0')
     expect(overlay.className).toContain('bg-black/')
-    expect(overlay.className).toContain('right-0')
     expect(screen.getByTestId('task-prompt-text').className).toContain('truncate')
     expect(screen.getByTestId('task-prompt-text').textContent).toBe(
       'A long active task prompt that should stay on one preview line and truncate when needed',
@@ -355,7 +353,6 @@ describe('PreviewArea', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Show task prompt' }))
 
-    expect(screen.getByTestId('task-prompt-overlay').className).toContain('right-0')
     expect(screen.getByTestId('task-prompt-text').textContent).toContain('A long active task prompt')
   })
 

@@ -111,6 +111,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null)
   const [selectedSegmentIds, setSelectedSegmentIds] = useState<Set<string>>(() => new Set())
   const [isSmartSplitting, setIsSmartSplitting] = useState(false)
+  const [syncPlayNonce, setSyncPlayNonce] = useState(0)
   const [missingModel, setMissingModel] = useState<MissingModelInfo | null>(null)
   const [isDownloadingModel, setIsDownloadingModel] = useState(false)
   const [modelDownloadError, setModelDownloadError] = useState<string | null>(null)
@@ -191,6 +192,23 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   }, [currentTime])
 
   useEffect(() => {
+    const syncNode = node as { __easyMediaSyncPlay?: (startAt: number) => void }
+    syncNode.__easyMediaSyncPlay = () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+      currentTimeRef.current = 0
+      startTimeRef.current = 0
+      startedAtRef.current = performance.now()
+      setCurrentTime(0)
+      setIsPlaying(true)
+      setSyncPlayNonce((value) => value + 1)
+    }
+    return () => {
+      if (syncNode.__easyMediaSyncPlay) delete syncNode.__easyMediaSyncPlay
+    }
+  }, [node])
+
+  useEffect(() => {
     const api = app.api as EasyMediaEventApi | undefined
     if (!api?.addCustomEventListener || !api.removeCustomEventListener) return
     const handleMissingModel: CustomEventCallback = (event) => {
@@ -232,7 +250,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
     }
-  }, [isPlaying, data.frame_rate, data.total_length])
+  }, [isPlaying, syncPlayNonce, data.frame_rate, data.total_length])
 
   async function handleAddVideo(
     trackId: string,
@@ -780,6 +798,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             currentTime={currentTime}
             selectedSegment={selectedSegment}
             isPlaying={isPlaying}
+            playbackNonce={syncPlayNonce}
             node={node}
             onGlobalSettingsChange={handleGlobalSettingsChange}
             onSelectedSegmentContentChange={handleSelectedSegmentContentChange}

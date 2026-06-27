@@ -6,9 +6,10 @@ import type { ActivePreviewAudioSource } from '@/lib/multitrack-utils'
 interface PreviewAudioSourceProps {
   source: ActivePreviewAudioSource
   isPlaying: boolean
+  playbackNonce?: number
 }
 
-function PreviewAudioSource({ source, isPlaying }: Readonly<PreviewAudioSourceProps>) {
+function PreviewAudioSource({ source, isPlaying, playbackNonce = 0 }: Readonly<PreviewAudioSourceProps>) {
   const audioRef = useRef<HTMLAudioElement>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const gainNodeRef = useRef<GainNode | null>(null)
@@ -95,7 +96,7 @@ function PreviewAudioSource({ source, isPlaying }: Readonly<PreviewAudioSourcePr
     playResult?.catch((error: unknown) => {
       console.error('[PreviewAudioPlayback] failed to play audio:', error)
     })
-  }, [isPlaying, source.segment.id, url])
+  }, [isPlaying, source.segment.id, url, playbackNonce])
 
   return url ? (
     <audio
@@ -111,10 +112,16 @@ function PreviewAudioSource({ source, isPlaying }: Readonly<PreviewAudioSourcePr
 interface PreviewAudioPlaybackProps {
   sources: ActivePreviewAudioSource[]
   isPlaying: boolean
+  playbackNonce?: number
 }
 
-export function PreviewAudioPlayback({ sources, isPlaying }: Readonly<PreviewAudioPlaybackProps>) {
+export function PreviewAudioPlayback({ sources, isPlaying, playbackNonce = 0 }: Readonly<PreviewAudioPlaybackProps>) {
   return sources.map((source) => (
-    <PreviewAudioSource key={`${source.trackId}:${source.segment.id}`} source={source} isPlaying={isPlaying} />
+    <PreviewAudioSource
+      key={`${source.trackId}:${source.segment.id}`}
+      source={source}
+      isPlaying={isPlaying}
+      playbackNonce={playbackNonce}
+    />
   ))
 }

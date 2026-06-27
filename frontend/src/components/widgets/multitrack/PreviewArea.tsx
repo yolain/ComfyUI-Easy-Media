@@ -32,6 +32,7 @@ interface PreviewAreaProps {
   currentTime: number
   selectedSegment: SelectedMultiTrackSegment | null
   isPlaying: boolean
+  playbackNonce?: number
   node: unknown
   onGlobalSettingsChange: (patch: Partial<Pick<TrackData, 'muted' | 'volume_db' | 'frame_rate'>>) => void
   onSelectedSegmentContentChange: (patch: Partial<MultiTrackSegmentContent>) => void
@@ -146,6 +147,7 @@ export function PreviewArea({
   currentTime,
   selectedSegment,
   isPlaying,
+  playbackNonce = 0,
   node,
   onGlobalSettingsChange,
   onSelectedSegmentContentChange,
@@ -578,6 +580,7 @@ export function PreviewArea({
               activeVideo={activeVideo}
               resolution={resolution}
               isPlaying={isPlaying}
+              playbackNonce={playbackNonce}
               muted
               volume={0}
             />
@@ -615,7 +618,7 @@ export function PreviewArea({
           </div>
         ) : null}
       </div>
-      <PreviewAudioPlayback sources={activeAudioSources} isPlaying={isPlaying} />
+      <PreviewAudioPlayback sources={activeAudioSources} isPlaying={isPlaying} playbackNonce={playbackNonce} />
       <PreviewFloatingToolbar
         globalMuted={data.muted === true}
         globalVolumeDb={data.volume_db ?? 0}

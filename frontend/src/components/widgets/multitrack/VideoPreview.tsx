@@ -6,6 +6,7 @@ interface VideoPreviewProps {
   activeVideo: ActivePreviewVideoSegment | null
   resolution: MultiTrackPreviewResolution
   isPlaying: boolean
+  playbackNonce?: number
   muted: boolean
   volume: number
 }
@@ -29,6 +30,7 @@ export function VideoPreview({
   activeVideo,
   resolution,
   isPlaying,
+  playbackNonce = 0,
   muted,
   volume,
 }: Readonly<VideoPreviewProps>) {
@@ -75,7 +77,7 @@ export function VideoPreview({
       return
     }
     video.pause()
-  }, [isPlaying, videoUrl, activeSegmentId])
+  }, [isPlaying, videoUrl, activeSegmentId, playbackNonce])
 
   return (
     <div
