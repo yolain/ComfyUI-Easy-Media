@@ -23,7 +23,31 @@ vi.mock('@/lib/video-utils', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/PreviewArea', () => ({
-  PreviewArea: () => <div data-testid="preview-area" />,
+  PreviewArea: ({ selectedSegment, onSelectedSegmentContentChange }: {
+    selectedSegment: { trackType: string } | null
+    onSelectedSegmentContentChange: (patch: unknown) => void
+  }) => (
+    <div data-testid="preview-area">
+      {selectedSegment?.trackType === 'subtitle' ? (
+        <button
+          type="button"
+          onClick={() => onSelectedSegmentContentChange({
+            subtitle_style: {
+              font_size: 18,
+              color: '#ff0000',
+              outline_color: '#000000',
+              background_color: 'rgba(0, 0, 0, 0.5)',
+              x: 0.2,
+              y: 0.75,
+              width: 0.6,
+            },
+          })}
+        >
+          update selected subtitle style
+        </button>
+      ) : null}
+    </div>
+  ),
 }))
 
 vi.mock('@/components/widgets/multitrack/MultiTrackRuler', () => ({
@@ -35,7 +59,7 @@ vi.mock('@/components/widgets/multitrack/MultiTrackRuler', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
-  TrackArea: ({ data, node, app, onCloneTaskSegment, onAddTrack, onAddVideo, onAddAudio, onSmartSplit, onSmartSplitTasks, onResizeSegment, onResizeSegmentPreview, onMoveSegment, selectedSegmentIds, onSelectSegment, onSelectSegments, cutMode }: {
+  TrackArea: ({ data, node, app, onCloneTaskSegment, onAddTrack, onAddVideo, onAddAudio, onAddSubtitleSegment, onSmartSplit, onSmartSplitTasks, onRecognizeSubtitles, onResizeSegment, onResizeSegmentPreview, onMoveSegment, selectedSegmentIds, onSelectSegment, onSelectSegments, cutMode }: {
     data: TrackData
     node: unknown
     app: unknown
@@ -43,8 +67,10 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
     onAddTrack: (type: 'audio') => void
     onAddVideo: (trackId: string, filePath: string, sourceType: 'input', startFrame?: number) => void
     onAddAudio: (trackId: string, filePath: string, sourceType: 'input', previewUrl?: string) => void
+    onAddSubtitleSegment: (trackId: string) => void
     onSmartSplit: (segmentId: string) => void
     onSmartSplitTasks: (segmentId: string) => void
+    onRecognizeSubtitles: (segmentId: string) => void
     onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
     onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
     onMoveSegment: (segmentId: string, targetTrackId: string, nextStartTime: number) => void
@@ -57,6 +83,8 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
     const audioTrack = data.tracks.find((track) => track.type === 'audio')
     const segment = taskTrack?.segments[0]
     const videoSegment = data.tracks.find((track) => track.type === 'video')?.segments[0]
+    const subtitleTrack = data.tracks.find((track) => track.type === 'subtitle')
+    const subtitleSegment = data.tracks.find((track) => track.type === 'subtitle')?.segments[0]
     return (
       <div data-testid="multitrack-track-area" data-cut-mode={cutMode}>
         <div data-testid="selected-segment-count">{selectedSegmentIds.size}</div>
@@ -80,6 +108,12 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
           <button type="button" onClick={() => onSmartSplit(videoSegment.id)}>smart split video</button>
         ) : null}
         {videoSegment ? (
+          <button type="button" onClick={() => onRecognizeSubtitles(videoSegment.id)}>recognize video subtitles</button>
+        ) : null}
+        {subtitleTrack ? (
+          <button type="button" onClick={() => onAddSubtitleSegment(subtitleTrack.id)}>add subtitle segment</button>
+        ) : null}
+        {videoSegment ? (
           <button
             type="button"
             onClick={(event) => {
@@ -88,6 +122,17 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
             }}
           >
             select video segment
+          </button>
+        ) : null}
+        {subtitleSegment ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              onSelectSegment(subtitleSegment.id)
+            }}
+          >
+            select subtitle segment
           </button>
         ) : null}
         {videoSegment && segment ? (
@@ -536,6 +581,124 @@ describe('MultiTrackWidget', () => {
     })
   })
 
+  it('applies selected subtitle style changes to every segment on the same subtitle track', () => {
+    const data = createDefaultTrackData()
+    data.tracks.push({
+      id: 'subtitle-track',
+      name: 'Subtitle 1',
+      type: 'subtitle',
+      color: '#9D4937',
+      muted: false,
+      locked: false,
+      segments: [
+        {
+          id: 'subtitle-a',
+          start_frame: 0,
+          end_frame: 24,
+          color: '#9D4937',
+          content: {
+            media_type: 'subtitle',
+            text: 'First line',
+            subtitle_style: {
+              font_size: 12,
+              color: '#ffffff',
+              outline_color: '#000000',
+              background_color: 'rgba(0, 0, 0, 0)',
+              x: 0.15,
+              y: 0.8,
+              width: 0.7,
+            },
+          },
+        },
+        {
+          id: 'subtitle-b',
+          start_frame: 24,
+          end_frame: 48,
+          color: '#9D4937',
+          content: {
+            media_type: 'subtitle',
+            text: 'Second line',
+            subtitle_style: {
+              font_size: 10,
+              color: '#00ff00',
+              background_color: 'transparent',
+              x: 0.3,
+              y: 0.7,
+              width: 0.5,
+            },
+          },
+        },
+      ],
+    })
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'select subtitle segment' }))
+    fireEvent.click(screen.getByRole('button', { name: 'update selected subtitle style' }))
+
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    const subtitleTrack = updated.tracks.find((track) => track.id === 'subtitle-track')
+    expect(subtitleTrack?.segments.map((segment) => segment.content.subtitle_style)).toEqual([
+      {
+        font_size: 18,
+        color: '#ff0000',
+        outline_color: '#000000',
+        background_color: 'rgba(0, 0, 0, 0.5)',
+        x: 0.2,
+        y: 0.75,
+        width: 0.6,
+      },
+      {
+        font_size: 18,
+        color: '#ff0000',
+        outline_color: '#000000',
+        background_color: 'rgba(0, 0, 0, 0.5)',
+        x: 0.2,
+        y: 0.75,
+        width: 0.6,
+      },
+    ])
+    expect(subtitleTrack?.segments.map((segment) => segment.content.text)).toEqual(['First line', 'Second line'])
+  })
+
+  it('adds a five-second default subtitle segment to a subtitle track', () => {
+    const data = createDefaultTrackData()
+    data.tracks.push({
+      id: 'subtitle-track',
+      name: 'Subtitle 1',
+      type: 'subtitle',
+      color: '#9D4937',
+      muted: false,
+      locked: false,
+      segments: [],
+    })
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'add subtitle segment' }))
+
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    const segment = updated.tracks.find((track) => track.id === 'subtitle-track')?.segments[0]
+    expect(segment).toMatchObject({
+      start_frame: 0,
+      end_frame: 120,
+      color: '#9D4937',
+      content: {
+        media_type: 'subtitle',
+        text: '默认文字',
+        subtitle_style: {
+          font_size: 12,
+          color: '#ffffff',
+          outline_color: '#000000',
+          background_color: 'rgba(0, 0, 0, 0)',
+          x: 0.125,
+          y: 0.8,
+          width: 0.75,
+        },
+      },
+    })
+  })
+
   it('covers the whole widget while smart split is pending and clears it on success', async () => {
     const data = createDefaultTrackData()
     data.total_length = 240
@@ -568,6 +731,54 @@ describe('MultiTrackWidget', () => {
 
     await waitFor(() => expect(screen.queryByTestId('smart-split-overlay')).toBeNull())
     expect(onChange).toHaveBeenCalledOnce()
+    vi.unstubAllGlobals()
+  })
+
+  it('covers the widget while recognizing subtitles and appends a subtitle track', async () => {
+    const data = createDefaultTrackData()
+    data.total_length = 240
+    data.tracks[1].segments = [{
+      id: 'video',
+      start_frame: 24,
+      end_frame: 120,
+      color: data.tracks[1].color,
+      content: { media_type: 'video', source_type: 'input', file_path: 'clip.mp4' },
+    }]
+    const onChange = vi.fn()
+    let resolveFetch: ((response: Response) => void) | undefined
+    const fetchMock = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) => new Promise<Response>((resolve) => {
+      resolveFetch = resolve
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'recognize video subtitles' }))
+
+    expect(await screen.findByTestId('subtitle-recognition-overlay')).not.toBeNull()
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      media_type: 'video',
+      fps: 24,
+    })
+    resolveFetch?.({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        segments: [{ start: 0, end: 1, text: 'Hello' }],
+      }),
+    } as Response)
+
+    await waitFor(() => expect(screen.queryByTestId('subtitle-recognition-overlay')).toBeNull())
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    expect(updated.tracks.find((track) => track.type === 'subtitle')?.segments[0]).toMatchObject({
+      start_frame: 24,
+      end_frame: 48,
+      color: '#9D4937',
+      content: {
+        media_type: 'subtitle',
+        text: 'Hello',
+        subtitle_style: expect.objectContaining({ font_size: 12 }),
+      },
+    })
     vi.unstubAllGlobals()
   })
 

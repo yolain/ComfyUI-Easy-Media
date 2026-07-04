@@ -1,7 +1,11 @@
 import json
 import math
+import os
 import re
+import tempfile
+from pathlib import Path
 
+import folder_paths
 import torch
 import torch.nn.functional as F
 
@@ -13,6 +17,9 @@ from ..utils import (
     audio_is_muted,
     audio_volume_db,
     build_multitrack_data_from_prompt_override,
+    burn_subtitles_with_ffmpeg,
+    collect_multitrack_subtitle_segments,
+    default_subtitle_filename,
     equirectangular_to_perspective,
     frames_to_seconds,
     load_audio_waveform,
@@ -26,6 +33,9 @@ from ..utils import (
     resolve_video_path,
     silence,
     trim_audio,
+    video_input_to_local_file,
+    write_ass_file,
+    write_srt_file,
 )
 from ..utils.prompt_builder import build_llm_prompt, build_prompt_request
 
@@ -298,22 +308,6 @@ def _resolve_multitrack_audio(content: dict, audio_input, sample_rate: int = 441
     return {"waveform": waveform, "sample_rate": sample_rate}
 
 
-def _media_info_entry(index: int, track_id: str, segment: dict, content: dict) -> dict:
-    return {
-        "index": index,
-        "track_id": track_id,
-        "segment_id": str(segment.get("id", "")),
-        "source_type": content.get("source_type"),
-        "file_path": content.get("file_path"),
-        "local_path": content.get("local_path"),
-        "url": content.get("url"),
-        "slot_name": content.get("slot_name"),
-        "file_name": content.get("file_name"),
-        "duration": content.get("duration"),
-        "panorama_view": content.get("panorama_view"),
-    }
-
-
 def _video_resize_cache_key(video, width: int, height: int, resize_method: str) -> tuple:
     source = _video_stream_source(video)
     identity = ("source", source) if isinstance(source, str) else ("object", id(video))
@@ -581,11 +575,6 @@ def _build_tracks_info_and_media_outputs(
         for track in tracks
     )
 
-    media_info = {
-        "images": [],
-        "audio": [],
-        "video": [],
-    }
     images_out: list[torch.Tensor] = []
     audio_out: list[dict] = []
     video_out: list = []
@@ -625,7 +614,6 @@ def _build_tracks_info_and_media_outputs(
         if not isinstance(track, dict):
             continue
 
-        track_id = str(track.get("id", ""))
         track_type = track.get("type")
         track_volume_db = global_volume_db + audio_volume_db(track)
         track_muted = (
@@ -675,9 +663,6 @@ def _build_tracks_info_and_media_outputs(
                             media_index = len(images_out)
                             images_out.append(image)
                             normalized_image["media_index"] = media_index
-                            media_info["images"].append(
-                                _media_info_entry(media_index, track_id, segment, image_item)
-                            )
                         normalized_images.append(normalized_image)
                 normalized_content["images"] = normalized_images
             elif track_type == "audio" and content.get("media_type") == "audio":
@@ -728,9 +713,6 @@ def _build_tracks_info_and_media_outputs(
                 content = normalized_segment.get("content", {})
                 if content.get("media_type") == "audio":
                     content["media_index"] = media_index
-                    media_info["audio"].append(
-                        _media_info_entry(media_index, track_id, normalized_segment, content)
-                    )
         elif track_type == "video":
             media_index = len(video_out)
             video_out.append(
@@ -749,9 +731,6 @@ def _build_tracks_info_and_media_outputs(
                 content = normalized_segment.get("content", {})
                 if content.get("media_type") == "video":
                     content["media_index"] = media_index
-                    media_info["video"].append(
-                        _media_info_entry(media_index, track_id, normalized_segment, content)
-                    )
         normalized_tracks.append(normalized_track)
 
     if progress is not None and progress_value < progress.total:
@@ -767,7 +746,6 @@ def _build_tracks_info_and_media_outputs(
         "width": width,
         "height": height,
         "tracks": normalized_tracks,
-        "media": media_info,
     }
     return tracks_info, images_out, audio_out, video_out
 
@@ -1672,6 +1650,97 @@ class MultiTrackInfoOutput(io.ComfyNode):
             float(info.get("frame_rate", 24)),
             task_count,
         )
+
+
+def _subtitle_base_name(video_path: str | None) -> str:
+    if video_path:
+        stem = Path(video_path).stem.strip()
+        if stem:
+            return default_subtitle_filename(stem)
+    return default_subtitle_filename()
+
+
+class MultiTrackAddSubtitleToVideo(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="easy multiTrackAddSubtitleToVIdeo",
+            display_name="MultiTrack Add Subtitle To Video",
+            category=CATEGORY_MULTITRACK,
+            description="Burn all subtitle track segments from TRACKS_INFO into a VIDEO and save an SRT file.",
+            inputs=[
+                TYPE_TRACKS_INFO.Input("tracks_info"),
+                io.Video.Input("video"),
+                io.Combo.Input(
+                    "srt_save",
+                    options=["temp", "output"],
+                    default="temp",
+                    tooltip="Save the generated SRT in temp or output/srt.",
+                ),
+            ],
+            outputs=[
+                io.Video.Output("VIDEO"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, tracks_info: str | dict, video, srt_save: str = "temp") -> io.NodeOutput:
+        if isinstance(tracks_info, list):
+            tracks_info = tracks_info[0] if tracks_info else {}
+        info = _parse_track_data(tracks_info)
+        save_mode = str(_unwrap_list_scalar(srt_save, "temp"))
+        if save_mode not in {"temp", "output"}:
+            save_mode = "temp"
+
+        subtitle_segments = collect_multitrack_subtitle_segments(info)
+        if not subtitle_segments:
+            return io.NodeOutput(video)
+
+        width, height = video.get_dimensions()
+        input_path, temp_files = video_input_to_local_file(
+            video,
+            suffix=".mp4",
+            save_kwargs={
+                "format": Types.VideoContainer.AUTO,
+                "codec": Types.VideoCodec.AUTO,
+            },
+        )
+        ass_path: Path | None = None
+        try:
+            base_name = _subtitle_base_name(input_path)
+            if save_mode == "output":
+                srt_dir = Path(folder_paths.get_output_directory()) / "srt"
+            else:
+                srt_dir = Path(folder_paths.get_temp_directory())
+            srt_path = write_srt_file(subtitle_segments, srt_dir / f"{base_name}.srt")
+
+            ass_fd, ass_raw_path = tempfile.mkstemp(
+                prefix=f"{base_name}_",
+                suffix=".ass",
+                dir=folder_paths.get_temp_directory(),
+            )
+            os.close(ass_fd)
+            ass_path = write_ass_file(subtitle_segments, Path(ass_raw_path), width, height)
+
+            output_fd, output_path = tempfile.mkstemp(
+                prefix=f"{base_name}_subtitled_",
+                suffix=".mp4",
+                dir=folder_paths.get_temp_directory(),
+            )
+            os.close(output_fd)
+            burn_subtitles_with_ffmpeg(input_path, str(ass_path), output_path)
+            return io.NodeOutput(InputImpl.VideoFromFile(output_path))
+        finally:
+            for path in temp_files:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+            if ass_path is not None:
+                try:
+                    ass_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
 
 def _unwrap_list_scalar(value, default=None):

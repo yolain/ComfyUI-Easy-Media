@@ -1092,6 +1092,93 @@ describe('multitrack utilities', () => {
     ])
   })
 
+  it('moves subtitle segments like audio segments without packing gaps', () => {
+    const data = createDefaultTrackData()
+    data.tracks.push({
+      id: 'subtitle-track',
+      name: 'Subtitle 1',
+      type: 'subtitle',
+      color: '#9D4937',
+      muted: false,
+      locked: false,
+      segments: [
+        {
+          id: 'subtitle-first',
+          start_frame: 0,
+          end_frame: 2,
+          color: '#9D4937',
+          content: { media_type: 'subtitle', text: 'First' },
+        },
+        {
+          id: 'subtitle-second',
+          start_frame: 6,
+          end_frame: 8,
+          color: '#9D4937',
+          content: { media_type: 'subtitle', text: 'Second' },
+        },
+      ],
+    })
+
+    const moved = moveSegmentBetweenCompatibleTracks(
+      data.tracks,
+      'subtitle-first',
+      'subtitle-track',
+      4,
+      24,
+    )
+
+    expect(moved[2].segments.map((segment) => [segment.id, segment.start_frame, segment.end_frame])).toEqual([
+      ['subtitle-first', 4, 6],
+      ['subtitle-second', 6, 8],
+    ])
+  })
+
+  it('previews subtitle drag placement without packing gaps', () => {
+    const data = createDefaultTrackData()
+    data.tracks.push({
+      id: 'subtitle-track',
+      name: 'Subtitle 1',
+      type: 'subtitle',
+      color: '#9D4937',
+      muted: false,
+      locked: false,
+      segments: [
+        {
+          id: 'subtitle-first',
+          start_frame: 0,
+          end_frame: 2,
+          color: '#9D4937',
+          content: { media_type: 'subtitle', text: 'First' },
+        },
+        {
+          id: 'subtitle-second',
+          start_frame: 6,
+          end_frame: 8,
+          color: '#9D4937',
+          content: { media_type: 'subtitle', text: 'Second' },
+        },
+      ],
+    })
+
+    const placeholder = getSegmentDragPlaceholder(
+      data.tracks,
+      'subtitle-first',
+      'subtitle-track',
+      4,
+      24,
+    )
+
+    expect(placeholder).toMatchObject({
+      segmentId: 'subtitle-first',
+      targetTrackId: 'subtitle-track',
+      start_frame: 4,
+      end_frame: 6,
+    })
+    expect(getSegmentDragPreviewSegments(data.tracks, placeholder!, 24)).toEqual([
+      expect.objectContaining({ id: 'subtitle-second', start_frame: 6, end_frame: 8 }),
+    ])
+  })
+
   it('moves matching task ranges together with reordered video segments', () => {
     const data = createDefaultTrackData()
     data.tracks[0].segments = [

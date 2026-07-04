@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   collectMultiTrackPreviewResolutionInput,
   frameToSeconds,
@@ -16,7 +17,8 @@ import { useT } from '@/lib/i18n'
 import { AudioWaveform } from '@/components/widgets/timeline/AudioWaveform'
 import { mediaContentToViewUrl } from '@/lib/media-url'
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
-import type { MultiTrackPanoramaView, MultiTrackSegment, MultiTrackSegmentContent, MultiTrackTaskImage, TrackData } from '@/types/multitrack'
+import { DEFAULT_SUBTITLE_STYLE } from '@/lib/subtitle-recognition'
+import type { MultiTrackPanoramaView, MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSubtitleStyle, MultiTrackTaskImage, TrackData } from '@/types/multitrack'
 import { PreviewFloatingToolbar } from './PreviewFloatingToolbar'
 import { PreviewAudioPlayback } from './PreviewAudioPlayback'
 import { PanoramaViewerOverlay } from '@/components/widgets/panorama/PanoramaViewerOverlay'
@@ -34,6 +36,9 @@ interface PreviewAreaProps {
   isPlaying: boolean
   playbackNonce?: number
   node: unknown
+  editingSubtitleSegmentId?: string | null
+  onSubtitleEditRequestHandled?: () => void
+  onSelectSegment?: (segmentId: string) => void
   onGlobalSettingsChange: (patch: Partial<Pick<TrackData, 'muted' | 'volume_db' | 'frame_rate'>>) => void
   onSelectedSegmentContentChange: (patch: Partial<MultiTrackSegmentContent>) => void
   taskSegments?: MultiTrackSegment[]
@@ -142,6 +147,47 @@ function getActiveTaskPrompt(data: TrackData, currentTime: number): ActiveTaskPr
   return null
 }
 
+function getActiveSubtitleSegments(data: TrackData, currentTime: number): MultiTrackSegment[] {
+  const currentFrame = snapTimeToFrame(currentTime, data.frame_rate)
+  return data.tracks.flatMap((track) => {
+    if (track.type !== 'subtitle') return []
+    return track.segments.filter((item) => (
+      currentFrame >= item.start_frame && currentFrame < item.end_frame
+    ))
+  })
+}
+
+function clampSubtitleStyle(style: MultiTrackSubtitleStyle): MultiTrackSubtitleStyle {
+  const width = Math.max(0.1, Math.min(1, style.width))
+  const x = Math.max(0, Math.min(1 - width, style.x))
+  return {
+    ...style,
+    font_size: Math.max(8, Math.min(96, style.font_size)),
+    outline_color: style.outline_color || '#000000',
+    x,
+    y: Math.max(0, Math.min(0.95, style.y)),
+    width,
+  }
+}
+
+function isTransparentSubtitleBackground(backgroundColor: string): boolean {
+  const value = backgroundColor.trim().toLowerCase()
+  return value === 'transparent' || value === 'rgba(0, 0, 0, 0)' || value === 'rgba(0,0,0,0)'
+}
+
+function subtitleTextShadow(outlineColor: string): string {
+  return [
+    `1px 0 0 ${outlineColor}`,
+    `-1px 0 0 ${outlineColor}`,
+    `0 1px 0 ${outlineColor}`,
+    `0 -1px 0 ${outlineColor}`,
+    `1px 1px 0 ${outlineColor}`,
+    `-1px 1px 0 ${outlineColor}`,
+    `1px -1px 0 ${outlineColor}`,
+    `-1px -1px 0 ${outlineColor}`,
+  ].join(', ')
+}
+
 export function PreviewArea({
   data,
   currentTime,
@@ -149,6 +195,9 @@ export function PreviewArea({
   isPlaying,
   playbackNonce = 0,
   node,
+  editingSubtitleSegmentId,
+  onSubtitleEditRequestHandled,
+  onSelectSegment,
   onGlobalSettingsChange,
   onSelectedSegmentContentChange,
   taskSegments,
@@ -161,6 +210,7 @@ export function PreviewArea({
   const [activePanoramaTarget, setActivePanoramaTarget] = useState<ActivePanoramaTarget | null>(null)
   const [activeTaskPreviewImageId, setActiveTaskPreviewImageId] = useState<string | null>(null)
   const [taskPromptExpanded, setTaskPromptExpanded] = useState(true)
+  const [editingSubtitle, setEditingSubtitle] = useState<{ segmentId: string; text: string } | null>(null)
   const [firstVideoMetadata, setFirstVideoMetadata] = useState<MultiTrackVideoMetadata | null>(null)
   const [resolutionInput, setResolutionInput] = useState(() => collectMultiTrackPreviewResolutionInput(node))
   const videoSegments = useMemo(() => (
@@ -185,6 +235,15 @@ export function PreviewArea({
   const activeAudioSources = getActivePreviewAudioSources(data, currentTime, selectedSegment)
   const activeTaskImages = selectedSegment === null ? getActiveTaskImages(data, currentTime) : null
   const activeTaskPrompt = selectedSegment === null ? getActiveTaskPrompt(data, currentTime) : null
+  const activeSubtitleSegments = useMemo(() => {
+    if (selectedSegment?.trackType === 'task' || selectedSegment?.trackType === 'audio') return []
+    const segments = getActiveSubtitleSegments(data, currentTime)
+    if (selectedSegment?.trackType !== 'subtitle') return segments
+    const selectedSubtitle = selectedSegment.segment
+    const selectedIndex = segments.findIndex((segment) => segment.id === selectedSubtitle.id)
+    if (selectedIndex < 0) return [...segments, selectedSubtitle]
+    return segments.map((segment, index) => index === selectedIndex ? selectedSubtitle : segment)
+  }, [currentTime, data, selectedSegment])
   const resolution = parseMultiTrackPreviewResolution(resolutionInput, firstVideoMetadata)
   const selectedMediaDuration = selectedSegment?.trackType === 'video' || selectedSegment?.trackType === 'audio'
     ? frameToSeconds(segmentDuration(selectedSegment.segment), data.frame_rate)
@@ -210,6 +269,17 @@ export function PreviewArea({
   useEffect(() => {
     setTaskPromptExpanded(true)
   }, [activeTaskPrompt?.segmentId])
+
+  useEffect(() => {
+    if (!editingSubtitleSegmentId) return
+    const segment = activeSubtitleSegments.find((item) => item.id === editingSubtitleSegmentId)
+    if (!segment) return
+    setEditingSubtitle({
+      segmentId: segment.id,
+      text: segment.content.text ?? '',
+    })
+    onSubtitleEditRequestHandled?.()
+  }, [activeSubtitleSegments, editingSubtitleSegmentId, onSubtitleEditRequestHandled])
 
   useEffect(() => {
     if (!activeTaskImages) {
@@ -287,6 +357,19 @@ export function PreviewArea({
     }])
   }
 
+  function commitSubtitleEditing() {
+    if (!editingSubtitle) return
+    if (selectedSegment?.trackType === 'subtitle' && selectedSegment.segment.id === editingSubtitle.segmentId) {
+      onSelectedSegmentContentChange({ text: editingSubtitle.text })
+    } else {
+      onTrackSegmentsContentChange?.([{
+        segmentId: editingSubtitle.segmentId,
+        patch: { text: editingSubtitle.text },
+      }])
+    }
+    setEditingSubtitle(null)
+  }
+
   function renderActiveTaskImagePreview(
     image: MultiTrackTaskImage,
     url: string,
@@ -347,6 +430,175 @@ export function PreviewArea({
           {renderActiveTaskImagePreview(image, url, imageName, 'h-full w-full object-contain')}
         </Button>
         {showControls ? renderActiveTaskImageControls(image, imageName, 'split') : null}
+      </div>
+    )
+  }
+
+  function renderSubtitleOverlay(activeSegment: MultiTrackSegment) {
+    const selected = selectedSegment?.segment.id === activeSegment.id && selectedSegment.trackType === 'subtitle'
+    const style = clampSubtitleStyle({
+      ...DEFAULT_SUBTITLE_STYLE,
+      ...activeSegment.content.subtitle_style,
+    })
+    const editing = editingSubtitle?.segmentId === activeSegment.id ? editingSubtitle : null
+    const updateStyle = (patch: Partial<MultiTrackSubtitleStyle>) => {
+      if (!selected) return
+      onSelectedSegmentContentChange({
+        subtitle_style: clampSubtitleStyle({
+          ...style,
+          ...patch,
+        }),
+      })
+    }
+
+    function handleOverlayMouseDown(event: React.MouseEvent<HTMLDivElement>) {
+      if (editing) {
+        event.stopPropagation()
+        return
+      }
+      event.preventDefault()
+      event.stopPropagation()
+      if (!selected) {
+        onSelectSegment?.(activeSegment.id)
+        return
+      }
+
+      const previewRect = event.currentTarget.closest('[data-multitrack-preview-area]')?.getBoundingClientRect()
+      if (!previewRect) return
+      const previewWidth = previewRect.width
+      const previewHeight = previewRect.height
+      const startX = event.clientX
+      const startY = event.clientY
+      const startStyle = style
+
+      function handleMove(moveEvent: MouseEvent) {
+        updateStyle({
+          x: startStyle.x + ((moveEvent.clientX - startX) / previewWidth),
+          y: startStyle.y + ((moveEvent.clientY - startY) / previewHeight),
+        })
+      }
+
+      function handleUp() {
+        globalThis.removeEventListener('mousemove', handleMove)
+        globalThis.removeEventListener('mouseup', handleUp)
+      }
+
+      globalThis.addEventListener('mousemove', handleMove)
+      globalThis.addEventListener('mouseup', handleUp)
+    }
+
+    function handleSubtitleDoubleClick(event: React.MouseEvent<HTMLDivElement>) {
+      event.preventDefault()
+      event.stopPropagation()
+      onSelectSegment?.(activeSegment.id)
+      setEditingSubtitle({
+        segmentId: activeSegment.id,
+        text: activeSegment.content.text ?? '',
+      })
+    }
+
+    function handleResizeMouseDown(edge: 'left' | 'right', event: React.MouseEvent<HTMLSpanElement>) {
+      if (!selected) return
+      event.preventDefault()
+      event.stopPropagation()
+      const previewRect = event.currentTarget.closest('[data-multitrack-preview-area]')?.getBoundingClientRect()
+      if (!previewRect) return
+      const previewWidth = previewRect.width
+      const startX = event.clientX
+      const startStyle = style
+
+      function handleMove(moveEvent: MouseEvent) {
+        const delta = (moveEvent.clientX - startX) / previewWidth
+        if (edge === 'left') {
+          const nextX = startStyle.x + delta
+          updateStyle({
+            x: nextX,
+            width: startStyle.width - delta,
+          })
+          return
+        }
+        updateStyle({ width: startStyle.width + delta })
+      }
+
+      function handleUp() {
+        globalThis.removeEventListener('mousemove', handleMove)
+        globalThis.removeEventListener('mouseup', handleUp)
+      }
+
+      globalThis.addEventListener('mousemove', handleMove)
+      globalThis.addEventListener('mouseup', handleUp)
+    }
+
+    return (
+      <div
+        data-testid="subtitle-preview-overlay"
+        className={`absolute z-10 text-center leading-snug ${selected ? 'ring-1 ring-primary cursor-move' : 'cursor-pointer'}`}
+        style={{
+          left: `${(style.x + style.width / 2) * 100}%`,
+          top: `${style.y * 100}%`,
+          width: 'max-content',
+          maxWidth: `${style.width * 100}%`,
+          transform: 'translateX(-50%)',
+          color: style.color,
+          fontSize: style.font_size,
+          textShadow: subtitleTextShadow(style.outline_color || '#000000'),
+        }}
+        onMouseDown={handleOverlayMouseDown}
+        onDoubleClick={handleSubtitleDoubleClick}
+      >
+        {editing ? (
+          <Input
+            data-testid="subtitle-preview-editor"
+            autoFocus
+            aria-label={t('multitrack.editSubtitle')}
+            value={editing.text}
+            className={`inline-block h-auto max-w-full rounded-sm border-primary px-3 py-1.5 text-center leading-snug text-inherit shadow-none focus-visible:ring-1 ${isTransparentSubtitleBackground(style.background_color) ? '' : 'shadow-sm'}`}
+            style={{
+              width: `${Math.max(editing.text.length + 2, 5)}em`,
+              backgroundColor: style.background_color,
+              color: style.color,
+              fontSize: style.font_size,
+              textShadow: subtitleTextShadow(style.outline_color || '#000000'),
+            }}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+            onChange={(event) => setEditingSubtitle({ ...editing, text: event.currentTarget.value })}
+            onBlur={commitSubtitleEditing}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                commitSubtitleEditing()
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                setEditingSubtitle(null)
+              }
+            }}
+          />
+        ) : (
+          <span
+            data-testid="subtitle-preview-text"
+            className={`inline-block max-w-full whitespace-pre-wrap break-words rounded-sm px-2 py-1 ${isTransparentSubtitleBackground(style.background_color) ? '' : 'shadow-sm'}`}
+            style={{
+              backgroundColor: style.background_color,
+            }}
+          >
+            {activeSegment.content.text}
+          </span>
+        )}
+        {selected ? (
+          <>
+            <span
+              className="absolute left-0 top-0 h-full w-1 cursor-ew-resize bg-primary"
+              onMouseDown={(event) => handleResizeMouseDown('left', event)}
+            />
+            <span
+              className="absolute right-0 top-0 h-full w-1 cursor-ew-resize bg-primary"
+              onMouseDown={(event) => handleResizeMouseDown('right', event)}
+            />
+          </>
+        ) : null}
       </div>
     )
   }
@@ -583,7 +835,13 @@ export function PreviewArea({
               playbackNonce={playbackNonce}
               muted
               volume={0}
-            />
+            >
+              {activeSubtitleSegments.map((segment) => (
+                <div key={segment.id}>
+                  {renderSubtitleOverlay(segment)}
+                </div>
+              ))}
+            </VideoPreview>
           ) : null}
         </div>
         {activeTaskPrompt ? (
@@ -630,6 +888,12 @@ export function PreviewArea({
           ? selectedSegment.segment.content.muted === true
           : false}
         selectedMediaDuration={selectedMediaDuration}
+        selectedSubtitleStyle={selectedSegment?.trackType === 'subtitle'
+          ? {
+              ...DEFAULT_SUBTITLE_STYLE,
+              ...selectedSegment.segment.content.subtitle_style,
+            }
+          : null}
         onGlobalSettingsChange={onGlobalSettingsChange}
         onSelectedSegmentContentChange={onSelectedSegmentContentChange}
         onSelectedSegmentDurationChange={onSelectedSegmentDurationChange}

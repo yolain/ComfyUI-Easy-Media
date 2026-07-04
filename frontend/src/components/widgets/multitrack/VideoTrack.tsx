@@ -32,6 +32,7 @@ interface VideoTrackProps {
   onReplaceVideo: (trackId: string, segmentId: string, filePath: string, sourceType: MultiTrackSourceType) => void
   onSmartSplit: (segmentId: string) => void
   onSmartSplitTasks: (segmentId: string) => void
+  onRecognizeSubtitles?: (segmentId: string) => void
   cutMode: boolean
   onCutSegment: (segmentId: string, splitFrame: number) => void
 }
@@ -64,6 +65,7 @@ export function VideoTrack({
   onReplaceVideo,
   onSmartSplit,
   onSmartSplitTasks,
+  onRecognizeSubtitles = () => {},
   cutMode,
   onCutSegment,
 }: Readonly<VideoTrackProps>) {
@@ -106,6 +108,7 @@ export function VideoTrack({
             onDelete={onDeleteSegment}
             onSmartSplit={onSmartSplit}
             onSmartSplitTasks={onSmartSplitTasks}
+            onRecognizeSubtitles={onRecognizeSubtitles}
             cutMode={cutMode}
             onCut={onCutSegment}
             onResize={onResizeSegment}

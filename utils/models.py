@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import aiohttp
@@ -21,6 +21,7 @@ class EasyMediaModel:
     category: str
     filename: str
     url: str
+    urls: tuple[str, ...] = field(default_factory=tuple)
 
     @property
     def directory(self) -> Path:
@@ -38,6 +39,17 @@ MODEL_REGISTRY: dict[str, EasyMediaModel] = {
         category="checkpoints",
         filename="OmniShotCut_ckpt.pth",
         url="https://huggingface.co/uva-cv-lab/OmniShotCut/resolve/main/OmniShotCut_ckpt.pth",
+    ),
+    "qwen3-asr": EasyMediaModel(
+        name="qwen3-asr",
+        display_name="Qwen3-ASR",
+        category="",
+        filename="Qwen3-ASR",
+        url="https://huggingface.co/Qwen/Qwen3-ASR-1.7B",
+        urls=(
+            "https://huggingface.co/Qwen/Qwen3-ASR-1.7B",
+            "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B",
+        ),
     ),
 }
 
@@ -64,7 +76,7 @@ def get_model_path(model_name: str) -> Path:
 
 
 def model_payload(model: EasyMediaModel) -> dict:
-    return {
+    payload = {
         "name": model.name,
         "display_name": model.display_name,
         "filename": model.filename,
@@ -72,6 +84,9 @@ def model_payload(model: EasyMediaModel) -> dict:
         "path": str(model.path),
         "url": model.url,
     }
+    if model.urls:
+        payload["urls"] = list(model.urls)
+    return payload
 
 
 def notify_missing_model(model_name: str) -> dict:
@@ -100,6 +115,9 @@ async def download_model(model_name: str) -> Path:
     lock = _MODEL_DOWNLOAD_LOCKS.setdefault(model.name, asyncio.Lock())
 
     async with lock:
+        if model.name == "qwen3-asr":
+            return await _download_qwen3_asr_bundle(model)
+
         if target.is_file():
             return target
 
@@ -128,3 +146,45 @@ async def download_model(model_name: str) -> Path:
             partial.unlink(missing_ok=True)
             raise
         raise
+
+
+def require_qwen_asr_model_dirs() -> tuple[Path, Path]:
+    """Return the ASR and aligner model directories, raising if either is missing."""
+    root = Path(folder_paths.models_dir) / "Qwen3-ASR"
+    candidates = ("Qwen3-ASR-1.7B", "Qwen3-ASR-0.6B")
+    asr_dir = next((root / name for name in candidates if (root / name).is_dir()), None)
+    aligner_dir = root / "Qwen3-ForcedAligner-0.6B"
+    if asr_dir is not None and aligner_dir.is_dir():
+        return asr_dir, aligner_dir
+    notify_missing_model("qwen3-asr")
+    raise MissingEasyMediaModelError(get_model_info("qwen3-asr"))
+
+
+async def _download_qwen3_asr_bundle(model: EasyMediaModel) -> Path:
+    target = model.path
+    asr_dir = target / "Qwen3-ASR-1.7B"
+    aligner_dir = target / "Qwen3-ForcedAligner-0.6B"
+    if asr_dir.is_dir() and aligner_dir.is_dir():
+        return target
+
+    try:
+        from huggingface_hub import snapshot_download  # type: ignore[import]
+    except ImportError as error:
+        raise RuntimeError(
+            "Automatic Qwen3-ASR download requires huggingface_hub. "
+            "Install it with: pip install huggingface_hub"
+        ) from error
+
+    target.mkdir(parents=True, exist_ok=True)
+
+    async def download_snapshot(repo_id: str, local_dir: Path) -> None:
+        await asyncio.to_thread(
+            snapshot_download,
+            repo_id=repo_id,
+            local_dir=str(local_dir),
+            local_dir_use_symlinks=False,
+        )
+
+    await download_snapshot("Qwen/Qwen3-ASR-1.7B", asr_dir)
+    await download_snapshot("Qwen/Qwen3-ForcedAligner-0.6B", aligner_dir)
+    return target

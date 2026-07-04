@@ -20,7 +20,7 @@ function segment(type: MultiTrackType): MultiTrackSegment {
     end_frame: 5,
     color: 'var(--primary)',
     content: {
-      media_type: type === 'video' ? 'video' : 'none',
+      media_type: type === 'video' ? 'video' : type === 'audio' ? 'audio' : 'none',
       task_mode: type === 'task' ? 'default' : undefined,
     },
   }
@@ -32,6 +32,7 @@ function renderBlock(trackType: MultiTrackType) {
   const onClone = vi.fn()
   const onSmartSplit = vi.fn()
   const onSmartSplitTasks = vi.fn()
+  const onRecognizeSubtitles = vi.fn()
   render(
     <MultiTrackSegmentBlock
       trackType={trackType}
@@ -48,12 +49,13 @@ function renderBlock(trackType: MultiTrackType) {
       onClone={trackType === 'task' ? onClone : undefined}
       onSmartSplit={trackType === 'video' ? onSmartSplit : undefined}
       onSmartSplitTasks={trackType === 'video' ? onSmartSplitTasks : undefined}
+      onRecognizeSubtitles={trackType === 'video' || trackType === 'audio' ? onRecognizeSubtitles : undefined}
       onResize={vi.fn()}
       onResizePreview={vi.fn()}
       onMove={vi.fn()}
     />,
   )
-  return { onDelete, onDistribute, onClone, onSmartSplit, onSmartSplitTasks }
+  return { onDelete, onDistribute, onClone, onSmartSplit, onSmartSplitTasks, onRecognizeSubtitles }
 }
 
 describe('MultiTrackSegmentBlock context menu', () => {
@@ -91,6 +93,14 @@ describe('MultiTrackSegmentBlock context menu', () => {
 
     expect(onSmartSplit).toHaveBeenCalledWith('video-segment')
     expect(onSmartSplitTasks).toHaveBeenCalledWith('video-segment')
+  })
+
+  it.each(['video', 'audio'] as const)('offers subtitle recognition for %s segments', (trackType) => {
+    const { onRecognizeSubtitles } = renderBlock(trackType)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Recognize subtitles' }))
+
+    expect(onRecognizeSubtitles).toHaveBeenCalledWith(`${trackType}-segment`)
   })
 
   it('cuts at the clicked frame without starting a drag', () => {

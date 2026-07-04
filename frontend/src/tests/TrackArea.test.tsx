@@ -1,4 +1,5 @@
 import { createEvent, fireEvent, render, screen } from '@testing-library/react'
+import type { MouseEvent } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { TrackArea } from '@/components/widgets/multitrack/TrackArea'
@@ -24,17 +25,24 @@ vi.mock('@/components/widgets/multitrack/AudioTrack', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/MultiTrackSegmentBlock', () => ({
-  MultiTrackSegmentBlock: ({ segment }: { segment: { id: string; start_frame: number; end_frame: number } }) => (
+  MultiTrackSegmentBlock: ({
+    segment,
+    onDoubleClick,
+  }: {
+    segment: { id: string; start_frame: number; end_frame: number }
+    onDoubleClick?: (segmentId: string, event: MouseEvent) => void
+  }) => (
     <div
       data-testid={`segment-${segment.id}`}
       data-start-frame={segment.start_frame}
       data-end-frame={segment.end_frame}
+      onDoubleClick={(event) => onDoubleClick?.(segment.id, event)}
     />
   ),
 }))
 
 describe('TrackArea track controls', () => {
-  it('renders the add-track bar with only audio enabled', () => {
+  it('renders the add-track bar with audio and subtitle enabled', () => {
     const onAddTrack = vi.fn()
     render(
       <TooltipProvider>
@@ -51,6 +59,7 @@ describe('TrackArea track controls', () => {
           onAddTrack={onAddTrack}
           onReplaceVideo={vi.fn()}
           onAddTaskSegment={vi.fn()}
+          onAddSubtitleSegment={vi.fn()}
           onSelectSegment={vi.fn()}
           onSelectSegments={vi.fn()}
           onClearSelection={vi.fn()}
@@ -73,9 +82,95 @@ describe('TrackArea track controls', () => {
     const addTrackLabel = screen.getByText('Add track:')
     expect(addTrackLabel.parentElement?.className).toContain('border-b')
     expect((screen.getByRole('button', { name: 'Add video track' }) as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByRole('button', { name: 'Add subtitle track' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Add subtitle track' }) as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: 'Add audio track' }))
     expect(onAddTrack).toHaveBeenCalledWith('audio')
+    fireEvent.click(screen.getByRole('button', { name: 'Add subtitle track' }))
+    expect(onAddTrack).toHaveBeenCalledWith('subtitle')
+  })
+
+  it('disables audio and subtitle track creation after two tracks of each type', () => {
+    const data = createDefaultTrackData()
+    data.tracks.push(
+      {
+        id: 'audio-a',
+        name: 'Audio 0',
+        type: 'audio',
+        color: 'var(--highlight)',
+        muted: false,
+        locked: false,
+        segments: [],
+      },
+      {
+        id: 'audio-b',
+        name: 'Audio 1',
+        type: 'audio',
+        color: 'var(--highlight)',
+        muted: false,
+        locked: false,
+        segments: [],
+      },
+      {
+        id: 'subtitle-a',
+        name: 'Subtitle 1',
+        type: 'subtitle',
+        color: '#9D4937',
+        muted: false,
+        locked: false,
+        segments: [],
+      },
+      {
+        id: 'subtitle-b',
+        name: 'Subtitle 2',
+        type: 'subtitle',
+        color: '#9D4937',
+        muted: false,
+        locked: false,
+        segments: [],
+      },
+    )
+    const onAddTrack = vi.fn()
+
+    render(
+      <TooltipProvider>
+        <TrackArea
+          data={data}
+          width={480}
+          currentTime={0}
+          canvasScale={1}
+          selectedSegmentIds={new Set()}
+          node={{}}
+          app={{}}
+          onAddVideo={vi.fn()}
+          onAddAudio={vi.fn()}
+          onAddTrack={onAddTrack}
+          onAddSubtitleSegment={vi.fn()}
+          onReplaceVideo={vi.fn()}
+          onAddTaskSegment={vi.fn()}
+          onSelectSegment={vi.fn()}
+          onSelectSegments={vi.fn()}
+          onClearSelection={vi.fn()}
+          onDeleteSegment={vi.fn()}
+          onDeleteTrack={vi.fn()}
+          onTrackAudioSettingsChange={vi.fn()}
+          onDistributeTaskSegments={vi.fn()}
+          onCloneTaskSegment={vi.fn()}
+          onResizeSegment={vi.fn()}
+          onResizeSegmentPreview={vi.fn()}
+          onMoveSegment={vi.fn()}
+          onSmartSplit={vi.fn()}
+          onSmartSplitTasks={vi.fn()}
+          cutMode={false}
+          onCutSegment={vi.fn()}
+        />
+      </TooltipProvider>,
+    )
+
+    expect((screen.getByRole('button', { name: 'Add audio track' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Add subtitle track' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Add audio track' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add subtitle track' }))
+    expect(onAddTrack).not.toHaveBeenCalled()
   })
 
   it('passes ComfyUI graph context to each audio track', () => {
@@ -105,6 +200,7 @@ describe('TrackArea track controls', () => {
           onAddTrack={vi.fn()}
           onReplaceVideo={vi.fn()}
           onAddTaskSegment={vi.fn()}
+            onAddSubtitleSegment={vi.fn()}
           onSelectSegment={vi.fn()}
           onSelectSegments={vi.fn()}
           onClearSelection={vi.fn()}
@@ -125,6 +221,139 @@ describe('TrackArea track controls', () => {
     )
 
     expect(screen.getByTestId('audio-track').textContent).toBe('connected')
+  })
+
+  it('shows horizontal subtitle controls after the last subtitle segment and adds subtitle segments', () => {
+    const data = createDefaultTrackData()
+    data.tracks.push({
+      id: 'subtitle-track',
+      name: 'Subtitle 1',
+      type: 'subtitle',
+      color: '#9D4937',
+      muted: false,
+      locked: false,
+      segments: [{
+        id: 'subtitle-first',
+        start_frame: 0,
+        end_frame: 24,
+        color: '#9D4937',
+        content: { media_type: 'subtitle', text: 'Existing' },
+      }],
+    })
+    const onAddSubtitleSegment = vi.fn()
+    const onDeleteTrack = vi.fn()
+
+    render(
+      <TooltipProvider>
+        <TrackArea
+          data={data}
+          width={480}
+          currentTime={0}
+          canvasScale={1}
+          selectedSegmentIds={new Set()}
+          node={{}}
+          app={{}}
+          onAddVideo={vi.fn()}
+          onAddAudio={vi.fn()}
+          onAddTrack={vi.fn()}
+          onAddSubtitleSegment={onAddSubtitleSegment}
+          onReplaceVideo={vi.fn()}
+          onAddTaskSegment={vi.fn()}
+          onSelectSegment={vi.fn()}
+          onSelectSegments={vi.fn()}
+          onClearSelection={vi.fn()}
+          onDeleteSegment={vi.fn()}
+          onDeleteTrack={onDeleteTrack}
+          onTrackAudioSettingsChange={vi.fn()}
+          onDistributeTaskSegments={vi.fn()}
+          onCloneTaskSegment={vi.fn()}
+          onResizeSegment={vi.fn()}
+          onResizeSegmentPreview={vi.fn()}
+          onMoveSegment={vi.fn()}
+          onSmartSplit={vi.fn()}
+          onSmartSplitTasks={vi.fn()}
+          cutMode={false}
+          onCutSegment={vi.fn()}
+        />
+      </TooltipProvider>,
+    )
+
+    const addButton = screen.getByRole('button', { name: 'Add subtitle' })
+    const addControls = addButton.parentElement
+    expect(addControls?.className).toContain('flex-row')
+    expect((addControls as HTMLElement).style.left).toBe('86.80000000000001px')
+    const deleteButton = screen.getByRole('button', { name: 'Delete Subtitle 1' })
+    expect(deleteButton.parentElement).toBe(addControls)
+
+    fireEvent.click(addButton)
+    expect(onAddSubtitleSegment).toHaveBeenCalledWith('subtitle-track')
+
+    fireEvent.click(deleteButton)
+    expect(onDeleteTrack).toHaveBeenCalledWith('subtitle-track')
+  })
+
+  it('requests preview subtitle editing after double clicking a track subtitle segment', () => {
+    const data = createDefaultTrackData()
+    data.tracks.push({
+      id: 'subtitle-track',
+      name: 'Subtitle 1',
+      type: 'subtitle',
+      color: '#9D4937',
+      muted: false,
+      locked: false,
+      segments: [{
+        id: 'subtitle-first',
+        start_frame: 12,
+        end_frame: 36,
+        color: '#9D4937',
+        content: { media_type: 'subtitle', text: 'Existing' },
+      }],
+    })
+    const onSelectSegment = vi.fn()
+    const onEditSubtitleSegment = vi.fn()
+
+    render(
+      <TooltipProvider>
+        <TrackArea
+          data={data}
+          width={480}
+          currentTime={0}
+          canvasScale={1}
+          selectedSegmentIds={new Set()}
+          node={{}}
+          app={{}}
+          onAddVideo={vi.fn()}
+          onAddAudio={vi.fn()}
+          onAddTrack={vi.fn()}
+            onAddSubtitleSegment={vi.fn()}
+          onReplaceVideo={vi.fn()}
+          onAddTaskSegment={vi.fn()}
+          onSelectSegment={onSelectSegment}
+          onSelectSegments={vi.fn()}
+          onClearSelection={vi.fn()}
+          onDeleteSegment={vi.fn()}
+          onDeleteTrack={vi.fn()}
+          onEditSubtitleSegment={onEditSubtitleSegment}
+          onTrackAudioSettingsChange={vi.fn()}
+          onDistributeTaskSegments={vi.fn()}
+          onCloneTaskSegment={vi.fn()}
+          onResizeSegment={vi.fn()}
+          onResizeSegmentPreview={vi.fn()}
+          onMoveSegment={vi.fn()}
+          onSmartSplit={vi.fn()}
+          onSmartSplitTasks={vi.fn()}
+          cutMode={false}
+          onCutSegment={vi.fn()}
+        />
+      </TooltipProvider>,
+    )
+
+    fireEvent.doubleClick(screen.getByTestId('segment-subtitle-first'))
+
+    expect(onSelectSegment).toHaveBeenCalledWith('subtitle-first')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByTestId('subtitle-track-editor')).toBeNull()
+    expect(onEditSubtitleSegment).toHaveBeenCalledWith('subtitle-first')
   })
 
   it('previews matching task segments together with a dragged video segment', () => {
@@ -177,6 +406,7 @@ describe('TrackArea track controls', () => {
           onAddTrack={vi.fn()}
           onReplaceVideo={vi.fn()}
           onAddTaskSegment={vi.fn()}
+          onAddSubtitleSegment={vi.fn()}
           onSelectSegment={vi.fn()}
           onSelectSegments={vi.fn()}
           onClearSelection={vi.fn()}
@@ -237,6 +467,7 @@ describe('TrackArea track controls', () => {
             onAddTrack={vi.fn()}
             onReplaceVideo={vi.fn()}
             onAddTaskSegment={vi.fn()}
+            onAddSubtitleSegment={vi.fn()}
             onSelectSegment={vi.fn()}
             onSelectSegments={onSelectSegments}
             onClearSelection={onClearSelection}
@@ -306,6 +537,7 @@ describe('TrackArea track controls', () => {
             onAddTrack={vi.fn()}
             onReplaceVideo={vi.fn()}
             onAddTaskSegment={vi.fn()}
+            onAddSubtitleSegment={vi.fn()}
             onSelectSegment={vi.fn()}
             onSelectSegments={onSelectSegments}
             onClearSelection={onClearSelection}
@@ -381,6 +613,7 @@ describe('TrackArea track controls', () => {
           onAddTrack={vi.fn()}
           onReplaceVideo={vi.fn()}
           onAddTaskSegment={vi.fn()}
+          onAddSubtitleSegment={vi.fn()}
           onSelectSegment={vi.fn()}
           onSelectSegments={vi.fn()}
           onClearSelection={vi.fn()}

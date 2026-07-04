@@ -52,8 +52,22 @@ const TASK_PRESENTATION: SegmentTrackPresentation = {
   waveformSource: null,
 }
 
+const SUBTITLE_PRESENTATION: SegmentTrackPresentation = {
+  backgroundColor: 'var(--multitrack-subtitle-bg)',
+  backgroundColorStrong: 'var(--multitrack-subtitle-bg-strong)',
+  borderColor: 'var(--multitrack-subtitle-border)',
+  textColor: 'var(--multitrack-subtitle-text)',
+  textClassName: 'text-[8px]',
+  titleBackgroundColor: null,
+  waveformColor: null,
+  showThumbnail: false,
+  showWaveform: false,
+  waveformSource: null,
+}
+
 export function getSegmentTrackPresentation(trackType: MultiTrackType): SegmentTrackPresentation {
   if (trackType === 'video') return VIDEO_PRESENTATION
   if (trackType === 'audio') return AUDIO_PRESENTATION
+  if (trackType === 'subtitle') return SUBTITLE_PRESENTATION
   return TASK_PRESENTATION
 }

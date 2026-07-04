@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { type ReactNode, useEffect, useMemo, useRef } from 'react'
 import type { ActivePreviewVideoSegment, MultiTrackPreviewResolution } from '@/lib/multitrack-utils'
 import { mediaContentToViewUrl } from '@/lib/media-url'
 
@@ -9,6 +9,7 @@ interface VideoPreviewProps {
   playbackNonce?: number
   muted: boolean
   volume: number
+  children?: ReactNode
 }
 
 function objectFitForResizeMethod(method: MultiTrackPreviewResolution['resizeMethod']): React.CSSProperties['objectFit'] {
@@ -33,6 +34,7 @@ export function VideoPreview({
   playbackNonce = 0,
   muted,
   volume,
+  children,
 }: Readonly<VideoPreviewProps>) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const videoUrl = useMemo(() => {
@@ -81,6 +83,7 @@ export function VideoPreview({
 
   return (
     <div
+      data-testid="multitrack-video-stage"
       className="relative flex h-full max-h-full items-center justify-center overflow-hidden bg-black"
       style={{ aspectRatio: `${resolution.width} / ${resolution.height}` }}
     >
@@ -98,6 +101,7 @@ export function VideoPreview({
       ) : (
         <div data-testid="multitrack-black-frame" className="h-full w-full bg-black" />
       )}
+      {children}
     </div>
   )
 }

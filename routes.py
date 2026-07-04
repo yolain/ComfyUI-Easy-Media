@@ -23,14 +23,12 @@ Response (JSON):
 """
 
 import asyncio
+import json
 import math
 import os
-import json
-import tempfile
 import traceback
 import uuid
 from pathlib import Path
-from urllib.parse import urlparse
 
 import aiohttp
 from server import PromptServer
@@ -43,161 +41,41 @@ from .utils.models import (
     download_model,
     model_payload,
     get_model_info,
+    require_qwen_asr_model_dirs,
+)
+from .utils.media import (
+    allowed_extensions,
+    extract_filename_from_content_disposition,
+    is_json_error,
+    list_dir_shallow,
+)
+from .utils.subtitles import missing_subtitle_dependencies, recognize_subtitle_segments
+from .utils.video import (
+    download_audio_to_temp,
+    download_video_to_temp,
+    extract_video_audio_to_temp,
+    resolve_segment_audio_path,
+    resolve_segment_video_path,
 )
 
 
 _SMART_SPLIT_LOCK = asyncio.Lock()
-
-try:
-    from PIL import Image as PILImage
-    _HAS_PIL = True
-except ImportError:
-    _HAS_PIL = False
-
-# ---------------------------------------------------------------------------
-# File-extension filters
-# ---------------------------------------------------------------------------
-
-IMAGE_EXTENSIONS = {
-    ".png", ".jpg", ".jpeg", ".webp", ".gif",
-    ".bmp", ".tiff", ".tif",
-}
-
-AUDIO_EXTENSIONS = {
-    ".mp3", ".wav", ".flac", ".ogg", ".m4a",
-    ".aac", ".opus", ".wma",
-}
-
-VIDEO_EXTENSIONS = {
-    ".mp4", ".webm", ".mov", ".avi", ".mkv",
-    ".flv", ".wmv", ".m4v",
-}
-
-ALL_EXTENSIONS = IMAGE_EXTENSIONS | AUDIO_EXTENSIONS | VIDEO_EXTENSIONS
-
-_TYPE_MAP: dict[str, set[str]] = {
-    "image": IMAGE_EXTENSIONS,
-    "audio": AUDIO_EXTENSIONS,
-    "video": VIDEO_EXTENSIONS,
-    "all":   ALL_EXTENSIONS,
-}
+_SUBTITLE_RECOGNITION_LOCK = asyncio.Lock()
 
 
-def _allowed_extensions(media_type: str) -> set[str]:
-    return _TYPE_MAP.get(media_type, ALL_EXTENSIONS)
-
-
-def _resolve_video_path(data: dict) -> Path:
-    """Resolve a segment media descriptor to a local video file."""
-    source_type = data.get("source_type", "input")
-    if source_type == "local":
-        raw_path = data.get("local_path") or data.get("file_path")
-        if not isinstance(raw_path, str) or not raw_path:
-            raise ValueError("local_path is required for local video segments")
-        path = Path(raw_path).expanduser().resolve()
-    elif source_type in ("input", "preset", "slot"):
-        raw_path = data.get("file_path")
-        if not isinstance(raw_path, str) or not raw_path:
-            raise ValueError("file_path is required for input video segments")
-        path = (Path(folder_paths.get_input_directory()).resolve() / raw_path).resolve()
-        path.relative_to(Path(folder_paths.get_input_directory()).resolve())
-    elif source_type == "output":
-        raw_path = data.get("file_path")
-        if not isinstance(raw_path, str) or not raw_path:
-            raise ValueError("file_path is required for output video segments")
-        path = (Path(folder_paths.get_output_directory()).resolve() / raw_path).resolve()
-        path.relative_to(Path(folder_paths.get_output_directory()).resolve())
-    else:
-        raise ValueError(f"unsupported video source_type: {source_type}")
-
-    if not path.is_file():
-        raise FileNotFoundError(f"video file not found: {path}")
-    if path.suffix.lower() not in VIDEO_EXTENSIONS:
-        raise ValueError(f"unsupported video extension: {path.suffix}")
-    return path
-
-
-async def _download_video_to_temp(url: str) -> Path:
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError("video URL must use http or https")
-    suffix = Path(parsed.path).suffix.lower()
-    if suffix not in VIDEO_EXTENSIONS:
-        suffix = ".mp4"
-    temp_file = tempfile.NamedTemporaryFile(prefix="easy_media_omni_", suffix=suffix, delete=False)
-    temp_path = Path(temp_file.name)
-    try:
-        timeout = aiohttp.ClientTimeout(total=300)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url) as response:
-                response.raise_for_status()
-                while chunk := await response.content.read(1024 * 1024):
-                    temp_file.write(chunk)
-        temp_file.close()
-        return temp_path
-    except Exception:
-        temp_file.close()
-        temp_path.unlink(missing_ok=True)
-        raise
-
-
-def _file_entry(abs_path: str, rel_path: str, source: str) -> dict:
-    """Build a file-info dict from an absolute path."""
-    stat = os.stat(abs_path)
-    if source in ("inputs", "outputs"):
-        # ComfyUI serves these via /view?filename=<name>&type=<source>&subfolder=<dir>
-        source_param = "input" if source == "inputs" else "output"
-        filename = os.path.basename(abs_path)
-        subfolder = os.path.dirname(rel_path)
-        url = f"/view?filename={filename}&type={source_param}&subfolder={subfolder}"
-    else:
-        url = ""
-    entry: dict = {
-        "type": "file",
-        "name":  os.path.basename(abs_path),
-        "path":  rel_path,
-        "url":   url,
-        "size":  stat.st_size,
-        "mtime": stat.st_mtime,
-    }
-    # Attach pixel dimensions for image files only; probing each video would make large media directories slow.
-    ext = Path(abs_path).suffix.lower()
-    if _HAS_PIL and ext in IMAGE_EXTENSIONS:
-        try:
-            with PILImage.open(abs_path) as img:
-                entry["width"] = img.width
-                entry["height"] = img.height
-        except Exception as error:
-            print(f"[Easy Media] Failed to read image dimensions for {abs_path}: {error}")
-    return entry
-
-
-def _list_dir_shallow(base_path: Path, subfolder: str, source: str, allowed: set[str]) -> list[dict]:
-    """List immediate children of *subfolder* inside *base_path* (non-recursive)."""
-    base_resolved = base_path.resolve()
-    target = (base_resolved / subfolder) if subfolder else base_resolved
-
-    # Security: disallow path traversal outside base
-    try:
-        target = target.resolve()
-        target.relative_to(base_resolved)
-    except ValueError:
-        return []
-
-    if not target.is_dir():
-        return []
-
-    items: list[dict] = []
-    for entry in sorted(target.iterdir(), key=lambda e: (e.is_file(), e.name.lower())):
-        try:
-            rel = str(entry.relative_to(base_resolved))
-            if entry.is_dir():
-                items.append({"type": "dir", "name": entry.name, "path": rel})
-            elif entry.is_file() and entry.suffix.lower() in allowed:
-                items.append(_file_entry(str(entry), rel, source))
-        except (OSError, ValueError):
-            continue
-    return items
+def _segment_source_audio_window(data: dict, fps: float) -> tuple[float, float]:
+    start_frame = data.get("start_frame")
+    end_frame = data.get("end_frame")
+    if not isinstance(start_frame, (int, float)) or not isinstance(end_frame, (int, float)):
+        return 0.0, 0.0
+    if not math.isfinite(start_frame) or not math.isfinite(end_frame):
+        return 0.0, 0.0
+    origin_start_frame = data.get("origin_start_frame")
+    if not isinstance(origin_start_frame, (int, float)) or not math.isfinite(origin_start_frame):
+        origin_start_frame = start_frame
+    source_start = max(0.0, (float(start_frame) - float(origin_start_frame)) / fps)
+    duration = max(0.0, (float(end_frame) - float(start_frame)) / fps)
+    return source_start, duration
 
 
 @PromptServer.instance.routes.get("/easy-media/media/list")
@@ -207,14 +85,14 @@ async def handle_media_list(request: web.Request) -> web.Response:
     local_path = request.rel_url.query.get("path", "")
     subfolder = request.rel_url.query.get("subfolder", "")
 
-    allowed = _allowed_extensions(media_type)
+    allowed = allowed_extensions(media_type)
 
     if source == "inputs":
         base = Path(folder_paths.get_input_directory())
-        items = _list_dir_shallow(base, subfolder, "inputs", allowed)
+        items = list_dir_shallow(base, subfolder, "inputs", allowed)
     elif source == "outputs":
         base = Path(folder_paths.get_output_directory())
-        items = _list_dir_shallow(base, subfolder, "outputs", allowed)
+        items = list_dir_shallow(base, subfolder, "outputs", allowed)
     elif source == "local":
         if not local_path:
             return web.Response(
@@ -229,7 +107,7 @@ async def handle_media_list(request: web.Request) -> web.Response:
                 content_type="application/json",
                 text=json.dumps({"error": "directory not found"}),
             )
-        items = _list_dir_shallow(Path(abs_path), subfolder, "local", allowed)
+        items = list_dir_shallow(Path(abs_path), subfolder, "local", allowed)
     else:
         return web.Response(
             status=400,
@@ -279,33 +157,6 @@ async def handle_easy_upload(request: web.Request) -> web.Response:
     )
 
 
-def _extract_filename_from_content_disposition(header: str | None) -> str | None:
-    """Extract filename from Content-Disposition header."""
-    if not header:
-        return None
-    import re
-    match = re.search(r'filename\*=(?:utf-8\'\')?([^;\s]+)', header, re.IGNORECASE)
-    if match:
-        return match.group(1).strip('"')
-    match = re.search(r'filename=([^;\s]+)', header, re.IGNORECASE)
-    if match:
-        return match.group(1).strip('"')
-    return None
-
-
-def _is_json_error(content: bytes) -> bool:
-    """Check if content looks like a JSON error response (not a file)."""
-    if len(content) < 2 or content[0] != 123:  # doesn't start with '{'
-        return False
-    try:
-        obj = json.loads(content.decode('utf-8', errors='ignore'))
-        return isinstance(obj, dict) and any(
-            k in obj for k in ('detail', 'error', 'message', 'code')
-        )
-    except Exception:
-        return False
-
-
 @PromptServer.instance.routes.post("/easy-media/download-url")
 async def handle_download_url(request: web.Request) -> web.Response:
     """
@@ -332,7 +183,7 @@ async def handle_download_url(request: web.Request) -> web.Response:
                 content = await resp.read()
 
                 # Detect JSON error responses (e.g., {"detail": "Not found"})
-                if _is_json_error(content):
+                if is_json_error(content):
                     try:
                         err_obj = json.loads(content.decode('utf-8', errors='ignore'))
                         err_msg = err_obj.get('detail') or err_obj.get('error') or err_obj.get('message') or 'Download failed'
@@ -347,7 +198,7 @@ async def handle_download_url(request: web.Request) -> web.Response:
                 # Derive filename from Content-Disposition or URL path
                 ct = resp.headers.get("Content-Type", "").split(";")[0].strip()
                 cd = resp.headers.get("Content-Disposition")
-                filename = _extract_filename_from_content_disposition(cd)
+                filename = extract_filename_from_content_disposition(cd)
                 if not filename:
                     url_path = url.split("?")[0].rstrip("/")
                     filename = Path(url_path).name
@@ -460,10 +311,10 @@ async def handle_video_smart_split(request: web.Request) -> web.Response:
             url = data.get("url")
             if not isinstance(url, str) or not url:
                 raise ValueError("url is required for URL video segments")
-            temp_path = await _download_video_to_temp(url)
+            temp_path = await download_video_to_temp(url)
             video_path = temp_path
         else:
-            video_path = _resolve_video_path(data)
+            video_path = resolve_segment_video_path(data)
 
         from .modules.omnishotcut import detect_shots
 
@@ -486,3 +337,88 @@ async def handle_video_smart_split(request: web.Request) -> web.Response:
                 temp_path.unlink(missing_ok=True)
             except OSError as error:
                 print(f"[Easy Media] Failed to remove OmniShotCut temporary video: {error}")
+
+
+@PromptServer.instance.routes.post("/easy-media/subtitles/recognize")
+async def handle_subtitle_recognition(request: web.Request) -> web.Response:
+    """Run Qwen3-ASR + ForcedAligner for one video/audio segment."""
+    source_temp_path: Path | None = None
+    extracted_audio_path: Path | None = None
+    try:
+        try:
+            data = await request.json()
+        except Exception as error:
+            raise ValueError("Invalid JSON body") from error
+        if not isinstance(data, dict):
+            raise ValueError("request body must be a JSON object")
+        fps = data.get("fps")
+        if not isinstance(fps, (int, float)) or not math.isfinite(fps) or fps <= 0:
+            raise ValueError("fps must be a positive finite number")
+
+        missing_dependencies = missing_subtitle_dependencies()
+        if missing_dependencies:
+            packages = " ".join(missing_dependencies)
+            return web.json_response({
+                "error": f"Missing Python dependencies: {packages}. Install with: pip install {packages}",
+                "missing_dependencies": missing_dependencies,
+            }, status=424)
+
+        asr_model_dir, aligner_model_dir = require_qwen_asr_model_dirs()
+        media_type = data.get("media_type")
+        source_type = data.get("source_type")
+        if source_type == "url":
+            url = data.get("url")
+            if not isinstance(url, str) or not url:
+                raise ValueError("url is required for URL media segments")
+            if media_type == "video":
+                source_temp_path = await download_video_to_temp(url)
+                media_path = source_temp_path
+            elif media_type == "audio":
+                source_temp_path = await download_audio_to_temp(url)
+                media_path = source_temp_path
+            else:
+                raise ValueError("media_type must be video or audio")
+        elif media_type == "video":
+            media_path = resolve_segment_video_path(data)
+        elif media_type == "audio":
+            media_path = resolve_segment_audio_path(data)
+        else:
+            raise ValueError("media_type must be video or audio")
+
+        source_start, source_duration = _segment_source_audio_window(data, float(fps))
+        if media_type == "video" or source_start > 0 or source_duration > 0:
+            extracted_audio_path = extract_video_audio_to_temp(
+                media_path,
+                start_time=source_start,
+                duration=source_duration,
+            )
+            audio_path = extracted_audio_path
+        else:
+            audio_path = media_path
+
+        async with _SUBTITLE_RECOGNITION_LOCK:
+            segments = await asyncio.to_thread(
+                recognize_subtitle_segments,
+                audio_path,
+                asr_model_dir,
+                aligner_model_dir,
+            )
+        return web.json_response({"segments": segments})
+    except MissingEasyMediaModelError as error:
+        return web.json_response({
+            "error": str(error),
+            "model_missing": model_payload(error.model),
+        }, status=428)
+    except (ValueError, FileNotFoundError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"Subtitle recognition failed: {error}"}, status=500)
+    finally:
+        for path in (source_temp_path, extracted_audio_path):
+            if path is None:
+                continue
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as error:
+                print(f"[Easy Media] Failed to remove subtitle recognition temporary file: {error}")

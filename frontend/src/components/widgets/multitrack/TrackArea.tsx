@@ -16,6 +16,7 @@ import { MULTITRACK_LEFT_GUTTER, MULTITRACK_RIGHT_RESERVE } from './MultiTrackRu
 import { MultiTrackSegmentBlock } from './MultiTrackSegmentBlock'
 import { AudioTrack } from './AudioTrack'
 import { VideoTrack } from './VideoTrack'
+import { SubtitleTrack } from './SubtitleTrack'
 
 interface TrackAreaProps {
   data: TrackData
@@ -34,6 +35,7 @@ interface TrackAreaProps {
     startFrame?: number,
   ) => void
   onAddTrack: (type: MultiTrackType) => void
+  onAddSubtitleSegment: (trackId: string) => void
   onReplaceVideo: (trackId: string, segmentId: string, filePath: string, sourceType: MultiTrackSourceType) => void
   onAddTaskSegment: (trackId: string) => void
   onSelectSegment: (segmentId: string, mode?: 'replace' | 'toggle' | 'add') => void
@@ -49,6 +51,8 @@ interface TrackAreaProps {
   onMoveSegment: (segmentId: string, targetTrackId: string, nextStartTime: number) => void
   onSmartSplit: (segmentId: string) => void
   onSmartSplitTasks: (segmentId: string) => void
+  onRecognizeSubtitles?: (segmentId: string) => void
+  onEditSubtitleSegment?: (segmentId: string) => void
   cutMode: boolean
   onCutSegment: (segmentId: string, splitFrame: number) => void
 }
@@ -137,6 +141,7 @@ export function TrackArea({
   onAddVideo,
   onAddAudio,
   onAddTrack,
+  onAddSubtitleSegment,
   onReplaceVideo,
   onAddTaskSegment,
   onSelectSegment,
@@ -152,6 +157,8 @@ export function TrackArea({
   onMoveSegment,
   onSmartSplit,
   onSmartSplitTasks,
+  onRecognizeSubtitles = () => {},
+  onEditSubtitleSegment = () => {},
   cutMode,
   onCutSegment,
 }: Readonly<TrackAreaProps>) {
@@ -174,6 +181,8 @@ export function TrackArea({
   const tracksHeight = data.tracks.reduce((height, track) => height + trackHeight(track.type), 0)
   const trackAreaHeight = tracksHeight + addTrackHeight
   const firstVideoTrackId = data.tracks.find((track) => track.type === 'video')?.id
+  const audioTrackLimitReached = data.tracks.filter((track) => track.type === 'audio').length >= 2
+  const subtitleTrackLimitReached = data.tracks.filter((track) => track.type === 'subtitle').length >= 2
   const trackBounds = data.tracks.reduce<Array<{ id: string, top: number, bottom: number }>>((bounds, track) => {
     const top = bounds.at(-1)?.bottom ?? 0
     bounds.push({ id: track.id, top, bottom: top + trackHeight(track.type) })
@@ -451,6 +460,7 @@ export function TrackArea({
               onDeleteSegment={onDeleteSegment}
               onSmartSplit={onSmartSplit}
               onSmartSplitTasks={onSmartSplitTasks}
+              onRecognizeSubtitles={onRecognizeSubtitles}
               cutMode={cutMode}
               onCutSegment={onCutSegment}
               canDeleteTrack={track.id !== firstVideoTrackId}
@@ -489,8 +499,33 @@ export function TrackArea({
               onMoveSegment={(segmentId, nextStartTime, clientY) => handleMoveSegment(segmentId, track.id, nextStartTime, clientY)}
               onDragPreviewChange={updateDragPlaceholder}
               onDragPreviewEnd={() => setDragPlaceholder(null)}
+              onRecognizeSubtitles={onRecognizeSubtitles}
               cutMode={cutMode}
               onCutSegment={onCutSegment}
+            />
+          )
+        }
+
+        if (track.type === 'subtitle') {
+          return (
+            <SubtitleTrack
+              key={track.id}
+              track={{ ...track, segments: track.segments.map((segment) => previewSegment(segment)) }}
+              totalLength={data.total_length}
+              frameRate={data.frame_rate}
+              width={playableWidth}
+              canvasScale={canvasScale}
+              selectedSegmentIds={selectedSegmentIds}
+              onSelectSegment={onSelectSegment}
+              onAddSubtitleSegment={onAddSubtitleSegment}
+              onDeleteSegment={onDeleteSegment}
+              onDeleteTrack={onDeleteTrack}
+              onEditSubtitleSegment={onEditSubtitleSegment}
+              onResizeSegment={onResizeSegment}
+              onResizeSegmentPreview={onResizeSegmentPreview}
+              onMoveSegment={(segmentId, nextStartTime, clientY) => handleMoveSegment(segmentId, track.id, nextStartTime, clientY)}
+              onDragPreviewChange={updateDragPlaceholder}
+              onDragPreviewEnd={() => setDragPlaceholder(null)}
             />
           )
         }
@@ -601,7 +636,8 @@ export function TrackArea({
               type="button"
               variant="ghost"
               size="icon"
-              className="h-6 w-6 cursor-pointer"
+              className="h-6 w-6 cursor-pointer disabled:cursor-not-allowed"
+              disabled={audioTrackLimitReached}
               aria-label={t('multitrack.addAudioTrack')}
               onClick={() => onAddTrack('audio')}
             >
@@ -612,13 +648,19 @@ export function TrackArea({
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="inline-flex">
-              <Button type="button" variant="ghost" size="icon" className="h-6 w-6" disabled aria-label={t('multitrack.addSubtitleTrack')}>
-                <Captions className="h-3.5 w-3.5" />
-              </Button>
-            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 cursor-pointer disabled:cursor-not-allowed"
+              disabled={subtitleTrackLimitReached}
+              aria-label={t('multitrack.addSubtitleTrack')}
+              onClick={() => onAddTrack('subtitle')}
+            >
+              <Captions className="h-3.5 w-3.5" />
+            </Button>
           </TooltipTrigger>
-          <TooltipContent>{t('multitrack.notSupportedYet')}</TooltipContent>
+          <TooltipContent>{t('multitrack.addSubtitleTrack')}</TooltipContent>
         </Tooltip>
       </div>
       {dragPlaceholderRect ? (

@@ -36,6 +36,7 @@ interface MultiTrackSegmentBlockProps {
   onClone?: (segmentId: string) => void
   onSmartSplit?: (segmentId: string) => void
   onSmartSplitTasks?: (segmentId: string) => void
+  onRecognizeSubtitles?: (segmentId: string) => void
   cutMode?: boolean
   onCut?: (segmentId: string, splitFrame: number) => void
   onResize: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
@@ -68,6 +69,7 @@ export function MultiTrackSegmentBlock({
   onClone,
   onSmartSplit,
   onSmartSplitTasks,
+  onRecognizeSubtitles,
   cutMode = false,
   onCut,
   onResize,
@@ -118,7 +120,9 @@ export function MultiTrackSegmentBlock({
       n: segmentIndex,
       mode: getMultiTrackTaskModeLabel(segment.content.task_mode ?? 'default', t),
     })
-    : segment.content.file_name ?? segment.id
+    : trackType === 'subtitle'
+      ? segment.content.text ?? t('multitrack.subtitle')
+      : segment.content.file_name ?? segment.id
   const durationLabel = formatMultiTrackTime(segmentDuration, { frameRate, showFrames: true })
   const presentation = getSegmentTrackPresentation(trackType)
   const borderColor = isResizing
@@ -416,6 +420,11 @@ export function MultiTrackSegmentBlock({
         {trackType === 'video' && onSmartSplitTasks ? (
           <ContextMenuItem onClick={() => onSmartSplitTasks(segment.id)}>
             {t('multitrack.smartSplitTasksOnly')}
+          </ContextMenuItem>
+        ) : null}
+        {(trackType === 'video' || trackType === 'audio') && onRecognizeSubtitles ? (
+          <ContextMenuItem onClick={() => onRecognizeSubtitles(segment.id)}>
+            {t('multitrack.recognizeSubtitles')}
           </ContextMenuItem>
         ) : null}
         {trackType === 'task' && onDistribute ? (

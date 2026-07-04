@@ -48,6 +48,12 @@ import {
   requestSmartSplit,
   splitTrackSegmentAtFrame,
 } from '@/lib/smart-split'
+import {
+  applySubtitleRecognition,
+  DEFAULT_SUBTITLE_STYLE,
+  MULTITRACK_SUBTITLE_COLOR,
+  requestSubtitleRecognition,
+} from '@/lib/subtitle-recognition'
 import { loadBrowserAudioMetadata } from '@/lib/audio-utils'
 import { uuid } from '@/lib/uuid'
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
@@ -110,7 +116,9 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   const [timelineCollapsed, setTimelineCollapsed] = useState(false)
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null)
   const [selectedSegmentIds, setSelectedSegmentIds] = useState<Set<string>>(() => new Set())
+  const [editingSubtitleSegmentId, setEditingSubtitleSegmentId] = useState<string | null>(null)
   const [isSmartSplitting, setIsSmartSplitting] = useState(false)
+  const [isRecognizingSubtitles, setIsRecognizingSubtitles] = useState(false)
   const [syncPlayNonce, setSyncPlayNonce] = useState(0)
   const [missingModel, setMissingModel] = useState<MissingModelInfo | null>(null)
   const [isDownloadingModel, setIsDownloadingModel] = useState(false)
@@ -357,16 +365,17 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   }
 
   function handleAddTrack(type: MultiTrackType) {
-    if (type !== 'audio') return
-    const trackNumber = data.tracks.filter((track) => track.type === 'audio').length
+    if (type !== 'audio' && type !== 'subtitle') return
+    const trackNumber = data.tracks.filter((track) => track.type === type).length
+    if ((type === 'audio' || type === 'subtitle') && trackNumber >= 2) return
     const track: MultiTrack = {
       id: uuid(),
-      name: `Audio ${trackNumber}`,
-      type: 'audio',
-      color: MULTITRACK_TRACK_COLORS.audio,
+      name: `${type === 'audio' ? 'Audio' : 'Subtitle'} ${trackNumber}`,
+      type,
+      color: type === 'subtitle' ? '#9D4937' : MULTITRACK_TRACK_COLORS.audio,
       muted: false,
-      solo: false,
-      volume_db: MULTITRACK_DEFAULT_VOLUME_DB,
+      solo: type === 'audio' ? false : undefined,
+      volume_db: type === 'audio' ? MULTITRACK_DEFAULT_VOLUME_DB : undefined,
       locked: false,
       segments: [],
     }
@@ -460,6 +469,41 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             content: {
               media_type: 'none' as const,
               task_mode: track.task_mode ?? 'default',
+            },
+          },
+        ],
+      }
+    })
+
+    commitNormalizedTrackChange({
+      ...data,
+      tracks: updatedTracks,
+      total_length: calculateTotalLength(updatedTracks, data.frame_rate),
+    })
+  }
+
+  function handleAddSubtitleSegment(trackId: string) {
+    const updatedTracks = data.tracks.map((track) => {
+      if (track.id !== trackId || track.type !== 'subtitle') return track
+      const startFrame = snapTimeToFrame(
+        track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0),
+        data.frame_rate,
+      )
+      const endFrame = startFrame + Math.max(1, secondsToFrame(5, data.frame_rate))
+      const existingStyle = track.segments.find((segment) => segment.content.subtitle_style)?.content.subtitle_style
+      return {
+        ...track,
+        segments: [
+          ...track.segments,
+          {
+            id: uuid(),
+            start_frame: startFrame,
+            end_frame: endFrame,
+            color: track.color || MULTITRACK_SUBTITLE_COLOR,
+            content: {
+              media_type: 'subtitle' as const,
+              text: '默认文字',
+              subtitle_style: { ...(existingStyle ?? DEFAULT_SUBTITLE_STYLE) },
             },
           },
         ],
@@ -604,6 +648,29 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
 
   function handleSelectedSegmentContentChange(patch: Partial<MultiTrackSegmentContent>) {
     if (!selectedSegmentId) return
+    if (selectedSegment?.trackType === 'subtitle' && patch.subtitle_style) {
+      const { subtitle_style: subtitleStyle, ...selectedSegmentPatch } = patch
+      const hasSelectedSegmentPatch = Object.keys(selectedSegmentPatch).length > 0
+      const updatedTracks = data.tracks.map((track) => {
+        if (track.id !== selectedSegment.trackId || track.type !== 'subtitle') return track
+        return {
+          ...track,
+          segments: track.segments.map((segment) => ({
+            ...segment,
+            content: {
+              ...segment.content,
+              ...(hasSelectedSegmentPatch && segment.id === selectedSegmentId ? selectedSegmentPatch : {}),
+              subtitle_style: subtitleStyle,
+            },
+          })),
+        }
+      })
+      commitNormalizedTrackChange({
+        ...data,
+        tracks: updatedTracks,
+      })
+      return
+    }
     commitNormalizedTrackChange(updateMultiTrackSegmentContent(data, selectedSegmentId, patch))
   }
 
@@ -727,6 +794,40 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     }
   }
 
+  async function handleRecognizeSubtitles(segmentId: string) {
+    const segment = data.tracks
+      .find((track) => (track.type === 'video' || track.type === 'audio') && track.segments.some((item) => item.id === segmentId))
+      ?.segments.find((item) => item.id === segmentId)
+    if (!segment || isRecognizingSubtitles) return
+
+    setIsPlaying(false)
+    setIsRecognizingSubtitles(true)
+    try {
+      const result = await requestSubtitleRecognition(segment, data.frame_rate)
+      commitNormalizedTrackChange(applySubtitleRecognition(data, segmentId, result))
+    } catch (error) {
+      if (error instanceof MissingModelError) {
+        setMissingModel(error.model)
+        setModelDownloadError(null)
+        return
+      }
+      console.error('[MultiTrackWidget] subtitle recognition failed:', error)
+      const message = error instanceof Error ? error.message : String(error)
+      try {
+        app.extensionManager?.toast?.add({
+          severity: 'error',
+          summary: t('multitrack.subtitleRecognitionFailed'),
+          detail: message,
+          life: 5000,
+        })
+      } catch (toastError) {
+        console.error('[MultiTrackWidget] failed to show subtitle recognition error:', toastError)
+      }
+    } finally {
+      setIsRecognizingSubtitles(false)
+    }
+  }
+
   function handleCutSegment(segmentId: string, splitFrame: number) {
     commitNormalizedTrackChange(splitTrackSegmentAtFrame(data, segmentId, splitFrame))
   }
@@ -780,7 +881,9 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
 
   function handleManualDownload() {
     if (!missingModel) return
-    globalThis.open(missingModel.url, '_blank', 'noopener,noreferrer')
+    for (const url of missingModel.urls ?? [missingModel.url]) {
+      globalThis.open(url, '_blank', 'noopener,noreferrer')
+    }
   }
 
   return (
@@ -788,7 +891,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       <TooltipProvider>
         <div
           className="relative flex h-full w-full flex-col overflow-hidden rounded text-foreground font-sans text-xs select-none"
-          aria-busy={isSmartSplitting}
+          aria-busy={isSmartSplitting || isRecognizingSubtitles}
           onClick={() => {
             handleClearSelection()
           }}
@@ -800,6 +903,9 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             isPlaying={isPlaying}
             playbackNonce={syncPlayNonce}
             node={node}
+            editingSubtitleSegmentId={editingSubtitleSegmentId}
+            onSubtitleEditRequestHandled={() => setEditingSubtitleSegmentId(null)}
+            onSelectSegment={(segmentId) => handleSelectSegment(segmentId)}
             onGlobalSettingsChange={handleGlobalSettingsChange}
             onSelectedSegmentContentChange={handleSelectedSegmentContentChange}
             taskSegments={selectedTaskTrackSegments}
@@ -854,6 +960,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     onAddVideo={handleAddVideo}
                     onAddAudio={handleAddAudio}
                     onAddTrack={handleAddTrack}
+                    onAddSubtitleSegment={handleAddSubtitleSegment}
                     onReplaceVideo={handleReplaceVideo}
                     onAddTaskSegment={handleAddTaskSegment}
                     onSelectSegment={handleSelectSegment}
@@ -869,6 +976,8 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     onMoveSegment={handleMoveSegment}
                     onSmartSplit={handleSmartSplit}
                     onSmartSplitTasks={handleSmartSplitTasks}
+                    onRecognizeSubtitles={handleRecognizeSubtitles}
+                    onEditSubtitleSegment={setEditingSubtitleSegmentId}
                     cutMode={false}
                     onCutSegment={handleCutSegment}
                   />
@@ -886,6 +995,19 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
               <div className="flex items-center gap-2 rounded border border-border bg-background px-3 py-2 text-foreground shadow-sm">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 <span>{t('multitrack.smartSplitting')}</span>
+              </div>
+            </div>
+          ) : null}
+          {isRecognizingSubtitles ? (
+            <div
+              className="absolute inset-0 z-50 flex items-center justify-center bg-background/80"
+              data-testid="subtitle-recognition-overlay"
+              role="status"
+              aria-live="polite"
+            >
+              <div className="flex items-center gap-2 rounded border border-border bg-background px-3 py-2 text-foreground shadow-sm">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>{t('multitrack.recognizingSubtitles')}</span>
               </div>
             </div>
           ) : null}

@@ -532,6 +532,25 @@
       "4": { "name": "任务数量" }
     }
   },
+  "easy multiTrackAddSubtitleToVIdeo": {
+    "display_name": "多轨字幕烧录到视频",
+    "description": "将轨道信息中的所有字幕轨片段烧录到视频中，并保存 SRT 字幕文件。",
+    "inputs": {
+      "tracks_info": { "name": "轨道信息" },
+      "video": { "name": "视频" },
+      "srt_save": {
+        "name": "SRT 保存位置",
+        "tooltip": "将生成的 SRT 保存到临时目录或 output/srt。",
+        "options": {
+          "temp": "临时目录",
+          "output": "输出目录"
+        }
+      }
+    },
+    "outputs": {
+      "0": { "name": "视频" }
+    }
+  },
   "easy multiTrackTaskOutput": {
     "display_name": "多轨任务输出",
     "description": "输出指定多轨任务片段的提示词和对应时间范围内的媒体。",

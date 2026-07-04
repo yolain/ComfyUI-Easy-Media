@@ -9,6 +9,8 @@ import shutil
 import subprocess
 import tempfile
 import urllib.request
+from .media import AUDIO_EXTENSIONS
+from pathlib import Path
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import Any, Callable
@@ -311,6 +313,108 @@ def get_ffmpeg_path(name: str = "ffmpeg") -> str | None:
             if os.path.isfile(path):
                 return path
     return None
+
+
+def video_input_to_local_file(
+    video: Any,
+    suffix: str = ".mp4",
+    save_kwargs: dict[str, Any] | None = None,
+) -> tuple[str, list[str]]:
+    """Return a local video file path, serializing non-file VIDEO inputs to temp."""
+    temp_files: list[str] = []
+    try:
+        source = video.get_stream_source()
+    except (AttributeError, NotImplementedError, RuntimeError, TypeError, ValueError):
+        source = None
+
+    if isinstance(source, str) and os.path.isfile(source):
+        return source, temp_files
+    if isinstance(source, io.BytesIO):
+        source.seek(0)
+        output_fd, output_path = tempfile.mkstemp(
+            suffix=suffix,
+            dir=folder_paths.get_temp_directory(),
+        )
+        try:
+            os.write(output_fd, source.read())
+        finally:
+            os.close(output_fd)
+        temp_files.append(output_path)
+        return output_path, temp_files
+
+    output_fd, output_path = tempfile.mkstemp(
+        suffix=suffix,
+        dir=folder_paths.get_temp_directory(),
+    )
+    os.close(output_fd)
+    try:
+        kwargs = save_kwargs or {}
+        video.save_to(output_path, **kwargs)
+    except Exception:
+        try:
+            os.unlink(output_path)
+        except OSError:
+            pass
+        raise
+    temp_files.append(output_path)
+    return output_path, temp_files
+
+
+def _escape_subtitles_filter_path(path: str) -> str:
+    return path.replace("\\", "\\\\").replace(":", "\\:").replace("'", r"\'")
+
+
+def burn_subtitles_with_ffmpeg(
+    video_path: str,
+    subtitle_path: str,
+    output_path: str,
+) -> str:
+    """Burn an SRT/ASS subtitle file into a video and return the output path."""
+    ffmpeg = get_ffmpeg_path("ffmpeg")
+    if ffmpeg is None:
+        raise RuntimeError("FFmpeg is required to add subtitles to video.")
+    if not os.path.isfile(video_path):
+        raise FileNotFoundError(f"Video file not found: {video_path}")
+    if not os.path.isfile(subtitle_path):
+        raise FileNotFoundError(f"Subtitle file not found: {subtitle_path}")
+
+    filter_value = f"subtitles='{_escape_subtitles_filter_path(subtitle_path)}'"
+    command = [
+        ffmpeg,
+        "-y",
+        "-i",
+        video_path,
+        "-vf",
+        filter_value,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a?",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "copy",
+        "-movflags",
+        "+faststart",
+        output_path,
+    ]
+    result = subprocess.run(command, capture_output=True)
+    if result.returncode == 0:
+        return output_path
+    try:
+        os.unlink(output_path)
+    except OSError:
+        pass
+    raise RuntimeError(
+        "FFmpeg subtitle burn failed:\n"
+        f"{result.stderr.decode(errors='replace')[-800:]}"
+    )
 
 
 @dataclass(frozen=True)
@@ -930,3 +1034,182 @@ def ffmpeg_extract_audio(video_path: str) -> dict | None:
             os.unlink(audio_path)
         except OSError:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Media segment helpers (used by routes.py)
+# ---------------------------------------------------------------------------
+
+import tempfile as _tempfile
+import aiohttp as _aiohttp
+from urllib.parse import urlparse as _urlparse
+
+
+async def download_video_to_temp(url: str) -> Path:
+    """Download a video URL to a temporary file and return its path."""
+    parsed = _urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("video URL must use http or https")
+    suffix = Path(parsed.path).suffix.lower()
+    if suffix not in _VIDEO_EXTENSIONS:
+        suffix = ".mp4"
+    temp_file = _tempfile.NamedTemporaryFile(
+        prefix="easy_media_omni_", suffix=suffix, delete=False
+    )
+    temp_path = Path(temp_file.name)
+    try:
+        timeout = _aiohttp.ClientTimeout(total=300)
+        async with _aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as response:
+                response.raise_for_status()
+                while chunk := await response.content.read(1024 * 1024):
+                    temp_file.write(chunk)
+        temp_file.close()
+        return temp_path
+    except Exception:
+        temp_file.close()
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
+async def download_audio_to_temp(url: str) -> Path:
+    """Download an audio URL to a temporary file and return its path."""
+    parsed = _urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("audio URL must use http or https")
+    suffix = Path(parsed.path).suffix.lower()
+    if suffix not in AUDIO_EXTENSIONS:
+        suffix = ".wav"
+    temp_file = _tempfile.NamedTemporaryFile(
+        prefix="easy_media_asr_audio_", suffix=suffix, delete=False
+    )
+    temp_path = Path(temp_file.name)
+    try:
+        timeout = _aiohttp.ClientTimeout(total=300)
+        async with _aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as response:
+                response.raise_for_status()
+                while chunk := await response.content.read(1024 * 1024):
+                    temp_file.write(chunk)
+        temp_file.close()
+        return temp_path
+    except Exception:
+        temp_file.close()
+        temp_path.unlink(missing_ok=True)
+        raise
+
+
+def resolve_segment_video_path(data: dict) -> Path:
+    """Resolve a segment media descriptor to a local video file."""
+    source_type = data.get("source_type", "input")
+    if source_type == "local":
+        raw_path = data.get("local_path") or data.get("file_path")
+        if not isinstance(raw_path, str) or not raw_path:
+            raise ValueError("local_path is required for local video segments")
+        path = Path(raw_path).expanduser().resolve()
+    elif source_type in ("input", "preset", "slot"):
+        raw_path = data.get("file_path")
+        if not isinstance(raw_path, str) or not raw_path:
+            raise ValueError("file_path is required for input video segments")
+        path = (Path(folder_paths.get_input_directory()).resolve() / raw_path).resolve()
+        path.relative_to(Path(folder_paths.get_input_directory()).resolve())
+    elif source_type == "output":
+        raw_path = data.get("file_path")
+        if not isinstance(raw_path, str) or not raw_path:
+            raise ValueError("file_path is required for output video segments")
+        path = (Path(folder_paths.get_output_directory()).resolve() / raw_path).resolve()
+        path.relative_to(Path(folder_paths.get_output_directory()).resolve())
+    else:
+        raise ValueError(f"unsupported video source_type: {source_type}")
+
+    if not path.is_file():
+        raise FileNotFoundError(f"video file not found: {path}")
+    if path.suffix.lower() not in _VIDEO_EXTENSIONS:
+        raise ValueError(f"unsupported video extension: {path.suffix}")
+    return path
+
+
+def resolve_segment_audio_path(data: dict) -> Path:
+    """Resolve a segment media descriptor to a local audio file."""
+    source_type = data.get("source_type", "input")
+    if source_type == "local":
+        raw_path = data.get("local_path") or data.get("file_path")
+        if not isinstance(raw_path, str) or not raw_path:
+            raise ValueError("local_path is required for local audio segments")
+        path = Path(raw_path).expanduser().resolve()
+    elif source_type in ("input", "preset", "slot"):
+        raw_path = data.get("file_path")
+        if not isinstance(raw_path, str) or not raw_path:
+            raise ValueError("file_path is required for input audio segments")
+        path = (Path(folder_paths.get_input_directory()).resolve() / raw_path).resolve()
+        path.relative_to(Path(folder_paths.get_input_directory()).resolve())
+    elif source_type == "output":
+        raw_path = data.get("file_path")
+        if not isinstance(raw_path, str) or not raw_path:
+            raise ValueError("file_path is required for output audio segments")
+        path = (Path(folder_paths.get_output_directory()).resolve() / raw_path).resolve()
+        path.relative_to(Path(folder_paths.get_output_directory()).resolve())
+    else:
+        raise ValueError(f"unsupported audio source_type: {source_type}")
+
+    if not path.is_file():
+        raise FileNotFoundError(f"audio file not found: {path}")
+    if path.suffix.lower() not in AUDIO_EXTENSIONS:
+        raise ValueError(f"unsupported audio extension: {path.suffix}")
+    return path
+
+
+def extract_video_audio_to_temp(
+    video_path: Path,
+    start_time: float = 0.0,
+    duration: float = 0.0,
+) -> Path:
+    """Extract the audio track from a video file to a temporary WAV file."""
+    info = ffprobe_info(str(video_path))
+    if info.get("has_audio") is False:
+        raise ValueError("Video segment does not contain an audio track.")
+    ffmpeg = get_ffmpeg_path("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("FFmpeg is required to extract audio from video segments.")
+    tmp_fd, audio_path = _tempfile.mkstemp(
+        prefix="easy_media_asr_extracted_",
+        suffix=".wav",
+        dir=folder_paths.get_temp_directory(),
+    )
+    os.close(tmp_fd)
+    output = Path(audio_path)
+    command = [
+        ffmpeg,
+        "-y",
+    ]
+    if math.isfinite(start_time) and start_time > 0:
+        command.extend(["-ss", f"{start_time:g}"])
+    command.extend([
+        "-i",
+        str(video_path),
+    ])
+    if math.isfinite(duration) and duration > 0:
+        command.extend(["-t", f"{duration:g}"])
+    command.extend([
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-acodec",
+        "pcm_s16le",
+        str(output),
+    ])
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0 or not output.is_file() or output.stat().st_size == 0:
+            output.unlink(missing_ok=True)
+            raise ValueError("Video segment does not contain an audio track.")
+        return output
+    except Exception:
+        output.unlink(missing_ok=True)
+        raise

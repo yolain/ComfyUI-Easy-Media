@@ -574,4 +574,331 @@ describe('PreviewArea', () => {
     expect(screen.getByRole('button', { name: 'Audio settings' })).not.toBeNull()
     expect(screen.queryByTestId('multitrack-video-preview')).toBeNull()
   })
+
+  it('overlays active subtitles on the video preview frame', () => {
+    const { data } = trackData()
+    data.tracks[0].segments[0].end_frame = 96
+    const subtitleSegment = {
+      id: 'subtitle-active',
+      start_frame: 24,
+      end_frame: 48,
+      color: '#9D4937',
+      content: {
+        media_type: 'subtitle' as const,
+        text: 'Recognized line',
+        subtitle_style: {
+          font_size: 12,
+          color: '#ffffff',
+          outline_color: '#000000',
+          background_color: 'rgba(0, 0, 0, 0.7)',
+          x: 0.15,
+          y: 0.8,
+          width: 0.7,
+        },
+      },
+    }
+    data.tracks.push({
+      id: 'subtitle-track',
+      name: 'Subtitle 1',
+      type: 'subtitle',
+      color: '#9D4937',
+      muted: false,
+      locked: false,
+      segments: [subtitleSegment],
+    })
+
+    const { rerender } = render(
+      <PreviewArea
+        data={data}
+        currentTime={36}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('subtitle-preview-overlay').textContent).toContain('Recognized line')
+    expect(screen.getByTestId('subtitle-preview-overlay').closest('[data-testid="multitrack-video-stage"]')).not.toBeNull()
+    expect(screen.getByTestId('subtitle-preview-overlay').style.top).toBe('80%')
+    expect(screen.getByTestId('subtitle-preview-overlay').style.backgroundColor).toBe('')
+    expect(screen.getByTestId('subtitle-preview-text').style.backgroundColor).toBe('rgba(0, 0, 0, 0.7)')
+
+    rerender(
+      <PreviewArea
+        data={data}
+        currentTime={36}
+        selectedSegment={{ trackId: 'subtitle-track', trackType: 'subtitle', segment: subtitleSegment }}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('multitrack-video-preview')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Subtitle text settings' })).not.toBeNull()
+  })
+
+  it('renders active subtitles from multiple subtitle tracks at the same time', () => {
+    const { data } = trackData()
+    data.tracks[0].segments[0].end_frame = 96
+    data.tracks.push(
+      {
+        id: 'subtitle-track-a',
+        name: 'Subtitle 1',
+        type: 'subtitle',
+        color: '#9D4937',
+        muted: false,
+        locked: false,
+        segments: [{
+          id: 'subtitle-a',
+          start_frame: 0,
+          end_frame: 48,
+          color: '#9D4937',
+          content: { media_type: 'subtitle' as const, text: 'First subtitle' },
+        }],
+      },
+      {
+        id: 'subtitle-track-b',
+        name: 'Subtitle 2',
+        type: 'subtitle',
+        color: '#9D4937',
+        muted: false,
+        locked: false,
+        segments: [{
+          id: 'subtitle-b',
+          start_frame: 0,
+          end_frame: 48,
+          color: '#9D4937',
+          content: { media_type: 'subtitle' as const, text: 'Second subtitle' },
+        }],
+      },
+    )
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={12}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    const overlays = screen.getAllByTestId('subtitle-preview-overlay')
+    expect(overlays).toHaveLength(2)
+    expect(overlays.map((overlay) => overlay.textContent)).toEqual([
+      expect.stringContaining('First subtitle'),
+      expect.stringContaining('Second subtitle'),
+    ])
+    expect(overlays.every((overlay) => overlay.closest('[data-testid="multitrack-video-stage"]'))).toBe(true)
+  })
+
+  it('renders transparent subtitle backgrounds without filling the preview width', () => {
+    const { data } = trackData()
+    const subtitleSegment = {
+      id: 'subtitle-transparent',
+      start_frame: 0,
+      end_frame: 48,
+      color: '#9D4937',
+      content: {
+        media_type: 'subtitle' as const,
+        text: 'Transparent line',
+        subtitle_style: {
+          font_size: 12,
+          color: '#ffffff',
+          outline_color: '#000000',
+          background_color: 'transparent',
+          x: 0.15,
+          y: 0.8,
+          width: 0.7,
+        },
+      },
+    }
+    data.tracks.push({
+      id: 'subtitle-track',
+      name: 'Subtitle 1',
+      type: 'subtitle',
+      color: '#9D4937',
+      muted: false,
+      locked: false,
+      segments: [subtitleSegment],
+    })
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={12}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('subtitle-preview-overlay').style.width).toBe('max-content')
+    expect(screen.getByTestId('subtitle-preview-overlay').style.maxWidth).toBe('70%')
+    expect(screen.getByTestId('subtitle-preview-overlay').style.backgroundColor).toBe('')
+    expect(screen.getByTestId('subtitle-preview-text').className).toContain('inline-block')
+    expect(screen.getByTestId('subtitle-preview-text').style.backgroundColor).toBe('transparent')
+  })
+
+  it('selects an active subtitle from the preview overlay', () => {
+    const { data } = trackData()
+    const onSelectSegment = vi.fn()
+    const subtitleSegment = {
+      id: 'subtitle-clickable',
+      start_frame: 0,
+      end_frame: 48,
+      color: '#9D4937',
+      content: {
+        media_type: 'subtitle' as const,
+        text: 'Clickable line',
+      },
+    }
+    data.tracks.push({
+      id: 'subtitle-track',
+      name: 'Subtitle 1',
+      type: 'subtitle',
+      color: '#9D4937',
+      muted: false,
+      locked: false,
+      segments: [subtitleSegment],
+    })
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={12}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onSelectSegment={onSelectSegment}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    const overlay = screen.getByTestId('subtitle-preview-overlay')
+    expect(overlay.className).toContain('cursor-pointer')
+    expect(overlay.className).not.toContain('pointer-events-none')
+    expect(overlay.style.left).toBe('50%')
+    expect(overlay.style.maxWidth).toBe('75%')
+    expect(overlay.style.transform).toBe('translateX(-50%)')
+
+    fireEvent.mouseDown(overlay)
+
+    expect(onSelectSegment).toHaveBeenCalledWith('subtitle-clickable')
+  })
+
+  it('edits an active subtitle inline by double clicking the preview overlay', () => {
+    const { data } = trackData()
+    const onSelectSegment = vi.fn()
+    const onTrackSegmentsContentChange = vi.fn()
+    const subtitleSegment = {
+      id: 'subtitle-editable',
+      start_frame: 0,
+      end_frame: 48,
+      color: '#9D4937',
+      content: {
+        media_type: 'subtitle' as const,
+        text: 'Original line',
+      },
+    }
+    data.tracks.push({
+      id: 'subtitle-track',
+      name: 'Subtitle 1',
+      type: 'subtitle',
+      color: '#9D4937',
+      muted: false,
+      locked: false,
+      segments: [subtitleSegment],
+    })
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={12}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onSelectSegment={onSelectSegment}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    const overlay = screen.getByTestId('subtitle-preview-overlay')
+    fireEvent.doubleClick(overlay)
+    const editor = screen.getByTestId('subtitle-preview-editor')
+    expect(overlay.contains(editor)).toBe(true)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    fireEvent.change(editor, { target: { value: 'Updated line' } })
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(onSelectSegment).toHaveBeenCalledWith('subtitle-editable')
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
+      segmentId: 'subtitle-editable',
+      patch: { text: 'Updated line' },
+    }])
+  })
+
+  it('edits a selected subtitle inline when editing is requested externally', () => {
+    const { data } = trackData()
+    const onSelectedSegmentContentChange = vi.fn()
+    const subtitleSegment = {
+      id: 'subtitle-edit-request',
+      start_frame: 0,
+      end_frame: 48,
+      color: '#9D4937',
+      content: {
+        media_type: 'subtitle' as const,
+        text: 'Timeline line',
+      },
+    }
+    data.tracks.push({
+      id: 'subtitle-track',
+      name: 'Subtitle 1',
+      type: 'subtitle',
+      color: '#9D4937',
+      muted: false,
+      locked: false,
+      segments: [subtitleSegment],
+    })
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={12}
+        selectedSegment={{ trackId: 'subtitle-track', trackType: 'subtitle', segment: subtitleSegment }}
+        editingSubtitleSegmentId="subtitle-edit-request"
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={onSelectedSegmentContentChange}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    const overlay = screen.getByTestId('subtitle-preview-overlay')
+    const editor = screen.getByTestId('subtitle-preview-editor')
+    expect(overlay.contains(editor)).toBe(true)
+    expect((editor as HTMLInputElement).value).toBe('Timeline line')
+    fireEvent.change(editor, { target: { value: 'Edited from timeline' } })
+    fireEvent.keyDown(editor, { key: 'Enter' })
+
+    expect(onSelectedSegmentContentChange).toHaveBeenCalledWith({ text: 'Edited from timeline' })
+  })
 })

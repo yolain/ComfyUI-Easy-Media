@@ -115,6 +115,14 @@ class _InputImpl:
         return _FakeVideo(components)
 
 
+class _VideoContainer:
+    AUTO = "auto"
+
+
+class _VideoCodec:
+    AUTO = "auto"
+
+
 def _load_basic_module():
     _ProgressBar.instances.clear()
     _InputImpl.loaded_sources.clear()
@@ -142,7 +150,11 @@ def _load_basic_module():
     comfy_api_latest = types.ModuleType("comfy_api.latest")
     comfy_api_latest.io = io
     comfy_api_latest.InputImpl = _InputImpl
-    comfy_api_latest.Types = types.SimpleNamespace(VideoComponents=_VideoComponents)
+    comfy_api_latest.Types = types.SimpleNamespace(
+        VideoComponents=_VideoComponents,
+        VideoContainer=_VideoContainer,
+        VideoCodec=_VideoCodec,
+    )
     comfy_api.latest = comfy_api_latest
 
     comfy = types.ModuleType("comfy")
@@ -162,6 +174,9 @@ def _load_basic_module():
         "audio_db_to_gain",
         "audio_is_muted",
         "audio_volume_db",
+        "burn_subtitles_with_ffmpeg",
+        "collect_multitrack_subtitle_segments",
+        "default_subtitle_filename",
         "equirectangular_to_perspective",
         "frames_to_seconds",
         "load_audio_waveform",
@@ -172,11 +187,20 @@ def _load_basic_module():
         "resolve_video_path",
         "silence",
         "trim_audio",
+        "video_input_to_local_file",
+        "write_ass_file",
+        "write_srt_file",
     ):
         setattr(utils_module, name, lambda *args, **kwargs: None)
     utils_module.audio_db_to_gain = lambda value: 10 ** (float(value) / 20)
     utils_module.audio_is_muted = lambda value: bool(value.get("muted", False))
     utils_module.audio_volume_db = lambda value: float(value.get("volume_db", 0.0))
+    utils_module.default_subtitle_filename = lambda prefix="easy_multitrack_subtitles": f"{prefix}_20260704_120000"
+    utils_module.video_input_to_local_file = lambda video, **kwargs: (video.get_stream_source(), [])
+    folder_paths = types.ModuleType("folder_paths")
+    folder_paths.get_temp_directory = lambda: "/tmp"
+    folder_paths.get_output_directory = lambda: "/tmp"
+    sys.modules["folder_paths"] = folder_paths
     prompt_override_path = Path(__file__).parents[1] / "utils" / "prompt_override.py"
     prompt_override_spec = importlib.util.spec_from_file_location(
         "easy_media.utils.prompt_override",
@@ -233,11 +257,22 @@ def _load_image_module():
 def _load_video_utils_module(input_directory):
     folder_paths = types.ModuleType("folder_paths")
     folder_paths.get_annotated_filepath = lambda path: str(input_directory / path)
+    folder_paths.get_input_directory = lambda: str(input_directory)
     folder_paths.get_output_directory = lambda: str(input_directory)
+    folder_paths.get_temp_directory = lambda: str(input_directory)
     sys.modules["folder_paths"] = folder_paths
+    package = types.ModuleType("easy_media")
+    package.__path__ = []
+    utils_package = types.ModuleType("easy_media.utils")
+    utils_package.__path__ = []
+    media_module = types.ModuleType("easy_media.utils.media")
+    media_module.AUDIO_EXTENSIONS = frozenset({".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg"})
+    sys.modules["easy_media"] = package
+    sys.modules["easy_media.utils"] = utils_package
+    sys.modules["easy_media.utils.media"] = media_module
 
     path = Path(__file__).parents[1] / "utils" / "video.py"
-    spec = importlib.util.spec_from_file_location("video_utils_under_test", path)
+    spec = importlib.util.spec_from_file_location("easy_media.utils.video", path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -285,6 +320,59 @@ def test_multitrack_info_output_counts_task_segments():
     result = module.MultiTrackInfoOutput.execute(json.dumps(tracks_info))
 
     assert result.values == (1280, 720, 97, 24.0, 3)
+
+
+def test_multitrack_add_subtitle_to_video_saves_srt_to_output_srt(monkeypatch, tmp_path):
+    module = _load_basic_module()
+    output_dir = tmp_path / "output"
+    temp_dir = tmp_path / "temp"
+    output_dir.mkdir()
+    temp_dir.mkdir()
+    module.folder_paths.get_output_directory = lambda: str(output_dir)
+    module.folder_paths.get_temp_directory = lambda: str(temp_dir)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    video = _FakeVideo(
+        _VideoComponents(torch.zeros(24, 360, 640, 3), None, Fraction(24)),
+        source=str(source),
+    )
+    segment = types.SimpleNamespace(start=0.0, end=1.0, text="hello", style={})
+    calls = {}
+
+    monkeypatch.setattr(module, "collect_multitrack_subtitle_segments", lambda info: [segment])
+    monkeypatch.setattr(module, "default_subtitle_filename", lambda prefix="x": f"{prefix}_stamp")
+
+    def fake_write_srt(segments, path):
+        calls["srt"] = path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("1\n00:00:00,000 --> 00:00:01,000\nhello\n", encoding="utf-8")
+        return path
+
+    def fake_write_ass(segments, path, width, height):
+        calls["ass"] = (path, width, height)
+        path.write_text("[Script Info]\n", encoding="utf-8")
+        return path
+
+    def fake_burn(video_path, subtitle_path, output_path):
+        calls["burn"] = (video_path, subtitle_path, output_path)
+        Path(output_path).write_bytes(b"subtitled")
+        return output_path
+
+    monkeypatch.setattr(module, "write_srt_file", fake_write_srt)
+    monkeypatch.setattr(module, "write_ass_file", fake_write_ass)
+    monkeypatch.setattr(module, "burn_subtitles_with_ffmpeg", fake_burn)
+
+    result = module.MultiTrackAddSubtitleToVideo.execute(
+        {"tracks": []},
+        video,
+        "output",
+    )
+
+    assert calls["srt"] == output_dir / "srt" / "source_stamp.srt"
+    assert calls["ass"][1:] == (640, 360)
+    assert calls["burn"][0] == str(source)
+    assert result.values[0].source == calls["burn"][2]
+    assert not calls["ass"][0].exists()
 
 
 def test_multitrack_editor_includes_selected_dimensions_in_tracks_info():
@@ -634,7 +722,7 @@ def test_multitrack_editor_projects_panorama_images_to_video_dimensions_for_task
     assert projection_calls[0][2:] == (640, 360)
     assert images[0].shape == (1, 360, 640, 3)
     assert task_image["panorama_view"] == panorama_view
-    assert tracks_info["media"]["images"][0]["panorama_view"] == panorama_view
+    assert "media" not in tracks_info
 
     task_result = module.MultiTrackTaskOutput.execute(
         [tracks_info],
@@ -840,6 +928,62 @@ def test_ffmpeg_video_merge_applies_segment_audio_filters(tmp_path, monkeypatch)
     assert "volume=-3.5dB" in filter_graph
     assert "trim=start=0.5:duration=1.0" in filter_graph
     assert "atrim=start=0.5:duration=1.0" in filter_graph
+
+
+def test_extract_video_audio_to_temp_applies_trim_window(tmp_path, monkeypatch):
+    module = _load_video_utils_module(tmp_path)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    module.folder_paths.get_temp_directory = lambda: str(tmp_path)
+    monkeypatch.setattr(module, "get_ffmpeg_path", lambda _name="ffmpeg": "ffmpeg")
+    monkeypatch.setattr(module, "ffprobe_info", lambda _source: {"has_audio": True})
+    commands = []
+
+    def fake_run(command, capture_output=False, check=False):
+        commands.append(command)
+        Path(command[-1]).write_bytes(b"audio")
+        return types.SimpleNamespace(returncode=0, stderr=b"")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    output = module.extract_video_audio_to_temp(source, start_time=1.0, duration=2.0)
+
+    assert output.is_file()
+    assert "-ss" in commands[0]
+    assert float(commands[0][commands[0].index("-ss") + 1]) == 1.0
+    assert "-t" in commands[0]
+    assert float(commands[0][commands[0].index("-t") + 1]) == 2.0
+
+
+def test_burn_subtitles_with_ffmpeg_maps_optional_audio(tmp_path, monkeypatch):
+    module = _load_video_utils_module(tmp_path)
+    source = tmp_path / "source.mp4"
+    subtitles_path = tmp_path / "subtitle file.ass"
+    output = tmp_path / "out.mp4"
+    source.write_bytes(b"video")
+    subtitles_path.write_text("[Script Info]\n", encoding="utf-8")
+    module.folder_paths.get_temp_directory = lambda: str(tmp_path)
+    monkeypatch.setattr(module, "get_ffmpeg_path", lambda _name="ffmpeg": "ffmpeg")
+    commands = []
+
+    def fake_run(command, capture_output):
+        commands.append(command)
+        output.write_bytes(b"done")
+        return types.SimpleNamespace(returncode=0, stderr=b"")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    assert module.burn_subtitles_with_ffmpeg(
+        str(source),
+        str(subtitles_path),
+        str(output),
+    ) == str(output)
+
+    command = commands[0]
+    assert command[command.index("-vf") + 1].startswith("subtitles='")
+    assert "-map" in command
+    assert "0:a?" in command
+    assert command[-1] == str(output)
 
 
 def test_multitrack_editor_reuses_cached_ffmpeg_result_for_duplicate_video():

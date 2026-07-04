@@ -281,6 +281,10 @@ function arrangeAudioDrop(
   }
 }
 
+function isFreeTimedTrack(type: MultiTrack['type']): boolean {
+  return type === 'audio' || type === 'subtitle'
+}
+
 export function syncMatchingTasksToPrimaryVideoTrack(
   originalTracks: MultiTrack[],
   updatedTracks: MultiTrack[],
@@ -527,7 +531,7 @@ export function moveSegmentBetweenCompatibleTracks(
     .sort((a, b) => a.start_frame - b.start_frame)
   const insertIndex = insertIndexForTrack(targetSegments, nextStartTime, frameRate)
 
-  if (targetTrack.type === 'audio') {
+  if (isFreeTimedTrack(targetTrack.type)) {
     const arranged = arrangeAudioDrop(targetSegments, movingSegment, nextStartTime, frameRate)
     return tracks.map((track) => {
       if (track.id === sourceTrack.id && track.id !== targetTrack.id) {
@@ -596,7 +600,7 @@ function moveSegmentsWithinOriginalTracks(
       return repositionSegment(segment, startFrame, startFrame + duration)
     })
 
-    if (track.type === 'audio') {
+    if (isFreeTimedTrack(track.type)) {
       const combined = [...remaining, ...moved].sort((left, right) => left.start_frame - right.start_frame)
       let cursor = 0
       return {
@@ -673,7 +677,7 @@ export function getSegmentDragPlaceholder(
     .filter((segment) => segment.id !== segmentId)
     .sort((a, b) => a.start_frame - b.start_frame)
   const insertIndex = insertIndexForTrack(targetSegments, nextStartTime, frameRate)
-  if (targetTrack.type === 'audio') {
+  if (isFreeTimedTrack(targetTrack.type)) {
     const arranged = arrangeAudioDrop(targetSegments, movingSegment, nextStartTime, frameRate)
     const placeholder = arranged.segments[arranged.insertIndex]
     return {
@@ -718,7 +722,7 @@ export function getSegmentDragPreviewSegments(
   const targetSegments = targetTrack.segments
     .filter((segment) => segment.id !== placeholder.segmentId)
     .sort((a, b) => a.start_frame - b.start_frame)
-  if (targetTrack.type === 'audio') {
+  if (isFreeTimedTrack(targetTrack.type)) {
     return arrangeAudioDrop(
       targetSegments,
       movingSegment,

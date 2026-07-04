@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Gauge, Volume2, VolumeX } from 'lucide-react'
+import { Gauge, Type, Volume2, VolumeX } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { ColorPickerPopover } from '@/components/ui/color-picker'
 import { Input } from '@/components/ui/input'
 import { NumberInput } from '@/components/ui/number-input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -15,7 +16,7 @@ import {
   clampMultiTrackVolumeDb,
   parseMultiTrackDurationTimecode,
 } from '@/lib/multitrack-utils'
-import type { MultiTrackSegmentContent, TrackData } from '@/types/multitrack'
+import type { MultiTrackSegmentContent, MultiTrackSubtitleStyle, TrackData } from '@/types/multitrack'
 
 interface PreviewFloatingToolbarProps {
   globalMuted: boolean
@@ -24,6 +25,7 @@ interface PreviewFloatingToolbarProps {
   selectedMediaVolumeDb: number | null
   selectedMediaMuted: boolean
   selectedMediaDuration: number | null
+  selectedSubtitleStyle: MultiTrackSubtitleStyle | null
   onGlobalSettingsChange: (patch: Partial<Pick<TrackData, 'muted' | 'volume_db' | 'frame_rate'>>) => void
   onSelectedSegmentContentChange: (patch: Partial<MultiTrackSegmentContent>) => void
   onSelectedSegmentDurationChange: (duration: number) => void
@@ -40,6 +42,12 @@ function nearestFrameRateIndex(frameRate: number): number {
   }, Math.max(0, fallbackIndex))
 }
 
+function normalizePickerColor(value: string | undefined, fallback: string): string {
+  if (!value) return fallback
+  if (value.trim().toLowerCase() === 'transparent') return 'rgba(0, 0, 0, 0)'
+  return value
+}
+
 export function PreviewFloatingToolbar({
   globalMuted,
   globalVolumeDb,
@@ -47,12 +55,14 @@ export function PreviewFloatingToolbar({
   selectedMediaVolumeDb,
   selectedMediaMuted,
   selectedMediaDuration,
+  selectedSubtitleStyle,
   onGlobalSettingsChange,
   onSelectedSegmentContentChange,
   onSelectedSegmentDurationChange,
 }: Readonly<PreviewFloatingToolbarProps>) {
   const t = useT()
   const hasSelectedMedia = selectedMediaVolumeDb !== null
+  const hasSelectedSubtitle = selectedSubtitleStyle !== null
   const audioLabel = t(hasSelectedMedia ? 'multitrack.audio' : 'multitrack.globalAudio')
   const effectiveVolumeDb = hasSelectedMedia ? selectedMediaVolumeDb : globalVolumeDb
   const muted = hasSelectedMedia ? selectedMediaMuted : globalMuted
@@ -99,6 +109,15 @@ export function PreviewFloatingToolbar({
   }
 
   const frameRateIndex = nearestFrameRateIndex(frameRate)
+  const updateSubtitleStyle = (patch: Partial<MultiTrackSubtitleStyle>) => {
+    if (!selectedSubtitleStyle) return
+    onSelectedSegmentContentChange({
+      subtitle_style: {
+        ...selectedSubtitleStyle,
+        ...patch,
+      },
+    })
+  }
 
   return (
     <div className="absolute right-3 top-1/2 z-20 flex -translate-y-1/2 flex-col overflow-hidden rounded-lg border border-border bg-popover/90 text-popover-foreground shadow-lg backdrop-blur">
@@ -155,6 +174,78 @@ export function PreviewFloatingToolbar({
         </PopoverContent>
       </Popover>
       <div className="mx-3 h-px bg-border" />
+      {hasSelectedSubtitle ? (
+        <>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                className="flex h-12 w-10 flex-col gap-1 rounded-none px-1 py-1 cursor-pointer"
+                aria-label={t('multitrack.subtitleTextSettings')}
+              >
+                <Type className="h-4 w-4" />
+                <span className="text-[8px]">{t('multitrack.text')}</span>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-56 space-y-3" align="end" side="left">
+              <div className="grid gap-2 text-xs text-muted-foreground">
+                <label className="grid gap-1">
+                  {t('multitrack.fontSize')}
+                  <NumberInput
+                    aria-label={t('multitrack.fontSize')}
+                    min={8}
+                    max={96}
+                    step={1}
+                    value={selectedSubtitleStyle?.font_size ?? 12}
+                    onChange={(value) => updateSubtitleStyle({ font_size: value })}
+                  />
+                </label>
+                <div className="grid gap-1">
+                  <span>{t('multitrack.textColor')}</span>
+                  <ColorPickerPopover
+                    value={normalizePickerColor(selectedSubtitleStyle?.color, '#ffffff')}
+                    defaultFormat="hex"
+                    triggerAriaLabel={t('multitrack.textColor')}
+                    triggerClassName="w-full justify-start"
+                    side="left"
+                    align="start"
+                    sideOffset={10}
+                    onValueChange={(value) => updateSubtitleStyle({ color: value })}
+                  />
+                </div>
+                <div className="grid gap-1">
+                  <span>{t('multitrack.outlineColor')}</span>
+                  <ColorPickerPopover
+                    value={normalizePickerColor(selectedSubtitleStyle?.outline_color, '#000000')}
+                    defaultFormat="hex"
+                    triggerAriaLabel={t('multitrack.outlineColor')}
+                    triggerClassName="w-full justify-start"
+                    side="left"
+                    align="start"
+                    sideOffset={10}
+                    onValueChange={(value) => updateSubtitleStyle({ outline_color: value })}
+                  />
+                </div>
+                <div className="grid gap-1">
+                  <span>{t('multitrack.backgroundColor')}</span>
+                  <ColorPickerPopover
+                    value={normalizePickerColor(selectedSubtitleStyle?.background_color, 'rgba(0, 0, 0, 0)')}
+                    defaultFormat="rgb"
+                    triggerAriaLabel={t('multitrack.backgroundColor')}
+                    triggerClassName="w-full justify-start"
+                    side="left"
+                    align="start"
+                    sideOffset={10}
+                    onValueChange={(value) => updateSubtitleStyle({ background_color: value })}
+                  />
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+          <div className="mx-3 h-px bg-border" />
+        </>
+      ) : null}
       <Popover>
         <PopoverTrigger asChild>
           <Button

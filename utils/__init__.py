@@ -5,3 +5,4 @@ from .video import *
 from .panorama import *
 from .models import *
 from .prompt_override import *
+from .subtitles import *

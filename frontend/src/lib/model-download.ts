@@ -7,6 +7,7 @@ export interface MissingModelInfo {
   directory: string
   path: string
   url: string
+  urls?: string[]
 }
 
 export class MissingModelError extends Error {
@@ -29,6 +30,7 @@ function isMissingModelInfo(value: unknown): value is MissingModelInfo {
     && typeof model.directory === 'string'
     && typeof model.path === 'string'
     && typeof model.url === 'string'
+    && (model.urls === undefined || (Array.isArray(model.urls) && model.urls.every((url) => typeof url === 'string')))
   )
 }
 

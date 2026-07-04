@@ -340,6 +340,14 @@ def test_trim_video_uses_standard_suffix_for_comfy_annotated_paths(monkeypatch, 
     folder_paths.get_output_directory = lambda: str(tmp_path)
     folder_paths.get_annotated_filepath = lambda path: path
     monkeypatch.setitem(sys.modules, "folder_paths", folder_paths)
+    easy_media = types.ModuleType("easy_media")
+    easy_media_utils = types.ModuleType("easy_media.utils")
+    easy_media_utils.__path__ = []
+    easy_media_utils_media = types.ModuleType("easy_media.utils.media")
+    easy_media_utils_media.AUDIO_EXTENSIONS = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".opus", ".wma"}
+    monkeypatch.setitem(sys.modules, "easy_media", easy_media)
+    monkeypatch.setitem(sys.modules, "easy_media.utils", easy_media_utils)
+    monkeypatch.setitem(sys.modules, "easy_media.utils.media", easy_media_utils_media)
 
     spec = importlib.util.spec_from_file_location("easy_media.utils.video_real", utils_module_path)
     assert spec is not None

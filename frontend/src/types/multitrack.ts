@@ -44,6 +44,17 @@ export interface MultiTrackSegmentContent {
   muted?: boolean
   speed?: number
   media_index?: number
+  subtitle_style?: MultiTrackSubtitleStyle
+}
+
+export interface MultiTrackSubtitleStyle {
+  font_size: number
+  color: string
+  outline_color?: string
+  background_color: string
+  x: number
+  y: number
+  width: number
 }
 
 export interface MultiTrackSegment {

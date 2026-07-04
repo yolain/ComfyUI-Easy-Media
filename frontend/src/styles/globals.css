@@ -3,6 +3,9 @@
 @import "tailwindcss/utilities";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+/*---break---
+ */
+@custom-variant dark (&:is(.dark *));
 
 /**
  * Define CSS variables for light and dark themes, scoped under a custom class to avoid global conflicts.
@@ -37,6 +40,39 @@
   --font-heading: var(--font-heading);
   --text-\[8px\]: 8px;
   --height-30: calc(var(--spacing) * 30);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-surface-4: var(--surface-4);
+  --color-surface-5: var(--surface-5);
+  --color-surface-6: var(--surface-6);
+  --color-surface-7: var(--surface-7);
+  --color-surface-8: var(--surface-8);
+  --shadow-surface-1: var(--shadow-1);
+  --shadow-surface-2: var(--shadow-2);
+  --shadow-surface-3: var(--shadow-3);
+  --shadow-surface-4: var(--shadow-4);
+  --shadow-surface-5: var(--shadow-5);
+  --shadow-surface-6: var(--shadow-6);
+  --shadow-surface-7: var(--shadow-7);
+  --shadow-surface-8: var(--shadow-8);
+  --color-dm-drop: var(--dm-drop);
+  --color-dm-ring-high: var(--dm-ring-high);
+  --color-dm-ring-mid: var(--dm-ring-mid);
+  --color-dm-ring-base: var(--dm-ring-base);
+  --color-dm-hi-peak: var(--dm-hi-peak);
+  --color-dm-hi-high: var(--dm-hi-high);
+  --color-dm-hi-mid: var(--dm-hi-mid);
+  --color-dm-hi-base: var(--dm-hi-base);
+  --shadow-8: var(--shadow-8);
+  --shadow-7: var(--shadow-7);
+  --shadow-6: var(--shadow-6);
+  --shadow-5: var(--shadow-5);
+  --shadow-4: var(--shadow-4);
+  --shadow-3: var(--shadow-3);
+  --shadow-2: var(--shadow-2);
+  --shadow-1: var(--shadow-1);
+  --color-shadow-color: var(--shadow-color);
 }
 
 /* All styles scoped under .__CUSTOM_NODE_CLASS__ to avoid global conflicts.
@@ -45,6 +81,8 @@
 @layer base {
   .__CUSTOM_NODE_CLASS__ {
     /* Standard Tailwind-compatible variables - Light theme */
+    --checker-a: oklch(1 0 0);
+    --checker-b: oklch(1 0 0);
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
@@ -79,6 +117,10 @@
     --multitrack-task-bg-strong: #5F3B6A;
     --multitrack-task-border: #A783B2;
     --multitrack-task-text: oklch(0.96 0.01 260);
+    --multitrack-subtitle-bg: #9D4937;
+    --multitrack-subtitle-bg-strong: #7D3A2C;
+    --multitrack-subtitle-border: #C9705A;
+    --multitrack-subtitle-text: #ffffff;
     --multitrack-waveform: oklch(0.55 0.09 185);
     --border: var(--border-color);
     --input: oklch(0.922 0 0);
@@ -97,6 +139,8 @@
 
   /* Dark theme - active when body has dark-theme class */
   .dark-theme .__CUSTOM_NODE_CLASS__{
+    --checker-a: oklch(0.145 0 0);
+    --checker-b: oklch(0.205 0 0);
     --background: oklch(0.145 0 0);
     --foreground: oklch(0.985 0 0);
     --card: oklch(0.205 0 0);
@@ -129,6 +173,10 @@
     --multitrack-task-bg-strong: #5F3B6A;
     --multitrack-task-border: #A783B2;
     --multitrack-task-text: oklch(0.96 0.01 260);
+    --multitrack-subtitle-bg: #9D4937;
+    --multitrack-subtitle-bg-strong: #7D3A2C;
+    --multitrack-subtitle-border: #C9705A;
+    --multitrack-subtitle-text: #ffffff;
     --multitrack-waveform: oklch(0.55 0.09 185);
     --border: var(--border-color);
     --input: oklch(1 0 0 / 15%);

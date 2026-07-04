@@ -65,3 +65,15 @@ def test_download_model_serializes_concurrent_requests(monkeypatch, tmp_path):
     assert first_path == second_path == tmp_path / "checkpoints" / "OmniShotCut_ckpt.pth"
     assert first_path.read_bytes() == b"checkpoint"
     assert _FakeSession.request_count == 1
+
+
+def test_qwen_model_payload_includes_bundle_urls(monkeypatch, tmp_path):
+    monkeypatch.setattr(models.folder_paths, "models_dir", str(tmp_path))
+
+    payload = models.model_payload(models.get_model_info("qwen3-asr"))
+
+    assert payload["path"] == str(tmp_path / "Qwen3-ASR")
+    assert payload["urls"] == [
+        "https://huggingface.co/Qwen/Qwen3-ASR-1.7B",
+        "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B",
+    ]

@@ -90,6 +90,9 @@ def _load_basic_module(monkeypatch):
     utils.audio_db_to_gain = lambda value: value
     utils.audio_is_muted = lambda value: False
     utils.audio_volume_db = lambda value: 0.0
+    utils.burn_subtitles_with_ffmpeg = lambda *args, **kwargs: None
+    utils.collect_multitrack_subtitle_segments = lambda *args, **kwargs: []
+    utils.default_subtitle_filename = lambda *args, **kwargs: "subtitles"
     utils.equirectangular_to_perspective = lambda image, *args, **kwargs: image
     utils.frames_to_seconds = lambda frames, frame_rate: (frames - 1) / frame_rate
     utils.load_audio_waveform = lambda *args, **kwargs: None
@@ -100,6 +103,9 @@ def _load_basic_module(monkeypatch):
     utils.resolve_video_path = lambda *args, **kwargs: None
     utils.silence = lambda *args, **kwargs: None
     utils.trim_audio = lambda audio, *args, **kwargs: audio
+    utils.video_input_to_local_file = lambda *args, **kwargs: ("", [])
+    utils.write_ass_file = lambda *args, **kwargs: None
+    utils.write_srt_file = lambda *args, **kwargs: None
     prompt_override_path = Path(__file__).resolve().parents[1] / "utils" / "prompt_override.py"
     prompt_override_spec = importlib.util.spec_from_file_location(
         "easy_media.utils.prompt_override",

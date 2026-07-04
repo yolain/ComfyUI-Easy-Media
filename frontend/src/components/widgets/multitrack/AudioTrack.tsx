@@ -36,6 +36,7 @@ interface AudioTrackProps {
   onMoveSegment: (segmentId: string, nextStartTime: number, clientY: number) => void
   onDragPreviewChange: (segmentId: string, nextStartTime: number, clientY: number) => void
   onDragPreviewEnd: () => void
+  onRecognizeSubtitles?: (segmentId: string) => void
   cutMode: boolean
   onCutSegment: (segmentId: string, splitFrame: number) => void
 }
@@ -59,6 +60,7 @@ export function AudioTrack({
   onMoveSegment,
   onDragPreviewChange,
   onDragPreviewEnd,
+  onRecognizeSubtitles = () => {},
   cutMode,
   onCutSegment,
 }: Readonly<AudioTrackProps>) {
@@ -69,7 +71,8 @@ export function AudioTrack({
     [node, app, mediaSelectorOpen],
   )
   const lastEnd = track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0)
-  const controlsLeft = (lastEnd / Math.max(totalLength, 1)) * width + 6
+  const addLeft = track.segments.length === 0 ? 6 : (lastEnd / Math.max(totalLength, 1)) * width + 6
+  const deleteLeft = track.segments.length === 0 ? 32 : width + 6
 
   return (
     <div className="relative flex h-16 border-b border-border">
@@ -100,14 +103,12 @@ export function AudioTrack({
             onMove={onMoveSegment}
             onDragPreviewChange={onDragPreviewChange}
             onDragPreviewEnd={onDragPreviewEnd}
+            onRecognizeSubtitles={onRecognizeSubtitles}
             cutMode={cutMode}
             onCut={onCutSegment}
           />
         ))}
-        <div
-          className="absolute top-1/2 flex -translate-y-1/2 flex-col gap-1"
-          style={{ left: track.segments.length === 0 ? 6 : controlsLeft }}
-        >
+        <div className="absolute top-1/2 -translate-y-1/2" style={{ left: addLeft }}>
           <Popover open={mediaSelectorOpen} onOpenChange={setMediaSelectorOpen}>
             <PopoverTrigger asChild>
               <Button
@@ -135,6 +136,8 @@ export function AudioTrack({
               />
             </PopoverContent>
           </Popover>
+        </div>
+        <div className="absolute top-1/2 -translate-y-1/2" style={{ left: deleteLeft }}>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
