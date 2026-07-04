@@ -44,7 +44,7 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 | Task Track | Supports multiple task type definitions such as t2v, i2v, r2v, v2v |
 | Video Track | Import and manage video clips, supporting multi-segment video stitching and intelligent segmentation |
 | Audio Track | Import and manage audio clips, supporting multi-segment audio stitching |
-| Subtitle Track | Not yet developed |
+| Subtitle Track | Add subtitles recognized from audio/video |
 
 - Task segments are the core of this node; workflows can be designed for automatic looping based on the number of task track segments
 - When adding video clips to the video track, corresponding task segments will be automatically added with matching duration
@@ -66,9 +66,6 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 
 
 ### 🎞️ Timeline Editor
-
-> I believe the media timeline editor component is better suited as a standalone module node for greater versatility. This node focuses on media import/editing and timeline-related functionality, providing better support for video pipeline creation across different models.<br>
-The editor can be used for single video segment generation (e.g., combined with PromptRelay), as well as segmented generation. Each segment can be combined with different model video pipelines for text-only generation, single image generation, first/last frame generation, multi-frame generation, reference-based generation, etc.
 
 ![timelineEditor](https://github.com/user-attachments/assets/d7c9e894-6e7e-488c-90fb-d3aa8310419d)
 
@@ -166,6 +163,7 @@ bun run build:release
 | easy multiTrackEditor | Multi-track editor for editing and transferring multi-track media data |
 | easy multiTrackInfoOutput | Output multi-track dimensions, duration, frame rate, and task count |
 | easy multiTrackTaskOutput | Output multi-track task segment prompts and task-ranged media |
+| easy multiTrackAddSubtitleToVideo | Add subtitle track to video track |
 | easy makeRefsCompositeBySam3 | Detect subject in prompt using SAM3 and composite reference images onto canvas |
 | easy splitImages | Split an image list or batch into multiple single-image outputs |
 | easy matchLine | Return zero-based index of the first line containing matching text |
@@ -177,6 +175,7 @@ bun run build:release
 ## Credits
 
 - [OmniShotCut](https://github.com/UVA-Computer-Vision-Lab/OmniShotCut)
+- [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B)
 
 ## Source of Inspiration
 

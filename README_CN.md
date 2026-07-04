@@ -43,7 +43,7 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 | 任务轨道    | 支持t2v、i2v、r2v、v2v等多种任务类型定义                |
 | 视频轨道    | 导入并管理视频片段，支持多段视频拼接、智能分割镜头           |
 | 音频轨道    | 导入并管理音频片段，支持多段音频拼接                   |
-| 字幕轨道    | 暂未开发            |
+| 字幕轨道    | 添加会从音视频识别            |
 
 - 任务片段是该节点的核心，工作流可根据任务轨道中片段的数量，设计自动循环执行
 - 视频轨道添加视频片段时也将自动添加对应时长的任务片段
@@ -60,7 +60,7 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 | 视频编辑 | bernini v2v、bernini vi2v、wan animate、ltx video replace、ltx iclora edit/inpaint/outpaint | 视频轨道片段及任务轨道片段必要
 | 视频参考 | wan scail2、wan animate、ltx iclora guide | 视频轨道片段及任务轨道片段必要
 | 视频配音 | wan infinititalk、longcat avatar、ltx ai2v | 任务轨道片段和音频轨道片段必要
-| 视频字幕 | 暂未开发 | -
+| 视频字幕 | - | 任务轨道有片段即可
 
 - 仅统计了热门开源模型常见的生成类型，理论上任何视频模型流程都可以通过多轨编辑器作为前置处理工具
 
@@ -168,6 +168,7 @@ bun run build:release
 | easy multiTrackEditor | 多轨编辑器，编辑和传递多轨媒体数据 |
 | easy multiTrackInfoOutput | 输出多轨维度、时长、帧率和任务数量 |
 | easy multiTrackTaskOutput | 输出多轨任务段的提示词和任务范围媒体 |
+| easy multiTrackAddSubtitleToVideo | 将字幕轨道添加到视频轨道中 |
 | easy makeRefsCompositeBySam3 | 使用 SAM3 检测提示的主体并组合参考图到画布 |
 | easy splitImages | 将图像列表或批次拆分为多个单图像输出 |
 | easy matchLine | 返回包含匹配文本的第一行的零基索引 |
@@ -179,6 +180,7 @@ bun run build:release
 ## Credits
 
 - [OmniShotCut](https://github.com/UVA-Computer-Vision-Lab/OmniShotCut)
+- [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B)
 
 ## Source of Inspiration
 
