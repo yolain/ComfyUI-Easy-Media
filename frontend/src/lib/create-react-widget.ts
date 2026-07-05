@@ -128,7 +128,6 @@ export function createReactWidget<T extends object | string = object>(
 
     // serializeValue is called by ComfyUI when building the API prompt payload
     widget.serializeValue = () => currentValue
-
     root = createRoot(container)
     render()
 

@@ -28,6 +28,9 @@ import {
   parseMultiTrackPreviewResolution,
   remapTrackDataFrameRate,
   secondsToFrame,
+  splitMultiTrackSegmentByFrames,
+  snapMultiTrackMoveStartTime,
+  snapMultiTrackResizeTime,
   snapTimeToFrame,
   updateMultiTrackSegmentContent,
   updateMultiTrackSegmentDuration,
@@ -57,6 +60,31 @@ describe('multitrack utilities', () => {
       { id: 'second', start_frame: 4, end_frame: 7 },
       { id: 'third', start_frame: 7, end_frame: 10 },
     ])
+  })
+
+  it('splits one multitrack segment by target frames and keeps the remainder last', () => {
+    const source = {
+      id: 'source',
+      start_frame: 5,
+      end_frame: 15,
+      color: 'var(--multitrack-task-bg)',
+      content: {
+        media_type: 'none' as const,
+        task_mode: 'default' as const,
+        images: [{ id: 'image', source_type: 'input' as const, file_path: 'image.png' }],
+      },
+    }
+    const result = splitMultiTrackSegmentByFrames([source], source.id, 3)
+
+    expect(result).not.toBeNull()
+    expect(result?.segments.map((segment) => [segment.id, segment.start_frame, segment.end_frame])).toEqual([
+      ['source', 5, 8],
+      [result?.splitSegmentIds[1], 8, 11],
+      [result?.splitSegmentIds[2], 11, 14],
+      [result?.splitSegmentIds[3], 14, 15],
+    ])
+    expect(result?.segments[1].content).toEqual(source.content)
+    expect(result?.segments[1].content).not.toBe(source.content)
   })
 
   it('deep-clones a segment after its source and shifts following segments', () => {
@@ -627,6 +655,191 @@ describe('multitrack utilities', () => {
     const updated = updateMultiTrackSegmentDuration(trackData, 'selected', 10, 24)
 
     expect(updated.tracks[1].segments[0].end_frame).toBe(60)
+  })
+
+  it('snaps resize edges to timeline and neighboring segment boundaries inside a brake distance', () => {
+    const data = createDefaultTrackData()
+    const trackData = {
+      ...data,
+      total_length: 120,
+      tracks: [
+        data.tracks[0],
+        {
+          ...data.tracks[1],
+          segments: [
+            {
+              id: 'previous',
+              start_frame: 0,
+              end_frame: 24,
+              color: data.tracks[1].color,
+              content: { media_type: 'video' as const },
+            },
+            {
+              id: 'selected',
+              start_frame: 31,
+              end_frame: 60,
+              color: data.tracks[1].color,
+              content: { media_type: 'video' as const },
+            },
+            {
+              id: 'next',
+              start_frame: 73,
+              end_frame: 96,
+              color: data.tracks[1].color,
+              content: { media_type: 'video' as const },
+            },
+          ],
+        },
+      ],
+    }
+
+    expect(snapMultiTrackResizeTime(trackData, 'selected', 'start', 27, 4)).toBe(24)
+    expect(snapMultiTrackResizeTime(trackData, 'selected', 'end', 70, 4)).toBe(73)
+    expect(snapMultiTrackResizeTime(trackData, 'selected', 'end', 116, 4)).toBe(120)
+    expect(snapMultiTrackResizeTime(trackData, 'selected', 'end', 67, 4)).toBe(67)
+  })
+
+  it('snaps resize edges to the current timeline playhead inside the brake distance', () => {
+    const data = createDefaultTrackData()
+    const trackData = {
+      ...data,
+      total_length: 120,
+      tracks: [
+        data.tracks[0],
+        {
+          ...data.tracks[1],
+          segments: [
+            {
+              id: 'selected',
+              start_frame: 0,
+              end_frame: 60,
+              color: data.tracks[1].color,
+              content: { media_type: 'video' as const },
+            },
+          ],
+        },
+      ],
+    }
+
+    expect(snapMultiTrackResizeTime(trackData, 'selected', 'end', 46, 4, 48)).toBe(48)
+  })
+
+  it('snaps moved segment starts to timeline and other segment starts inside a brake distance', () => {
+    const data = createDefaultTrackData()
+    const trackData = {
+      ...data,
+      total_length: 120,
+      tracks: [
+        data.tracks[0],
+        {
+          ...data.tracks[1],
+          segments: [
+            {
+              id: 'selected',
+              start_frame: 31,
+              end_frame: 60,
+              color: data.tracks[1].color,
+              content: { media_type: 'video' as const },
+            },
+            {
+              id: 'other',
+              start_frame: 73,
+              end_frame: 96,
+              color: data.tracks[1].color,
+              content: { media_type: 'video' as const },
+            },
+          ],
+        },
+      ],
+    }
+
+    expect(snapMultiTrackMoveStartTime(trackData, 'selected', 70, 4)).toBe(73)
+    expect(snapMultiTrackMoveStartTime(trackData, 'selected', 116, 4)).toBe(120)
+    expect(snapMultiTrackMoveStartTime(trackData, 'selected', 67, 4)).toBe(67)
+  })
+
+  it('snaps moved segment ends to timeline and other segment starts inside a brake distance', () => {
+    const data = createDefaultTrackData()
+    const trackData = {
+      ...data,
+      total_length: 120,
+      tracks: [
+        data.tracks[0],
+        {
+          ...data.tracks[1],
+          segments: [
+            {
+              id: 'selected',
+              start_frame: 31,
+              end_frame: 60,
+              color: data.tracks[1].color,
+              content: { media_type: 'video' as const },
+            },
+            {
+              id: 'other',
+              start_frame: 73,
+              end_frame: 96,
+              color: data.tracks[1].color,
+              content: { media_type: 'video' as const },
+            },
+          ],
+        },
+      ],
+    }
+
+    expect(snapMultiTrackMoveStartTime(trackData, 'selected', 43, 4)).toBe(44)
+    expect(snapMultiTrackMoveStartTime(trackData, 'selected', 92, 4)).toBe(91)
+    expect(snapMultiTrackMoveStartTime(trackData, 'selected', 88, 2)).toBe(88)
+  })
+
+  it('snaps moved segment starts to the current timeline playhead inside the brake distance', () => {
+    const data = createDefaultTrackData()
+    const trackData = {
+      ...data,
+      total_length: 120,
+      tracks: [
+        data.tracks[0],
+        {
+          ...data.tracks[1],
+          segments: [
+            {
+              id: 'selected',
+              start_frame: 0,
+              end_frame: 24,
+              color: data.tracks[1].color,
+              content: { media_type: 'video' as const },
+            },
+          ],
+        },
+      ],
+    }
+
+    expect(snapMultiTrackMoveStartTime(trackData, 'selected', 46, 4, 48)).toBe(48)
+  })
+
+  it('snaps moved segment ends to the current timeline playhead inside the brake distance', () => {
+    const data = createDefaultTrackData()
+    const trackData = {
+      ...data,
+      total_length: 120,
+      tracks: [
+        data.tracks[0],
+        {
+          ...data.tracks[1],
+          segments: [
+            {
+              id: 'selected',
+              start_frame: 0,
+              end_frame: 24,
+              color: data.tracks[1].color,
+              content: { media_type: 'video' as const },
+            },
+          ],
+        },
+      ],
+    }
+
+    expect(snapMultiTrackMoveStartTime(trackData, 'selected', 23, 4, 48)).toBe(24)
   })
 
   it('converts seconds and frames using the current frame rate', () => {

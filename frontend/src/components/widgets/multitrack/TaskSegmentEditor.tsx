@@ -20,12 +20,17 @@ import {
   segmentDuration,
 } from '@/lib/multitrack-utils'
 import { cn } from '@/lib/utils'
-import { uuid } from '@/lib/uuid'
+import {
+  createTaskImage,
+  MAX_TASK_IMAGES,
+  splitSelectedTaskMedia,
+  taskImagesFromContent,
+  uploadTaskImageFile,
+} from '@/lib/task-image-utils'
 import { invalidateMediaListCache } from '@/stores/media-list-store'
 import type {
   MultiTrackSegment,
   MultiTrackSegmentContent,
-  MultiTrackSourceType,
   MultiTrackTaskImage,
   MultiTrackTaskMode,
 } from '@/types/multitrack'
@@ -63,13 +68,11 @@ interface SystemPromptOption {
 }
 
 const TASK_MODES: MultiTrackTaskMode[] = ['default', 'ref', 'edit']
-const MAX_TASK_IMAGES = 9
-const MULTIPLE_MEDIA_SEPARATOR = '|MULTIPLE|'
 let cachedSystemPromptOptions: SystemPromptOption[] | undefined
 let systemPromptOptionsRequest: Promise<SystemPromptOption[]> | null = null
 
 function taskImages(segment: MultiTrackSegment): MultiTrackTaskImage[] {
-  return Array.isArray(segment.content.images) ? segment.content.images : []
+  return taskImagesFromContent(segment.content.images)
 }
 
 function moveImage(images: MultiTrackTaskImage[], sourceId: string, targetId: string): MultiTrackTaskImage[] {
@@ -115,22 +118,6 @@ function getDefaultSystemPromptForSegment(
   return options.find((option) => option.task_type === taskType)?.system_prompt ?? ''
 }
 
-function createTaskImage(filePath: string, source: MultiTrackSourceType): MultiTrackTaskImage {
-  const fileName = filePath.split(/[\\/]/).pop() ?? filePath
-  return {
-    id: uuid(),
-    source_type: source,
-    file_path: source === 'local' || source === 'url' ? undefined : filePath,
-    local_path: source === 'local' ? filePath : undefined,
-    url: source === 'url' ? filePath : undefined,
-    file_name: fileName,
-  }
-}
-
-function splitSelectedMedia(value: string): string[] {
-  return value.split(MULTIPLE_MEDIA_SEPARATOR).filter((item) => item.length > 0)
-}
-
 function renderSystemPromptHighlight(value: string) {
   return value.split(/(\{[^{}]*\})/g).map((part, index) => (
     /^\{[^{}]*\}$/.test(part) ? (
@@ -147,27 +134,6 @@ function renderCombinedPromptHighlight(value: string) {
       <span key={`pipe-${index}`} className="text-highlight" data-pipe="true">|</span>
     ) : part
   ))
-}
-
-async function uploadImageFile(file: File): Promise<MultiTrackTaskImage> {
-  const formData = new FormData()
-  formData.append('image', file)
-  const response = await fetch('/upload/image', {
-    method: 'POST',
-    body: formData,
-  })
-  if (!response.ok) {
-    throw new Error(`Failed to upload image: ${file.name}`)
-  }
-  const result = await response.json() as { name?: string; subfolder?: string }
-  const name = result.name ?? file.name
-  const subfolder = result.subfolder ?? ''
-  return {
-    id: uuid(),
-    source_type: 'input',
-    file_path: subfolder ? `${subfolder}/${name}` : name,
-    file_name: name,
-  }
 }
 
 async function loadSystemPromptOptions(): Promise<SystemPromptOption[]> {
@@ -318,7 +284,7 @@ export function TaskSegmentEditor({
       .slice(0, remainingSlots)
     if (files.length === 0) return
 
-    const results = await Promise.allSettled(files.map((file) => uploadImageFile(file)))
+    const results = await Promise.allSettled(files.map((file) => uploadTaskImageFile(file)))
     const uploaded = results.flatMap((result) => {
       if (result.status === 'fulfilled') return [result.value]
       console.error('[TaskSegmentEditor] failed to upload task image:', result.reason)
@@ -333,7 +299,7 @@ export function TaskSegmentEditor({
   function handleSelectedMedia(filePath: string, source?: 'input' | 'output' | 'local') {
     const remainingSlots = MAX_TASK_IMAGES - images.length
     if (remainingSlots <= 0) return
-    const selectedPaths = splitSelectedMedia(filePath).slice(0, remainingSlots)
+    const selectedPaths = splitSelectedTaskMedia(filePath).slice(0, remainingSlots)
     const sourceType = source ?? (filePath.startsWith('http://') || filePath.startsWith('https://') ? 'url' : 'input')
     const nextImages = selectedPaths.map((path) => createTaskImage(path, sourceType))
     if (nextImages.length === 0) return

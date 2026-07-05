@@ -15,6 +15,7 @@ import type { MultiTrackSegment, MultiTrackType } from '@/types/multitrack'
 
 const RESIZE_ZONE_DEFAULT = 8
 const RESIZE_ZONE_SELECTED = 12
+const RESIZE_SNAP_DISTANCE = 8
 const DRAG_START_DISTANCE = 4
 
 type SegmentBlockStyle = CSSProperties & {
@@ -34,15 +35,17 @@ interface MultiTrackSegmentBlockProps {
   onDelete: (segmentId: string) => void
   onDistribute?: () => void
   onClone?: (segmentId: string) => void
+  onSplitTask?: (segmentId: string) => void
   onSmartSplit?: (segmentId: string) => void
   onSmartSplitTasks?: (segmentId: string) => void
   onRecognizeSubtitles?: (segmentId: string) => void
   cutMode?: boolean
   onCut?: (segmentId: string, splitFrame: number) => void
-  onResize: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
-  onResizePreview: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
+  onResize: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
+  onResizePreview: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
   onMove: (segmentId: string, nextStartTime: number, clientY: number) => void
   onDragPreviewChange?: (segmentId: string, nextStartTime: number, clientY: number) => void
+  getDragPreviewStart?: (segmentId: string, nextStartTime: number, clientY: number) => number
   onDragPreviewEnd?: () => void
   onDoubleClick?: (segmentId: string, event: React.MouseEvent) => void
 }
@@ -67,6 +70,7 @@ export function MultiTrackSegmentBlock({
   onDelete,
   onDistribute,
   onClone,
+  onSplitTask,
   onSmartSplit,
   onSmartSplitTasks,
   onRecognizeSubtitles,
@@ -76,6 +80,7 @@ export function MultiTrackSegmentBlock({
   onResizePreview,
   onMove,
   onDragPreviewChange,
+  getDragPreviewStart,
   onDragPreviewEnd,
   onDoubleClick,
 }: Readonly<MultiTrackSegmentBlockProps>) {
@@ -206,6 +211,10 @@ export function MultiTrackSegmentBlock({
     return (adjustedDelta / Math.max(areaWidth, 1)) * Math.max(totalLength, 1)
   }
 
+  function resizeSnapBrakeDistanceFrames(): number {
+    return Math.max(1, Math.round((RESIZE_SNAP_DISTANCE / Math.max(areaWidth, 1)) * Math.max(totalLength, 1)))
+  }
+
   function handleMouseMove(event: React.MouseEvent) {
     if (cutMode) return
     const rect = event.currentTarget.getBoundingClientRect()
@@ -237,7 +246,6 @@ export function MultiTrackSegmentBlock({
       const currentTarget = event.currentTarget as HTMLElement
       const containerRect = currentTarget.offsetParent?.getBoundingClientRect()
       const scale = Math.max(canvasScale, 0.01)
-      const pointerOffsetX = (event.clientX - startRect.left) / scale
       const pointerOffsetY = (event.clientY - startRect.top) / scale
       const previewWidth = startRect.width / scale
       const previewHeight = startRect.height / scale
@@ -252,14 +260,16 @@ export function MultiTrackSegmentBlock({
           isDraggingRef.current = true
           setIsDragging(true)
         }
-        const x = (moveEvent.clientX - containerRect.left) / scale - pointerOffsetX
+        const requestedStartTime = originalStart + deltaFrames
+        const previewStartTime = getDragPreviewStart?.(segment.id, requestedStartTime, moveEvent.clientY) ?? requestedStartTime
+        const x = (previewStartTime / Math.max(totalLength, 1)) * areaWidth
         const y = (moveEvent.clientY - containerRect.top) / scale - pointerOffsetY
         updateDragPreview({
           x,
           y,
           width: previewWidth,
           height: previewHeight,
-          nextStartTime: originalStart + deltaFrames,
+          nextStartTime: previewStartTime,
           clientY: moveEvent.clientY,
         })
       }
@@ -287,17 +297,18 @@ export function MultiTrackSegmentBlock({
 
     const resizeEdge = edge
     const originalTime = resizeEdge === 'start' ? segment.start_frame : segment.end_frame
+    const brakeDistanceFrames = resizeSnapBrakeDistanceFrames()
     setIsResizing(true)
 
     function handleMove(moveEvent: MouseEvent) {
       const deltaFrames = resizeDeltaFromClientX(moveEvent.clientX, startX)
       if (Math.abs(deltaFrames) > 0) didDragRef.current = true
-      onResizePreview(segment.id, resizeEdge, originalTime + deltaFrames)
+      onResizePreview(segment.id, resizeEdge, originalTime + deltaFrames, brakeDistanceFrames)
     }
 
     function handleUp(upEvent: MouseEvent) {
       const deltaFrames = resizeDeltaFromClientX(upEvent.clientX, startX)
-      if (didDragRef.current) onResize(segment.id, resizeEdge, originalTime + deltaFrames)
+      if (didDragRef.current) onResize(segment.id, resizeEdge, originalTime + deltaFrames, brakeDistanceFrames)
       setIsResizing(false)
       globalThis.removeEventListener('mousemove', handleMove)
       globalThis.removeEventListener('mouseup', handleUp)
@@ -435,6 +446,11 @@ export function MultiTrackSegmentBlock({
         {trackType === 'task' && onClone ? (
           <ContextMenuItem onClick={() => onClone(segment.id)}>
             {t('multitrack.cloneTaskSegment')}
+          </ContextMenuItem>
+        ) : null}
+        {trackType === 'task' && onSplitTask ? (
+          <ContextMenuItem onClick={() => onSplitTask(segment.id)}>
+            {t('multitrack.splitTaskSegment')}
           </ContextMenuItem>
         ) : null}
         <ContextMenuItem onClick={() => onDelete(segment.id)}>

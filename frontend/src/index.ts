@@ -1,6 +1,6 @@
 import { addInlineStyles } from "@/lib/add-stylesheet";
 import { installEasyMediaSyncPlay } from "@/lib/sync-play";
-import { preserveTimelineEditorNodeHeight } from "@/lib/timeline-node-size";
+import { preserveTimelineEditorNodeSize } from "@/lib/timeline-node-size";
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 import type { TimelineData } from '@/types/timeline'
 import type { TrackData } from '@/types/multitrack'
@@ -38,7 +38,7 @@ globalThis.comfyAPI!.app.app.registerExtension({
   },
 
   beforeRegisterNodeDef(nodeType, nodeData) {
-    preserveTimelineEditorNodeHeight(nodeType, nodeData)
+    preserveTimelineEditorNodeSize(nodeType, nodeData)
     installEasyMediaSyncPlay(nodeType, nodeData)
   },
 

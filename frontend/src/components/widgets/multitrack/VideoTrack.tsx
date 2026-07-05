@@ -24,10 +24,11 @@ interface VideoTrackProps {
   canDeleteTrack: boolean
   onDeleteTrack: (trackId: string) => void
   onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo'>>) => void
-  onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
-  onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
+  onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
+  onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
   onMoveSegment: (segmentId: string, nextStartTime: number, clientY: number) => void
   onDragPreviewChange: (segmentId: string, nextStartTime: number, clientY: number) => void
+  getDragPreviewStart?: (segmentId: string, nextStartTime: number, clientY: number) => number
   onDragPreviewEnd: () => void
   onReplaceVideo: (trackId: string, segmentId: string, filePath: string, sourceType: MultiTrackSourceType) => void
   onSmartSplit: (segmentId: string) => void
@@ -61,6 +62,7 @@ export function VideoTrack({
   onResizeSegmentPreview,
   onMoveSegment,
   onDragPreviewChange,
+  getDragPreviewStart,
   onDragPreviewEnd,
   onReplaceVideo,
   onSmartSplit,
@@ -115,6 +117,7 @@ export function VideoTrack({
             onResizePreview={onResizeSegmentPreview}
             onMove={onMoveSegment}
             onDragPreviewChange={onDragPreviewChange}
+            getDragPreviewStart={getDragPreviewStart}
             onDragPreviewEnd={onDragPreviewEnd}
             onDoubleClick={(segmentId, event) => {
               const rect = contentRef.current?.getBoundingClientRect()

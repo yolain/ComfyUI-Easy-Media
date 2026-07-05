@@ -59,11 +59,12 @@ vi.mock('@/components/widgets/multitrack/MultiTrackRuler', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
-  TrackArea: ({ data, node, app, onCloneTaskSegment, onAddTrack, onAddVideo, onAddAudio, onAddSubtitleSegment, onSmartSplit, onSmartSplitTasks, onRecognizeSubtitles, onResizeSegment, onResizeSegmentPreview, onMoveSegment, selectedSegmentIds, onSelectSegment, onSelectSegments, cutMode }: {
+  TrackArea: ({ data, node, app, onCloneTaskSegment, onSplitTaskSegment, onAddTrack, onAddVideo, onAddAudio, onAddSubtitleSegment, onSmartSplit, onSmartSplitTasks, onRecognizeSubtitles, onResizeSegment, onResizeSegmentPreview, onMoveSegment, onTrackAudioSettingsChange, selectedSegmentIds, onSelectSegment, onSelectSegments, cutMode }: {
     data: TrackData
     node: unknown
     app: unknown
     onCloneTaskSegment: (trackId: string, segmentId: string) => void
+    onSplitTaskSegment: (segmentId: string) => void
     onAddTrack: (type: 'audio') => void
     onAddVideo: (trackId: string, filePath: string, sourceType: 'input', startFrame?: number) => void
     onAddAudio: (trackId: string, filePath: string, sourceType: 'input', previewUrl?: string) => void
@@ -71,9 +72,10 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
     onSmartSplit: (segmentId: string) => void
     onSmartSplitTasks: (segmentId: string) => void
     onRecognizeSubtitles: (segmentId: string) => void
-    onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
-    onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
+    onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
+    onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
     onMoveSegment: (segmentId: string, targetTrackId: string, nextStartTime: number) => void
+    onTrackAudioSettingsChange: (trackId: string, patch: { muted?: boolean; solo?: boolean }) => void
     selectedSegmentIds: Set<string>
     onSelectSegment: (segmentId: string) => void
     onSelectSegments: (segmentIds: string[]) => void
@@ -83,6 +85,7 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
     const audioTrack = data.tracks.find((track) => track.type === 'audio')
     const segment = taskTrack?.segments[0]
     const videoSegment = data.tracks.find((track) => track.type === 'video')?.segments[0]
+    const firstVideoTrack = data.tracks.find((track) => track.type === 'video')
     const subtitleTrack = data.tracks.find((track) => track.type === 'subtitle')
     const subtitleSegment = data.tracks.find((track) => track.type === 'subtitle')?.segments[0]
     return (
@@ -94,6 +97,11 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
             clone task
           </button>
         ) : null}
+        {taskTrack && segment ? (
+          <button type="button" onClick={() => onSplitTaskSegment(segment.id)}>
+            split task
+          </button>
+        ) : null}
         <button type="button" onClick={() => onAddTrack('audio')}>add audio track</button>
         <button
           type="button"
@@ -103,6 +111,16 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
         </button>
         {audioTrack ? (
           <button type="button" onClick={() => onAddAudio(audioTrack.id, 'audio.wav', 'input')}>add audio segment</button>
+        ) : null}
+        {firstVideoTrack ? (
+          <button type="button" onClick={() => onTrackAudioSettingsChange(firstVideoTrack.id, { solo: !firstVideoTrack.solo })}>
+            toggle first video solo
+          </button>
+        ) : null}
+        {audioTrack ? (
+          <button type="button" onClick={() => onTrackAudioSettingsChange(audioTrack.id, { solo: !audioTrack.solo })}>
+            toggle first audio solo
+          </button>
         ) : null}
         {videoSegment ? (
           <button type="button" onClick={() => onSmartSplit(videoSegment.id)}>smart split video</button>
@@ -340,6 +358,37 @@ describe('MultiTrackWidget', () => {
     expect(onChange.mock.lastCall?.[0]).toEqual(cloned)
   })
 
+  it('splits a task segment from the context dialog', () => {
+    const data = createDefaultTrackData()
+    data.frame_rate = 16
+    data.total_length = 160
+    data.tracks[0].segments = [{
+      id: 'task-0',
+      start_frame: 0,
+      end_frame: 160,
+      color: data.tracks[0].color,
+      content: { media_type: 'none', task_mode: 'default', text: 'Prompt' },
+    }]
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'split task' }))
+    const input = screen.getByRole('spinbutton', { name: 'Split seconds' })
+    expect((input as HTMLInputElement).value).toBe('5')
+    fireEvent.change(input, { target: { value: '5' } })
+    fireEvent.blur(input)
+    expect((input as HTMLInputElement).value).toBe('5')
+    fireEvent.click(screen.getByRole('button', { name: 'Split' }))
+
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    expect(updated.tracks[0].segments).toHaveLength(2)
+    expect(updated.tracks[0].segments.map((segment) => [segment.start_frame, segment.end_frame])).toEqual([
+      [0, 80],
+      [80, 160],
+    ])
+    expect(updated.tracks[0].segments.every((segment) => segment.content.text === 'Prompt')).toBe(true)
+  })
+
   it('resets local redo history when the canvas restores a different widget value', () => {
     const initial = createDefaultTrackData()
     initial.tracks[0].segments = [{
@@ -470,6 +519,76 @@ describe('MultiTrackWidget', () => {
       end_frame: 48,
       content: { media_type: 'audio', file_path: 'audio.wav', duration: 2, volume_db: 0 },
     })
+  })
+
+  it('solos a video track by muting other video and audio tracks, then restores them when solo is cleared', () => {
+    const data = createDefaultTrackData()
+    data.tracks[1].id = 'video-main'
+    data.tracks[1].muted = false
+    data.tracks[1].solo = false
+    data.tracks.push(
+      {
+        id: 'video-secondary',
+        name: 'Video 1',
+        type: 'video',
+        color: 'var(--secondary)',
+        muted: false,
+        solo: false,
+        locked: false,
+        segments: [],
+      },
+      {
+        id: 'audio-main',
+        name: 'Audio 0',
+        type: 'audio',
+        color: 'var(--highlight)',
+        muted: false,
+        solo: false,
+        locked: false,
+        segments: [],
+      },
+    )
+    const onChange = vi.fn()
+    const props = widgetProps()
+    const view = render(<MultiTrackWidget {...props} value={data} onChange={onChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'toggle first video solo' }))
+    const soloed = onChange.mock.lastCall?.[0] as TrackData
+    expect(soloed.tracks.find((track) => track.id === 'video-main')).toMatchObject({ muted: false, solo: true })
+    expect(soloed.tracks.find((track) => track.id === 'video-secondary')).toMatchObject({ muted: true, solo: false })
+    expect(soloed.tracks.find((track) => track.id === 'audio-main')).toMatchObject({ muted: true, solo: false })
+
+    view.rerender(<MultiTrackWidget {...props} value={soloed} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'toggle first video solo' }))
+    const restored = onChange.mock.lastCall?.[0] as TrackData
+    expect(restored.tracks.find((track) => track.id === 'video-main')).toMatchObject({ muted: false, solo: false })
+    expect(restored.tracks.find((track) => track.id === 'video-secondary')).toMatchObject({ muted: false, solo: false })
+    expect(restored.tracks.find((track) => track.id === 'audio-main')).toMatchObject({ muted: false, solo: false })
+  })
+
+  it('solos an audio track by muting video tracks', () => {
+    const data = createDefaultTrackData()
+    data.tracks[1].id = 'video-main'
+    data.tracks[1].muted = false
+    data.tracks[1].solo = false
+    data.tracks.push({
+      id: 'audio-main',
+      name: 'Audio 0',
+      type: 'audio',
+      color: 'var(--highlight)',
+      muted: false,
+      solo: false,
+      locked: false,
+      segments: [],
+    })
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'toggle first audio solo' }))
+
+    const soloed = onChange.mock.lastCall?.[0] as TrackData
+    expect(soloed.tracks.find((track) => track.id === 'audio-main')).toMatchObject({ muted: false, solo: true })
+    expect(soloed.tracks.find((track) => track.id === 'video-main')).toMatchObject({ muted: true, solo: false })
   })
 
   it('keeps matching task ranges aligned when inserting a video before existing segments', async () => {

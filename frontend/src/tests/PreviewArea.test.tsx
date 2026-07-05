@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PreviewArea } from '@/components/widgets/multitrack/PreviewArea'
 import type { SelectedMultiTrackSegment } from '@/lib/multitrack-utils'
@@ -9,7 +9,11 @@ vi.mock('@/lib/video-utils', () => ({
 }))
 
 vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
-  MediaSelector: () => null,
+  MediaSelector: ({ onChange }: { onChange: (value: string, source?: 'input' | 'output' | 'local') => void }) => (
+    <button type="button" onClick={() => onChange('picked.png', 'input')}>
+      mock select image
+    </button>
+  ),
 }))
 
 vi.mock('@/components/widgets/timeline/AudioWaveform', () => ({
@@ -287,7 +291,7 @@ describe('PreviewArea', () => {
 
     const imageArea = screen.getByTestId('task-preview-images')
     expect(imageArea.className).toContain('flex-col')
-    expect(imageArea.className).toContain('w-full')
+    expect(imageArea.className).toContain('max-w-xl')
     expect(screen.queryByTestId('multitrack-video-preview')).toBeNull()
     expect(screen.getAllByRole('img').map((image) => image.getAttribute('src'))).toContain(
       '/view?filename=first.png&type=input&subfolder=tasks',
@@ -304,7 +308,7 @@ describe('PreviewArea', () => {
     expect(screen.queryByTestId('task-preview-images')).toBeNull()
   })
 
-  it('shows and collapses the active task user prompt when no segment is selected', () => {
+  it('edits the active task user prompt inline when no segment is selected', () => {
     const { data } = trackData()
     data.tracks.unshift({
       id: 'task-track',
@@ -326,6 +330,7 @@ describe('PreviewArea', () => {
       }],
     })
 
+    const onTrackSegmentsContentChange = vi.fn()
     render(
       <PreviewArea
         data={data}
@@ -335,6 +340,7 @@ describe('PreviewArea', () => {
         node={{ widgets: [] }}
         onGlobalSettingsChange={vi.fn()}
         onSelectedSegmentContentChange={vi.fn()}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
         onSelectedSegmentDurationChange={vi.fn()}
       />,
     )
@@ -346,14 +352,110 @@ describe('PreviewArea', () => {
       'A long active task prompt that should stay on one preview line and truncate when needed',
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Hide task prompt' }))
+    fireEvent.doubleClick(screen.getByTestId('task-prompt-text'))
+    const editor = screen.getByTestId('task-prompt-editor') as HTMLTextAreaElement
+    expect(editor.value).toBe('A long active task prompt that should stay on one preview line and truncate when needed')
+    fireEvent.change(editor, { target: { value: 'Updated preview prompt' } })
+    fireEvent.blur(editor)
 
-    expect(screen.getByTestId('task-prompt-overlay').className).toContain('w-8')
-    expect(screen.queryByTestId('task-prompt-text')).toBeNull()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Show task prompt' }))
-
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
+      segmentId: 'active-task',
+      patch: { user_prompt: 'Updated preview prompt' },
+    }])
     expect(screen.getByTestId('task-prompt-text').textContent).toContain('A long active task prompt')
+  })
+
+  it('shows and updates the active task mode from the prompt bar', () => {
+    const { data } = trackData()
+    data.tracks.unshift({
+      id: 'task-track',
+      name: 'Task 1',
+      type: 'task',
+      color: 'var(--primary)',
+      muted: false,
+      locked: false,
+      segments: [{
+        id: 'active-task',
+        start_frame: 24,
+        end_frame: 48,
+        color: 'var(--primary)',
+        content: {
+          media_type: 'none',
+          task_mode: 'ref',
+          user_prompt: 'Use this reference',
+        },
+      }],
+    })
+
+    const onTrackSegmentsContentChange = vi.fn()
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={36}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    const modeSelect = screen.getByTestId('task-mode-select') as HTMLSelectElement
+    expect(modeSelect.value).toBe('ref')
+    expect(modeSelect.selectedOptions[0].textContent).toBe('Reference')
+    expect(screen.getByText('|').className).toContain('text-secondary')
+
+    fireEvent.change(modeSelect, { target: { value: 'edit' } })
+
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
+      segmentId: 'active-task',
+      patch: { task_mode: 'edit' },
+    }])
+  })
+
+  it('shows an editable active task prompt placeholder and toggles image/video layout', () => {
+    const { data } = trackData()
+    data.tracks[0].segments[0].end_frame = 48
+    addActiveTaskTrack(data)
+    data.tracks[0].segments[1].content.user_prompt = ''
+    const onTrackSegmentsContentChange = vi.fn()
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={36}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('task-prompt-text').textContent).toBe('Describe what you want to generate...')
+    const imageArea = screen.getByTestId('task-preview-images')
+    expect(imageArea.className).toContain('w-20')
+    expect(imageArea.parentElement?.className).toContain('w-fit')
+    expect(screen.getByTestId('multitrack-video-stage').parentElement?.className).toContain('h-full')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Enlarge task images' }))
+
+    expect(screen.getByTestId('task-preview-images').className).toContain('w-32')
+    expect(screen.getByTestId('multitrack-video-stage').parentElement?.className).toContain('h-full')
+    expect(screen.getByRole('button', { name: 'Use balanced preview layout' })).not.toBeNull()
+
+    fireEvent.doubleClick(screen.getByTestId('task-prompt-text'))
+    fireEvent.change(screen.getByTestId('task-prompt-editor'), { target: { value: 'Prompt from preview' } })
+    fireEvent.blur(screen.getByTestId('task-prompt-editor'))
+
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
+      segmentId: 'active-task',
+      patch: { user_prompt: 'Prompt from preview' },
+    }])
   })
 
   it('does not show the active task prompt while another segment is selected', () => {
@@ -492,6 +594,136 @@ describe('PreviewArea', () => {
         ],
       },
     }])
+  })
+
+  it('adds an image to the active task from the global preview media selector', async () => {
+    vi.useRealTimers()
+    const { data } = trackData()
+    addActiveTaskTrack(data)
+    const onTrackSegmentsContentChange = vi.fn()
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={36}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('task-preview-add-image'))
+    fireEvent.click(await screen.findByRole('button', { name: 'mock select image' }))
+
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
+      segmentId: 'active-task',
+      patch: {
+        images: [
+          expect.objectContaining({ id: 'first' }),
+          expect.objectContaining({ id: 'second' }),
+          expect.objectContaining({ source_type: 'input', file_path: 'picked.png', file_name: 'picked.png' }),
+        ],
+      },
+    }])
+  })
+
+  it('opens the media selector from the empty image-only task preview', async () => {
+    vi.useRealTimers()
+    const { data } = trackData()
+    data.tracks.unshift({
+      id: 'task-track',
+      name: 'Task 1',
+      type: 'task',
+      color: 'var(--primary)',
+      muted: false,
+      locked: false,
+      segments: [{
+        id: 'active-task',
+        start_frame: 24,
+        end_frame: 48,
+        color: 'var(--primary)',
+        content: { media_type: 'none', images: [] },
+      }],
+    })
+    const onTrackSegmentsContentChange = vi.fn()
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={36}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('task-preview-images').className).toContain('max-w-xl')
+    fireEvent.click(screen.getByTestId('task-preview-empty-add-image'))
+    fireEvent.click(await screen.findByRole('button', { name: 'mock select image' }))
+
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
+      segmentId: 'active-task',
+      patch: {
+        images: [
+          expect.objectContaining({ source_type: 'input', file_path: 'picked.png', file_name: 'picked.png' }),
+        ],
+      },
+    }])
+  })
+
+  it('uploads a local image dropped on the active task preview add slot', async () => {
+    vi.useRealTimers()
+    const { data } = trackData()
+    addActiveTaskTrack(data)
+    const onTrackSegmentsContentChange = vi.fn()
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ name: 'dropped.png', subfolder: 'tasks' }),
+    } as Response)
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={36}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    const file = new File(['image'], 'dropped.png', { type: 'image/png' })
+    fireEvent.drop(screen.getByTestId('task-preview-add-image'), {
+      dataTransfer: {
+        files: [file],
+        items: [{ kind: 'file', type: 'image/png' }],
+      },
+    })
+
+    await waitFor(() => expect(onTrackSegmentsContentChange).toHaveBeenCalled())
+    expect(fetchMock).toHaveBeenCalledWith('/upload/image', expect.objectContaining({ method: 'POST' }))
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
+      segmentId: 'active-task',
+      patch: {
+        images: [
+          expect.objectContaining({ id: 'first' }),
+          expect.objectContaining({ id: 'second' }),
+          expect.objectContaining({ source_type: 'input', file_path: 'tasks/dropped.png', file_name: 'dropped.png' }),
+        ],
+      },
+    }])
+    fetchMock.mockRestore()
   })
 
   it('does not show task images while another segment is selected', () => {

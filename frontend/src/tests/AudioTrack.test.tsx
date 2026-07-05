@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { ComponentProps, ReactNode } from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -23,6 +23,36 @@ vi.mock('@/components/widgets/multitrack/MultiTrackSegmentBlock', () => ({
 vi.mock('@/components/widgets/multitrack/TrackAudioControls', () => ({
   TrackAudioControls: ({ icon }: { icon: ReactNode }) => <div>{icon}</div>,
 }))
+
+function renderAudioTrack(track: MultiTrack, props?: Partial<ComponentProps<typeof AudioTrack>>) {
+  return render(
+    <TooltipProvider>
+      <AudioTrack
+        track={track}
+        totalLength={120}
+        frameRate={24}
+        width={480}
+        canvasScale={1}
+        selectedSegmentIds={new Set()}
+        node={null}
+        app={null}
+        onAddAudio={vi.fn()}
+        onSelectSegment={vi.fn()}
+        onDeleteSegment={vi.fn()}
+        onDeleteTrack={vi.fn()}
+        onTrackAudioSettingsChange={vi.fn()}
+        onResizeSegment={vi.fn()}
+        onResizeSegmentPreview={vi.fn()}
+        onMoveSegment={vi.fn()}
+        onDragPreviewChange={vi.fn()}
+        onDragPreviewEnd={vi.fn()}
+        cutMode={false}
+        onCutSegment={vi.fn()}
+        {...props}
+      />
+    </TooltipProvider>,
+  )
+}
 
 describe('AudioTrack', () => {
   it('shows connected audio inputs in the slot selector', () => {
@@ -49,32 +79,7 @@ describe('AudioTrack', () => {
     }
 
     const onAddAudio = vi.fn()
-    render(
-      <TooltipProvider>
-        <AudioTrack
-          track={track}
-          totalLength={120}
-          frameRate={24}
-          width={480}
-          canvasScale={1}
-          selectedSegmentIds={new Set()}
-          node={node}
-          app={app}
-          onAddAudio={onAddAudio}
-          onSelectSegment={vi.fn()}
-          onDeleteSegment={vi.fn()}
-          onDeleteTrack={vi.fn()}
-          onTrackAudioSettingsChange={vi.fn()}
-          onResizeSegment={vi.fn()}
-          onResizeSegmentPreview={vi.fn()}
-          onMoveSegment={vi.fn()}
-          onDragPreviewChange={vi.fn()}
-          onDragPreviewEnd={vi.fn()}
-          cutMode={false}
-          onCutSegment={vi.fn()}
-        />
-      </TooltipProvider>,
-    )
+    renderAudioTrack(track, { node, app, onAddAudio })
 
     fireEvent.click(screen.getByRole('button', { name: 'Add audio' }))
     fireEvent.click(screen.getByRole('button', { name: '__slot__:audio' }))
@@ -85,5 +90,39 @@ describe('AudioTrack', () => {
       'input',
       '/view?filename=voice.wav&type=input&subfolder=',
     )
+  })
+
+  it('keeps add and delete controls separated when an audio segment ends at the track edge', () => {
+    const track: MultiTrack = {
+      id: 'audio-track',
+      name: 'Audio 0',
+      type: 'audio',
+      color: 'var(--highlight)',
+      muted: false,
+      locked: false,
+      segments: [{
+        id: 'audio-segment',
+        start_frame: 0,
+        end_frame: 120,
+        color: 'var(--highlight)',
+        content: {
+          media_type: 'audio',
+          source_type: 'input',
+          file_path: '__slot__:audio',
+          file_name: 'voice.wav',
+        },
+      }],
+    }
+
+    renderAudioTrack(track)
+
+    const addButton = screen.getByRole('button', { name: 'Add audio' })
+    const deleteButton = screen.getByRole('button', { name: 'Delete Audio 0' })
+    const actionGroup = addButton.parentElement
+
+    expect(actionGroup).toBe(deleteButton.parentElement)
+    expect(actionGroup?.classList.contains('flex')).toBe(true)
+    expect(actionGroup?.classList.contains('gap-1')).toBe(true)
+    expect(actionGroup?.style.left).toBe('486px')
   })
 })

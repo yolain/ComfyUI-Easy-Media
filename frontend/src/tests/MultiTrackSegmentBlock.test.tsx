@@ -30,6 +30,7 @@ function renderBlock(trackType: MultiTrackType) {
   const onDelete = vi.fn()
   const onDistribute = vi.fn()
   const onClone = vi.fn()
+  const onSplitTask = vi.fn()
   const onSmartSplit = vi.fn()
   const onSmartSplitTasks = vi.fn()
   const onRecognizeSubtitles = vi.fn()
@@ -47,6 +48,7 @@ function renderBlock(trackType: MultiTrackType) {
       onDelete={onDelete}
       onDistribute={trackType === 'task' ? onDistribute : undefined}
       onClone={trackType === 'task' ? onClone : undefined}
+      onSplitTask={trackType === 'task' ? onSplitTask : undefined}
       onSmartSplit={trackType === 'video' ? onSmartSplit : undefined}
       onSmartSplitTasks={trackType === 'video' ? onSmartSplitTasks : undefined}
       onRecognizeSubtitles={trackType === 'video' || trackType === 'audio' ? onRecognizeSubtitles : undefined}
@@ -55,7 +57,7 @@ function renderBlock(trackType: MultiTrackType) {
       onMove={vi.fn()}
     />,
   )
-  return { onDelete, onDistribute, onClone, onSmartSplit, onSmartSplitTasks, onRecognizeSubtitles }
+  return { onDelete, onDistribute, onClone, onSplitTask, onSmartSplit, onSmartSplitTasks, onRecognizeSubtitles }
 }
 
 describe('MultiTrackSegmentBlock context menu', () => {
@@ -65,15 +67,17 @@ describe('MultiTrackSegmentBlock context menu', () => {
       disconnect() {}
     })
   })
-  it('offers distribute, clone, and delete actions for task segments', () => {
-    const { onDelete, onDistribute, onClone } = renderBlock('task')
+  it('offers distribute, clone, split, and delete actions for task segments', () => {
+    const { onDelete, onDistribute, onClone, onSplitTask } = renderBlock('task')
 
     fireEvent.click(screen.getByRole('button', { name: 'Distribute segments evenly' }))
     fireEvent.click(screen.getByRole('button', { name: 'Clone segment' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Split segment' }))
     fireEvent.click(screen.getByRole('button', { name: 'Delete segment' }))
 
     expect(onDistribute).toHaveBeenCalledOnce()
     expect(onClone).toHaveBeenCalledWith('task-segment')
+    expect(onSplitTask).toHaveBeenCalledWith('task-segment')
     expect(onDelete).toHaveBeenCalledWith('task-segment')
   })
 
@@ -82,6 +86,7 @@ describe('MultiTrackSegmentBlock context menu', () => {
 
     expect(screen.queryByRole('button', { name: 'Distribute segments evenly' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Clone segment' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Split segment' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Delete segment' })).not.toBeNull()
   })
 

@@ -8,6 +8,8 @@ import { invalidateMediaListCache } from '@/stores/media-list-store'
 import {
   getSegmentDragPlaceholder,
   getSegmentDragPreviewSegments,
+  snapMultiTrackMoveStartTime,
+  snapTimeToFrame,
   type SegmentDragPlaceholder,
 } from '@/lib/multitrack-utils'
 import type { MultiTrack, MultiTrackSegment, MultiTrackType } from '@/types/multitrack'
@@ -24,6 +26,7 @@ interface TrackAreaProps {
   app: unknown
   width: number
   currentTime: number
+  snapEnabled: boolean
   canvasScale: number
   selectedSegmentIds: Set<string>
   onAddVideo: (trackId: string, filePath: string, sourceType: MultiTrackSourceType, startFrame?: number) => void
@@ -46,8 +49,9 @@ interface TrackAreaProps {
   onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo'>>) => void
   onDistributeTaskSegments: (trackId: string) => void
   onCloneTaskSegment: (trackId: string, segmentId: string) => void
-  onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
-  onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
+  onSplitTaskSegment?: (segmentId: string) => void
+  onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
+  onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
   onMoveSegment: (segmentId: string, targetTrackId: string, nextStartTime: number) => void
   onSmartSplit: (segmentId: string) => void
   onSmartSplitTasks: (segmentId: string) => void
@@ -136,6 +140,7 @@ export function TrackArea({
   app,
   width,
   currentTime,
+  snapEnabled,
   canvasScale,
   selectedSegmentIds,
   onAddVideo,
@@ -152,6 +157,7 @@ export function TrackArea({
   onTrackAudioSettingsChange,
   onDistributeTaskSegments,
   onCloneTaskSegment,
+  onSplitTaskSegment = () => {},
   onResizeSegment,
   onResizeSegmentPreview,
   onMoveSegment,
@@ -381,13 +387,29 @@ export function TrackArea({
     }
   }
 
+  function dragSnapBrakeDistanceFrames(): number {
+    return Math.max(1, Math.round((8 / playableWidth) * safeLength))
+  }
+
+  function snappedMoveStartTime(segmentId: string, nextStartTime: number): number {
+    return snapEnabled
+      ? snapMultiTrackMoveStartTime(data, segmentId, nextStartTime, dragSnapBrakeDistanceFrames(), currentTime)
+      : snapTimeToFrame(nextStartTime, data.frame_rate)
+  }
+
   function updateDragPlaceholder(segmentId: string, nextStartTime: number, clientY: number) {
     const targetTrackId = targetTrackIdFromClientY(clientY)
     if (!targetTrackId) {
       setDragPlaceholder((current) => samePlaceholder(current, null) ? current : null)
       return
     }
-    const nextPlaceholder = getSegmentDragPlaceholder(data.tracks, segmentId, targetTrackId, nextStartTime, data.frame_rate)
+    const nextPlaceholder = getSegmentDragPlaceholder(
+      data.tracks,
+      segmentId,
+      targetTrackId,
+      snappedMoveStartTime(segmentId, nextStartTime),
+      data.frame_rate,
+    )
     setDragPlaceholder((current) => samePlaceholder(current, nextPlaceholder) ? current : nextPlaceholder)
   }
 
@@ -395,7 +417,7 @@ export function TrackArea({
     const targetTrackId = targetTrackIdFromClientY(clientY)
     setDragPlaceholder(null)
     if (!targetTrackId) return
-    onMoveSegment(segmentId, targetTrackId ?? fallbackTrackId, nextStartTime)
+    onMoveSegment(segmentId, targetTrackId ?? fallbackTrackId, snappedMoveStartTime(segmentId, nextStartTime))
   }
 
   const dragPlaceholderRect = dragPlaceholder ? placeholderRect(dragPlaceholder) : null
@@ -472,6 +494,7 @@ export function TrackArea({
                 handleMoveSegment(segmentId, track.id, nextStartTime, clientY)
               }}
               onDragPreviewChange={updateDragPlaceholder}
+              getDragPreviewStart={snappedMoveStartTime}
               onDragPreviewEnd={() => setDragPlaceholder(null)}
             />
           )
@@ -498,6 +521,7 @@ export function TrackArea({
               onResizeSegmentPreview={onResizeSegmentPreview}
               onMoveSegment={(segmentId, nextStartTime, clientY) => handleMoveSegment(segmentId, track.id, nextStartTime, clientY)}
               onDragPreviewChange={updateDragPlaceholder}
+              getDragPreviewStart={snappedMoveStartTime}
               onDragPreviewEnd={() => setDragPlaceholder(null)}
               onRecognizeSubtitles={onRecognizeSubtitles}
               cutMode={cutMode}
@@ -525,6 +549,7 @@ export function TrackArea({
               onResizeSegmentPreview={onResizeSegmentPreview}
               onMoveSegment={(segmentId, nextStartTime, clientY) => handleMoveSegment(segmentId, track.id, nextStartTime, clientY)}
               onDragPreviewChange={updateDragPlaceholder}
+              getDragPreviewStart={snappedMoveStartTime}
               onDragPreviewEnd={() => setDragPlaceholder(null)}
             />
           )
@@ -558,6 +583,7 @@ export function TrackArea({
                   onDelete={onDeleteSegment}
                   onDistribute={track.type === 'task' ? () => onDistributeTaskSegments(track.id) : undefined}
                   onClone={track.type === 'task' ? (segmentId) => onCloneTaskSegment(track.id, segmentId) : undefined}
+                  onSplitTask={track.type === 'task' ? onSplitTaskSegment : undefined}
                   cutMode={cutMode}
                   onCut={onCutSegment}
                   onResize={onResizeSegment}
@@ -566,6 +592,7 @@ export function TrackArea({
                     handleMoveSegment(segmentId, track.id, nextStartTime, clientY)
                   }}
                   onDragPreviewChange={updateDragPlaceholder}
+                  getDragPreviewStart={snappedMoveStartTime}
                   onDragPreviewEnd={() => setDragPlaceholder(null)}
                 />
               ))}

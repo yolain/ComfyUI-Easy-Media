@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
+import type { ComponentProps } from 'react'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { MultiTrackToolbar } from '@/components/widgets/multitrack/MultiTrackToolbar'
 
@@ -18,7 +19,10 @@ afterAll(() => {
   vi.unstubAllGlobals()
 })
 
-function renderToolbar(timelineCollapsed: boolean, onToggleTimeline = vi.fn()) {
+function renderToolbar(
+  timelineCollapsed: boolean,
+  overrides: Partial<ComponentProps<typeof MultiTrackToolbar>> = {},
+) {
   return render(
     <MultiTrackToolbar
       currentTime={0}
@@ -26,10 +30,12 @@ function renderToolbar(timelineCollapsed: boolean, onToggleTimeline = vi.fn()) {
       frameRate={24}
       isPlaying={false}
       zoom={1}
+      snapEnabled
       timelineCollapsed={timelineCollapsed}
       onPlayPause={vi.fn()}
       onZoomChange={vi.fn()}
-      onToggleTimeline={onToggleTimeline}
+      onSnapEnabledChange={vi.fn()}
+      onToggleTimeline={vi.fn()}
       canDelete={false}
       onDeleteSelected={vi.fn()}
       onCutAtCurrentTime={vi.fn()}
@@ -37,6 +43,7 @@ function renderToolbar(timelineCollapsed: boolean, onToggleTimeline = vi.fn()) {
       canRedo={false}
       onUndo={vi.fn()}
       onRedo={vi.fn()}
+      {...overrides}
     />,
   )
 }
@@ -44,26 +51,7 @@ function renderToolbar(timelineCollapsed: boolean, onToggleTimeline = vi.fn()) {
 describe('MultiTrackToolbar', () => {
   it('cuts at the current time from the scissors button', () => {
     const onCutAtCurrentTime = vi.fn()
-    render(
-      <MultiTrackToolbar
-        currentTime={0}
-        totalLength={24}
-        frameRate={24}
-        isPlaying={false}
-        zoom={1}
-        timelineCollapsed={false}
-        onPlayPause={vi.fn()}
-        onZoomChange={vi.fn()}
-        onToggleTimeline={vi.fn()}
-        canDelete={false}
-        onDeleteSelected={vi.fn()}
-        onCutAtCurrentTime={onCutAtCurrentTime}
-        canUndo={false}
-        canRedo={false}
-        onUndo={vi.fn()}
-        onRedo={vi.fn()}
-      />,
-    )
+    renderToolbar(false, { onCutAtCurrentTime })
 
     const button = screen.getByRole('button', { name: 'multitrack.cutMode' })
     expect(button.hasAttribute('aria-pressed')).toBe(false)
@@ -73,7 +61,7 @@ describe('MultiTrackToolbar', () => {
 
   it('shows the reversed timeline toggle icons and handles clicks', () => {
     const onToggleTimeline = vi.fn()
-    const { container, rerender } = renderToolbar(false, onToggleTimeline)
+    const { container, rerender } = renderToolbar(false, { onToggleTimeline })
 
     const collapseButton = screen.getByRole('button', { name: 'multitrack.hideTimeline' })
     expect(container.querySelector('.lucide-minimize-2')).not.toBeNull()
@@ -87,9 +75,11 @@ describe('MultiTrackToolbar', () => {
         frameRate={24}
         isPlaying={false}
         zoom={1}
+        snapEnabled
         timelineCollapsed
         onPlayPause={vi.fn()}
         onZoomChange={vi.fn()}
+        onSnapEnabledChange={vi.fn()}
         onToggleTimeline={onToggleTimeline}
         canDelete={false}
         onDeleteSelected={vi.fn()}
@@ -117,26 +107,7 @@ describe('MultiTrackToolbar', () => {
   it('renders undo and redo history buttons with disabled states', () => {
     const onUndo = vi.fn()
     const onRedo = vi.fn()
-    const { rerender } = render(
-      <MultiTrackToolbar
-        currentTime={0}
-        totalLength={24}
-        frameRate={24}
-        isPlaying={false}
-        zoom={1}
-        timelineCollapsed={false}
-        onPlayPause={vi.fn()}
-        onZoomChange={vi.fn()}
-        onToggleTimeline={vi.fn()}
-        canDelete={false}
-        onDeleteSelected={vi.fn()}
-        onCutAtCurrentTime={vi.fn()}
-        canUndo
-        canRedo={false}
-        onUndo={onUndo}
-        onRedo={onRedo}
-      />,
-    )
+    const { rerender } = renderToolbar(false, { canUndo: true, canRedo: false, onUndo, onRedo })
 
     fireEvent.click(screen.getByRole('button', { name: 'multitrack.undo' }))
     fireEvent.click(screen.getByRole('button', { name: 'multitrack.redo' }))
@@ -150,9 +121,11 @@ describe('MultiTrackToolbar', () => {
         frameRate={24}
         isPlaying={false}
         zoom={1}
+        snapEnabled
         timelineCollapsed={false}
         onPlayPause={vi.fn()}
         onZoomChange={vi.fn()}
+        onSnapEnabledChange={vi.fn()}
         onToggleTimeline={vi.fn()}
         canDelete={false}
         onDeleteSelected={vi.fn()}
@@ -166,5 +139,41 @@ describe('MultiTrackToolbar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'multitrack.redo' }))
     expect(onRedo).toHaveBeenCalledOnce()
+  })
+
+  it('toggles timeline snapping from the right toolbar group', () => {
+    const onSnapEnabledChange = vi.fn()
+    const { container, rerender } = renderToolbar(false, { snapEnabled: true, onSnapEnabledChange })
+
+    const snapButton = screen.getByRole('button', { name: 'multitrack.timelineSnap' })
+    expect(snapButton.getAttribute('aria-pressed')).toBe('true')
+    expect(container.querySelector('.lucide-magnet')).not.toBeNull()
+    fireEvent.click(snapButton)
+    expect(onSnapEnabledChange).toHaveBeenCalledWith(false)
+
+    rerender(
+      <MultiTrackToolbar
+        currentTime={0}
+        totalLength={24}
+        frameRate={24}
+        isPlaying={false}
+        zoom={1}
+        snapEnabled={false}
+        timelineCollapsed={false}
+        onPlayPause={vi.fn()}
+        onZoomChange={vi.fn()}
+        onSnapEnabledChange={onSnapEnabledChange}
+        onToggleTimeline={vi.fn()}
+        canDelete={false}
+        onDeleteSelected={vi.fn()}
+        onCutAtCurrentTime={vi.fn()}
+        canUndo={false}
+        canRedo={false}
+        onUndo={vi.fn()}
+        onRedo={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'multitrack.timelineSnap' }).getAttribute('aria-pressed')).toBe('false')
   })
 })

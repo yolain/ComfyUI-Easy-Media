@@ -158,6 +158,98 @@ export function snapTimeToFrame(time: number, frameRate: number): number {
   return Math.max(0, Math.round(time))
 }
 
+export function snapMultiTrackResizeTime(
+  data: TrackData,
+  segmentId: string,
+  edge: 'start' | 'end',
+  nextTime: number,
+  brakeDistanceFrames: number,
+  currentTime?: number,
+): number {
+  const selected = data.tracks
+    .flatMap((track) => track.segments)
+    .find((segment) => segment.id === segmentId)
+  if (!selected) return nextTime
+
+  const requestedFrame = snapTimeToFrame(nextTime, data.frame_rate)
+  const safeBrakeDistance = Math.max(0, Math.round(brakeDistanceFrames))
+  if (safeBrakeDistance <= 0) return requestedFrame
+
+  const candidates = new Set<number>([0, data.total_length])
+  if (typeof currentTime === 'number' && Number.isFinite(currentTime)) {
+    candidates.add(snapTimeToFrame(currentTime, data.frame_rate))
+  }
+  for (const track of data.tracks) {
+    for (const segment of track.segments) {
+      if (segment.id === segmentId) continue
+      candidates.add(segment.start_frame)
+      candidates.add(segment.end_frame)
+    }
+  }
+
+  const oppositeEdgeFrame = edge === 'start' ? selected.end_frame : selected.start_frame
+  let closestFrame = requestedFrame
+  let closestDistance = safeBrakeDistance + 1
+  for (const candidate of candidates) {
+    if (edge === 'start' && candidate >= oppositeEdgeFrame) continue
+    if (edge === 'end' && candidate <= oppositeEdgeFrame) continue
+    const distance = Math.abs(requestedFrame - candidate)
+    if (distance > safeBrakeDistance || distance >= closestDistance) continue
+    closestFrame = candidate
+    closestDistance = distance
+  }
+
+  return closestFrame
+}
+
+export function snapMultiTrackMoveStartTime(
+  data: TrackData,
+  segmentId: string,
+  nextStartTime: number,
+  brakeDistanceFrames: number,
+  currentTime?: number,
+): number {
+  const selected = data.tracks
+    .flatMap((track) => track.segments)
+    .find((segment) => segment.id === segmentId)
+  if (!selected) return nextStartTime
+
+  const requestedFrame = snapTimeToFrame(nextStartTime, data.frame_rate)
+  const safeBrakeDistance = Math.max(0, Math.round(brakeDistanceFrames))
+  if (safeBrakeDistance <= 0) return requestedFrame
+  const duration = segmentDuration(selected)
+  const requestedEndFrame = requestedFrame + duration
+
+  const candidates = new Set<number>([0, data.total_length])
+  if (typeof currentTime === 'number' && Number.isFinite(currentTime)) {
+    candidates.add(snapTimeToFrame(currentTime, data.frame_rate))
+  }
+  for (const track of data.tracks) {
+    for (const segment of track.segments) {
+      if (segment.id === segmentId) continue
+      candidates.add(segment.start_frame)
+    }
+  }
+
+  let closestFrame = requestedFrame
+  let closestDistance = safeBrakeDistance + 1
+  for (const candidate of candidates) {
+    const startDistance = Math.abs(requestedFrame - candidate)
+    if (startDistance <= safeBrakeDistance && startDistance < closestDistance) {
+      closestFrame = candidate
+      closestDistance = startDistance
+    }
+
+    const endDistance = Math.abs(requestedEndFrame - candidate)
+    const snappedStartFrame = candidate - duration
+    if (snappedStartFrame < 0 || endDistance > safeBrakeDistance || endDistance >= closestDistance) continue
+    closestFrame = snappedStartFrame
+    closestDistance = endDistance
+  }
+
+  return closestFrame
+}
+
 export function snapSecondsToFrame(seconds: number, frameRate: number): number {
   return Math.max(0, secondsToFrame(seconds, frameRate))
 }
@@ -415,6 +507,50 @@ export function distributeMultiTrackSegmentsEvenly(
       cursor += size
       return { ...segment, start_frame: startFrame, end_frame: cursor }
     })
+}
+
+export interface SplitMultiTrackSegmentResult {
+  segments: MultiTrackSegment[]
+  splitSegmentIds: string[]
+}
+
+export function splitMultiTrackSegmentByFrames(
+  segments: MultiTrackSegment[],
+  segmentId: string,
+  targetFrames: number,
+): SplitMultiTrackSegmentResult | null {
+  const sorted = [...segments].sort((left, right) => left.start_frame - right.start_frame)
+  const index = sorted.findIndex((segment) => segment.id === segmentId)
+  if (index < 0) return null
+
+  const source = sorted[index]
+  const duration = segmentDuration(source)
+  const safeTargetFrames = Math.round(targetFrames)
+  if (duration <= 1 || safeTargetFrames < 1 || safeTargetFrames >= duration) return null
+
+  let cursor = source.start_frame
+  const splitSegments: MultiTrackSegment[] = []
+  while (cursor < source.end_frame) {
+    const splitIndex = splitSegments.length
+    const nextEndFrame = Math.min(cursor + safeTargetFrames, source.end_frame)
+    const startFrame = cursor
+    cursor = nextEndFrame
+    splitSegments.push({
+      ...structuredClone(source),
+      id: splitIndex === 0 ? source.id : uuid(),
+      start_frame: startFrame,
+      end_frame: cursor,
+    })
+  }
+
+  return {
+    segments: [
+      ...sorted.slice(0, index),
+      ...splitSegments,
+      ...sorted.slice(index + 1),
+    ],
+    splitSegmentIds: splitSegments.map((segment) => segment.id),
+  }
 }
 
 export interface ClonedMultiTrackSegmentResult {

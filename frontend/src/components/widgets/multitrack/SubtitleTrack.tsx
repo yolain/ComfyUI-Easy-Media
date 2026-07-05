@@ -18,10 +18,11 @@ interface SubtitleTrackProps {
   onDeleteSegment: (segmentId: string) => void
   onDeleteTrack: (trackId: string) => void
   onEditSubtitleSegment: (segmentId: string) => void
-  onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
-  onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
+  onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
+  onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
   onMoveSegment: (segmentId: string, nextStartTime: number, clientY: number) => void
   onDragPreviewChange: (segmentId: string, nextStartTime: number, clientY: number) => void
+  getDragPreviewStart?: (segmentId: string, nextStartTime: number, clientY: number) => number
   onDragPreviewEnd: () => void
 }
 
@@ -41,6 +42,7 @@ export function SubtitleTrack({
   onResizeSegmentPreview,
   onMoveSegment,
   onDragPreviewChange,
+  getDragPreviewStart,
   onDragPreviewEnd,
 }: Readonly<SubtitleTrackProps>) {
   const t = useT()
@@ -73,6 +75,7 @@ export function SubtitleTrack({
             onResizePreview={onResizeSegmentPreview}
             onMove={onMoveSegment}
             onDragPreviewChange={onDragPreviewChange}
+            getDragPreviewStart={getDragPreviewStart}
             onDragPreviewEnd={onDragPreviewEnd}
             onDoubleClick={() => {
               onSelectSegment(segment.id)

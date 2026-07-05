@@ -1,6 +1,10 @@
 const TIMELINE_NODE_NAME = new Set(['easy timelineEditor', 'easy multiTrackEditor'])
 const TIMELINE_HEIGHT_PROPERTY = 'easyMediaTimelineHeight'
 const TIMELINE_WIDGET_RESIZE_GUARD = '__easyMediaTimelineWidgetResizeGuard'
+const TIMELINE_WIDGET_DEFAULT_SIZES: Record<string, [number, number]> = {
+  'easy timelineEditor': [520, 430],
+  'easy multiTrackEditor': [800, 700],
+}
 const WIDGET_RESIZE_GUARD_MS = 500
 
 type NodeSize = [number, number]
@@ -83,7 +87,7 @@ function beginWidgetResizeGuard(node: any) {
   } satisfies ResizeGuard
 }
 
-export function preserveTimelineEditorNodeHeight(nodeType: any, nodeData: { name?: string }) {
+export function preserveTimelineEditorNodeSize(nodeType: any, nodeData: { name?: string }) {
   if (!TIMELINE_NODE_NAME.has(nodeData.name || '')) return
 
   const originalOnNodeCreated = nodeType.prototype.onNodeCreated
@@ -94,7 +98,13 @@ export function preserveTimelineEditorNodeHeight(nodeType: any, nodeData: { name
 
   nodeType.prototype.onNodeCreated = function () {
     originalOnNodeCreated?.call(this)
-    restoreHeight(this, readStoredHeight(this))
+    const nodeName = nodeData.name || ''
+    const defaultSize = TIMELINE_WIDGET_DEFAULT_SIZES[nodeName]
+    if (!defaultSize) return
+
+    this.size[0] = defaultSize[0]
+    this.size[1] = defaultSize[1]
+    this.setDirtyCanvas?.(true, true)
   }
 
   nodeType.prototype.onConfigure = function (serialisedNode: any) {
@@ -139,3 +149,5 @@ export function preserveTimelineEditorNodeHeight(nodeType: any, nodeData: { name
     serialisedNode.properties[TIMELINE_HEIGHT_PROPERTY] = this.properties?.[TIMELINE_HEIGHT_PROPERTY]
   }
 }
+
+export const preserveTimelineEditorNodeHeight = preserveTimelineEditorNodeSize

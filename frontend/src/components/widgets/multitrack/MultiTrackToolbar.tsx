@@ -1,4 +1,4 @@
-import { Maximize2, Minimize2, Redo2, Scissors, Trash2, Undo2, ZoomOut } from 'lucide-react'
+import { Magnet, Maximize2, Minimize2, Redo2, Scissors, Trash2, Undo2, ZoomOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { useT } from '@/lib/i18n'
@@ -13,9 +13,11 @@ interface MultiTrackToolbarProps {
   frameRate: number
   isPlaying: boolean
   zoom: number
+  snapEnabled: boolean
   timelineCollapsed: boolean
   onPlayPause: () => void
   onZoomChange: (zoom: number) => void
+  onSnapEnabledChange: (enabled: boolean) => void
   onToggleTimeline: () => void
   canDelete: boolean
   onDeleteSelected: () => void
@@ -32,9 +34,11 @@ export function MultiTrackToolbar({
   frameRate,
   isPlaying,
   zoom,
+  snapEnabled,
   timelineCollapsed,
   onPlayPause,
   onZoomChange,
+  onSnapEnabledChange,
   onToggleTimeline,
   canDelete,
   onDeleteSelected,
@@ -141,7 +145,21 @@ export function MultiTrackToolbar({
         <span className="w-16 tabular-nums">{formatMultiTrackTime(totalLength, { frameRate, showFrames: true })}</span>
       </div>
 
-      <div className="ml-auto flex h-6 max-h-6 min-h-6 items-center gap-1 overflow-hidden">
+      <div className="ml-auto flex h-6 max-h-6 min-h-6 items-center gap-0.5 overflow-hidden">
+        <Button
+          type="button"
+          variant={snapEnabled ? "outline" : "ghost"}
+          size="icon"
+          className={`${TOOLBAR_ICON_BUTTON_CLASS} cursor-pointer ${snapEnabled ? 'text-highlight' : 'text-muted-foreground'}`}
+          aria-label={t('multitrack.timelineSnap')}
+          aria-pressed={snapEnabled}
+          onClick={(event) => {
+            event.stopPropagation()
+            onSnapEnabledChange(!snapEnabled)
+          }}
+        >
+          <Magnet className={TOOLBAR_ICON_CLASS} />
+        </Button>
         <Button
           type="button"
           variant="ghost"

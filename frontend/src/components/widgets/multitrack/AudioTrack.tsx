@@ -31,10 +31,11 @@ interface AudioTrackProps {
   onDeleteSegment: (segmentId: string) => void
   onDeleteTrack: (trackId: string) => void
   onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo'>>) => void
-  onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
-  onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number) => void
+  onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
+  onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
   onMoveSegment: (segmentId: string, nextStartTime: number, clientY: number) => void
   onDragPreviewChange: (segmentId: string, nextStartTime: number, clientY: number) => void
+  getDragPreviewStart?: (segmentId: string, nextStartTime: number, clientY: number) => number
   onDragPreviewEnd: () => void
   onRecognizeSubtitles?: (segmentId: string) => void
   cutMode: boolean
@@ -59,6 +60,7 @@ export function AudioTrack({
   onResizeSegmentPreview,
   onMoveSegment,
   onDragPreviewChange,
+  getDragPreviewStart,
   onDragPreviewEnd,
   onRecognizeSubtitles = () => {},
   cutMode,
@@ -71,8 +73,7 @@ export function AudioTrack({
     [node, app, mediaSelectorOpen],
   )
   const lastEnd = track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0)
-  const addLeft = track.segments.length === 0 ? 6 : (lastEnd / Math.max(totalLength, 1)) * width + 6
-  const deleteLeft = track.segments.length === 0 ? 32 : width + 6
+  const actionLeft = track.segments.length === 0 ? 6 : (lastEnd / Math.max(totalLength, 1)) * width + 6
 
   return (
     <div className="relative flex h-16 border-b border-border">
@@ -102,13 +103,14 @@ export function AudioTrack({
             onResizePreview={onResizeSegmentPreview}
             onMove={onMoveSegment}
             onDragPreviewChange={onDragPreviewChange}
+            getDragPreviewStart={getDragPreviewStart}
             onDragPreviewEnd={onDragPreviewEnd}
             onRecognizeSubtitles={onRecognizeSubtitles}
             cutMode={cutMode}
             onCut={onCutSegment}
           />
         ))}
-        <div className="absolute top-1/2 -translate-y-1/2" style={{ left: addLeft }}>
+        <div className="absolute top-1/2 flex -translate-y-1/2 gap-1" style={{ left: actionLeft }}>
           <Popover open={mediaSelectorOpen} onOpenChange={setMediaSelectorOpen}>
             <PopoverTrigger asChild>
               <Button
@@ -136,8 +138,6 @@ export function AudioTrack({
               />
             </PopoverContent>
           </Popover>
-        </div>
-        <div className="absolute top-1/2 -translate-y-1/2" style={{ left: deleteLeft }}>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button

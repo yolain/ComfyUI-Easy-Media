@@ -13,6 +13,7 @@
 
 ### 🐛 Bug Fixes
 
+- **MultiTrack Editor、TimelineEditor**: Fixed the default width and height when creating nodes
 - **Media Selector**: Fix resource sorting should be by `name`, `creation time`, `folder first`
 - **Media Selector**: Fix issues where keyword is not cleared when entering subdirectory after searching
 
