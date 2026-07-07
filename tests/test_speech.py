@@ -101,6 +101,54 @@ def test_generate_voxcpm2_speech_passes_cfg_steps_normalize_and_reference(tmp_pa
     assert Path(result.absolute_path).is_file()
 
 
+def test_generate_voxcpm2_speech_accepts_raw_waveform_result(tmp_path, monkeypatch):
+    model_dir = tmp_path / "models" / "voxcpm" / "VoxCPM2"
+    model_dir.mkdir(parents=True)
+    output_dir = tmp_path / "output"
+    monkeypatch.setattr(speech.folder_paths, "models_dir", str(tmp_path / "models"))
+    monkeypatch.setattr(speech.folder_paths, "get_output_directory", lambda: str(output_dir))
+    monkeypatch.setattr(speech, "missing_speech_dependencies", lambda: [])
+    _install_fake_torch(monkeypatch)
+
+    calls = {}
+
+    class FakeTtsModel:
+        sample_rate = 24000
+
+    class FakeVoxCPM:
+        tts_model = FakeTtsModel()
+
+        @classmethod
+        def from_pretrained(cls, path, **kwargs):
+            return cls()
+
+        def generate(self, **kwargs):
+            return [0.0, 0.1, 0.2]
+
+    def write_audio_file(path, audio, sample_rate):
+        calls["audio"] = audio
+        calls["sample_rate"] = sample_rate
+        path.write_bytes(b"wav")
+
+    voxcpm_module = types.ModuleType("voxcpm")
+    voxcpm_module.VoxCPM = FakeVoxCPM
+    monkeypatch.setitem(sys.modules, "voxcpm", voxcpm_module)
+    monkeypatch.setattr(speech, "_write_audio_file", write_audio_file)
+    monkeypatch.setattr(speech, "cleanup_model_memory", lambda *models: None)
+    monkeypatch.setattr(speech, "_seed_voxcpm_generation", lambda: 123)
+
+    result = speech.generate_voxcpm2_speech(
+        text="字幕",
+        prompt="",
+        cfg=2.0,
+        steps=10,
+    )
+
+    assert calls["audio"] == [0.0, 0.1, 0.2]
+    assert calls["sample_rate"] == 24000
+    assert result.duration == pytest.approx(3 / 24000)
+
+
 def test_generate_voxcpm2_speech_cleans_model_memory_on_error(tmp_path, monkeypatch):
     model_dir = tmp_path / "models" / "voxcpm" / "VoxCPM2"
     model_dir.mkdir(parents=True)

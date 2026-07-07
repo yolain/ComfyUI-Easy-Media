@@ -80,7 +80,15 @@ def _write_audio_file(path: Path, audio: Any, sample_rate: int) -> None:
     sf.write(path, audio, sample_rate)
 
 
-def _normalize_voxcpm_generate_result(result: Any) -> tuple[int, Any]:
+def _model_sample_rate(model: Any) -> int | None:
+    for owner in (model, getattr(model, "tts_model", None)):
+        sample_rate = getattr(owner, "sample_rate", None)
+        if isinstance(sample_rate, (int, float)):
+            return int(sample_rate)
+    return None
+
+
+def _normalize_voxcpm_generate_result(result: Any, model: Any = None) -> tuple[int, Any]:
     if isinstance(result, tuple) and len(result) == 2:
         left, right = result
         if isinstance(left, (int, float)):
@@ -92,6 +100,9 @@ def _normalize_voxcpm_generate_result(result: Any) -> tuple[int, Any]:
         audio = result.get("audio") or result.get("wav") or result.get("waveform")
         if isinstance(sample_rate, (int, float)) and audio is not None:
             return int(sample_rate), audio
+    sample_rate = _model_sample_rate(model)
+    if sample_rate is not None:
+        return sample_rate, result
     raise RuntimeError("VoxCPM2 returned an unsupported audio result.")
 
 
@@ -183,7 +194,7 @@ def generate_voxcpm2_speech(
             generate_kwargs["reference_wav_path"] = str(reference_audio_path)
 
         _seed_voxcpm_generation()
-        sample_rate, audio = _normalize_voxcpm_generate_result(model.generate(**generate_kwargs))
+        sample_rate, audio = _normalize_voxcpm_generate_result(model.generate(**generate_kwargs), model)
         output_path, relative_path = _output_path_for_text(text)
         _write_audio_file(output_path, audio, sample_rate)
     finally:

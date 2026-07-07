@@ -40,6 +40,9 @@ def cleanup_model_memory(*models: Any) -> None:
     except Exception as error:
         print(f"[Easy Media] Failed to clear CUDA cache: {error}")
     try:
+        mps_backend = getattr(getattr(torch, "backends", None), "mps", None)
+        if mps_backend is None or not mps_backend.is_available():
+            return
         mps = getattr(torch, "mps", None)
         empty_cache = getattr(mps, "empty_cache", None)
         if callable(empty_cache):
