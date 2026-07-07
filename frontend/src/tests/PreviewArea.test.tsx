@@ -134,6 +134,11 @@ function addActiveTaskTrack(data: TrackData): void {
 describe('PreviewArea', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
     vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
     vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined)
   })
@@ -164,6 +169,95 @@ describe('PreviewArea', () => {
     fireEvent.click(screen.getByTestId('multitrack-black-frame'))
 
     expect(onParentClick).not.toHaveBeenCalled()
+  })
+
+  it('keeps subtitle speech settings in memory while the settings panel unmounts', () => {
+    const { data } = trackData()
+    const subtitleSegment = {
+      id: 'subtitle-1',
+      start_frame: 0,
+      end_frame: 48,
+      color: 'var(--primary)',
+      content: {
+        media_type: 'subtitle' as const,
+        text: '字幕',
+        subtitle_style: {
+          font_size: 24,
+          color: '#ffffff',
+          outline_color: '#000000',
+          background_color: 'transparent',
+          background_opacity: 0.7,
+          x: 0.15,
+          y: 0.8,
+          width: 0.7,
+        },
+      },
+    }
+    const taskSegment = {
+      id: 'task-1',
+      start_frame: 0,
+      end_frame: 48,
+      color: 'var(--primary)',
+      content: { media_type: 'none' as const },
+    }
+    data.tracks.push({
+      id: 'subtitle-track',
+      name: 'Subtitle',
+      type: 'subtitle',
+      color: 'var(--primary)',
+      muted: false,
+      locked: false,
+      segments: [subtitleSegment],
+    })
+    data.tracks.push({
+      id: 'task-track',
+      name: 'Task',
+      type: 'task',
+      color: 'var(--primary)',
+      muted: false,
+      locked: false,
+      segments: [taskSegment],
+    })
+    const subtitleSelection: SelectedMultiTrackSegment = {
+      trackId: 'subtitle-track',
+      trackType: 'subtitle',
+      segment: subtitleSegment,
+    }
+    const taskSelection: SelectedMultiTrackSegment = {
+      trackId: 'task-track',
+      trackType: 'task',
+      segment: taskSegment,
+    }
+    const props = {
+      data,
+      currentTime: 0,
+      selectedSegment: subtitleSelection,
+      isPlaying: false,
+      node: { widgets: [] },
+      onGlobalSettingsChange: vi.fn(),
+      onSelectedSegmentContentChange: vi.fn(),
+      onSelectedSegmentDurationChange: vi.fn(),
+    }
+
+    const { rerender } = render(<PreviewArea {...props} />)
+
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /Speech/ }))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Control prompt' }), { target: { value: '四川话' } })
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'CFG' }), { target: { value: '3.4' } })
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Steps' }), { target: { value: '18' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add reference audio' }))
+    fireEvent.click(screen.getByRole('button', { name: 'mock select image' }))
+
+    rerender(<PreviewArea {...props} selectedSegment={taskSelection} />)
+    expect(screen.queryByTestId('subtitle-settings-panel')).toBeNull()
+
+    rerender(<PreviewArea {...props} selectedSegment={subtitleSelection} />)
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /Speech/ }))
+
+    expect((screen.getByRole('textbox', { name: 'Control prompt' }) as HTMLTextAreaElement).value).toBe('四川话')
+    expect(screen.getByRole('spinbutton', { name: 'CFG' }).getAttribute('value')).toBe('3.4')
+    expect(screen.getByRole('spinbutton', { name: 'Steps' }).getAttribute('value')).toBe('18')
+    expect(screen.getByText('picked.png')).not.toBeNull()
   })
 
   it('opens panorama mode and updates only the selected task image metadata', () => {
@@ -436,7 +530,7 @@ describe('PreviewArea', () => {
       />,
     )
 
-    expect(screen.getByTestId('task-prompt-text').textContent).toBe('Describe what you want to generate...')
+    expect(screen.getByTestId('task-prompt-text').textContent).toBe('Double-click to describe what you want to generate...')
     const imageArea = screen.getByTestId('task-preview-images')
     expect(imageArea.className).toContain('w-20')
     expect(imageArea.parentElement?.className).toContain('w-fit')
@@ -823,6 +917,7 @@ describe('PreviewArea', () => {
           color: '#ffffff',
           outline_color: '#000000',
           background_color: 'rgba(0, 0, 0, 0.7)',
+          background_opacity: 0.7,
           x: 0.15,
           y: 0.8,
           width: 0.7,
@@ -872,7 +967,9 @@ describe('PreviewArea', () => {
     )
 
     expect(screen.getByTestId('multitrack-video-preview')).not.toBeNull()
-    expect(screen.getByRole('button', { name: 'Subtitle text settings' })).not.toBeNull()
+    expect(screen.getByTestId('multitrack-video-stage').parentElement?.className).not.toContain('transition')
+    expect(screen.getByTestId('subtitle-settings-panel')).not.toBeNull()
+    expect(screen.getByRole('tab', { name: /Text/ })).not.toBeNull()
   })
 
   it('renders active subtitles from multiple subtitle tracks at the same time', () => {
@@ -948,6 +1045,7 @@ describe('PreviewArea', () => {
           color: '#ffffff',
           outline_color: '#000000',
           background_color: 'transparent',
+          background_opacity: 0.7,
           x: 0.15,
           y: 0.8,
           width: 0.7,

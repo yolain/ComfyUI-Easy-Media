@@ -13,6 +13,7 @@ interface NumberInputProps {
   className?: string
   disabled?: boolean
   commitOnBlur?: boolean
+  formatValue?: (value: number) => string
   "aria-label"?: string
 }
 
@@ -25,6 +26,7 @@ export function NumberInput({
   className,
   disabled,
   commitOnBlur = false,
+  formatValue,
   "aria-label": ariaLabel,
 }: NumberInputProps) {
   const inputRef = React.useRef<HTMLInputElement>(null)
@@ -140,7 +142,7 @@ export function NumberInput({
     >
       <input
         type="number"
-        value={commitOnBlur ? draftValue : value}
+        value={commitOnBlur ? draftValue : formatValue?.(value) ?? value}
         onChange={handleInputChange}
         onKeyDown={handleKeyDown}
         onBlur={handleBlur}

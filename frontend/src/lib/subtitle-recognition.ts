@@ -19,6 +19,7 @@ export const DEFAULT_SUBTITLE_STYLE: MultiTrackSubtitleStyle = {
   color: '#ffffff',
   outline_color: '#000000',
   background_color: 'rgba(0, 0, 0, 0)',
+  background_opacity: 0.7,
   x: 0.125,
   y: 0.8,
   width: 0.75,

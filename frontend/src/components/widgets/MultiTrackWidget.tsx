@@ -56,7 +56,13 @@ import {
   MULTITRACK_SUBTITLE_COLOR,
   requestSubtitleRecognition,
 } from '@/lib/subtitle-recognition'
+import {
+  applySubtitleSpeechAudio,
+  requestSubtitleSpeechAudio,
+  type SubtitleSpeechSettings,
+} from '@/lib/subtitle-speech'
 import { loadBrowserAudioMetadata } from '@/lib/audio-utils'
+import { invalidateMediaListCache } from '@/stores/media-list-store'
 import { uuid } from '@/lib/uuid'
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
 import type { MultiTrack, MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSourceType, MultiTrackType, TrackData } from '@/types/multitrack'
@@ -898,6 +904,57 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     }
   }
 
+  async function handleGenerateSubtitleSpeech(
+    segment: MultiTrackSegment,
+    settings: SubtitleSpeechSettings,
+  ) {
+    if (segment.content.media_type !== 'subtitle') return
+    setIsPlaying(false)
+    try {
+      const result = await requestSubtitleSpeechAudio({
+        ...settings,
+        text: segment.content.text ?? '',
+      })
+      invalidateMediaListCache('outputs')
+      const latestData = dataRef.current
+      commitNormalizedTrackChange(applySubtitleSpeechAudio(latestData, {
+        subtitleSegmentId: segment.id,
+        startFrame: segment.start_frame,
+        endFrame: segment.end_frame,
+        filePath: result.filePath,
+        duration: result.duration,
+      }))
+      try {
+        app.extensionManager?.toast?.add({
+          severity: 'success',
+          summary: t('multitrack.subtitleSpeechComplete'),
+          detail: result.message || t('multitrack.subtitleSpeechSaved', { path: result.absolutePath || result.filePath }),
+          life: 5000,
+        })
+      } catch (toastError) {
+        console.error('[MultiTrackWidget] failed to show subtitle speech success:', toastError)
+      }
+    } catch (error) {
+      if (error instanceof MissingModelError) {
+        setMissingModel(error.model)
+        setModelDownloadError(null)
+        return
+      }
+      console.error('[MultiTrackWidget] subtitle speech generation failed:', error)
+      const message = error instanceof Error ? error.message : String(error)
+      try {
+        app.extensionManager?.toast?.add({
+          severity: 'error',
+          summary: t('multitrack.subtitleSpeechFailed'),
+          detail: message,
+          life: 5000,
+        })
+      } catch (toastError) {
+        console.error('[MultiTrackWidget] failed to show subtitle speech error:', toastError)
+      }
+    }
+  }
+
   function handleCutSegment(segmentId: string, splitFrame: number) {
     commitNormalizedTrackChange(splitTrackSegmentAtFrame(data, segmentId, splitFrame))
   }
@@ -982,6 +1039,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             onTrackSegmentsContentChange={handleTrackSegmentsContentChange}
             onTaskTrackSegmentsChange={handleTaskTrackSegmentsChange}
             onSelectedSegmentDurationChange={handleSelectedSegmentDurationChange}
+            onGenerateSubtitleSpeech={handleGenerateSubtitleSpeech}
           />
           <MultiTrackToolbar
             currentTime={currentTime}

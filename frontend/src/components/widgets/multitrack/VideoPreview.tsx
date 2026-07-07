@@ -84,7 +84,7 @@ export function VideoPreview({
   return (
     <div
       data-testid="multitrack-video-stage"
-      className="relative flex h-full max-h-full items-center justify-center overflow-hidden bg-black"
+      className="relative flex h-full min-w-0 max-h-full w-full max-w-full items-center justify-center overflow-hidden bg-black"
       style={{ aspectRatio: `${resolution.width} / ${resolution.height}` }}
     >
       {videoUrl ? (

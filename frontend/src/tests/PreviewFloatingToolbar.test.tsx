@@ -22,7 +22,6 @@ describe('PreviewFloatingToolbar', () => {
         selectedMediaVolumeDb={null}
         selectedMediaMuted={false}
         selectedMediaDuration={null}
-        selectedSubtitleStyle={null}
         onGlobalSettingsChange={onGlobalSettingsChange}
         onSelectedSegmentContentChange={vi.fn()}
         onSelectedSegmentDurationChange={vi.fn()}
@@ -44,7 +43,6 @@ describe('PreviewFloatingToolbar', () => {
       frameRate: 24,
       selectedMediaMuted: false,
       selectedMediaDuration: 3,
-      selectedSubtitleStyle: null,
       onGlobalSettingsChange: vi.fn(),
       onSelectedSegmentContentChange,
       onSelectedSegmentDurationChange: vi.fn(),
@@ -85,7 +83,6 @@ describe('PreviewFloatingToolbar', () => {
         selectedMediaVolumeDb={0.8}
         selectedMediaMuted={false}
         selectedMediaDuration={3}
-        selectedSubtitleStyle={null}
         onGlobalSettingsChange={onGlobalSettingsChange}
         onSelectedSegmentContentChange={vi.fn()}
         onSelectedSegmentDurationChange={onSelectedSegmentDurationChange}
@@ -102,7 +99,6 @@ describe('PreviewFloatingToolbar', () => {
         selectedMediaVolumeDb={0.8}
         selectedMediaMuted={false}
         selectedMediaDuration={3}
-        selectedSubtitleStyle={null}
         onGlobalSettingsChange={onGlobalSettingsChange}
         onSelectedSegmentContentChange={vi.fn()}
         onSelectedSegmentDurationChange={onSelectedSegmentDurationChange}
@@ -130,7 +126,6 @@ describe('PreviewFloatingToolbar', () => {
         selectedMediaVolumeDb={0.8}
         selectedMediaMuted={false}
         selectedMediaDuration={3}
-        selectedSubtitleStyle={null}
         onGlobalSettingsChange={vi.fn()}
         onSelectedSegmentContentChange={vi.fn()}
         onSelectedSegmentDurationChange={onSelectedSegmentDurationChange}
@@ -159,7 +154,6 @@ describe('PreviewFloatingToolbar', () => {
           selectedMediaVolumeDb={null}
           selectedMediaMuted={false}
           selectedMediaDuration={null}
-          selectedSubtitleStyle={null}
           onGlobalSettingsChange={vi.fn()}
           onSelectedSegmentContentChange={vi.fn()}
           onSelectedSegmentDurationChange={vi.fn()}
@@ -174,54 +168,5 @@ describe('PreviewFloatingToolbar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '速度设置' }))
     expect(screen.getByRole('slider', { name: '帧率' })).not.toBeNull()
-  })
-
-  it('updates selected subtitle text settings', () => {
-    const onSelectedSegmentContentChange = vi.fn()
-    render(
-      <PreviewFloatingToolbar
-        globalMuted={false}
-        globalVolumeDb={0}
-        frameRate={24}
-        selectedMediaVolumeDb={null}
-        selectedMediaMuted={false}
-        selectedMediaDuration={null}
-        selectedSubtitleStyle={{
-          font_size: 12,
-          color: '#ffffff',
-          outline_color: '#000000',
-          background_color: '#000000',
-          x: 0.15,
-          y: 0.8,
-          width: 0.7,
-        }}
-        onGlobalSettingsChange={vi.fn()}
-        onSelectedSegmentContentChange={onSelectedSegmentContentChange}
-        onSelectedSegmentDurationChange={vi.fn()}
-      />,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: 'Subtitle text settings' }))
-    fireEvent.change(screen.getByRole('spinbutton', { name: 'Font size' }), { target: { value: '18' } })
-    const textColorLabel = screen.getByText('Text color')
-    const outlineColorLabel = screen.getByText('Outline color')
-    const backgroundColorLabel = screen.getByText('Background color')
-    const textColorButton = screen.getByRole('button', { name: 'Text color' })
-    const outlineColorButton = screen.getByRole('button', { name: 'Outline color' })
-    const backgroundColorButton = screen.getByRole('button', { name: 'Background color' })
-    expect(textColorLabel.closest('button')).toBeNull()
-    expect(outlineColorLabel.closest('button')).toBeNull()
-    expect(backgroundColorLabel.closest('button')).toBeNull()
-    expect(textColorButton.textContent).toContain('#FFFFFF')
-    expect(textColorButton.textContent).not.toContain('Text color')
-    expect(outlineColorButton.textContent).toContain('#000000')
-    expect(outlineColorButton.textContent).not.toContain('Outline color')
-    expect(backgroundColorButton.textContent).toContain('#000000')
-    expect(backgroundColorButton.textContent).not.toContain('Background color')
-    expect(screen.queryByRole('button', { name: 'Transparent background' })).toBeNull()
-
-    expect(onSelectedSegmentContentChange).toHaveBeenCalledWith(expect.objectContaining({
-      subtitle_style: expect.objectContaining({ font_size: 18 }),
-    }))
   })
 })

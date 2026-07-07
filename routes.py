@@ -50,6 +50,7 @@ from .utils.media import (
     list_dir_shallow,
 )
 from .utils.subtitles import missing_subtitle_dependencies, recognize_subtitle_segments
+from .utils.speech import generate_voxcpm2_speech
 from .utils.video import (
     download_audio_to_temp,
     download_video_to_temp,
@@ -61,6 +62,7 @@ from .utils.video import (
 
 _SMART_SPLIT_LOCK = asyncio.Lock()
 _SUBTITLE_RECOGNITION_LOCK = asyncio.Lock()
+_SUBTITLE_SPEECH_LOCK = asyncio.Lock()
 
 
 def _segment_source_audio_window(data: dict, fps: float) -> tuple[float, float]:
@@ -422,3 +424,72 @@ async def handle_subtitle_recognition(request: web.Request) -> web.Response:
                 path.unlink(missing_ok=True)
             except OSError as error:
                 print(f"[Easy Media] Failed to remove subtitle recognition temporary file: {error}")
+
+
+@PromptServer.instance.routes.post("/easy-media/subtitles/speech")
+async def handle_subtitle_speech(request: web.Request) -> web.Response:
+    """Generate speech audio for a subtitle segment."""
+    try:
+        try:
+            data = await request.json()
+        except Exception as error:
+            raise ValueError("Invalid JSON body") from error
+        if not isinstance(data, dict):
+            raise ValueError("request body must be a JSON object")
+
+        text = data.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("text is required")
+        model = data.get("model", "VoxCPM2")
+        if model != "VoxCPM2":
+            raise ValueError(f"unsupported speech model: {model}")
+        prompt = data.get("prompt", "")
+        if not isinstance(prompt, str):
+            raise ValueError("prompt must be a string")
+        cfg = data.get("cfg", 2.0)
+        if not isinstance(cfg, (int, float)) or not math.isfinite(cfg):
+            raise ValueError("cfg must be a finite number")
+        steps = data.get("steps", 10)
+        if not isinstance(steps, (int, float)) or not math.isfinite(steps):
+            raise ValueError("steps must be a finite number")
+
+        reference_audio_path = None
+        raw_reference_audio_path = data.get("reference_audio_path")
+        if isinstance(raw_reference_audio_path, str) and raw_reference_audio_path:
+            reference_audio_path = resolve_segment_audio_path({
+                "source_type": data.get("reference_audio_source_type", "input"),
+                "file_path": raw_reference_audio_path,
+                "local_path": raw_reference_audio_path,
+            })
+
+        async with _SUBTITLE_SPEECH_LOCK:
+            result = await asyncio.to_thread(
+                generate_voxcpm2_speech,
+                text=text.strip(),
+                prompt=prompt,
+                cfg=float(cfg),
+                steps=int(steps),
+                reference_audio_path=reference_audio_path,
+            )
+
+        return web.json_response({
+            "file_path": result.file_path,
+            "absolute_path": result.absolute_path,
+            "source_type": result.source_type,
+            "duration": result.duration,
+            "message": f"Audio generated and saved to {result.absolute_path}",
+        })
+    except MissingEasyMediaModelError as error:
+        return web.json_response({
+            "error": str(error),
+            "model_missing": model_payload(error.model),
+        }, status=428)
+    except RuntimeError as error:
+        message = str(error)
+        status = 424 if "Missing Python dependencies" in message else 500
+        return web.json_response({"error": message}, status=status)
+    except (ValueError, FileNotFoundError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"Subtitle speech generation failed: {error}"}, status=500)

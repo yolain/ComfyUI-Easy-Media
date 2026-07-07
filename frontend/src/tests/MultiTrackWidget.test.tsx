@@ -23,9 +23,20 @@ vi.mock('@/lib/video-utils', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/PreviewArea', () => ({
-  PreviewArea: ({ selectedSegment, onSelectedSegmentContentChange }: {
-    selectedSegment: { trackType: string } | null
+  PreviewArea: ({ selectedSegment, onSelectedSegmentContentChange, onGenerateSubtitleSpeech }: {
+    selectedSegment: { trackType: string; segment: TrackData['tracks'][number]['segments'][number] } | null
     onSelectedSegmentContentChange: (patch: unknown) => void
+    onGenerateSubtitleSpeech?: (
+      segment: TrackData['tracks'][number]['segments'][number],
+      settings: {
+        model: 'VoxCPM2'
+        prompt: string
+        cfg: number
+        steps: number
+        referenceAudio: string
+        referenceAudioSourceType: 'input'
+      },
+    ) => Promise<void>
   }) => (
     <div data-testid="preview-area">
       {selectedSegment?.trackType === 'subtitle' ? (
@@ -37,6 +48,7 @@ vi.mock('@/components/widgets/multitrack/PreviewArea', () => ({
               color: '#ff0000',
               outline_color: '#000000',
               background_color: 'rgba(0, 0, 0, 0.5)',
+              background_opacity: 0.7,
               x: 0.2,
               y: 0.75,
               width: 0.6,
@@ -44,6 +56,21 @@ vi.mock('@/components/widgets/multitrack/PreviewArea', () => ({
           })}
         >
           update selected subtitle style
+        </button>
+      ) : null}
+      {selectedSegment?.trackType === 'subtitle' ? (
+        <button
+          type="button"
+          onClick={() => onGenerateSubtitleSpeech?.(selectedSegment.segment, {
+            model: 'VoxCPM2',
+            prompt: 'calm',
+            cfg: 2.4,
+            steps: 13,
+            referenceAudio: 'voice.wav',
+            referenceAudioSourceType: 'input',
+          })}
+        >
+          generate subtitle speech
         </button>
       ) : null}
     </div>
@@ -723,6 +750,7 @@ describe('MultiTrackWidget', () => {
               color: '#ffffff',
               outline_color: '#000000',
               background_color: 'rgba(0, 0, 0, 0)',
+              background_opacity: 0.7,
               x: 0.15,
               y: 0.8,
               width: 0.7,
@@ -741,6 +769,7 @@ describe('MultiTrackWidget', () => {
               font_size: 10,
               color: '#00ff00',
               background_color: 'transparent',
+              background_opacity: 0.7,
               x: 0.3,
               y: 0.7,
               width: 0.5,
@@ -763,6 +792,7 @@ describe('MultiTrackWidget', () => {
         color: '#ff0000',
         outline_color: '#000000',
         background_color: 'rgba(0, 0, 0, 0.5)',
+        background_opacity: 0.7,
         x: 0.2,
         y: 0.75,
         width: 0.6,
@@ -772,6 +802,7 @@ describe('MultiTrackWidget', () => {
         color: '#ff0000',
         outline_color: '#000000',
         background_color: 'rgba(0, 0, 0, 0.5)',
+        background_opacity: 0.7,
         x: 0.2,
         y: 0.75,
         width: 0.6,
@@ -810,6 +841,7 @@ describe('MultiTrackWidget', () => {
           color: '#ffffff',
           outline_color: '#000000',
           background_color: 'rgba(0, 0, 0, 0)',
+          background_opacity: 0.7,
           x: 0.125,
           y: 0.8,
           width: 0.75,
@@ -896,6 +928,65 @@ describe('MultiTrackWidget', () => {
         media_type: 'subtitle',
         text: 'Hello',
         subtitle_style: expect.objectContaining({ font_size: 12 }),
+      },
+    })
+    vi.unstubAllGlobals()
+  })
+
+  it('generates selected subtitle speech and adds the output to an audio track', async () => {
+    const data = createDefaultTrackData()
+    data.total_length = 120
+    data.tracks.push({
+      id: 'subtitle-track',
+      name: 'Subtitle 0',
+      type: 'subtitle',
+      color: '#9D4937',
+      muted: false,
+      locked: false,
+      segments: [{
+        id: 'subtitle',
+        start_frame: 24,
+        end_frame: 48,
+        color: '#9D4937',
+        content: { media_type: 'subtitle', text: 'Hello 123' },
+      }],
+    })
+    const onChange = vi.fn()
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        file_path: 'easy_media/Hello.wav',
+        source_type: 'output',
+        absolute_path: '/tmp/output/easy_media/Hello.wav',
+        message: 'Audio generated and saved to /tmp/output/easy_media/Hello.wav',
+        duration: 1,
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'select subtitle segment' }))
+    fireEvent.click(screen.getByRole('button', { name: 'generate subtitle speech' }))
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      text: 'Hello 123',
+      model: 'VoxCPM2',
+      prompt: 'calm',
+      cfg: 2.4,
+      steps: 13,
+      reference_audio_path: 'voice.wav',
+      reference_audio_source_type: 'input',
+    })
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    expect(updated.tracks.find((track) => track.type === 'audio')?.segments[0]).toMatchObject({
+      start_frame: 24,
+      end_frame: 48,
+      content: {
+        media_type: 'audio',
+        source_type: 'output',
+        file_path: 'easy_media/Hello.wav',
       },
     })
     vi.unstubAllGlobals()

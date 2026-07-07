@@ -51,6 +51,13 @@ MODEL_REGISTRY: dict[str, EasyMediaModel] = {
             "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B",
         ),
     ),
+    "voxcpm2": EasyMediaModel(
+        name="voxcpm2",
+        display_name="VoxCPM2",
+        category="voxcpm",
+        filename="VoxCPM2",
+        url="https://huggingface.co/openbmb/VoxCPM2",
+    ),
 }
 
 
@@ -117,6 +124,8 @@ async def download_model(model_name: str) -> Path:
     async with lock:
         if model.name == "qwen3-asr":
             return await _download_qwen3_asr_bundle(model)
+        if model.name == "voxcpm2":
+            return await _download_snapshot_model(model, "openbmb/VoxCPM2")
 
         if target.is_file():
             return target
@@ -187,4 +196,27 @@ async def _download_qwen3_asr_bundle(model: EasyMediaModel) -> Path:
 
     await download_snapshot("Qwen/Qwen3-ASR-1.7B", asr_dir)
     await download_snapshot("Qwen/Qwen3-ForcedAligner-0.6B", aligner_dir)
+    return target
+
+
+async def _download_snapshot_model(model: EasyMediaModel, repo_id: str) -> Path:
+    target = model.path
+    if target.is_dir():
+        return target
+
+    try:
+        from huggingface_hub import snapshot_download  # type: ignore[import]
+    except ImportError as error:
+        raise RuntimeError(
+            f"Automatic {model.display_name} download requires huggingface_hub. "
+            "Install it with: pip install huggingface_hub"
+        ) from error
+
+    target.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(
+        snapshot_download,
+        repo_id=repo_id,
+        local_dir=str(target),
+        local_dir_use_symlinks=False,
+    )
     return target

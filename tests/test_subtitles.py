@@ -225,6 +225,23 @@ def test_recognize_subtitle_segments_uses_official_qwen3_asr_api(monkeypatch, tm
     )]
 
 
+def test_recognize_subtitle_segments_cleans_model_memory(monkeypatch, tmp_path):
+    fake_qwen_asr = types.SimpleNamespace(Qwen3ASRModel=_FakeQwen3ASRModel)
+    cleaned = []
+    monkeypatch.setitem(sys.modules, "torch", _FakeTorch())
+    monkeypatch.setitem(sys.modules, "qwen_asr", fake_qwen_asr)
+    monkeypatch.setattr(subtitles, "cleanup_model_memory", lambda *models: cleaned.extend(models), raising=False)
+
+    subtitles.recognize_subtitle_segments(
+        tmp_path / "audio.wav",
+        tmp_path / "Qwen3-ASR-1.7B",
+        tmp_path / "Qwen3-ForcedAligner-0.6B",
+    )
+
+    assert len(cleaned) == 1
+    assert isinstance(cleaned[0], _FakeQwen3ASRModel)
+
+
 def test_recognize_subtitle_segments_reads_forced_align_result_time_stamps(monkeypatch, tmp_path):
     fake_qwen_asr = types.SimpleNamespace(Qwen3ASRModel=_ForcedAlignResultFakeQwen3ASRModel)
     _ForcedAlignResultFakeQwen3ASRModel.from_pretrained_calls.clear()
@@ -593,7 +610,7 @@ def test_write_ass_file_scales_preview_font_to_video_height(tmp_path):
     text = output.read_text(encoding="utf-8")
 
     assert r"\pos(640,576)" in text
-    assert r"\fs28.8" in text
+    assert r"\fs34.8" in text
     assert r"\bord2.5" in text
     assert r"\3c&H000000" in text
-    assert r"\4a&HFF" in text
+    assert r"\3a&H00" in text

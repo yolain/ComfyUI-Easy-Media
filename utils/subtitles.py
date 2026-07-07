@@ -8,6 +8,8 @@ import importlib.util
 import re
 from typing import Any
 
+from .model_memory import cleanup_model_memory
+
 _START_TIME_KEYS = ("start", "begin", "start_time", "begin_time", "startTime", "beginTime")
 _END_TIME_KEYS = ("end", "stop", "end_time", "finish_time", "endTime", "stopTime")
 _TEXT_KEYS = ("text", "sentence", "transcript")
@@ -77,13 +79,15 @@ _DEFAULT_SUBTITLE_STYLE = {
     "color": "#ffffff",
     "outline_color": "#000000",
     "background_color": "rgba(0, 0, 0, 0)",
+    "background_opacity": 0.7,
     "x": 0.1,
     "y": 0.8,
     "width": 0.8,
 }
 _PREVIEW_REFERENCE_HEIGHT = 360.0
-_ASS_FONT_SCALE = 1.2
+_ASS_FONT_SCALE = 1.45
 _ASS_OUTLINE_SCALE = 1.25
+_ASS_BOX_PADDING_SCALE = 2.2
 
 
 @dataclass(frozen=True)
@@ -180,12 +184,33 @@ def _rgba_opacity(value: object) -> float | None:
     return max(0.0, min(1.0, float(match.group(1))))
 
 
-def _ass_alpha(value: object) -> str:
-    if not isinstance(value, str) or value.strip().lower() == "transparent":
+def _is_transparent_background(value: object) -> bool:
+    if not isinstance(value, str):
+        return True
+    if value.strip().lower() == "transparent":
+        return True
+    return _rgba_opacity(value) == 0.0
+
+
+def _ass_alpha(value: object, opacity_override: object | None = None) -> str:
+    if _is_transparent_background(value):
         return "&HFF"
-    opacity = _rgba_opacity(value)
+    opacity = _clamped_float(opacity_override, -1.0, 0.0, 1.0) if opacity_override is not None else -1.0
+    if opacity < 0:
+        parsed_opacity = _rgba_opacity(value)
+        opacity = 1.0 if parsed_opacity is None else parsed_opacity
     alpha = 0 if opacity is None else int((1.0 - opacity) * 255 + 0.5)
     return f"&H{alpha:02X}"
+
+
+def _ass_style_has_background(style: dict[str, object]) -> bool:
+    return not _is_transparent_background(style.get("background_color"))
+
+
+def _ass_outline_alpha(value: object) -> str:
+    if not isinstance(value, str) or value.strip().lower() == "transparent":
+        return "&HFF"
+    return "&H00"
 
 
 def _ass_back_color(value: object) -> str:
@@ -219,6 +244,12 @@ def _normalized_subtitle_style(value: object) -> dict[str, object]:
     style["outline_color"] = str(style.get("outline_color") or _DEFAULT_SUBTITLE_STYLE["outline_color"])
     style["background_color"] = str(
         style.get("background_color") or _DEFAULT_SUBTITLE_STYLE["background_color"]
+    )
+    style["background_opacity"] = _clamped_float(
+        style.get("background_opacity"),
+        float(_DEFAULT_SUBTITLE_STYLE["background_opacity"]),
+        0.0,
+        1.0,
     )
     return style
 
@@ -302,6 +333,10 @@ def write_ass_file(
             "Style: Default,Arial,12,&H00FFFFFF,&H00FFFFFF,&H00000000,&H99000000,"
             "0,0,0,0,100,100,0,0,1,2,0,8,10,10,10,1"
         ),
+        (
+            "Style: Box,Arial,12,&H00FFFFFF,&H00FFFFFF,&H00000000,&H99000000,"
+            "0,0,0,0,100,100,0,0,3,2,0,8,10,10,10,1"
+        ),
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
@@ -309,14 +344,19 @@ def write_ass_file(
     events: list[str] = []
     preview_scale = _preview_to_video_scale(height)
     outline_size = max(1.0, round(_ASS_OUTLINE_SCALE * preview_scale, 2))
+    box_padding_size = max(outline_size, round(_ASS_BOX_PADDING_SCALE * preview_scale, 2))
     for segment in segments:
         style = segment.style
         preview_font_size = _clamped_float(style.get("font_size"), 12, 8, 96)
         font_size = round(preview_font_size * preview_scale * _ASS_FONT_SCALE, 2)
+        has_background = _ass_style_has_background(style)
+        style_name = "Box" if has_background else "Default"
+        border_size = box_padding_size if has_background else outline_size
         color = _ass_override_color(style.get("color"), (255, 255, 255))
         outline_color = _ass_override_color(style.get("outline_color"), (0, 0, 0))
+        outline_alpha = _ass_outline_alpha(style.get("outline_color"))
         back_color = _ass_override_color(style.get("background_color"), (0, 0, 0))
-        back_alpha = _ass_alpha(style.get("background_color"))
+        back_alpha = _ass_alpha(style.get("background_color"), style.get("background_opacity"))
         x = _clamped_float(style.get("x"), 0.1, 0.0, 1.0)
         y = _clamped_float(style.get("y"), 0.8, 0.0, 0.95)
         box_width = _clamped_float(style.get("width"), 0.8, 0.1, 1.0)
@@ -326,17 +366,17 @@ def write_ass_file(
             r"{\an8"
             rf"\pos({pos_x},{pos_y})"
             rf"\fs{font_size:g}"
-            rf"\bord{outline_size:g}"
+            rf"\bord{border_size:g}"
             rf"\c{color}"
-            rf"\3c{outline_color}"
-            rf"\4c{back_color}"
-            rf"\4a{back_alpha}"
+            rf"\3c{back_color if has_background else outline_color}"
+            rf"\3a{back_alpha if has_background else outline_alpha}"
             r"}"
         )
         events.append(
-            "Dialogue: 0,{start},{end},Default,,0,0,0,,{text}".format(
+            "Dialogue: 0,{start},{end},{style},,0,0,0,,{text}".format(
                 start=_format_ass_timestamp(segment.start),
                 end=_format_ass_timestamp(segment.end),
+                style=style_name,
                 text=override + _escape_ass_text(segment.text),
             )
         )
@@ -652,17 +692,21 @@ def _align_subtitle_segments(
 ) -> list[dict]:
     from qwen_asr import Qwen3ForcedAligner  # type: ignore[import]
 
-    aligner = Qwen3ForcedAligner.from_pretrained(
-        str(aligner_model_dir),
-        dtype=dtype,
-        device_map=device,
-    )
-    result = aligner.align(
-        audio=str(audio_path),
-        text=text,
-        language=language,
-    )
-    return normalize_subtitle_segments(result)
+    aligner = None
+    try:
+        aligner = Qwen3ForcedAligner.from_pretrained(
+            str(aligner_model_dir),
+            dtype=dtype,
+            device_map=device,
+        )
+        result = aligner.align(
+            audio=str(audio_path),
+            text=text,
+            language=language,
+        )
+        return normalize_subtitle_segments(result)
+    finally:
+        cleanup_model_memory(aligner)
 
 
 def normalize_subtitle_segments(value: object) -> list[dict]:
@@ -737,42 +781,46 @@ def recognize_subtitle_segments(audio_path: Path, asr_model_dir: Path, aligner_m
             "device_map": device,
         },
     }
-    model = Qwen3ASRModel.from_pretrained(str(asr_model_dir), **model_kwargs)
+    model = None
+    try:
+        model = Qwen3ASRModel.from_pretrained(str(asr_model_dir), **model_kwargs)
 
-    result = _transcribe(model, audio_path, None)
-    result_summaries = [f"transcribe={_summarize_value(result)}"]
-    detected_language = _detect_language(result)
-    transcript = _detect_text(result)
-    segments = normalize_subtitle_segments(result)
-    if segments:
-        return _restore_subtitle_punctuation(segments, transcript, detected_language)
+        result = _transcribe(model, audio_path, None)
+        result_summaries = [f"transcribe={_summarize_value(result)}"]
+        detected_language = _detect_language(result)
+        transcript = _detect_text(result)
+        segments = normalize_subtitle_segments(result)
+        if segments:
+            return _restore_subtitle_punctuation(segments, transcript, detected_language)
 
-    retry_language = _normalize_aligner_language(detected_language) or detected_language
-    aligner_language = _normalize_aligner_language(detected_language) or _infer_aligner_language_from_text(transcript)
-    if retry_language:
-        retry_result = _transcribe(model, audio_path, retry_language)
-        result_summaries.append(f"retry={_summarize_value(retry_result)}")
-        transcript = _detect_text(retry_result) or transcript
-        retry_segments = normalize_subtitle_segments(retry_result)
-        if retry_segments:
-            return _restore_subtitle_punctuation(retry_segments, transcript, detected_language)
-
+        retry_language = _normalize_aligner_language(detected_language) or detected_language
         aligner_language = _normalize_aligner_language(detected_language) or _infer_aligner_language_from_text(transcript)
+        if retry_language:
+            retry_result = _transcribe(model, audio_path, retry_language)
+            result_summaries.append(f"retry={_summarize_value(retry_result)}")
+            transcript = _detect_text(retry_result) or transcript
+            retry_segments = normalize_subtitle_segments(retry_result)
+            if retry_segments:
+                return _restore_subtitle_punctuation(retry_segments, transcript, detected_language)
 
-    if transcript and aligner_language:
-        align_segments = _align_subtitle_segments(
-            audio_path,
-            transcript,
-            aligner_language,
-            aligner_model_dir,
-            dtype,
-            device,
+            aligner_language = _normalize_aligner_language(detected_language) or _infer_aligner_language_from_text(transcript)
+
+        if transcript and aligner_language:
+            align_segments = _align_subtitle_segments(
+                audio_path,
+                transcript,
+                aligner_language,
+                aligner_model_dir,
+                dtype,
+                device,
+            )
+            result_summaries.append(f"align={_summarize_value(align_segments)}")
+            if align_segments:
+                return _restore_subtitle_punctuation(align_segments, transcript, aligner_language)
+
+        raise RuntimeError(
+            "Qwen3-ASR did not return timestamped subtitle text. "
+            + "; ".join(result_summaries)
         )
-        result_summaries.append(f"align={_summarize_value(align_segments)}")
-        if align_segments:
-            return _restore_subtitle_punctuation(align_segments, transcript, aligner_language)
-
-    raise RuntimeError(
-        "Qwen3-ASR did not return timestamped subtitle text. "
-        + "; ".join(result_summaries)
-    )
+    finally:
+        cleanup_model_memory(model)

@@ -52,6 +52,7 @@ export interface MultiTrackSubtitleStyle {
   color: string
   outline_color?: string
   background_color: string
+  background_opacity: number
   x: number
   y: number
   width: number
