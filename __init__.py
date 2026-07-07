@@ -69,6 +69,7 @@ class EasyMediaExtension(ComfyExtension):
             LTXVMakeRefVideo,
             # Video
             EasySaveVideo,
+            EasyCompareVideos,
             EasyGetAudioFromVideo,
             EasyMergeVideos,
             EasyMergeVideosFromPaths,

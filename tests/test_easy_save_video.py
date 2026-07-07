@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 import types
+from fractions import Fraction
 from pathlib import Path
 
 
@@ -44,6 +45,18 @@ class _FakeIO:
     DynamicCombo = _FakeDynamicCombo
     FolderType = _FakeFolderType
     NodeOutput = _NodeOutput
+
+    @staticmethod
+    def Custom(io_type):
+        class _FakeCustomType:
+            class Input(_FakeInput):
+                pass
+
+            class Output(_FakeInput):
+                pass
+
+        _FakeCustomType.io_type = io_type
+        return _FakeCustomType
 
     class Boolean:
         Input = _FakeInput
@@ -93,14 +106,26 @@ class _FakeVideoCodec:
 
 
 class _FakeVideo:
-    def __init__(self):
+    def __init__(self, frames=24, fps=24, probe_fps=True, probe_frame_count=True):
         self.saved = []
+        self.component_reads = 0
+        self.frames = frames
+        self.probe_fps = probe_fps
+        self.probe_frame_count = probe_frame_count
+        self.spec = types.SimpleNamespace(fps=Fraction(fps), has_audio=False)
 
     def get_dimensions(self):
         return (320, 240)
 
     def save_to(self, path, **kwargs):
         self.saved.append((path, kwargs))
+
+    def get_components(self):
+        self.component_reads += 1
+        return types.SimpleNamespace(
+            images=types.SimpleNamespace(shape=(self.frames, 240, 320, 3)),
+            audio=None,
+        )
 
 
 def _install_comfy_stubs(monkeypatch, tmp_path: Path):
@@ -147,9 +172,32 @@ def _install_comfy_stubs(monkeypatch, tmp_path: Path):
         "",
         prefix,
     )
+    probed_videos = {}
+
+    def fake_video_input_to_local_file(video, suffix=".mp4", save_kwargs=None):
+        path = temp_dir / f"probe_{len(probed_videos)}{suffix}"
+        path.write_bytes(b"video")
+        probed_videos[str(path)] = video
+        return str(path), [str(path)]
+
+    def fake_ffprobe_info(path):
+        video = probed_videos.get(str(path))
+        if video is None:
+            return {}
+        fps_fraction = video.spec.fps
+        return {
+            "duration": video.frames / float(fps_fraction),
+            "has_video": True,
+            "has_audio": False,
+            "width": 320,
+            "height": 240,
+            "fps": float(fps_fraction) if video.probe_fps else None,
+            "fps_fraction": fps_fraction if video.probe_fps else None,
+            "frame_count": video.frames if video.probe_frame_count else None,
+        }
 
     utils_video = types.ModuleType("easy_media.utils.video")
-    utils_video.extract_merge_spec = lambda video: None
+    utils_video.extract_merge_spec = lambda video: getattr(video, "spec", None)
     utils_video.ffmpeg_concat = lambda *args, **kwargs: False
     utils_video.ffmpeg_concat_with_fade = lambda *args, **kwargs: False
     utils_video.ffmpeg_extract_audio = lambda *args, **kwargs: None
@@ -160,6 +208,8 @@ def _install_comfy_stubs(monkeypatch, tmp_path: Path):
     utils_video.tensor_crossfade_images = lambda *args, **kwargs: None
     utils_video.trim_video_with_ffmpeg = lambda *args, **kwargs: None
     utils_video.validate_merge_compatibility = lambda specs: None
+    utils_video.video_input_to_local_file = fake_video_input_to_local_file
+    utils_video.ffprobe_info = fake_ffprobe_info
 
     monkeypatch.setitem(sys.modules, "folder_paths", folder_paths)
     monkeypatch.setitem(sys.modules, "comfy_api", comfy_api)
@@ -211,6 +261,7 @@ def test_hide_save_writes_output_without_preview(monkeypatch, tmp_path):
 
     mode_names = [option.name for option in video_module._OUTPUT_MODE_OPTIONS]
     assert "hide&save" in mode_names
+    assert mode_names.index("hide") < mode_names.index("hide&save")
 
     result = video_module.EasySaveVideo.execute(
         input_mode={"input_mode": "video", "video": source_video},
@@ -221,6 +272,108 @@ def test_hide_save_writes_output_without_preview(monkeypatch, tmp_path):
     assert result.values == (source_video, "output/clip_00001_.mp4")
     assert source_video.saved[0][0] == str(tmp_path / "output" / "clip_00001_.mp4")
     assert result.ui is None
+
+
+def test_hide_writes_temp_without_preview(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    source_video = _FakeVideo()
+
+    result = video_module.EasySaveVideo.execute(
+        input_mode={"input_mode": "video", "video": source_video},
+        output_mode={"output_mode": "hide"},
+        filename_prefix="clip",
+    )
+
+    assert result.values == (source_video, "temp/clip_00001_.mp4")
+    assert source_video.saved[0][0] == str(tmp_path / "temp" / "clip_00001_.mp4")
+    assert result.ui is None
+
+
+def test_compare_videos_saves_single_source_preview(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    source_video = _FakeVideo(frames=48, fps=24)
+
+    result = video_module.EasyCompareVideos.execute(source=source_video)
+
+    assert result.values == ()
+    assert isinstance(result.ui["compare_videos"], list)
+    payload = result.ui["compare_videos"][0]
+    assert payload["source"]["type"] == "temp"
+    assert payload["output"] is None
+    assert payload["frame_count"] == 48
+    assert payload["fps"] == 24.0
+    assert source_video.saved == []
+    assert source_video.component_reads == 0
+
+
+def test_compare_videos_schema_uses_socketless_widget(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+
+    schema = video_module.EasyCompareVideos.define_schema()
+
+    widget = schema.inputs[2]
+    assert widget.args[0] == "compare_video"
+    assert video_module.TYPE_COMPARE_VIDEO.io_type == "COMPARE_VIDEO"
+
+
+def test_compare_videos_saves_matching_pair(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    source_video = _FakeVideo(frames=36, fps=12)
+    output_video = _FakeVideo(frames=36, fps=12)
+
+    result = video_module.EasyCompareVideos.execute(source=source_video, output=output_video)
+
+    assert isinstance(result.ui["compare_videos"], list)
+    payload = result.ui["compare_videos"][0]
+    assert payload["source"]["filename"].startswith("easy_compare_source_")
+    assert payload["output"]["filename"].startswith("easy_compare_output_")
+    assert payload["frame_count"] == 36
+    assert payload["duration"] == 3.0
+    assert source_video.saved == []
+    assert output_video.saved == []
+    assert source_video.component_reads == 0
+    assert output_video.component_reads == 0
+
+
+def test_compare_videos_allows_mismatched_fps_when_duration_matches(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+
+    result = video_module.EasyCompareVideos.execute(
+        source=_FakeVideo(frames=24, fps=24),
+        output=_FakeVideo(frames=30, fps=30),
+    )
+
+    payload = result.ui["compare_videos"][0]
+    assert payload["duration"] == 1.0
+    assert payload["fps"] == 24.0
+
+
+def test_compare_videos_allows_duration_only_probe(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+
+    result = video_module.EasyCompareVideos.execute(
+        source=_FakeVideo(frames=24, fps=24, probe_fps=False, probe_frame_count=False),
+        output=_FakeVideo(frames=30, fps=30, probe_fps=False, probe_frame_count=False),
+    )
+
+    payload = result.ui["compare_videos"][0]
+    assert payload["duration"] == 1.0
+    assert payload["fps"] is None
+    assert payload["frame_count"] is None
+
+
+def test_compare_videos_rejects_mismatched_duration(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+
+    try:
+        video_module.EasyCompareVideos.execute(
+            source=_FakeVideo(frames=24, fps=24),
+            output=_FakeVideo(frames=27, fps=24),
+        )
+    except ValueError as exc:
+        assert "durations must match" in str(exc)
+    else:
+        raise AssertionError("Expected mismatched duration to raise ValueError.")
 
 
 def test_make_video_list_fills_missing_inputs_with_empty_video(monkeypatch, tmp_path):

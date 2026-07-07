@@ -5,6 +5,20 @@
     "add": "添加",
     "delete": "删除"
   },
+  "compareVideo": {
+    "empty": "执行节点后预览视频。",
+    "source": "Source",
+    "output": "Output",
+    "sourceOnly": "Source",
+    "outputOnly": "Output",
+    "compare": "Compare",
+    "play": "播放",
+    "pause": "暂停",
+    "seek": "视频时间",
+    "mute": "静音",
+    "unmute": "取消静音",
+    "volume": "音量"
+  },
   "toolbar": {
     "frames": "帧",
     "seconds": "秒",

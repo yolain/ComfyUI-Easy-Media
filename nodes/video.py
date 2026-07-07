@@ -15,11 +15,12 @@ from comfy_api.latest import Input, InputImpl, Types, io, ui
 from comfy.utils import ProgressBar
 from server import PromptServer
 
-from ..utils.video import extract_merge_spec, ffmpeg_concat, ffmpeg_concat_with_fade, ffmpeg_extract_audio, ffmpeg_replace_audio, ffmpeg_supports_xfade, normalize_video_images, tensor_crossfade_audio, tensor_crossfade_images, trim_video_with_ffmpeg, validate_merge_compatibility
+from ..utils.video import extract_merge_spec, ffmpeg_concat, ffmpeg_concat_with_fade, ffmpeg_extract_audio, ffmpeg_replace_audio, ffmpeg_supports_xfade, ffprobe_info, normalize_video_images, tensor_crossfade_audio, tensor_crossfade_images, trim_video_with_ffmpeg, validate_merge_compatibility, video_input_to_local_file
 
 logger = logging.getLogger(__name__)
 
 CATEGORY_VIDEO = "EasyUse/Video"
+TYPE_COMPARE_VIDEO = io.Custom(io_type="COMPARE_VIDEO")
 
 _OUTPUT_MODE_OPTIONS = [
     io.DynamicCombo.Option(
@@ -33,6 +34,7 @@ _OUTPUT_MODE_OPTIONS = [
         ],
     ),
     io.DynamicCombo.Option("preview_only", []),
+    io.DynamicCombo.Option("hide", []),
     io.DynamicCombo.Option("hide&save", []),
 ]
 
@@ -139,8 +141,8 @@ class EasySaveVideo(io.ComfyNode):
     ) -> io.NodeOutput:
         input_mode_key: str = input_mode.get("input_mode", "images+audio")
         output_mode_key: str = output_mode.get("output_mode", "save")
-        only_preview = output_mode_key == "preview_only"
-        hide_preview = output_mode_key == "hide&save"
+        hide_preview = output_mode_key in {"hide", "hide&save"}
+        write_temp = output_mode_key in {"preview_only", "hide"}
         save_metadata: bool = output_mode.get("save_metadata", False)
 
         if input_mode_key == "video":
@@ -171,7 +173,7 @@ class EasySaveVideo(io.ComfyNode):
 
         width, height = source_video.get_dimensions()
 
-        if only_preview:
+        if write_temp:
             output_dir = folder_paths.get_temp_directory()
             folder_type = io.FolderType.temp
         else:
@@ -185,7 +187,7 @@ class EasySaveVideo(io.ComfyNode):
         ext = Types.VideoContainer.get_extension(Types.VideoContainer.AUTO)
         file = f"{filename}_{counter:05}_.{ext}"
         full_path = os.path.join(full_output_folder, file)
-        prefix = "temp" if only_preview else "output"
+        prefix = "temp" if write_temp else "output"
         relative_path = f"{prefix}/{os.path.relpath(full_path, output_dir)}"
 
         metadata: dict | None = None
@@ -382,6 +384,168 @@ class EasyGetAudioFromVideo(io.ComfyNode):
         if audio is None:
             raise ValueError("The input VIDEO does not contain an audio track.")
         return io.NodeOutput(audio)
+
+
+def _compare_video_preview_from_path(path: str, label: str) -> dict:
+    ext = os.path.splitext(path)[1] or f".{Types.VideoContainer.get_extension(Types.VideoContainer.AUTO)}"
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        prefix=f"easy_compare_{label}_",
+        suffix=ext,
+        dir=folder_paths.get_temp_directory(),
+    )
+    os.close(tmp_fd)
+    try:
+        shutil.copy2(path, tmp_path)
+    except Exception as exc:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise RuntimeError(f"Failed to save {label} VIDEO preview.") from exc
+
+    return {
+        "filename": os.path.basename(tmp_path),
+        "subfolder": "",
+        "type": "temp",
+    }
+
+
+def _compare_video_local_path(video: Input.Video, label: str) -> "tuple[str, list[str]]":
+    try:
+        return video_input_to_local_file(
+            video,
+            suffix=f".{Types.VideoContainer.get_extension(Types.VideoContainer.AUTO)}",
+            save_kwargs={
+                "format": Types.VideoContainer.AUTO,
+                "codec": Types.VideoCodec.AUTO,
+            },
+        )
+    except Exception as exc:
+        raise RuntimeError(f"Failed to prepare {label} VIDEO for FFmpeg probing.") from exc
+
+
+def _compare_video_metadata(path: str, label: str) -> dict[str, object]:
+    info = ffprobe_info(path)
+    fps_fraction = info.get("fps_fraction")
+    fps = float(fps_fraction) if isinstance(fps_fraction, Fraction) else info.get("fps")
+    frame_count = info.get("frame_count")
+    duration = info.get("duration")
+
+    if not info.get("has_video"):
+        raise ValueError(f"{label} VIDEO does not contain a video stream.")
+    if not isinstance(duration, (int, float)) or duration <= 0:
+        raise ValueError(f"{label} VIDEO duration could not be detected by FFprobe.")
+    if not isinstance(frame_count, int) or frame_count <= 0:
+        if isinstance(fps, (int, float)) and fps > 0:
+            frame_count = max(1, round(float(duration) * float(fps)))
+        else:
+            frame_count = None
+
+    return {
+        "fps": float(fps) if isinstance(fps, (int, float)) and fps > 0 else None,
+        "fps_fraction": fps_fraction,
+        "frame_count": frame_count,
+        "duration": float(duration),
+    }
+
+
+def _probe_compare_video(video: Input.Video, label: str) -> "tuple[str, list[str], dict[str, object]]":
+    path, temp_files = _compare_video_local_path(video, label)
+    try:
+        metadata = _compare_video_metadata(path, label)
+        return path, temp_files, metadata
+    except Exception:
+        for temp_file in temp_files:
+            try:
+                os.unlink(temp_file)
+            except OSError:
+                pass
+        raise
+
+
+def _cleanup_compare_temp_files(temp_files: list[str]) -> None:
+    for temp_file in temp_files:
+        try:
+            os.unlink(temp_file)
+        except OSError:
+            pass
+
+
+class EasyCompareVideos(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="easy compareVideos",
+            display_name="Compare Videos",
+            category=CATEGORY_VIDEO,
+            description=(
+                "Preview source and output VIDEO inputs side by side with an interactive comparison slider. "
+                "When both inputs are provided, duration must match."
+            ),
+            inputs=[
+                io.Video.Input("source", optional=True),
+                io.Video.Input("output", optional=True),
+                TYPE_COMPARE_VIDEO.Input("compare_video"),
+            ],
+            outputs=[],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        source: Optional[Input.Video] = None,
+        output: Optional[Input.Video] = None,
+        compare_video: str = "{}",
+    ) -> io.NodeOutput:
+        _ = compare_video
+        if source is None and output is None:
+            raise ValueError("At least one VIDEO input is required.")
+
+        payload: dict[str, object] = {
+            "source": None,
+            "output": None,
+            "fps": None,
+            "frame_count": None,
+            "duration": None,
+        }
+
+        prepared: dict[str, tuple[str, list[str], dict[str, object]]] = {}
+        try:
+            if source is not None:
+                prepared["source"] = _probe_compare_video(source, "source")
+            if output is not None:
+                prepared["output"] = _probe_compare_video(output, "output")
+
+            source_metadata = prepared.get("source", (None, None, None))[2]
+            output_metadata = prepared.get("output", (None, None, None))[2]
+
+            if source_metadata is not None and output_metadata is not None:
+                source_duration = float(source_metadata["duration"])
+                output_duration = float(output_metadata["duration"])
+                if abs(source_duration - output_duration) > 0.05:
+                    raise ValueError(
+                        f"source and output durations must match: {source_duration:.6g}s != {output_duration:.6g}s"
+                    )
+
+                payload["fps"] = float(source_metadata["fps"]) if source_metadata["fps"] is not None else None
+                payload["frame_count"] = int(source_metadata["frame_count"]) if source_metadata["frame_count"] is not None else None
+                payload["duration"] = source_duration
+            else:
+                metadata = source_metadata if source_metadata is not None else output_metadata
+                if metadata is not None:
+                    payload["fps"] = float(metadata["fps"]) if metadata["fps"] is not None else None
+                    payload["frame_count"] = int(metadata["frame_count"]) if metadata["frame_count"] is not None else None
+                    payload["duration"] = float(metadata["duration"])
+
+            for label, (path, _temp_files, _metadata) in prepared.items():
+                payload[label] = _compare_video_preview_from_path(path, label)
+        finally:
+            for _path, temp_files, _metadata in prepared.values():
+                _cleanup_compare_temp_files(temp_files)
+
+        return io.NodeOutput(ui={"compare_videos": [payload]})
+
 
 class EasyMergeVideos(io.ComfyNode):
     @classmethod

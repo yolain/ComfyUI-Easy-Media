@@ -643,17 +643,42 @@ def trim_video_with_ffmpeg(
     )
 
 
-def _parse_video_stream(stream: dict) -> "tuple[int | None, int | None, float | None]":
-    """Extract width, height, and fps from a video stream dict."""
+def _parse_rate(value: str | None) -> Fraction | None:
+    if not value:
+        return None
+    if "/" in value:
+        num, denom = value.split("/", 1)
+        try:
+            numerator = int(num)
+            denominator = int(denom)
+        except ValueError:
+            return None
+        if denominator > 0 and numerator > 0:
+            return Fraction(numerator, denominator)
+        return None
+    try:
+        parsed = float(value)
+    except ValueError:
+        return None
+    if parsed <= 0:
+        return None
+    return Fraction(parsed).limit_denominator(100000)
+
+
+def _parse_video_stream(stream: dict) -> "tuple[int | None, int | None, float | None, Fraction | None, int | None]":
+    """Extract width, height, fps, and frame count from a video stream dict."""
     width = int(stream["width"]) if stream.get("width") else None
     height = int(stream["height"]) if stream.get("height") else None
-    fps = None
-    r_frame = stream.get("r_frame_rate", "0/1")
-    if "/" in r_frame:
-        num, denom = r_frame.split("/")
-        if int(denom) > 0:
-            fps = float(num) / float(denom)
-    return width, height, fps
+    fps_fraction = _parse_rate(stream.get("avg_frame_rate")) or _parse_rate(stream.get("r_frame_rate"))
+    fps = float(fps_fraction) if fps_fraction is not None else None
+    raw_frame_count = stream.get("nb_read_frames") or stream.get("nb_frames")
+    frame_count = None
+    if raw_frame_count not in (None, "N/A"):
+        try:
+            frame_count = int(raw_frame_count)
+        except (TypeError, ValueError):
+            frame_count = None
+    return width, height, fps, fps_fraction, frame_count
 
 
 def ffprobe_info(path: str) -> dict[str, Any]:
@@ -664,7 +689,7 @@ def ffprobe_info(path: str) -> dict[str, Any]:
     result = subprocess.run(
         [
             ffprobe, "-v", "error",
-            "-show_entries", "format=duration:stream=codec_type,width,height,r_frame_rate",
+            "-show_entries", "format=duration:stream=codec_type,width,height,r_frame_rate,avg_frame_rate,nb_frames,nb_read_frames",
             "-of", "json",
             path,
         ],
@@ -679,19 +704,26 @@ def ffprobe_info(path: str) -> dict[str, Any]:
         codec_types = {s.get("codec_type") for s in streams}
         duration_str = data.get("format", {}).get("duration")
 
-        width = height = fps = None
+        width = height = fps = frame_count = None
+        fps_fraction = None
         for stream in streams:
             if stream.get("codec_type") == "video":
-                width, height, fps = _parse_video_stream(stream)
+                width, height, fps, fps_fraction, frame_count = _parse_video_stream(stream)
                 break
 
+        duration = float(duration_str) if duration_str else None
+        if frame_count is None and duration is not None and fps:
+            frame_count = max(1, round(duration * fps))
+
         return {
-            "duration": float(duration_str) if duration_str else None,
+            "duration": duration,
             "has_video": "video" in codec_types,
             "has_audio": "audio" in codec_types,
             "width": width,
             "height": height,
             "fps": fps,
+            "fps_fraction": fps_fraction,
+            "frame_count": frame_count,
         }
     except Exception:
         return {}

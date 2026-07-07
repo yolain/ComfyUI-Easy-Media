@@ -14,7 +14,7 @@ declare global {
 
 const [
   { createReactWidget },
-  { TimelineWidget, MultiTrackWidget },
+  { TimelineWidget, MultiTrackWidget, CompareVideoWidget },
   { createDefaultTimelineData },
   { createDefaultTrackData },
 ] = await Promise.all([
@@ -26,6 +26,7 @@ const [
 
 const DEFAULT_TIMELINE_VALUE = JSON.stringify(createDefaultTimelineData())
 const DEFAULT_TRACK_DATA_VALUE = JSON.stringify(createDefaultTrackData())
+const DEFAULT_COMPARE_VIDEO_VALUE = JSON.stringify({})
 
 globalThis.comfyAPI!.app.app.registerExtension({
   name: 'Comfy.EasyMedia.widgets',
@@ -54,6 +55,14 @@ globalThis.comfyAPI!.app.app.registerExtension({
         defaultValue: DEFAULT_TRACK_DATA_VALUE,
         domWidgetOptions: {
           getMinHeight: () => 320,
+        },
+      }),
+      COMPARE_VIDEO: createReactWidget<Record<string, never>>(CompareVideoWidget, {
+        defaultValue: DEFAULT_COMPARE_VIDEO_VALUE,
+        domWidgetOptions: {
+          getMinHeight: () => 360,
+          hideOnZoom: false,
+          serialize: true,
         },
       }),
     }

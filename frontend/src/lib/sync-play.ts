@@ -2,6 +2,7 @@ import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 
 export const EASY_MEDIA_SYNC_PLAY_NODE_TYPES = new Set([
   'easy saveVideo',
+  'easy compareVideos',
   'easy multiTrackEditor',
 ])
 

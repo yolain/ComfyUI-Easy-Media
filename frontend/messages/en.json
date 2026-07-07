@@ -5,6 +5,20 @@
     "add": "Add",
     "delete": "Delete"
   },
+  "compareVideo": {
+    "empty": "Run the node to preview videos.",
+    "source": "Source",
+    "output": "Output",
+    "sourceOnly": "Source",
+    "outputOnly": "Output",
+    "compare": "Compare",
+    "play": "Play",
+    "pause": "Pause",
+    "seek": "Video time",
+    "mute": "Mute audio",
+    "unmute": "Unmute audio",
+    "volume": "Volume"
+  },
   "toolbar": {
     "frames": "Frames",
     "seconds": "Seconds",
