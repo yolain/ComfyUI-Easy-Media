@@ -1165,7 +1165,7 @@ export function PreviewArea({
           )}
           {!selectedAudio && !usesTaskImageOnlyPreview ? (
             <div className={selectedSubtitleStyle
-              ? 'min-w-0 h-full flex-1'
+              ? 'min-w-0 h-full flex-1 flex-col items-center justify-center flex'
               : `min-w-0 transition-all duration-300 ease-in-out ${activeTaskImages ? activeTaskVideoPanelClassName : 'h-full flex-[1_1_100%]'}`
             }>
               <VideoPreview
