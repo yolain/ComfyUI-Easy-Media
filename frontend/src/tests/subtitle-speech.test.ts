@@ -68,7 +68,7 @@ describe('subtitle speech audio', () => {
     vi.unstubAllGlobals()
   })
 
-  it('adds generated speech to an existing free audio track at the subtitle range', () => {
+  it('adds generated speech to an existing free audio track starting at the subtitle start', () => {
     const data = baseData([
       audioTrack('audio-a', [{
         id: 'existing',
@@ -82,7 +82,7 @@ describe('subtitle speech audio', () => {
     const updated = applySubtitleSpeechAudio(data, {
       subtitleSegmentId: 'subtitle-a',
       startFrame: 24,
-      endFrame: 48,
+      endFrame: 72,
       filePath: 'easy_media/hello.wav',
       duration: 1,
     })
@@ -96,16 +96,17 @@ describe('subtitle speech audio', () => {
         media_type: 'audio',
         source_type: 'output',
         file_path: 'easy_media/hello.wav',
+        duration: 1,
       },
     })
   })
 
-  it('creates a new audio track when existing audio overlaps the subtitle range', () => {
+  it('uses generated speech duration when checking for audio track overlap', () => {
     const data = baseData([
       audioTrack('audio-a', [{
-        id: 'overlap',
-        start_frame: 20,
-        end_frame: 30,
+        id: 'after-generated-speech',
+        start_frame: 60,
+        end_frame: 70,
         color: 'var(--highlight)',
         content: { media_type: 'audio' },
       }]),
@@ -114,9 +115,41 @@ describe('subtitle speech audio', () => {
     const updated = applySubtitleSpeechAudio(data, {
       subtitleSegmentId: 'subtitle-a',
       startFrame: 24,
-      endFrame: 48,
+      endFrame: 72,
       filePath: 'easy_media/hello.wav',
       duration: 1,
+    })
+
+    expect(updated.tracks).toHaveLength(1)
+    expect(updated.tracks[0].segments).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        start_frame: 24,
+        end_frame: 48,
+        content: expect.objectContaining({
+          source_type: 'output',
+          file_path: 'easy_media/hello.wav',
+        }),
+      }),
+    ]))
+  })
+
+  it('creates a new audio track when existing audio overlaps generated speech duration', () => {
+    const data = baseData([
+      audioTrack('audio-a', [{
+        id: 'overlap',
+        start_frame: 40,
+        end_frame: 50,
+        color: 'var(--highlight)',
+        content: { media_type: 'audio' },
+      }]),
+    ])
+
+    const updated = applySubtitleSpeechAudio(data, {
+      subtitleSegmentId: 'subtitle-a',
+      startFrame: 24,
+      endFrame: 72,
+      filePath: 'easy_media/hello.wav',
+      duration: 1.5,
     })
 
     expect(updated.tracks).toHaveLength(2)
@@ -124,7 +157,7 @@ describe('subtitle speech audio', () => {
       type: 'audio',
       segments: [expect.objectContaining({
         start_frame: 24,
-        end_frame: 48,
+        end_frame: 60,
         content: expect.objectContaining({
           source_type: 'output',
           file_path: 'easy_media/hello.wav',

@@ -3,6 +3,7 @@ import {
   calculateTotalLength,
   MULTITRACK_DEFAULT_VOLUME_DB,
   MULTITRACK_TRACK_COLORS,
+  secondsToFrame,
 } from '@/lib/multitrack-utils'
 import { uuid } from '@/lib/uuid'
 import type { MultiTrack, MultiTrackSegment, MultiTrackSourceType, TrackData } from '@/types/multitrack'
@@ -127,10 +128,14 @@ export function applySubtitleSpeechAudio(
   if (options.endFrame <= options.startFrame) return data
   const durationFrames = options.endFrame - options.startFrame
   const contentDuration = options.duration ?? durationFrames / data.frame_rate
+  const speechDurationFrames = options.duration && Number.isFinite(options.duration)
+    ? Math.max(1, secondsToFrame(options.duration, data.frame_rate))
+    : durationFrames
+  const endFrame = options.startFrame + speechDurationFrames
   const nextSegment: MultiTrackSegment = {
     id: uuid(),
     start_frame: options.startFrame,
-    end_frame: options.endFrame,
+    end_frame: endFrame,
     color: MULTITRACK_TRACK_COLORS.audio,
     content: {
       media_type: 'audio',
@@ -147,7 +152,7 @@ export function applySubtitleSpeechAudio(
   const tracks = data.tracks.map((track) => {
     if (track.type !== 'audio' || inserted) return track
     const overlaps = track.segments.some((segment) => (
-      rangesOverlap(options.startFrame, options.endFrame, segment.start_frame, segment.end_frame)
+      rangesOverlap(options.startFrame, endFrame, segment.start_frame, segment.end_frame)
     ))
     if (overlaps) return track
     inserted = true
