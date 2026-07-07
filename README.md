@@ -78,6 +78,9 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 
 ![SubtitleToVideo](https://github.com/user-attachments/assets/58f90eb7-d671-437d-8adf-d8a04a3e261e)
 
+#### Compare Videos
+
+![CompareVideos](https://github.com/user-attachments/assets/3bad558c-c5f4-411d-ba4c-b2edee9b9f11)
 
 ### 🎞️ Timeline Editor
 
@@ -170,6 +173,7 @@ bun run build:release
 | easy makeAudioList | Combine multiple audio inputs into an audio list |
 | easy audioMerge | Merge or concatenate up to six audio inputs |
 | easy makeVideoList | Combine multiple video inputs into a video list |
+| easy compareVideos | Preview source and output VIDEO inputs side by side with an interactive comparison slider |
 | easy imageIndexesToIntList | Convert comma-separated image index string to integer list |
 | easy saveVideo | Save images and optional audio as video file |
 | easy getAudioFromVideo | Extract audio from a VIDEO input |

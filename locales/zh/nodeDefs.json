@@ -1,4 +1,22 @@
 {
+  "easy compareVideos": {
+    "display_name": "视频对比",
+    "description": "使用交互式对比滑块左右并排预览源视频和输出视频。当两个输入都连接时，时长必须匹配。",
+    "inputs": {
+      "source": {
+        "name": "源视频",
+        "tooltip": "源视频输入（可选）。"
+      },
+      "output": {
+        "name": "输出视频",
+        "tooltip": "输出视频输入（可选）。"
+      },
+      "compare_video": {
+        "name": "对比视频数据",
+        "tooltip": "对比视频的内部数据。"
+      }
+    }
+  },
   "easy saveVideo": {
     "display_name": "保存视频",
     "description": "将图像和可选音频保存为视频文件，同时输出 VIDEO 供下游节点使用及完整文件路径。",

@@ -79,7 +79,9 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 ![SubtitleToVideo](https://github.com/user-attachments/assets/58f90eb7-d671-437d-8adf-d8a04a3e261e)
 
+#### 对比视频
 
+![CompareVideos](https://github.com/user-attachments/assets/3bad558c-c5f4-411d-ba4c-b2edee9b9f11)
 
 ### 🎞️ 媒体时间线编辑器 Timeline Editor
 
