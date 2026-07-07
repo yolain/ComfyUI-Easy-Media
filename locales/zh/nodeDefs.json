@@ -424,6 +424,33 @@
       }
     }
   },
+  "easy audioMerge": {
+    "display_name": "合并音频",
+    "description": "合并或拼接最多 6 个音频输入，可展开音频列表并自动忽略空项。",
+    "inputs": {
+      "audios": {
+        "name": "音频",
+        "tooltip": "要合并或拼接的音频输入。最多可连接 6 个来源。"
+      },
+      "merge_method": {
+        "name": "合并方式",
+        "tooltip": "使用 add/mean/subtract/multiply 叠加音频，或使用 after/before 拼接音频。",
+        "options": {
+          "add": "相加",
+          "mean": "平均",
+          "subtract": "相减",
+          "multiply": "相乘",
+          "after": "追加到后面",
+          "before": "插入到前面"
+        }
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "音频"
+      }
+    }
+  },
   "easy makeVideoList": {
     "display_name": "创建视频列表",
     "description": "将最多 10 个可选视频输入组合成视频列表。",

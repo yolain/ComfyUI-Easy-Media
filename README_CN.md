@@ -174,6 +174,7 @@ bun run build:release
 | easy timelineSegmentCount | 输出时间线中的片段总数 |
 | easy makeImageList | 将多个图片输入组合成图片列表 |
 | easy makeAudioList | 将多个音频输入组合成音频列表 |
+| easy audioMerge | 合并或拼接最多 6 个音频输入 |
 | easy makeVideoList | 将多个视频输入组合成视频列表 |
 | easy imageIndexesToIntList | 将逗号分隔的图片索引字符串转换为整数列表 |
 | easy saveVideo | 将图片和可选音频保存为视频文件 |

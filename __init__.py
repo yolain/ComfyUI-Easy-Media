@@ -62,6 +62,7 @@ class EasyMediaExtension(ComfyExtension):
             MakeImageList,
             MakeAudioList,
             MakeVideoList,
+            EasyAudioMerge,
             # Wan
             BerniniModelPatch,
             # LTXV
