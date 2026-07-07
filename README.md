@@ -12,7 +12,7 @@ A ComfyUI custom node package for streamlined media loading and video pipeline a
 [![][github-forks-shield]][github-forks-link]
 [![][github-license-shield]][github-license-link]
 
-<img src="https://github.com/user-attachments/assets/06b20c46-e141-46cc-8a20-31937ec4bb3a" style="width:100%">
+<img src="https://github.com/user-attachments/assets/493947f1-3fff-4503-b2d3-408591b7597f" style="width:100%">
 </div>
 
 ## 📦 Installation
@@ -60,9 +60,23 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 | Video Editing | bernini v2v, bernini vi2v, wan animate, ltx video replace, ltx iclora edit/inpaint/outpaint | Video track segments + task track segments |
 | Video Reference | wan scail2, wan animate, ltx iclora guide | Video track segments + task track segments |
 | Video Dubbing | wan infinititalk, longcat avatar, ltx ai2v | Task track segments + audio track segments |
-| Video Subtitles | Not yet developed | - |
+| Video Subtitles | - | Task track segments + subtitle track segments |
 
 - Only the most common open-source model generation types are listed; theoretically any video model pipeline can use the multi-track editor as a preprocessing tool
+
+#### Optional Models
+
+| Scenario | Description | Download | Local Path | Prerequisites 
+| - | - | - | - | - | 
+| **Video Subtitles** | Audio/video recognition to generate subtitles  | [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) <br> [Qwen3-ForcedAligner](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B) | models/Qwen3-ASR/ | `pip install qwen-asr torchaudio` |
+| **Subtitle Narration** | Convert subtitles to speech voiceover | [VoxCPM2](https://huggingface.co/openbmb/VoxCPM2) | models/voxcpm/ | `pip install voxcpm` |
+| **Shot Detection** | Intelligently segment video shots | [OmniShotCut](https://huggingface.co/uva-cv-lab/OmniShotCut/resolve/main/OmniShotCut_ckpt.pth) | models/checkpoints | - |
+
+> **Note:** Some models support automatic download via the built-in Easy-Media model download interface. Model files will be placed in the `ComfyUI/models/` directory.
+
+#### Subtitle To Video
+
+![SubtitleToVideo](https://github.com/user-attachments/assets/58f90eb7-d671-437d-8adf-d8a04a3e261e)
 
 
 ### 🎞️ Timeline Editor
@@ -176,6 +190,7 @@ bun run build:release
 
 - [OmniShotCut](https://github.com/UVA-Computer-Vision-Lab/OmniShotCut)
 - [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B)
+- [VoxCPM2](https://github.com/OpenBMB/VoxCPM)
 
 ## Source of Inspiration
 

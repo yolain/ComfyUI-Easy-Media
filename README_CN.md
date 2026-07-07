@@ -12,7 +12,7 @@
 [![][github-forks-shield]][github-forks-link]
 [![][github-license-shield]][github-license-link]
 
-<img src="https://github.com/user-attachments/assets/06b20c46-e141-46cc-8a20-31937ec4bb3a" style="width:100%">
+<img src="https://github.com/user-attachments/assets/e12f219c-b4c7-47ce-96fb-23103c621720" style="width:100%">
 </div>
 
 
@@ -43,7 +43,7 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 | 任务轨道    | 支持t2v、i2v、r2v、v2v等多种任务类型定义                |
 | 视频轨道    | 导入并管理视频片段，支持多段视频拼接、智能分割镜头           |
 | 音频轨道    | 导入并管理音频片段，支持多段音频拼接                   |
-| 字幕轨道    | 添加会从音视频识别            |
+| 字幕轨道    | 添加或从音视频中识别            |
 
 - 任务片段是该节点的核心，工作流可根据任务轨道中片段的数量，设计自动循环执行
 - 视频轨道添加视频片段时也将自动添加对应时长的任务片段
@@ -61,12 +61,27 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 | 视频参考 | wan scail2、wan animate、ltx iclora guide | 视频轨道片段及任务轨道片段必要
 | 视频配音 | wan infinititalk、longcat avatar、ltx ai2v | 任务轨道片段和音频轨道片段必要
 | 视频字幕 | - | 任务轨道有片段即可
+| 字幕朗读 | - | 任务轨道与字幕轨道有片段即可
 
 - 仅统计了热门开源模型常见的生成类型，理论上任何视频模型流程都可以通过多轨编辑器作为前置处理工具
 
+#### 额外模型（可选）
+
+| 场景 | 功能说明 | 下载地址 | 本地路径 | 前置依赖
+|------|----------|----------|----------|-------------|
+| **视频字幕** | 音视频识别生成字幕 | [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) <br>[Qwen3-ForcedAligner](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B) | models/Qwen3-ASR/ | `pip install qwen-asr torchaudio` |
+| **字幕朗读** | 字幕转语音配音 | [VoxCPM2](https://huggingface.co/openbmb/VoxCPM2) | models/voxcpm/ |  `pip install voxcpm` |
+| **镜头检测** | 智能分割视频镜头 | [OmniShotCut](https://huggingface.co/uva-cv-lab/OmniShotCut/resolve/main/OmniShotCut_ckpt.pth) | models/checkpoints | - |
+
+> **提示：** 部分模型支持通过 Easy-Media 内置的模型下载接口自动下载，模型文件将放置在 `ComfyUI/models/` 目录下。
+
+#### 字幕烧录到视频
+
+![SubtitleToVideo](https://github.com/user-attachments/assets/58f90eb7-d671-437d-8adf-d8a04a3e261e)
+
+
 
 ### 🎞️ 媒体时间线编辑器 Timeline Editor
-
 
 ![timelineEditor](https://github.com/user-attachments/assets/d7c9e894-6e7e-488c-90fb-d3aa8310419d)
 
@@ -181,6 +196,7 @@ bun run build:release
 
 - [OmniShotCut](https://github.com/UVA-Computer-Vision-Lab/OmniShotCut)
 - [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B)
+- [VoxCPM2](https://github.com/OpenBMB/VoxCPM)
 
 ## Source of Inspiration
 
