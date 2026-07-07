@@ -46,6 +46,7 @@ interface TrackAreaProps {
   onClearSelection: () => void
   onDeleteSegment: (segmentId: string) => void
   onDeleteTrack: (trackId: string) => void
+  onTrackVisibilityChange?: (trackId: string, visible: boolean) => void
   onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo'>>) => void
   onDistributeTaskSegments: (trackId: string) => void
   onCloneTaskSegment: (trackId: string, segmentId: string) => void
@@ -154,6 +155,7 @@ export function TrackArea({
   onClearSelection,
   onDeleteSegment,
   onDeleteTrack,
+  onTrackVisibilityChange = () => {},
   onTrackAudioSettingsChange,
   onDistributeTaskSegments,
   onCloneTaskSegment,
@@ -544,6 +546,7 @@ export function TrackArea({
               onAddSubtitleSegment={onAddSubtitleSegment}
               onDeleteSegment={onDeleteSegment}
               onDeleteTrack={onDeleteTrack}
+              onTrackVisibilityChange={onTrackVisibilityChange}
               onEditSubtitleSegment={onEditSubtitleSegment}
               onResizeSegment={onResizeSegment}
               onResizeSegmentPreview={onResizeSegmentPreview}

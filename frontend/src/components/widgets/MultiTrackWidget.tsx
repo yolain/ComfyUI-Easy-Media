@@ -447,6 +447,17 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     })
   }
 
+  function handleTrackVisibilityChange(trackId: string, visible: boolean) {
+    commitNormalizedTrackChange({
+      ...data,
+      tracks: data.tracks.map((track) => (
+        track.id === trackId && track.type === 'subtitle'
+          ? { ...track, visible }
+          : track
+      )),
+    })
+  }
+
   async function handleReplaceVideo(
     trackId: string,
     segmentId: string,
@@ -981,6 +992,39 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     commitNormalizedTrackChange(nextData)
   }
 
+  function getTrimTargetSegmentIds(trimFrame: number): string[] {
+    const candidateSegmentIds = selectedSegmentIds.size > 0
+      ? selectedSegmentIds
+      : new Set(data.tracks.flatMap((track) => track.segments.map((segment) => segment.id)))
+
+    return data.tracks.flatMap((track) => (
+      track.segments
+        .filter((segment) => (
+          candidateSegmentIds.has(segment.id) &&
+          trimFrame > segment.start_frame &&
+          trimFrame < segment.end_frame
+        ))
+        .map((segment) => segment.id)
+    ))
+  }
+
+  function canTrimAtCurrentTime(): boolean {
+    const trimFrame = snapTimeToFrame(currentTime, data.frame_rate)
+    return getTrimTargetSegmentIds(trimFrame).length > 0
+  }
+
+  function handleTrimAtCurrentTime(edge: 'start' | 'end') {
+    const trimFrame = snapTimeToFrame(currentTime, data.frame_rate)
+    const targetSegmentIds = getTrimTargetSegmentIds(trimFrame)
+    if (targetSegmentIds.length === 0) return
+
+    const nextData = targetSegmentIds.reduce(
+      (currentData, segmentId) => buildResizedTrackData(currentData, segmentId, edge, trimFrame),
+      data,
+    )
+    commitNormalizedTrackChange(nextData)
+  }
+
   async function handleDownloadMissingModel() {
     if (!missingModel || isDownloadingModel) return
     setIsDownloadingModel(true)
@@ -1058,6 +1102,11 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
               if (selectedSegmentId) handleDeleteSegment(selectedSegmentId)
             }}
             onCutAtCurrentTime={handleCutAtCurrentTime}
+            canTrimCenter={canTrimAtCurrentTime()}
+            canTrimLeft={canTrimAtCurrentTime()}
+            canTrimRight={canTrimAtCurrentTime()}
+            onTrimLeftAtCurrentTime={() => handleTrimAtCurrentTime('start')}
+            onTrimRightAtCurrentTime={() => handleTrimAtCurrentTime('end')}
             canUndo={canUndo}
             canRedo={canRedo}
             onUndo={undoTrackChange}
@@ -1099,6 +1148,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     onClearSelection={handleClearSelection}
                     onDeleteSegment={handleDeleteSegment}
                     onDeleteTrack={handleDeleteTrack}
+                    onTrackVisibilityChange={handleTrackVisibilityChange}
                     onTrackAudioSettingsChange={handleTrackAudioSettingsChange}
                     onDistributeTaskSegments={handleDistributeTaskSegments}
                     onCloneTaskSegment={handleCloneTaskSegment}

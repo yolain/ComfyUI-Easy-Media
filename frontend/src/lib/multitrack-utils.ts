@@ -1455,6 +1455,7 @@ export function normalizeTrackData(raw: LegacyTrackData): TrackData {
         ...normalizedTrack,
         ...audioSettings,
         type: track.type,
+        visible: track.type === 'subtitle' ? track.visible !== false : track.visible,
         segments,
       } as MultiTrack
     }

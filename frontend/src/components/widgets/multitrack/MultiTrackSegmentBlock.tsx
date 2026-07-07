@@ -48,6 +48,7 @@ interface MultiTrackSegmentBlockProps {
   getDragPreviewStart?: (segmentId: string, nextStartTime: number, clientY: number) => number
   onDragPreviewEnd?: () => void
   onDoubleClick?: (segmentId: string, event: React.MouseEvent) => void
+  dimmed?: boolean
 }
 
 function segmentRect(segment: MultiTrackSegment, totalLength: number, areaWidth: number) {
@@ -83,6 +84,7 @@ export function MultiTrackSegmentBlock({
   getDragPreviewStart,
   onDragPreviewEnd,
   onDoubleClick,
+  dimmed = false,
 }: Readonly<MultiTrackSegmentBlockProps>) {
   const t = useT()
   const didDragRef = useRef(false)
@@ -326,7 +328,7 @@ export function MultiTrackSegmentBlock({
           role="button"
           data-multitrack-segment=""
           tabIndex={0}
-          className="absolute top-1 bottom-1 flex items-center overflow-hidden rounded select-none active:opacity-70"
+          className={`absolute top-1 bottom-1 flex items-center overflow-hidden rounded select-none active:opacity-70 ${dimmed ? 'opacity-50' : ''}`}
           style={blockStyle}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}

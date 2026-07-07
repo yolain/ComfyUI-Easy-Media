@@ -1,4 +1,4 @@
-import { Captions, Plus, Trash2 } from 'lucide-react'
+import { Captions, Eye, EyeOff, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useT } from '@/lib/i18n'
@@ -17,6 +17,7 @@ interface SubtitleTrackProps {
   onAddSubtitleSegment: (trackId: string) => void
   onDeleteSegment: (segmentId: string) => void
   onDeleteTrack: (trackId: string) => void
+  onTrackVisibilityChange?: (trackId: string, visible: boolean) => void
   onEditSubtitleSegment: (segmentId: string) => void
   onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
   onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
@@ -37,6 +38,7 @@ export function SubtitleTrack({
   onAddSubtitleSegment,
   onDeleteSegment,
   onDeleteTrack,
+  onTrackVisibilityChange = () => {},
   onEditSubtitleSegment,
   onResizeSegment,
   onResizeSegmentPreview,
@@ -48,6 +50,7 @@ export function SubtitleTrack({
   const t = useT()
   const lastEnd = track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0)
   const actionLeft = track.segments.length === 0 ? 6 : (lastEnd / Math.max(totalLength, 1)) * width + 6
+  const visible = track.visible !== false
 
   return (
     <div className="relative flex h-[30px] border-b border-border">
@@ -77,6 +80,7 @@ export function SubtitleTrack({
             onDragPreviewChange={onDragPreviewChange}
             getDragPreviewStart={getDragPreviewStart}
             onDragPreviewEnd={onDragPreviewEnd}
+            dimmed={!visible}
             onDoubleClick={() => {
               onSelectSegment(segment.id)
               onEditSubtitleSegment(segment.id)
@@ -102,20 +106,43 @@ export function SubtitleTrack({
             </TooltipTrigger>
             <TooltipContent>{t('multitrack.addSubtitleSegment')}</TooltipContent>
           </Tooltip>
+          {track.segments.length === 0 ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 cursor-pointer text-destructive"
+                  aria-label={t('multitrack.deleteTrack', { name: track.name })}
+                  onClick={() => onDeleteTrack(track.id)}
+                >
+                  <Trash2 className="h-2.5 w-2.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t('multitrack.deleteTrack', { name: track.name })}</TooltipContent>
+            </Tooltip>
+          ) : null}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 type="button"
-                variant="ghost"
+                variant={visible ? 'ghost' : 'outline'}
                 size="icon"
-                className="h-5 w-5 cursor-pointer text-destructive"
-                aria-label={t('multitrack.deleteTrack', { name: track.name })}
-                onClick={() => onDeleteTrack(track.id)}
+                className={`h-5 w-5 cursor-pointer ${visible ? 'text-muted-foreground' : 'text-foreground'}`}
+                aria-label={visible ? t('multitrack.hideSubtitleTrack', { name: track.name }) : t('multitrack.showSubtitleTrack', { name: track.name })}
+                aria-pressed={!visible}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onTrackVisibilityChange(track.id, !visible)
+                }}
               >
-                <Trash2 className="h-2.5 w-2.5" />
+                {visible ? <EyeOff className="h-2.5 w-2.5" /> : <Eye className="h-2.5 w-2.5" />}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{t('multitrack.deleteTrack', { name: track.name })}</TooltipContent>
+            <TooltipContent>
+              {visible ? t('multitrack.hideSubtitleTrack', { name: track.name }) : t('multitrack.showSubtitleTrack', { name: track.name })}
+            </TooltipContent>
           </Tooltip>
         </div>
       </div>

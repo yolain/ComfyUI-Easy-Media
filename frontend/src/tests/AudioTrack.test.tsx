@@ -92,7 +92,7 @@ describe('AudioTrack', () => {
     )
   })
 
-  it('keeps add and delete controls separated when an audio segment ends at the track edge', () => {
+  it('hides the delete track control when an audio track has segments', () => {
     const track: MultiTrack = {
       id: 'audio-track',
       name: 'Audio 0',
@@ -117,10 +117,9 @@ describe('AudioTrack', () => {
     renderAudioTrack(track)
 
     const addButton = screen.getByRole('button', { name: 'Add audio' })
-    const deleteButton = screen.getByRole('button', { name: 'Delete Audio 0' })
     const actionGroup = addButton.parentElement
 
-    expect(actionGroup).toBe(deleteButton.parentElement)
+    expect(screen.queryByRole('button', { name: 'Delete Audio 0' })).toBeNull()
     expect(actionGroup?.classList.contains('flex')).toBe(true)
     expect(actionGroup?.classList.contains('gap-1')).toBe(true)
     expect(actionGroup?.style.left).toBe('486px')

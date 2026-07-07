@@ -628,6 +628,8 @@ def _build_tracks_info_and_media_outputs(
         for segment_index, segment in enumerate(track.get("segments", [])):
             if not isinstance(segment, dict):
                 continue
+            if track_type == "subtitle" and track.get("visible") is False:
+                continue
 
             content = segment.get("content", {})
             if not isinstance(content, dict):

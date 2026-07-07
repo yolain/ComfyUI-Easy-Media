@@ -75,6 +75,7 @@ export interface MultiTrack {
   color: string
   muted: boolean
   solo?: boolean
+  visible?: boolean
   volume_db?: number
   locked: boolean
   media_index?: number

@@ -286,14 +286,14 @@ describe('TrackArea track controls', () => {
     const addControls = addButton.parentElement
     expect(addControls?.className).toContain('flex-row')
     expect((addControls as HTMLElement).style.left).toBe('86.80000000000001px')
-    const deleteButton = screen.getByRole('button', { name: 'Delete Subtitle 1' })
-    expect(deleteButton.parentElement).toBe(addControls)
+    const visibilityButton = screen.getByRole('button', { name: 'Hide Subtitle 1' })
+    expect(screen.queryByRole('button', { name: 'Delete Subtitle 1' })).toBeNull()
+    expect(visibilityButton.parentElement).toBe(addControls)
 
     fireEvent.click(addButton)
     expect(onAddSubtitleSegment).toHaveBeenCalledWith('subtitle-track')
 
-    fireEvent.click(deleteButton)
-    expect(onDeleteTrack).toHaveBeenCalledWith('subtitle-track')
+    expect(onDeleteTrack).not.toHaveBeenCalled()
   })
 
   it('requests preview subtitle editing after double clicking a track subtitle segment', () => {

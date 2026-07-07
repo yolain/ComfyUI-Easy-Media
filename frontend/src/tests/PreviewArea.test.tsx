@@ -16,10 +16,6 @@ vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
   ),
 }))
 
-vi.mock('@/components/widgets/timeline/AudioWaveform', () => ({
-  AudioWaveform: () => <canvas data-testid="audio-waveform" />,
-}))
-
 vi.mock('@/components/widgets/panorama/PanoramaViewerOverlay', () => ({
   PanoramaViewerOverlay: ({ onPanoramaViewChange, onExit }: {
     onPanoramaViewChange: (view: unknown) => void
@@ -894,11 +890,8 @@ describe('PreviewArea', () => {
       />,
     )
 
-    const waveform = screen.getByTestId('selected-audio-waveform')
-    expect(waveform.className).toContain('h-20')
-    expect(waveform.className).toContain('w-full')
+    expect(screen.queryByTestId('selected-audio-waveform')).toBeNull()
     expect(screen.getByRole('button', { name: 'Audio settings' })).not.toBeNull()
-    expect(screen.queryByTestId('multitrack-video-preview')).toBeNull()
   })
 
   it('overlays active subtitles on the video preview frame', () => {

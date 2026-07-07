@@ -20,7 +20,6 @@ import {
   type SelectedMultiTrackSegment,
 } from '@/lib/multitrack-utils'
 import { useT } from '@/lib/i18n'
-import { AudioWaveform } from '@/components/widgets/timeline/AudioWaveform'
 import { mediaContentToViewUrl } from '@/lib/media-url'
 import {
   DEFAULT_SUBTITLE_SPEECH_SETTINGS,
@@ -177,7 +176,7 @@ function getActiveTaskPrompt(data: TrackData, currentTime: number): ActiveTaskPr
 function getActiveSubtitleSegments(data: TrackData, currentTime: number): MultiTrackSegment[] {
   const currentFrame = snapTimeToFrame(currentTime, data.frame_rate)
   return data.tracks.flatMap((track) => {
-    if (track.type !== 'subtitle') return []
+    if (track.type !== 'subtitle' || track.visible === false) return []
     return track.segments.filter((item) => (
       currentFrame >= item.start_frame && currentFrame < item.end_frame
     ))
@@ -278,21 +277,22 @@ export function PreviewArea({
       slot_name: firstVideoSegment.content.slot_name,
     })
   }, [videoSegments])
-  const activeVideo = selectedSegment?.trackType === 'task' || selectedSegment?.trackType === 'audio'
+  const previewSelectedSegment = selectedSegment?.trackType === 'audio' ? null : selectedSegment
+  const activeVideo = previewSelectedSegment?.trackType === 'task'
     ? null
-    : getActivePreviewVideoSegment(data, currentTime, selectedSegment?.trackType === 'video' ? selectedSegment.segment.id : null)
-  const activeAudioSources = getActivePreviewAudioSources(data, currentTime, selectedSegment)
-  const activeTaskImages = selectedSegment === null ? getActiveTaskImages(data, currentTime) : null
-  const activeTaskPrompt = selectedSegment === null ? getActiveTaskPrompt(data, currentTime) : null
+    : getActivePreviewVideoSegment(data, currentTime, previewSelectedSegment?.trackType === 'video' ? previewSelectedSegment.segment.id : null)
+  const activeAudioSources = getActivePreviewAudioSources(data, currentTime, previewSelectedSegment)
+  const activeTaskImages = previewSelectedSegment === null ? getActiveTaskImages(data, currentTime) : null
+  const activeTaskPrompt = previewSelectedSegment === null ? getActiveTaskPrompt(data, currentTime) : null
   const activeSubtitleSegments = useMemo(() => {
-    if (selectedSegment?.trackType === 'task' || selectedSegment?.trackType === 'audio') return []
+    if (previewSelectedSegment?.trackType === 'task') return []
     const segments = getActiveSubtitleSegments(data, currentTime)
-    if (selectedSegment?.trackType !== 'subtitle') return segments
-    const selectedSubtitle = selectedSegment.segment
+    if (previewSelectedSegment?.trackType !== 'subtitle') return segments
+    const selectedSubtitle = previewSelectedSegment.segment
     const selectedIndex = segments.findIndex((segment) => segment.id === selectedSubtitle.id)
     if (selectedIndex < 0) return [...segments, selectedSubtitle]
     return segments.map((segment, index) => index === selectedIndex ? selectedSubtitle : segment)
-  }, [currentTime, data, selectedSegment])
+  }, [currentTime, data, previewSelectedSegment])
   const resolution = parseMultiTrackPreviewResolution(resolutionInput, firstVideoMetadata)
   const selectedMediaDuration = selectedSegment?.trackType === 'video' || selectedSegment?.trackType === 'audio'
     ? frameToSeconds(segmentDuration(selectedSegment.segment), data.frame_rate)
@@ -303,7 +303,6 @@ export function PreviewArea({
         ...selectedSegment.segment.content.subtitle_style,
       })
     : null
-  const selectedAudio = selectedSegment?.trackType === 'audio' ? selectedSegment.segment : null
   const selectedTaskImages = selectedSegment?.trackType === 'task'
     ? selectedSegment.segment.content.images ?? []
     : []
@@ -315,7 +314,7 @@ export function PreviewArea({
   const activeTaskPreviewImage = activeTaskImages?.images.find(({ image }) => image.id === activeTaskPreviewImageId)
     ?? activeTaskImages?.images[0]
     ?? null
-  const usesTaskImageOnlyPreview = Boolean(activeTaskImages && !selectedAudio && !activeVideo)
+  const usesTaskImageOnlyPreview = Boolean(activeTaskImages && !activeVideo)
   const activeTaskImagePanelClassName = previewLayoutMode === 'image-large'
     ? 'w-32 flex-[0_0_8rem]'
     : 'w-20 flex-[0_0_5rem]'
@@ -324,7 +323,7 @@ export function PreviewArea({
     : 'h-full flex-none'
   const previewMediaGroupClassName = selectedSubtitleStyle
     ? 'mx-auto flex h-full min-h-24 w-full max-w-full items-stretch justify-center gap-0'
-    : usesTaskImageOnlyPreview || selectedAudio
+    : usesTaskImageOnlyPreview
     ? 'mx-auto flex h-full min-h-24 w-full max-w-full items-center justify-center gap-3'
     : 'mx-auto flex h-full min-h-24 w-fit max-w-full items-center justify-center gap-3'
 
@@ -1094,20 +1093,7 @@ export function PreviewArea({
       ) : null}
       <div className="flex h-full min-h-24 w-full flex-col items-center justify-center gap-0.5">
         <div className={previewMediaGroupClassName}>
-          {selectedAudio ? (
-            <div data-testid="selected-audio-waveform" className="h-20 max-h-full w-full overflow-hidden px-2">
-              <AudioWaveform
-                content={{
-                  source_type: selectedAudio.content.source_type ?? 'input',
-                  file_path: selectedAudio.content.file_path,
-                  local_path: selectedAudio.content.local_path,
-                  url: selectedAudio.content.url,
-                  slot_name: selectedAudio.content.slot_name,
-                }}
-                className="h-full w-full"
-              />
-            </div>
-          ) : usesTaskImageOnlyPreview && activeTaskImages ? (
+          {usesTaskImageOnlyPreview && activeTaskImages ? (
             <div
               data-testid="task-preview-images"
               className="flex h-full min-h-0 w-full max-w-xl flex-col bg-black"
@@ -1163,7 +1149,7 @@ export function PreviewArea({
               </div>
             </div>
           )}
-          {!selectedAudio && !usesTaskImageOnlyPreview ? (
+          {!usesTaskImageOnlyPreview ? (
             <div className={selectedSubtitleStyle
               ? 'min-w-0 h-full flex-1 flex-col items-center justify-center flex'
               : `min-w-0 transition-all duration-300 ease-in-out ${activeTaskImages ? activeTaskVideoPanelClassName : 'h-full flex-[1_1_100%]'}`

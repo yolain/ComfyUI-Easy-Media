@@ -267,7 +267,12 @@ def collect_multitrack_subtitle_segments(tracks_info: dict) -> list[MultitrackSu
 
     segments: list[MultitrackSubtitleSegment] = []
     for track in tracks:
-        if not isinstance(track, dict) or track.get("type") != "subtitle" or track.get("muted") is True:
+        if (
+            not isinstance(track, dict)
+            or track.get("type") != "subtitle"
+            or track.get("muted") is True
+            or track.get("visible") is False
+        ):
             continue
         for segment in track.get("segments", []):
             if not isinstance(segment, dict):

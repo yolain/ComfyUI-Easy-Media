@@ -138,21 +138,23 @@ export function AudioTrack({
               />
             </PopoverContent>
           </Popover>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-5 w-5 cursor-pointer text-destructive"
-                aria-label={t('multitrack.deleteTrack', { name: track.name })}
-                onClick={() => onDeleteTrack(track.id)}
-              >
-                <Trash2 className="h-2.5 w-2.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t('multitrack.deleteTrack', { name: track.name })}</TooltipContent>
-          </Tooltip>
+          {track.segments.length === 0 ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 cursor-pointer text-destructive"
+                  aria-label={t('multitrack.deleteTrack', { name: track.name })}
+                  onClick={() => onDeleteTrack(track.id)}
+                >
+                  <Trash2 className="h-2.5 w-2.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t('multitrack.deleteTrack', { name: track.name })}</TooltipContent>
+            </Tooltip>
+          ) : null}
         </div>
       </div>
     </div>

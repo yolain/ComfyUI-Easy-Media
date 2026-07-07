@@ -233,11 +233,28 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/MultiTrackToolbar', () => ({
-  MultiTrackToolbar: ({ onToggleTimeline, canDelete, onDeleteSelected, onCutAtCurrentTime, canUndo, canRedo, onUndo, onRedo }: {
+  MultiTrackToolbar: ({
+    onToggleTimeline,
+    canDelete,
+    onDeleteSelected,
+    onCutAtCurrentTime,
+    canTrimLeft,
+    canTrimRight,
+    onTrimLeftAtCurrentTime,
+    onTrimRightAtCurrentTime,
+    canUndo,
+    canRedo,
+    onUndo,
+    onRedo,
+  }: {
     onToggleTimeline: () => void
     canDelete: boolean
     onDeleteSelected: () => void
     onCutAtCurrentTime: () => void
+    canTrimLeft: boolean
+    canTrimRight: boolean
+    onTrimLeftAtCurrentTime: () => void
+    onTrimRightAtCurrentTime: () => void
     canUndo: boolean
     canRedo: boolean
     onUndo: () => void
@@ -255,6 +272,8 @@ vi.mock('@/components/widgets/multitrack/MultiTrackToolbar', () => ({
       >
         cut current time
       </button>
+      <button type="button" disabled={!canTrimLeft} onClick={onTrimLeftAtCurrentTime}>trim left current time</button>
+      <button type="button" disabled={!canTrimRight} onClick={onTrimRightAtCurrentTime}>trim right current time</button>
       <button type="button" onClick={onUndo} disabled={!canUndo}>undo history</button>
       <button type="button" onClick={onRedo} disabled={!canRedo}>redo history</button>
     </div>
@@ -1157,6 +1176,78 @@ describe('MultiTrackWidget', () => {
     expect(updated.tracks[0].segments).toHaveLength(1)
     expect(updated.tracks[1].segments).toHaveLength(2)
     expect(updated.tracks[1].segments.map((segment) => [segment.start_frame, segment.end_frame])).toEqual([[0, 5], [5, 10]])
+  })
+
+  it.each([
+    ['trim left current time', 'start_frame', 5],
+    ['trim right current time', 'end_frame', 5],
+  ] as const)('trims all active track segments from %s when no segment is selected', (buttonName, frameKey, expectedFrame) => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [{
+      id: 'task-active',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[0].color,
+      content: { media_type: 'none', task_mode: 'default' },
+    }]
+    data.tracks[1].segments = [{
+      id: 'video-active',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[1].color,
+      content: { media_type: 'video', duration: 10 },
+    }]
+    const audioTrack = data.tracks.find((track) => track.type === 'audio')
+    if (audioTrack) {
+      audioTrack.segments = [{
+        id: 'audio-active',
+        start_frame: 0,
+        end_frame: 10,
+        color: audioTrack.color,
+        content: { media_type: 'audio', duration: 10 },
+      }]
+    }
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByTestId('multitrack-ruler'))
+    const trimButton = screen.getByRole('button', { name: buttonName })
+    expect((trimButton as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(trimButton)
+
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    expect(updated.tracks[0].segments[0][frameKey]).toBe(expectedFrame)
+    expect(updated.tracks[1].segments[0][frameKey]).toBe(expectedFrame)
+    const updatedAudioTrack = updated.tracks.find((track) => track.type === 'audio')
+    if (updatedAudioTrack) expect(updatedAudioTrack.segments[0][frameKey]).toBe(expectedFrame)
+  })
+
+  it('trims a selected video segment and keeps the matching task aligned', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [{
+      id: 'task-active',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[0].color,
+      content: { media_type: 'none', task_mode: 'default' },
+    }]
+    data.tracks[1].segments = [{
+      id: 'video-active',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[1].color,
+      content: { media_type: 'video', duration: 10 },
+    }]
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByTestId('multitrack-ruler'))
+    fireEvent.click(screen.getByRole('button', { name: 'select video segment' }))
+    fireEvent.click(screen.getByRole('button', { name: 'trim left current time' }))
+
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    expect(updated.tracks[0].segments[0].start_frame).toBe(5)
+    expect(updated.tracks[1].segments[0].start_frame).toBe(5)
   })
 
   it('clears selected segment ids after deleting selected segments', () => {
