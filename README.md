@@ -35,6 +35,14 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 
 ### 🎞️ MultiTrack Editor
 
+#### Comparison
+
+![Compare](https://github.com/user-attachments/assets/e7a30db8-48b3-480a-a211-a2633b4b1243)
+
+> **Tips:** The advantage of the multi-track editor is its decoupling design — it is used solely for media editing and loading, and is not bound to any model. Users can freely choose any model node to process the media data output by the multi-track editor.
+
+#### Overview
+
 ![multiTrackEditor](https://github.com/user-attachments/assets/8d4dd7a0-361a-4e19-814a-f19d9b2f31cb)
 
 #### Tracks
@@ -63,12 +71,6 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 | Video Subtitles | - | Task track segments + subtitle track segments |
 
 - Only the most common open-source model generation types are listed; theoretically any video model pipeline can use the multi-track editor as a preprocessing tool
-
-#### Comparison
-
-![Compare](https://github.com/user-attachments/assets/e7a30db8-48b3-480a-a211-a2633b4b1243)
-
-> **Tips:** The advantage of the multi-track editor is its decoupling design — it is used solely for media editing and loading, and is not bound to any model. Users can freely choose any model node to process the media data output by the multi-track editor.
 
 #### Optional Models
 

@@ -34,6 +34,14 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 ### 🎞️ 多轨编辑器 MultiTrack Editor
 
+#### 与其他节点的区别
+
+![Compare](https://github.com/user-attachments/assets/e7a30db8-48b3-480a-a211-a2633b4b1243)
+
+> **提示：** 多轨编辑器的优势在于解耦，它只用来做媒体的编辑与加载，不与任何模型绑定，用户可以自由选择任何模型节点来处理多轨编辑器输出的媒体数据。
+
+#### 概览
+
 ![multiTrackEditor](https://github.com/user-attachments/assets/fc9ebcc6-d5e6-4f43-9825-6432c17d340d)
 
 #### 轨道
@@ -64,12 +72,6 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 | 字幕朗读 | - | 任务轨道与字幕轨道有片段即可
 
 - 仅统计了热门开源模型常见的生成类型，理论上任何视频模型流程都可以通过多轨编辑器作为前置处理工具
-
-#### 与其他节点的区别
-
-![Compare](https://github.com/user-attachments/assets/e7a30db8-48b3-480a-a211-a2633b4b1243)
-
-> **提示：** 多轨编辑器的优势在于解耦，它只用来做媒体的编辑与加载，不与任何模型绑定，用户可以自由选择任何模型节点来处理多轨编辑器输出的媒体数据。
 
 #### 额外模型（可选）
 
