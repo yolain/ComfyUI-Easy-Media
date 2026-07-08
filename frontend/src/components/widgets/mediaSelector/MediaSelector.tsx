@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useSyncExternalStore } from 'react'
 import {
   Search,
   ArrowUpDown,
@@ -6,6 +6,7 @@ import {
   LayoutGrid,
   CheckCircle2,
   FileAudio,
+  FileVideo,
   Image as ImageIcon,
   File,
   Folder,
@@ -20,37 +21,30 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { useT } from '@/lib/i18n'
 import { $error } from '@/lib/comfy-api'
+import { uploadInputMediaFile } from '@/lib/media-upload'
+import { useDelayedIntersection } from '@/hooks/use-delayed-intersection'
 import type { SlotItem } from '@/lib/timeline-utils'
+import {
+  getMediaList,
+  getMediaListStoreRevision,
+  invalidateMediaListCache,
+  subscribeMediaListStore,
+  type MediaDirEntry,
+  type MediaFileEntry,
+  type MediaItem,
+  type MediaListMediaType,
+} from '@/stores/media-list-store'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type MediaType = 'all' | 'image' | 'audio' | 'video'
+export type MediaType = MediaListMediaType
 export type MediaTab = 'inputs' | 'outputs' | 'local' | 'url' | 'slot'
 type ViewMode = 'grid' | 'list'
-type SortBy = 'name' | 'date' | 'size'
+type SortBy = 'name' | 'date' | 'folders'
 
 const MULTIPLE_MEDIA_SEPARATOR = '|MULTIPLE|'
-
-interface MediaDirEntry {
-  type: 'dir'
-  name: string
-  path: string
-}
-
-interface MediaFileEntry {
-  type: 'file'
-  name: string
-  path: string
-  url: string
-  size: number
-  mtime: number
-  width?: number
-  height?: number
-}
-
-type MediaItem = MediaDirEntry | MediaFileEntry
 
 interface MediaSelectorChangeEvent {
   filePath: string
@@ -81,9 +75,11 @@ function formatSize(bytes: number): string {
 function getFileIcon(name: string, mediaType: MediaType) {
   if (mediaType === 'audio') return FileAudio
   if (mediaType === 'image') return ImageIcon
+  if (mediaType === 'video') return FileVideo
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
   if (['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus', 'wma'].includes(ext)) return FileAudio
   if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tiff', 'tif'].includes(ext)) return ImageIcon
+  if (['mp4', 'webm', 'mov', 'mkv', 'avi', 'm4v'].includes(ext)) return FileVideo
   return File
 }
 
@@ -99,9 +95,39 @@ function isAudioFile(name: string, mediaType: MediaType): boolean {
   return ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus', 'wma'].includes(ext)
 }
 
+function isVideoFile(name: string, mediaType: MediaType): boolean {
+  if (mediaType === 'video') return true
+  const ext = name.split('.').pop()?.toLowerCase() ?? ''
+  return ['mp4', 'webm', 'mov', 'mkv', 'avi', 'm4v'].includes(ext)
+}
+
 function getSelectedMediaValues(value: string): Set<string> {
   if (!value) return new Set()
   return new Set(value.split(MULTIPLE_MEDIA_SEPARATOR).filter((item) => item.length > 0))
+}
+
+function formatMediaInfo(file: MediaFileEntry, mediaType: MediaType): string {
+  if (isImageFile(file.name, mediaType) && file.width && file.height) {
+    return `${file.width}×${file.height}`
+  }
+  return formatSize(file.size)
+}
+
+function sortFiles(files: MediaFileEntry[], sortBy: SortBy): MediaFileEntry[] {
+  return [...files].sort((a, b) => {
+    if (sortBy === 'date') return b.mtime - a.mtime
+    return a.name.localeCompare(b.name)
+  })
+}
+
+function sortDirs(dirs: MediaDirEntry[]): MediaDirEntry[] {
+  return [...dirs].sort((a, b) => a.name.localeCompare(b.name))
+}
+
+function sortByLabelKey(sortBy: SortBy): string {
+  if (sortBy === 'name') return 'mediaSelector.sortName'
+  if (sortBy === 'date') return 'mediaSelector.sortDate'
+  return 'mediaSelector.sortFolders'
 }
 
 // ---------------------------------------------------------------------------
@@ -114,23 +140,7 @@ function LazyImage({
   className,
 }: Readonly<{ src: string; alt: string; className?: string }>) {
   const ref = useRef<HTMLImageElement>(null)
-  const [visible, setVisible] = useState(false)
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setVisible(true)
-          observer.disconnect()
-        }
-      },
-      { threshold: 0 },
-    )
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
+  const visible = useDelayedIntersection(ref)
 
   return (
     <img
@@ -140,6 +150,32 @@ function LazyImage({
       className={className}
       onError={(e) => {
         ;(e.target as HTMLImageElement).style.display = 'none'
+      }}
+    />
+  )
+}
+
+function LazyVideo({
+  src,
+  className,
+}: Readonly<{ src: string; className?: string }>) {
+  const ref = useRef<HTMLVideoElement>(null)
+  const visible = useDelayedIntersection(ref)
+
+  return (
+    <video
+      ref={ref}
+      src={visible ? src : undefined}
+      className={className}
+      muted
+      playsInline
+      preload="metadata"
+      onLoadedMetadata={(event) => {
+        const video = event.currentTarget
+        if (Number.isFinite(video.duration) && video.duration > 0.1) video.currentTime = 0.1
+      }}
+      onError={(event) => {
+        event.currentTarget.style.display = 'none'
       }}
     />
   )
@@ -156,7 +192,8 @@ function FileThumbnail({
 }: Readonly<{ file: MediaFileEntry; mediaType: MediaType; isSelected: boolean }>) {
   const Icon = getFileIcon(file.name, mediaType)
   const showImage = isImageFile(file.name, mediaType) && !!file.url
-  const isAudio = !showImage && isAudioFile(file.name, mediaType)
+  const showVideo = !showImage && isVideoFile(file.name, mediaType) && !!file.url
+  const isAudio = !showImage && !showVideo && isAudioFile(file.name, mediaType)
 
   return (
     <div
@@ -167,6 +204,8 @@ function FileThumbnail({
     >
       {showImage ? (
         <LazyImage src={file.url} alt={file.name} className="w-full h-full object-cover" />
+      ) : showVideo ? (
+        <LazyVideo src={file.url} className="w-full h-full object-cover" />
       ) : (
         <Icon className={`w-6 h-6 ${isAudio ? 'text-highlight' : 'text-muted-foreground'}`} />
       )}
@@ -262,6 +301,7 @@ function RemoteFileList({
   searchQuery,
   value,
   onChange,
+  onNavigateSubfolder,
   onAddLocalFile,
 }: Readonly<{
   source: 'inputs' | 'outputs' | 'local'
@@ -272,6 +312,7 @@ function RemoteFileList({
   searchQuery: string
   value: string
   onChange: (v: string, source: 'input' | 'output' | 'local') => void
+  onNavigateSubfolder?: () => void
   onAddLocalFile?: () => void
 }>) {
   const t = useT()
@@ -279,6 +320,11 @@ function RemoteFileList({
   const [subfolder, setSubfolder] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const cacheRevision = useSyncExternalStore(
+    subscribeMediaListStore,
+    getMediaListStoreRevision,
+    getMediaListStoreRevision,
+  )
   const selectedValues = getSelectedMediaValues(value)
 
   // Reset to root when the source or local path changes
@@ -303,47 +349,25 @@ function RemoteFileList({
     setLoading(true)
     setError(null)
 
-    const params = new URLSearchParams({ source, type: mediaType })
-    if (source === 'local') params.set('path', localPath)
-    if (subfolder) params.set('subfolder', subfolder)
-
     let cancelled = false
-    fetch(`/easy-media/media/list?${params}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`${r.status}`)
-        return r.json() as Promise<{ items: MediaItem[] }>
+    getMediaList({ source, mediaType, localPath, subfolder })
+      .then((list) => {
+        if (!cancelled) setItems(list)
       })
-      .then((data) => {
-          if (!cancelled) {
-            const raw = data as Record<string, unknown>
-            // Support both old "files" (no type field) and new "items" format
-            const rawList = (raw.items ?? raw.files ?? []) as Array<Record<string, unknown>>
-            const list: MediaItem[] = rawList.map((entry) =>
-              entry.type === 'dir'
-                ? (entry as unknown as MediaDirEntry)
-                : ({ ...entry, type: 'file' } as unknown as MediaFileEntry),
-            )
-            setItems(list)
-          }
-        })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : JSON.stringify(e))
       })
       .finally(() => { if (!cancelled) setLoading(false) })
 
     return () => { cancelled = true }
-  }, [source, mediaType, localPath, subfolder])
+  }, [source, mediaType, localPath, subfolder, cacheRevision])
 
-  const dirs = items.filter((i): i is MediaDirEntry => i.type === 'dir')
-  const files = (items.filter((i): i is MediaFileEntry => i.type === 'file') as MediaFileEntry[])
-    .filter((f) => f.name.toLowerCase().includes(searchQuery.toLowerCase()))
-    .sort((a, b) => {
-      const selectedDelta = Number(selectedValues.has(b.path)) - Number(selectedValues.has(a.path))
-      if (selectedDelta !== 0) return selectedDelta
-      if (sortBy === 'name') return a.name.localeCompare(b.name)
-      if (sortBy === 'date') return b.mtime - a.mtime
-      return b.size - a.size
-    })
+  const dirs = sortDirs(items.filter((i): i is MediaDirEntry => i.type === 'dir'))
+  const files = sortFiles(
+    (items.filter((i): i is MediaFileEntry => i.type === 'file') as MediaFileEntry[])
+      .filter((f) => f.name.toLowerCase().includes(searchQuery.toLowerCase())),
+    sortBy,
+  )
 
   const filteredDirs = dirs.filter((d) =>
     searchQuery ? d.name.toLowerCase().includes(searchQuery.toLowerCase()) : true,
@@ -361,9 +385,16 @@ function RemoteFileList({
 
   const isEmpty = filteredDirs.length === 0 && files.length === 0
   const selectedFiles = files.filter((file) => selectedValues.has(file.path))
-  const unselectedFiles = files.filter((file) => !selectedValues.has(file.path))
-  const leadFiles = selectedFiles.length > 0 ? selectedFiles : files
-  const tailFiles = selectedFiles.length > 0 ? unselectedFiles : []
+  const sortedItems: MediaItem[] = sortBy === 'folders'
+    ? [...filteredDirs, ...files]
+    : [...files, ...filteredDirs]
+  const unselectedItems = sortedItems.filter((item) => item.type === 'dir' || !selectedValues.has(item.path))
+
+  function navigateSubfolder(path: string) {
+    if (path === subfolder) return
+    setSubfolder(path)
+    onNavigateSubfolder?.()
+  }
 
   function renderGridFile(file: MediaFileEntry, selected: boolean) {
     return (
@@ -378,9 +409,7 @@ function RemoteFileList({
           {file.name}
         </span>
         <span className="text-[10px] text-muted-foreground truncate leading-tight max-w-full">
-          {isImageFile(file.name, mediaType) && file.width && file.height
-            ? `${file.width}×${file.height}`
-            : formatSize(file.size)}
+          {formatMediaInfo(file, mediaType)}
         </span>
       </button>
     )
@@ -389,7 +418,8 @@ function RemoteFileList({
   function renderListFile(file: MediaFileEntry, selected: boolean) {
     const Icon = getFileIcon(file.name, mediaType)
     const showThumb = isImageFile(file.name, mediaType) && !!file.url
-    const showAudioIcon = !showThumb && isAudioFile(file.name, mediaType)
+    const showVideoThumb = !showThumb && isVideoFile(file.name, mediaType) && !!file.url
+    const showAudioIcon = !showThumb && !showVideoThumb && isAudioFile(file.name, mediaType)
 
     return (
       <button
@@ -406,25 +436,76 @@ function RemoteFileList({
             <LazyImage src={file.url} alt={file.name} className="w-full h-full object-cover" />
           </div>
         )}
+        {showVideoThumb && (
+          <div className="w-4 h-4 rounded overflow-hidden shrink-0 bg-muted">
+            <LazyVideo src={file.url} className="w-full h-full object-cover" />
+          </div>
+        )}
         {showAudioIcon && (
           <div className="w-4 h-4 rounded flex items-center justify-center bg-[#34d399] shrink-0">
             <Icon className="w-3 h-3 text-white" />
           </div>
         )}
-        {!showThumb && !showAudioIcon && (
+        {!showThumb && !showVideoThumb && !showAudioIcon && (
           <Icon className="w-4 h-4 text-muted-foreground shrink-0" />
         )}
         <span className="flex-1 text-xs truncate min-w-0" title={file.name}>
           {file.name}
         </span>
         <span className="text-[10px] text-muted-foreground shrink-0">
-          {isImageFile(file.name, mediaType) && file.width && file.height
-            ? `${file.width}×${file.height}`
-            : formatSize(file.size)}
+          {formatMediaInfo(file, mediaType)}
         </span>
         {selected && <CheckCircle2 className="w-3.5 h-3.5 text-primary shrink-0" />}
       </button>
     )
+  }
+
+  function renderGridDir(dir: MediaDirEntry) {
+    return (
+      <button
+        key={dir.path}
+        type="button"
+        className="flex flex-col gap-1 text-left hover:opacity-80 transition-opacity"
+        onClick={() => navigateSubfolder(dir.path)}
+      >
+        <div className="relative w-full aspect-square rounded overflow-hidden bg-muted flex items-center justify-center">
+          <Folder className="w-6 h-6 text-warning" />
+        </div>
+        <span className="text-[10px] truncate leading-tight max-w-full" title={dir.name}>
+          {dir.name}
+        </span>
+      </button>
+    )
+  }
+
+  function renderListDir(dir: MediaDirEntry) {
+    return (
+      <button
+        key={dir.path}
+        type="button"
+        className="flex items-center gap-2 px-2 py-1 text-left hover:bg-accent transition-colors"
+        onClick={() => navigateSubfolder(dir.path)}
+      >
+        <div className="w-4 h-4 rounded flex items-center justify-center bg-muted shrink-0">
+          <Folder className="w-3 h-3 text-warning" />
+        </div>
+        <span className="flex-1 text-xs truncate min-w-0" title={dir.name}>
+          {dir.name}
+        </span>
+      </button>
+    )
+  }
+
+  function renderGridItem(item: MediaItem) {
+    return item.type === 'dir'
+      ? renderGridDir(item)
+      : renderGridFile(item, selectedValues.has(item.path))
+  }
+
+  function renderListItem(item: MediaItem) {
+    return item.type === 'dir'
+      ? renderListDir(item)
+      : renderListFile(item, selectedValues.has(item.path))
   }
 
   function renderGrid() {
@@ -446,23 +527,8 @@ function RemoteFileList({
             </span>
           </button>
         )}
-        {leadFiles.map((file) => renderGridFile(file, selectedValues.has(file.path)))}
-        {filteredDirs.map((dir) => (
-          <button
-            key={dir.path}
-            type="button"
-            className="flex flex-col gap-1 text-left hover:opacity-80 transition-opacity"
-            onClick={() => setSubfolder(dir.path)}
-          >
-            <div className="relative w-full aspect-square rounded overflow-hidden bg-muted flex items-center justify-center">
-              <Folder className="w-6 h-6 text-warning" />
-            </div>
-            <span className="text-[10px] truncate leading-tight max-w-full" title={dir.name}>
-              {dir.name}
-            </span>
-          </button>
-        ))}
-        {tailFiles.map((file) => renderGridFile(file, false))}
+        {selectedFiles.map((file) => renderGridFile(file, true))}
+        {unselectedItems.map(renderGridItem)}
       </div>
     )
   }
@@ -486,30 +552,15 @@ function RemoteFileList({
             </span>
           </button>
         )}
-        {leadFiles.map((file) => renderListFile(file, selectedValues.has(file.path)))}
-        {filteredDirs.map((dir) => (
-          <button
-            key={dir.path}
-            type="button"
-            className="flex items-center gap-2 px-2 py-1 text-left hover:bg-accent transition-colors"
-            onClick={() => setSubfolder(dir.path)}
-          >
-            <div className="w-4 h-4 rounded flex items-center justify-center bg-muted shrink-0">
-              <Folder className="w-3 h-3 text-warning" />
-            </div>
-            <span className="flex-1 text-xs truncate min-w-0" title={dir.name}>
-              {dir.name}
-            </span>
-          </button>
-        ))}
-        {tailFiles.map((file) => renderListFile(file, false))}
+        {selectedFiles.map((file) => renderListFile(file, true))}
+        {unselectedItems.map(renderListItem)}
       </div>
     )
   }
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
-      <Breadcrumb subfolder={subfolder} onNavigate={setSubfolder} />
+      <Breadcrumb subfolder={subfolder} onNavigate={navigateSubfolder} />
       {isEmpty && (
         <div className="flex items-center justify-center h-24 text-muted-foreground text-xs">
           {t('mediaSelector.empty')}
@@ -553,7 +604,7 @@ export function MediaSelector({
   function cycleSortBy() {
     setSortBy((prev) => {
       if (prev === 'name') return 'date'
-      if (prev === 'date') return 'size'
+      if (prev === 'date') return 'folders'
       return 'name'
     })
   }
@@ -596,6 +647,7 @@ export function MediaSelector({
       if (data.source_type === 'url') {
         onChange(data.url!)
       } else {
+        invalidateMediaListCache('inputs')
         onChange(data.file_name!)
       }
     } catch {
@@ -622,7 +674,8 @@ export function MediaSelector({
       if (input.files.length === 1) {
         const file = input.files[0]
         try {
-          const uploaded = await uploadFile(file)
+          const uploaded = await uploadInputMediaFile(file)
+          invalidateMediaListCache('inputs')
           onChange(uploaded)
         } catch (err) {
           console.error('[MediaSelector] upload failed:', err)
@@ -634,30 +687,19 @@ export function MediaSelector({
       const paths: string[] = []
       for (const file of input.files) {
         try {
-          const uploaded = await uploadFile(file)
+          const uploaded = await uploadInputMediaFile(file)
           paths.push(uploaded)
         } catch (err) {
           console.error('[MediaSelector] upload failed:', err)
         }
       }
       if (paths.length > 0) {
+        invalidateMediaListCache('inputs')
         // Select first file for single selection, but indicate multiple were uploaded
         onChange(paths.join(MULTIPLE_MEDIA_SEPARATOR))
       }
     }
     input.click()
-  }
-
-  async function uploadFile(file: File): Promise<string> {
-    const form = new FormData()
-    form.append('image', file)
-    form.append('type', 'input')
-    form.append('overwrite', 'false')
-    const res = await fetch('/upload/image', { method: 'POST', body: form })
-    if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
-    const json = await res.json() as { name: string; subfolder?: string }
-    const sub = json.subfolder ? `${json.subfolder}/` : ''
-    return `${sub}${json.name}`
   }
 
   return (
@@ -700,7 +742,7 @@ export function MediaSelector({
               variant="ghost"
               size="icon"
               className="h-6 w-6"
-              title={t('mediaSelector.sort', { by: sortBy })}
+              title={t('mediaSelector.sort', { by: t(sortByLabelKey(sortBy)) })}
               onClick={cycleSortBy}
             >
               <ArrowUpDown className="w-3 h-3" />
@@ -737,6 +779,7 @@ export function MediaSelector({
             searchQuery={searchQuery}
             value={value}
             onChange={(path) => handleFileChange(path, 'input')}
+            onNavigateSubfolder={() => setSearchQuery('')}
             onAddLocalFile={handleAddLocalFile}
           />
         </TabsContent>
@@ -751,6 +794,7 @@ export function MediaSelector({
             searchQuery={searchQuery}
             value={value}
             onChange={(path) => handleFileChange(path, 'output')}
+            onNavigateSubfolder={() => setSearchQuery('')}
           />
         </TabsContent>
 
@@ -773,6 +817,7 @@ export function MediaSelector({
             searchQuery={searchQuery}
             value={value}
             onChange={(path) => handleFileChange(path, 'local')}
+            onNavigateSubfolder={() => setSearchQuery('')}
           />
         </TabsContent>
 

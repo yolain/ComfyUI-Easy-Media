@@ -15,11 +15,12 @@ from comfy_api.latest import Input, InputImpl, Types, io, ui
 from comfy.utils import ProgressBar
 from server import PromptServer
 
-from ..utils.video import extract_merge_spec, ffmpeg_concat, ffmpeg_concat_with_fade, ffmpeg_replace_audio, ffmpeg_supports_xfade, normalize_video_images, tensor_crossfade_audio, tensor_crossfade_images, validate_merge_compatibility
+from ..utils.video import extract_merge_spec, ffmpeg_concat, ffmpeg_concat_with_fade, ffmpeg_extract_audio, ffmpeg_replace_audio, ffmpeg_supports_xfade, ffprobe_info, normalize_video_images, tensor_crossfade_audio, tensor_crossfade_images, trim_video_with_ffmpeg, validate_merge_compatibility, video_input_to_local_file
 
 logger = logging.getLogger(__name__)
 
-CATEGORY = "EasyUse/Media"
+CATEGORY_VIDEO = "EasyUse/Video"
+TYPE_COMPARE_VIDEO = io.Custom(io_type="COMPARE_VIDEO")
 
 _OUTPUT_MODE_OPTIONS = [
     io.DynamicCombo.Option(
@@ -33,6 +34,8 @@ _OUTPUT_MODE_OPTIONS = [
         ],
     ),
     io.DynamicCombo.Option("preview_only", []),
+    io.DynamicCombo.Option("hide", []),
+    io.DynamicCombo.Option("hide&save", []),
 ]
 
 _INPUT_MODE_OPTIONS = [
@@ -54,13 +57,64 @@ _INPUT_MODE_OPTIONS = [
 ]
 
 
+class MakeVideoList(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="easy makeVideoList",
+            display_name="Make Video List",
+            category=CATEGORY_VIDEO,
+            description="Combine up to 10 optional video inputs into a video list.",
+            inputs=[
+                io.Boolean.Input("skip_empty", default=False, label_on="Skip", label_off="Fill"),
+                io.Video.Input("video1", optional=True),
+                io.Video.Input("video2", optional=True),
+                io.Video.Input("video3", optional=True),
+                io.Video.Input("video4", optional=True),
+                io.Video.Input("video5", optional=True),
+                io.Video.Input("video6", optional=True),
+                io.Video.Input("video7", optional=True),
+                io.Video.Input("video8", optional=True),
+                io.Video.Input("video9", optional=True),
+                io.Video.Input("video10", optional=True),
+            ],
+            outputs=[
+                io.Video.Output("VIDEO", is_output_list=True),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, skip_empty: bool, **kwargs: object) -> io.NodeOutput:
+        videos: list[Input.Video] = []
+        for i in range(1, 11):
+            key = f"video{i}"
+            value = kwargs.get(key)
+            if value is not None:
+                videos.append(value)
+            elif not skip_empty:
+                videos.append(_empty_video())
+
+        return io.NodeOutput(videos)
+
+
+def _empty_video() -> InputImpl.VideoFromComponents:  # type: ignore[return-value]
+    images = torch.zeros(1, 2, 2, 3, dtype=torch.float32, device="cpu")
+    return InputImpl.VideoFromComponents(
+        Types.VideoComponents(
+            images=images,
+            audio=None,
+            frame_rate=Fraction(24),
+        )
+    )
+
+
 class EasySaveVideo(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
             node_id="easy saveVideo",
             display_name="Save Video",
-            category=CATEGORY,
+            category=CATEGORY_VIDEO,
             description=(
                 "Save images and optional audio to a video file. "
                 "Returns the VIDEO for downstream use and the full written file path."
@@ -87,7 +141,8 @@ class EasySaveVideo(io.ComfyNode):
     ) -> io.NodeOutput:
         input_mode_key: str = input_mode.get("input_mode", "images+audio")
         output_mode_key: str = output_mode.get("output_mode", "save")
-        only_preview = output_mode_key == "preview_only"
+        hide_preview = output_mode_key in {"hide", "hide&save"}
+        write_temp = output_mode_key in {"preview_only", "hide"}
         save_metadata: bool = output_mode.get("save_metadata", False)
 
         if input_mode_key == "video":
@@ -118,7 +173,7 @@ class EasySaveVideo(io.ComfyNode):
 
         width, height = source_video.get_dimensions()
 
-        if only_preview:
+        if write_temp:
             output_dir = folder_paths.get_temp_directory()
             folder_type = io.FolderType.temp
         else:
@@ -132,7 +187,7 @@ class EasySaveVideo(io.ComfyNode):
         ext = Types.VideoContainer.get_extension(Types.VideoContainer.AUTO)
         file = f"{filename}_{counter:05}_.{ext}"
         full_path = os.path.join(full_output_folder, file)
-        prefix = "temp" if only_preview else "output"
+        prefix = "temp" if write_temp else "output"
         relative_path = f"{prefix}/{os.path.relpath(full_path, output_dir)}"
 
         metadata: dict | None = None
@@ -151,6 +206,9 @@ class EasySaveVideo(io.ComfyNode):
             codec=Types.VideoCodec.AUTO,
             metadata=metadata,
         )
+
+        if hide_preview:
+            return io.NodeOutput(source_video, relative_path)
 
         return io.NodeOutput(
             source_video,
@@ -239,13 +297,263 @@ def _replace_video_audio(source_video, audio: dict):
         )
     )
 
+
+def _video_to_local_file(video: Input.Video) -> "tuple[str | None, list[str]]":
+    """Return a local file path for ffmpeg, creating temp files when needed."""
+    temp_files: list[str] = []
+    try:
+        source = video.get_stream_source()
+    except (AttributeError, RuntimeError, ValueError, TypeError):
+        source = None
+
+    if isinstance(source, str) and os.path.isfile(source):
+        return source, temp_files
+    if isinstance(source, _io.BytesIO):
+        source.seek(0)
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp4", dir=folder_paths.get_temp_directory())
+        try:
+            os.write(tmp_fd, source.read())
+        finally:
+            os.close(tmp_fd)
+        temp_files.append(tmp_path)
+        return tmp_path, temp_files
+
+    ext = Types.VideoContainer.get_extension(Types.VideoContainer.AUTO)
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=f".{ext}", dir=folder_paths.get_temp_directory())
+    os.close(tmp_fd)
+    try:
+        video.save_to(tmp_path, format=Types.VideoContainer.AUTO, codec=Types.VideoCodec.AUTO)
+    except Exception as exc:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        logger.warning("[EasyGetAudioFromVideo] Failed to serialize VIDEO for FFmpeg: %s", exc)
+        return None, temp_files
+    temp_files.append(tmp_path)
+    return tmp_path, temp_files
+
+
+def _extract_audio_with_ffmpeg(video: Input.Video) -> "dict | None":
+    source_path, temp_files = _video_to_local_file(video)
+    if source_path is None:
+        return None
+
+    try:
+        return ffmpeg_extract_audio(source_path)
+    finally:
+        for path in temp_files:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+
+def _fallback_video_audio(video: Input.Video) -> "dict | None":
+    try:
+        components = video.get_components()
+    except Exception as exc:
+        raise RuntimeError("Failed to read VIDEO components for audio fallback.") from exc
+    audio = getattr(components, "audio", None)
+    if isinstance(audio, dict) and audio.get("waveform") is not None and audio.get("sample_rate") is not None:
+        return audio
+    return None
+
+
+class EasyGetAudioFromVideo(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="easy getAudioFromVideo",
+            display_name="Get Audio From Video",
+            category=CATEGORY_VIDEO,
+            description="Extract the audio track from a VIDEO. Uses FFmpeg first, then falls back to ComfyUI VIDEO components.",
+            inputs=[
+                io.Video.Input("video"),
+            ],
+            outputs=[
+                io.Audio.Output("AUDIO"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, video: Input.Video) -> io.NodeOutput:
+        audio = _extract_audio_with_ffmpeg(video)
+        if audio is None:
+            audio = _fallback_video_audio(video)
+        if audio is None:
+            raise ValueError("The input VIDEO does not contain an audio track.")
+        return io.NodeOutput(audio)
+
+
+def _compare_video_preview_from_path(path: str, label: str) -> dict:
+    ext = os.path.splitext(path)[1] or f".{Types.VideoContainer.get_extension(Types.VideoContainer.AUTO)}"
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        prefix=f"easy_compare_{label}_",
+        suffix=ext,
+        dir=folder_paths.get_temp_directory(),
+    )
+    os.close(tmp_fd)
+    try:
+        shutil.copy2(path, tmp_path)
+    except Exception as exc:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise RuntimeError(f"Failed to save {label} VIDEO preview.") from exc
+
+    return {
+        "filename": os.path.basename(tmp_path),
+        "subfolder": "",
+        "type": "temp",
+    }
+
+
+def _compare_video_local_path(video: Input.Video, label: str) -> "tuple[str, list[str]]":
+    try:
+        return video_input_to_local_file(
+            video,
+            suffix=f".{Types.VideoContainer.get_extension(Types.VideoContainer.AUTO)}",
+            save_kwargs={
+                "format": Types.VideoContainer.AUTO,
+                "codec": Types.VideoCodec.AUTO,
+            },
+        )
+    except Exception as exc:
+        raise RuntimeError(f"Failed to prepare {label} VIDEO for FFmpeg probing.") from exc
+
+
+def _compare_video_metadata(path: str, label: str) -> dict[str, object]:
+    info = ffprobe_info(path)
+    fps_fraction = info.get("fps_fraction")
+    fps = float(fps_fraction) if isinstance(fps_fraction, Fraction) else info.get("fps")
+    frame_count = info.get("frame_count")
+    duration = info.get("duration")
+
+    if not info.get("has_video"):
+        raise ValueError(f"{label} VIDEO does not contain a video stream.")
+    if not isinstance(duration, (int, float)) or duration <= 0:
+        raise ValueError(f"{label} VIDEO duration could not be detected by FFprobe.")
+    if not isinstance(frame_count, int) or frame_count <= 0:
+        if isinstance(fps, (int, float)) and fps > 0:
+            frame_count = max(1, round(float(duration) * float(fps)))
+        else:
+            frame_count = None
+
+    return {
+        "fps": float(fps) if isinstance(fps, (int, float)) and fps > 0 else None,
+        "fps_fraction": fps_fraction,
+        "frame_count": frame_count,
+        "duration": float(duration),
+    }
+
+
+def _probe_compare_video(video: Input.Video, label: str) -> "tuple[str, list[str], dict[str, object]]":
+    path, temp_files = _compare_video_local_path(video, label)
+    try:
+        metadata = _compare_video_metadata(path, label)
+        return path, temp_files, metadata
+    except Exception:
+        for temp_file in temp_files:
+            try:
+                os.unlink(temp_file)
+            except OSError:
+                pass
+        raise
+
+
+def _cleanup_compare_temp_files(temp_files: list[str]) -> None:
+    for temp_file in temp_files:
+        try:
+            os.unlink(temp_file)
+        except OSError:
+            pass
+
+
+class EasyCompareVideos(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="easy compareVideos",
+            display_name="Compare Videos",
+            category=CATEGORY_VIDEO,
+            description=(
+                "Preview source and output VIDEO inputs side by side with an interactive comparison slider. "
+                "When both inputs are provided, duration must match."
+            ),
+            inputs=[
+                io.Video.Input("source", optional=True),
+                io.Video.Input("output", optional=True),
+                TYPE_COMPARE_VIDEO.Input("compare_video"),
+            ],
+            outputs=[],
+            is_output_node=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        source: Optional[Input.Video] = None,
+        output: Optional[Input.Video] = None,
+        compare_video: str = "{}",
+    ) -> io.NodeOutput:
+        _ = compare_video
+        if source is None and output is None:
+            raise ValueError("At least one VIDEO input is required.")
+
+        payload: dict[str, object] = {
+            "source": None,
+            "output": None,
+            "fps": None,
+            "frame_count": None,
+            "duration": None,
+        }
+
+        prepared: dict[str, tuple[str, list[str], dict[str, object]]] = {}
+        try:
+            if source is not None:
+                prepared["source"] = _probe_compare_video(source, "source")
+            if output is not None:
+                prepared["output"] = _probe_compare_video(output, "output")
+
+            source_metadata = prepared.get("source", (None, None, None))[2]
+            output_metadata = prepared.get("output", (None, None, None))[2]
+
+            if source_metadata is not None and output_metadata is not None:
+                source_duration = float(source_metadata["duration"])
+                output_duration = float(output_metadata["duration"])
+                if abs(source_duration - output_duration) > 0.05:
+                    raise ValueError(
+                        f"source and output durations must match: {source_duration:.6g}s != {output_duration:.6g}s"
+                    )
+
+                payload["fps"] = float(source_metadata["fps"]) if source_metadata["fps"] is not None else None
+                payload["frame_count"] = int(source_metadata["frame_count"]) if source_metadata["frame_count"] is not None else None
+                payload["duration"] = source_duration
+            else:
+                metadata = source_metadata if source_metadata is not None else output_metadata
+                if metadata is not None:
+                    payload["fps"] = float(metadata["fps"]) if metadata["fps"] is not None else None
+                    payload["frame_count"] = int(metadata["frame_count"]) if metadata["frame_count"] is not None else None
+                    payload["duration"] = float(metadata["duration"])
+
+            for label, (path, _temp_files, _metadata) in prepared.items():
+                payload[label] = _compare_video_preview_from_path(path, label)
+        finally:
+            for _path, temp_files, _metadata in prepared.values():
+                _cleanup_compare_temp_files(temp_files)
+
+        return io.NodeOutput(ui={"compare_videos": [payload]})
+
+
 class EasyMergeVideos(io.ComfyNode):
     @classmethod
     def define_schema(cls):
         return io.Schema(
             node_id="easy mergeVideos",
             display_name="Merge Videos",
-            category=CATEGORY,
+            category=CATEGORY_VIDEO,
             description=(
                 "Concatenate multiple compatible VIDEO clips in order. "
                 "All clips must share the same fps, dimensions, and audio configuration."
@@ -442,6 +750,27 @@ def _log_ffmpeg_unavailable_hint(tag: str, need_xfade: bool = False) -> None:
         )
 
 
+def _trim_video_to_frame_count(
+    source: str,
+    frame_count: int,
+    tag: str,
+    progress: "callable[[str], None] | None" = None,
+) -> str:
+    """Trim source when requested, raising if the requested trim cannot be performed."""
+    if frame_count <= 0:
+        return source
+    try:
+        trimmed = trim_video_with_ffmpeg(source, frame_count, progress_callback=progress)
+    except RuntimeError as exc:
+        raise RuntimeError(f"{tag} failed to trim merged video to {frame_count} frames.") from exc
+    if trimmed is None:
+        raise RuntimeError(
+            f"{tag} cannot trim to {frame_count} frames. "
+            "Install FFmpeg/FFprobe and ensure the merged video has a detectable frame rate."
+        )
+    return trimmed
+
+
 def _resolve_video_path(raw: str) -> str | _io.BytesIO:
     """Resolve a raw path string to a local file path or BytesIO buffer.
 
@@ -501,7 +830,7 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
         return io.Schema(
             node_id="easy mergeVideosFromPaths",
             display_name="Merge Videos From Paths",
-            category=CATEGORY,
+            category=CATEGORY_VIDEO,
             description=(
                 "Load and concatenate videos from a list of file paths or URLs. "
                 "Supports ComfyUI temp/output paths, absolute local paths, and HTTP(S) URLs. "
@@ -516,6 +845,13 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
                         "One path per line (or comma-separated). "
                         "Accepts ComfyUI output/temp filenames, absolute paths, or URLs."
                     ),
+                ),
+                io.Int.Input(
+                    "frame_count",
+                    default=-1,
+                    min=-1,
+                    step=1,
+                    tooltip="Maximum frames to keep after merging. Use -1 to keep all frames.",
                 ),
                 # io.Combo.Input("transition", default="None", options=['None', 'Fade'], tooltip="Transition type to apply between clips."),
                 # io.Float.Input(
@@ -534,7 +870,7 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, paths: str,) -> io.NodeOutput:
+    def execute(cls, paths: str, frame_count: int = -1) -> io.NodeOutput:
         raw_paths = _parse_path_list(paths)
         if len(raw_paths) == 0:
             raise ValueError("At least 1 video path is required.")
@@ -561,6 +897,12 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
                 os.write(tmp_fd, source.read())
                 os.close(tmp_fd)
                 source = tmp_path
+            source = _trim_video_to_frame_count(
+                source,
+                frame_count,
+                "[EasyMergeVideosFromPaths]",
+                progress=lambda msg: _progress(1, msg),
+            )
             merged_video = InputImpl.VideoFromFile(source)
             _progress(2, "Done — loaded single video")
             return io.NodeOutput(merged_video)
@@ -611,6 +953,12 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
                         logger.info(
                             "%s backend=ffmpeg-xfade, transition=fade(%.2fs) ✓", tag, fade_duration
                         )
+                        tmp_path = _trim_video_to_frame_count(
+                            tmp_path,
+                            frame_count,
+                            tag,
+                            progress=lambda msg: _progress(total + 1, msg),
+                        )
                         merged_video = InputImpl.VideoFromFile(tmp_path)
                         _progress(total + 2, f"Done — merged {total} clips with fade")
                         return io.NodeOutput(merged_video)
@@ -630,6 +978,12 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
                 )
                 if success:
                     logger.info("%s backend=ffmpeg-concat (stream copy), transition=none ✓", tag)
+                    tmp_path = _trim_video_to_frame_count(
+                        tmp_path,
+                        frame_count,
+                        tag,
+                        progress=lambda msg: _progress(total + 1, msg),
+                    )
                     merged_video = InputImpl.VideoFromFile(tmp_path)
                     _progress(total + 2, f"Done — merged {total} clips")
                     return io.NodeOutput(merged_video)
@@ -651,4 +1005,3 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
                     os.unlink(f)
                 except OSError:
                     pass
-

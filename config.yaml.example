@@ -1,0 +1,2 @@
+# Set the environment variables for the web application
+WEB_VERSION: dev

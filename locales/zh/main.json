@@ -1,5 +1,11 @@
 {
-  "categories": {
-    "EasyUse/Media": "EasyUse/媒体"
+  "nodeCategories": {
+    "Media": "媒体",
+    "TimelineEditor": "时间线编辑器",
+    "MultiTrackEditor": "多轨编辑器",
+    "Image": "图像",
+    "Video": "视频",
+    "Audio": "音频",
+    "Logic": "逻辑"
   }
 }

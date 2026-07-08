@@ -1,8 +1,9 @@
-import { useRef, useState, useLayoutEffect, useEffect } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import type { WheelEvent } from 'react'
 import type { ReactWidgetProps } from '@/lib/create-react-widget'
 import type { TimelineData, Track, Segment, TimeDisplayFormat, MaintainSegment, AudioSegment } from '@/types/timeline'
-import { createDefaultTimelineData } from '@/lib/timeline-utils'
+import { createDefaultTimelineData, scaleImageItemsToDuration } from '@/lib/timeline-utils'
+import { audioContentToViewUrl } from '@/lib/media-url'
 import { Toolbar } from './timeline/Toolbar'
 import { TimelineRuler } from './timeline/TimelineRuler'
 import { MaintainTrack } from './timeline/MaintainTrack'
@@ -10,19 +11,10 @@ import { AudioTrack } from './timeline/AudioTrack'
 import { EditPanel } from './timeline/EditPanel'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { LocaleContext } from '@/lib/i18n'
-
-/** Minimal type for an input slot to check connection status */
-interface InputSlot {
-  name: string
-  link: number | null
-}
-
-/** Check if an input slot is connected (has a non-null link) */
-function isInputConnected(node: any, inputName: string): boolean {
-  if (!node?.inputs) return false
-  const slot = (node.inputs as InputSlot[]).find((i) => i.name === inputName)
-  return slot?.link !== null && slot?.link !== undefined
-}
+import { useCanvasScale } from '@/hooks/use-canvas-scale'
+import { useElementWidth } from '@/hooks/use-element-width'
+import { useLatestRef } from '@/hooks/use-latest-ref'
+import { useNodeInputConnectionDisabled } from '@/hooks/use-node-input-connection-disabled'
 
 function ensureDefaults(raw: unknown): TimelineData {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
@@ -36,16 +28,7 @@ function ensureDefaults(raw: unknown): TimelineData {
 
 /** Build a browser-playable URL from an audio segment's content. */
 function audioUrl(seg: AudioSegment): string | null {
-  const { source_type, file_path, local_path, url } = seg.content
-  if (source_type === 'url' && url) return url
-  if (source_type === 'input' && file_path) {
-    return `/api/view?filename=${encodeURIComponent(file_path)}&type=input`
-  }
-  if (source_type === 'slot' && url) return url
-  if (source_type === 'local' && local_path) {
-    return `file://${local_path}`
-  }
-  return null
+  return audioContentToViewUrl(seg.content)
 }
 
 /** Track last synced frame to avoid unnecessary seeks */
@@ -95,7 +78,7 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
   const [displayFormat, setDisplayFormat] = useState<TimeDisplayFormat>('frames')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const [contentWidth, setContentWidth] = useState(0)
+  const contentWidth = useElementWidth(scrollContainerRef)
   const [isPlaying, setIsPlaying] = useState(false)
   const [playheadFrame, setPlayheadFrame] = useState(0)
   const [showSeekLabel, setShowSeekLabel] = useState(false)
@@ -103,21 +86,8 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
   const [zoom, setZoom] = useState(1)
   const isNodeV2 = app?.ui?.settings?.settingsValues?.['Comfy.VueNodes.Enabled']
   const locale = app?.ui?.settings?.settingsValues?.['Comfy.Locale']
-  // Track canvas scale reactively so the EditPanel overlay recomputes when the user zooms
-  const [canvasScale, setCanvasScale] = useState<number>(() => app?.canvas?.ds.scale ?? 1)
-  useEffect(() => {
-    if (!app?.canvas) return
-    const canvas = app.canvas
-    const origOnDrawForeground = canvas.onDrawForeground?.bind(canvas)
-    canvas.onDrawForeground = (ctx, visibleArea) => {
-      origOnDrawForeground?.(ctx, visibleArea)
-      const s: number = canvas.ds?.scale ?? 1
-      setCanvasScale((prev) => (prev !== s ? s : prev))
-    }
-    return () => {
-      canvas.onDrawForeground = origOnDrawForeground
-    }
-  }, [app])
+  const canvasScale = useCanvasScale(app)
+  useNodeInputConnectionDisabled(node, widget, 'prompt_override')
   // Refs for playback loop (avoid stale closures)
   const playbackRef = useRef<{
     rafId: number | null
@@ -144,47 +114,12 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
   }
 
   // Always-current ref for data so the RAF loop never has a stale closure
-  const dataRef = useRef(data)
-  useEffect(() => { dataRef.current = data })
-
-  // Ref to keep keyboard handler up-to-date without re-registration
-  const isPlayingRef = useRef(isPlaying)
-  useEffect(() => { isPlayingRef.current = isPlaying }, [isPlaying])
-
-  // Measure scroll container width
-  useLayoutEffect(() => {
-    const el = scrollContainerRef.current
-    if (!el) return
-    const ro = new ResizeObserver(() => setContentWidth(el.clientWidth))
-    ro.observe(el)
-    setContentWidth(el.clientWidth)
-    return () => ro.disconnect()
-  }, [])
+  const dataRef = useLatestRef(data)
 
   // Keep playback ref in sync with react state
   useEffect(() => {
     playbackRef.current.frame = playheadFrame
   }, [playheadFrame])
-
-  // Track prompt_override connection status
-  useEffect(() => {
-    const updateConnectionStatus = () => {
-      widget.disabled = isInputConnected(node, 'prompt_override')
-    }
-    updateConnectionStatus()
-
-    // Listen for connection changes on this node using LiteGraph callback
-    if (node) {
-      const prevOnConnectionsChange = node.onConnectionsChange?.bind(node)
-      node.onConnectionsChange = (...args: unknown[]) => {
-        prevOnConnectionsChange?.(...args)
-        updateConnectionStatus()
-      }
-      return () => {
-        node.onConnectionsChange = prevOnConnectionsChange ?? undefined
-      }
-    }
-  }, [node, widget])
 
   /**
    * Ensure audio HTMLElements exist for every audio segment.
@@ -432,7 +367,16 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
     // Update this segment and shift all subsequent segments
     const updated = segments.map((s, i) => {
       if (i < idx) return s
-      if (i === idx) return { ...s, end_frame: newEndFrame }
+      if (i === idx) {
+        return {
+          ...s,
+          end_frame: newEndFrame,
+          content: {
+            ...s.content,
+            images: scaleImageItemsToDuration(s.content.images, oldDuration, newDuration),
+          },
+        }
+      }
       // Shift subsequent segments
       return {
         ...s,
@@ -503,7 +447,16 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
                 let updated = segments.map((seg) => {
                   // If segment ends beyond new total, truncate it
                   if (seg.end_frame >= newTotal) {
-                    return { ...seg, end_frame: newTotal - 1 }
+                    const oldDuration = seg.end_frame - seg.start_frame + 1
+                    const newDuration = newTotal - seg.start_frame
+                    return {
+                      ...seg,
+                      end_frame: newTotal - 1,
+                      content: {
+                        ...seg.content,
+                        images: scaleImageItemsToDuration(seg.content.images, oldDuration, newDuration),
+                      },
+                    }
                   }
                   return seg
                 })

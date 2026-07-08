@@ -1,0 +1,1 @@
+"""OmniShotCut model architecture."""

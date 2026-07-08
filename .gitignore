@@ -2,7 +2,6 @@ __pycache__
 .DS_Store
 node_modules/
 docs/
-tests/
 dist/dev/
 config.yaml
 *.cache
@@ -10,6 +9,7 @@ config.yaml
 *.bak
 *.bat
 *.log
+.pytest_cache
 .env
 .vscode/
 .idea/
@@ -17,5 +17,6 @@ config.yaml
 .codegraph/
 .claude/skills/comfyui-node-*/
 !.claude/skills/comfyui-node-i18n/
+.superpowers/
 superpowers/
 docs/superpowers/

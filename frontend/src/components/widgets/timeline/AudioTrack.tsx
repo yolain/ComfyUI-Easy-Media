@@ -23,6 +23,8 @@ import { useT } from '@/lib/i18n'
 import { uuid } from '@/lib/uuid'
 import { CUSTOM_NODE_CLASS } from '@/lib/constants'
 import { computeSlotItems } from '@/lib/timeline-utils'
+import { audioContentToViewUrl, mediaPathToViewUrl } from '@/lib/media-url'
+import { invalidateMediaListCache } from '@/stores/media-list-store'
 
 interface AudioTrackProps {
   track: Track
@@ -43,6 +45,7 @@ interface AudioTrackProps {
 /** Map segment source_type to the MediaSelector tab */
 function sourceTypeToTab(sourceType: string | undefined): MediaTab {
   if (sourceType === 'input') return 'inputs'
+  if (sourceType === 'output') return 'outputs'
   if (sourceType === 'url') return 'url'
   if (sourceType === 'local') return 'local'
   return 'inputs'
@@ -137,7 +140,7 @@ export function AudioTrack({
     )
   }
 
-  function handleSelectorChange(filePath: string) {
+  function handleSelectorChange(filePath: string, source: 'input' | 'output' | 'local' = 'input') {
     setSelectorValue(filePath)
 
     // Handle multiple files
@@ -149,14 +152,17 @@ export function AudioTrack({
       const path = paths[0]
       const fileName = path.split('/').pop() ?? path
       const isUrl = path.startsWith('http')
+      const content = isUrl
+        ? { source_type: 'url' as const, url: path, file_name: fileName }
+        : source === 'local'
+          ? { source_type: 'local' as const, local_path: path, file_name: fileName }
+          : { source_type: source, file_path: path, file_name: fileName }
       onSegmentsChange(
         segments.map((s) =>
           s.id === editingSegId
             ? {
                 ...s,
-                content: isUrl
-                  ? { source_type: 'url', url: path, file_name: fileName }
-                  : { source_type: 'input', file_path: path, file_name: fileName },
+                content,
               }
             : s,
         ),
@@ -170,15 +176,18 @@ export function AudioTrack({
       path: string,
       cursor: number,
       currentSegments: AudioSegment[],
+      sourceType: 'input' | 'output' | 'local',
     ): Promise<{ newSeg: AudioSegment | null; nextCursor: number; updatedSegments: AudioSegment[] }> {
       const fileName = path.split('/').pop() ?? path
       const isUrl = path.startsWith('http')
+      const content = isUrl
+        ? { source_type: 'url' as const, url: path, file_name: fileName }
+        : sourceType === 'local'
+          ? { source_type: 'local' as const, local_path: path, file_name: fileName }
+          : { source_type: sourceType, file_path: path, file_name: fileName }
 
       // Build source URL
-      let src = path
-      if (!isUrl) {
-        src = `/api/view?filename=${encodeURIComponent(path)}&type=input`
-      }
+      const src = audioContentToViewUrl(content) ?? path
 
       const actualDuration = await new Promise<number>((resolve) => {
         const audio = new Audio(src)
@@ -202,9 +211,7 @@ export function AudioTrack({
         end_frame: segEnd,
         origin_start_frame: cursor,
         origin_end_frame: cursor + actualFrames - 1,
-        content: isUrl
-          ? { source_type: 'url', url: path, file_name: fileName }
-          : { source_type: 'input', file_path: path, file_name: fileName },
+        content,
         color: track.color,
         markers: [],
       }
@@ -227,7 +234,7 @@ export function AudioTrack({
           const slotName = path.slice('__slot__:'.length)
           const slotItem = slotItems.find((item: SlotItem) => item.value === path)
           const audioName = slotItem?.audio_name
-          const url = audioName ? `/api/view?filename=${encodeURIComponent(audioName)}&type=input` : undefined
+          const url = audioName ? mediaPathToViewUrl(audioName, 'input') : undefined
 
           const actualDuration = await new Promise<number>((resolve) => {
             if (url) {
@@ -258,7 +265,7 @@ export function AudioTrack({
           currentSegments = [...currentSegments, newSeg]
           cursor = segEnd + 1
         } else {
-          const result = await processAudioFile(path, cursor, currentSegments)
+          const result = await processAudioFile(path, cursor, currentSegments, source)
           if (result.newSeg) {
             cursor = result.nextCursor
             currentSegments = result.updatedSegments
@@ -319,6 +326,7 @@ export function AudioTrack({
     if (!canImport) return
     const updated = [...segments]
     let cursor = pendingDropFrame ?? (lastOccupied >= 0 ? lastOccupied + 1 : 0)
+    let uploadedAny = false
     for (const file of files) {
       if (cursor >= totalFrames) break
       try {
@@ -327,9 +335,10 @@ export function AudioTrack({
         const res = await fetch('/easy-media/upload', { method: 'POST', body: form })
         if (!res.ok) continue
         const { file_name: fileName } = await res.json() as { file_name: string }
+        uploadedAny = true
 
         // Detect actual audio duration from the uploaded file
-        const src = `/view?filename=${encodeURIComponent(fileName)}&type=input`
+        const src = mediaPathToViewUrl(fileName, 'input')
         const duration = await new Promise<number>((resolve) => {
           const audio = new Audio(src)
           audio.preload = 'metadata'
@@ -360,6 +369,7 @@ export function AudioTrack({
         // skip failed uploads
       }
     }
+    if (uploadedAny) invalidateMediaListCache('inputs')
     onSegmentsChange(updated.toSorted((a, b) => a.start_frame - b.start_frame))
     setPendingDropFrame(null)
   }
@@ -535,6 +545,7 @@ export function AudioTrack({
                       endRatio={seg.origin_end_frame !== undefined && seg.origin_start_frame !== undefined
                         ? (seg.end_frame - seg.origin_start_frame) / (seg.origin_end_frame - seg.origin_start_frame)
                         : 1}
+                      color="#2E6E53"
                     />}
                     onContextMenu={(_, s) => {
                       onSelectedIdChange(s.id)
