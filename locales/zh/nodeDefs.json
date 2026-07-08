@@ -303,6 +303,24 @@
       }
     }
   },
+  "easy apiWorkflowGate": {
+    "display_name": "API工作流阀门",
+    "description": "使用 API 工作流执行时透传输入，检测到工作流元数据时不求值输入并输出 None。列表输入请使用列表输出口。",
+    "inputs": {
+      "value": {
+        "name": "输入",
+        "tooltip": "任意类型输入；仅在 API 工作流格式执行时求值。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "输出"
+      },
+      "1": {
+        "name": "列表输出"
+      }
+    }
+  },
   "easy makeImageList": {
     "display_name": "创建图像列表",
     "description": "将多个可选的图像输入组合成图像列表。",

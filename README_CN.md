@@ -94,6 +94,14 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 > 预览源视频和输出视频的输入，支持交互式对比滑块进行左右对比。
 
+### 🎞️ API工作流阀门 APIWorkflowGate
+
+![APIWorkflowGate](https://github.com/user-attachments/assets/60a2f32b-d77b-4bf1-a1e3-99803de240c1)
+
+> **提示：** 在`APP模式`下，可以通过 `APIWorkflowGate` 节点判断只有为API调用的工作流才会透传前面的输入项，反之常规执行工作流队列会直接从后续节点开始执行。
+
+---
+
 ### 🎞️ 时间线编辑器 Timeline Editor
 
 ![timelineEditor](https://github.com/user-attachments/assets/d7c9e894-6e7e-488c-90fb-d3aa8310419d)
@@ -191,6 +199,7 @@ bun run build:release
 | easy makeRefsCompositeBySam3 | 使用 SAM3 检测提示的主体并组合参考图到画布 |
 | easy splitImages | 将图像列表或批次拆分为多个单图像输出 |
 | easy matchLine | 返回包含匹配文本的第一行的零基索引 |
+| easy apiWorkflowGate | 判断是否为 API 调用的工作流，透传前面输入项 |
 | LTXVAddGuidesFromBatchIndexes | 从批量图像添加引导图到潜在变量的指定帧索引 |
 | LTXVMakeRefVideo | 将参考图像批次扩展为 IC-LoRA 参考视频 |
 | BerniniModelPatch | 为 Wan 模型添加 Bernini 上下文潜在支持 |

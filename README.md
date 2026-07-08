@@ -83,6 +83,7 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 
 > **Note:** Some models support automatic download via the built-in Easy-Media model download interface. Model files will be placed in the `ComfyUI/models/` directory.
 
+
 ### 🎞️ Subtitle To Video
 
 ![SubtitleToVideo](https://github.com/user-attachments/assets/58f90eb7-d671-437d-8adf-d8a04a3e261e)
@@ -90,6 +91,14 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 ### 🎞️ Compare Videos
 
 ![CompareVideos](https://github.com/user-attachments/assets/3bad558c-c5f4-411d-ba4c-b2edee9b9f11)
+
+### 🎞️ APIWorkflowGate
+
+![APIWorkflowGate](https://github.com/user-attachments/assets/60a2f32b-d77b-4bf1-a1e3-99803de240c1)
+
+> **Note:** In `APP Mode`, you can use the `APIWorkflowGate` node to determine that only workflows intended for API calls will pass through the preceding input items; otherwise, regular workflow queues will begin execution directly from the subsequent nodes.
+
+---
 
 ### 🎞️ Timeline Editor
 
@@ -141,8 +150,6 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 
 The `trim_frame_count` parameter defaults to `-1`, which keeps all frames of the merged video. When set to a value greater than `0`, the node calculates the duration based on the merged video's frame rate and uses FFmpeg to trim the final video.
 
-
-
 ## Development & Testing
 
 1. Create a `config.yaml` file in the ComfyUI-Easy-Media directory and add the following content to enable frontend development mode:
@@ -188,6 +195,7 @@ bun run build:release
 | easy makeRefsCompositeBySam3 | Detect subject in prompt using SAM3 and composite reference images onto canvas |
 | easy splitImages | Split an image list or batch into multiple single-image outputs |
 | easy matchLine | Return zero-based index of the first line containing matching text |
+| easy apiWorkflowGate | Determine if the workflow is an API call and pass through preceding input items |
 | LTXVAddGuidesFromBatchIndexes | Add guide images from batch images to specified frame indexes of latent variables |
 | LTXVMakeRefVideo | Expand a reference image batch into an IC-LoRA reference video |
 | BerniniModelPatch | Add Bernini context latent support for Wan model |

@@ -137,6 +137,7 @@ def _load_basic_module():
         Custom=lambda **kwargs: _CustomType(),
         DynamicCombo=_DynamicCombo,
         Float=_PortType,
+        Hidden=types.SimpleNamespace(extra_pnginfo="EXTRA_PNGINFO"),
         Image=_PortType,
         Int=_PortType,
         Mask=_PortType,
@@ -1375,6 +1376,62 @@ def test_match_line_has_chinese_localization():
     assert translation["display_name"] == "匹配行"
     assert set(translation["inputs"]) == {"text", "match"}
     assert translation["outputs"] == {"0": {"name": "行索引"}}
+
+
+def test_workflow_format_gate_skips_input_for_workflow_metadata():
+    module = _load_basic_module()
+    module.WorkflowFormatGate.hidden = types.SimpleNamespace(
+        extra_pnginfo={"workflow": {"nodes": []}},
+    )
+
+    assert module.WorkflowFormatGate.check_lazy_status() == []
+    assert module.WorkflowFormatGate.execute("ignored").values == (None, [])
+
+
+def test_workflow_format_gate_requests_input_for_api_prompt():
+    module = _load_basic_module()
+    module.WorkflowFormatGate.hidden = types.SimpleNamespace(extra_pnginfo={})
+
+    assert module.WorkflowFormatGate.check_lazy_status() == ["value"]
+    assert module.WorkflowFormatGate.check_lazy_status("payload") == []
+    assert module.WorkflowFormatGate.execute("payload").values == ("payload", [])
+
+
+def test_workflow_format_gate_passes_list_values_through_list_output():
+    module = _load_basic_module()
+    module.WorkflowFormatGate.hidden = types.SimpleNamespace(extra_pnginfo={})
+
+    value = ["a", "b"]
+
+    assert module.WorkflowFormatGate.execute(value).values == (None, value)
+
+
+def test_workflow_format_gate_schema_has_list_output():
+    module = _load_basic_module()
+
+    schema = module.WorkflowFormatGate.define_schema()
+
+    assert schema.outputs[0].name == "VALUE"
+    assert schema.outputs[1].name == "VALUES"
+    assert schema.outputs[1].kwargs == {"is_output_list": True}
+
+
+def test_workflow_format_gate_detects_nested_workflow_metadata():
+    module = _load_basic_module()
+
+    assert module._is_workflow_format({"extra": [{"workflow": {"version": 1}}]}) is True
+    assert module._is_workflow_format({"prompt": {"1": {"class_type": "Node"}}}) is False
+
+
+def test_workflow_format_gate_has_chinese_localization():
+    locale_path = Path(__file__).parents[1] / "locales" / "zh" / "nodeDefs.json"
+    node_defs = json.loads(locale_path.read_text(encoding="utf-8"))
+
+    translation = node_defs["easy workflowFormatGate"]
+
+    assert translation["display_name"] == "工作流格式阀门"
+    assert set(translation["inputs"]) == {"value"}
+    assert translation["outputs"] == {"0": {"name": "输出"}, "1": {"name": "列表输出"}}
 
 
 def test_split_images_splits_a_single_batched_tensor_into_single_images():
