@@ -115,7 +115,7 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
     onAddSubtitleSegment: (trackId: string) => void
     onSmartSplit: (segmentId: string) => void
     onSmartSplitTasks: (segmentId: string) => void
-    onRecognizeSubtitles: (segmentId: string) => void
+    onRecognizeSubtitles: (segmentId: string, method: 'qwen3-asr' | 'whisper-large-v3') => void
     onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
     onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
     onMoveSegment: (segmentId: string, targetTrackId: string, nextStartTime: number) => void
@@ -181,7 +181,7 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
           <button type="button" onClick={() => onSmartSplit(videoSegment.id)}>smart split video</button>
         ) : null}
         {videoSegment ? (
-          <button type="button" onClick={() => onRecognizeSubtitles(videoSegment.id)}>recognize video subtitles</button>
+          <button type="button" onClick={() => onRecognizeSubtitles(videoSegment.id, 'qwen3-asr')}>recognize video subtitles</button>
         ) : null}
         {subtitleTrack ? (
           <button type="button" onClick={() => onAddSubtitleSegment(subtitleTrack.id)}>add subtitle segment</button>

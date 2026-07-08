@@ -552,6 +552,42 @@ def test_timeline_editor_empty_prompt_override_uses_original_timeline_data():
     }]
 
 
+def test_timeline_editor_prompt_override_frame_range_total_length_is_not_incremented():
+    module = _load_basic_module()
+
+    result = module.TimelineEditor.execute(
+        {"resolution": "1280 x 720 (16:9)", "resize_method": "stretch"},
+        "None",
+        {"total_length": 999, "frame_rate": 24, "tracks": []},
+        prompt_override="hello [0-120]|nice [121-240]",
+    )
+
+    timeline_info = result.values[0]
+    assert timeline_info["total_length"] == 241
+    assert [(segment["start_frame"], segment["end_frame"]) for segment in timeline_info["segments"]] == [
+        (0, 120),
+        (121, 240),
+    ]
+
+
+def test_timeline_editor_prompt_override_second_range_uses_exclusive_second_end():
+    module = _load_basic_module()
+
+    result = module.TimelineEditor.execute(
+        {"resolution": "1280 x 720 (16:9)", "resize_method": "stretch"},
+        "None",
+        {"total_length": 999, "frame_rate": 24, "tracks": []},
+        prompt_override="hello [0-5s]|nice [5s-10s]",
+    )
+
+    timeline_info = result.values[0]
+    assert timeline_info["total_length"] == 241
+    assert [(segment["start_frame"], segment["end_frame"]) for segment in timeline_info["segments"]] == [
+        (0, 120),
+        (121, 240),
+    ]
+
+
 def test_multitrack_editor_prompt_override_builds_slot_audio_and_video_tracks():
     module = _load_basic_module()
     image = torch.zeros(1, 10, 20, 3)
@@ -591,6 +627,36 @@ def test_multitrack_editor_prompt_override_builds_slot_audio_and_video_tracks():
     assert audio_track["segments"][0]["content"]["slot_name"] == "audio2"
     assert len(audio) == 1
     assert audio[0]["waveform"].flatten().tolist() == [2.0, 2.0, 0.0, 0.0]
+
+
+def test_multitrack_editor_prompt_override_ranges_do_not_extend_total_length():
+    module = _load_basic_module()
+
+    frame_result = module.MultiTrackEditor.execute(
+        {"resolution": "1280 x 720 (16:9)", "resize_method": "stretch"},
+        "None",
+        {"total_length": 999, "frame_rate": 24, "tracks": []},
+        prompt_override="hello [0-120]|nice [121-240]",
+    )
+    frame_tracks_info = frame_result.values[0]
+    assert frame_tracks_info["total_length"] == 241
+    assert [(segment["start_frame"], segment["end_frame"]) for segment in frame_tracks_info["tracks"][0]["segments"]] == [
+        (0, 121),
+        (121, 241),
+    ]
+
+    seconds_result = module.MultiTrackEditor.execute(
+        {"resolution": "1280 x 720 (16:9)", "resize_method": "stretch"},
+        "None",
+        {"total_length": 999, "frame_rate": 24, "tracks": []},
+        prompt_override="hello [0-5s]|nice [5s-10s]",
+    )
+    seconds_tracks_info = seconds_result.values[0]
+    assert seconds_tracks_info["total_length"] == 241
+    assert [(segment["start_frame"], segment["end_frame"]) for segment in seconds_tracks_info["tracks"][0]["segments"]] == [
+        (0, 121),
+        (121, 241),
+    ]
 
 
 def test_multitrack_editor_prompt_override_preserves_explicit_task_type():

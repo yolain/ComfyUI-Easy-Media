@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
 import { useT } from '@/lib/i18n'
 import { mediaPathToViewUrl } from '@/lib/media-url'
+import type { SubtitleRecognitionMethod } from '@/lib/subtitle-recognition'
 import { computeSlotItems } from '@/lib/timeline-utils'
 import type { MultiTrack, MultiTrackSourceType } from '@/types/multitrack'
 import { MULTITRACK_LEFT_GUTTER } from './MultiTrackRuler'
@@ -37,7 +38,7 @@ interface AudioTrackProps {
   onDragPreviewChange: (segmentId: string, nextStartTime: number, clientY: number) => void
   getDragPreviewStart?: (segmentId: string, nextStartTime: number, clientY: number) => number
   onDragPreviewEnd: () => void
-  onRecognizeSubtitles?: (segmentId: string) => void
+  onRecognizeSubtitles?: (segmentId: string, method: SubtitleRecognitionMethod) => void
   cutMode: boolean
   onCutSegment: (segmentId: string, splitFrame: number) => void
 }

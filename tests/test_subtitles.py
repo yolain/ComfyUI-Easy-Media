@@ -6,6 +6,7 @@ import types
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from utils import subtitles
+from modules import qwen_asr, whisper_asr
 
 
 class _FakeCuda:
@@ -55,6 +56,57 @@ class _FakeQwen3ASRModel:
     def transcribe(self, *args, **kwargs):
         self.transcribe_calls.append((args, kwargs))
         return [_FakeResult()]
+
+
+class _FakeWhisperModel:
+    transcribe_calls = []
+
+    def transcribe(self, *args, **kwargs):
+        self.transcribe_calls.append((args, kwargs))
+        return {
+            "language": "en",
+            "text": "hello world.",
+            "segments": [
+                {"start": 0, "end": 0.5, "text": "hello"},
+                {"start": 0.5, "end": 1.0, "text": "world"},
+            ],
+        }
+
+
+class _FakeWhisperModule:
+    load_model_calls = []
+
+    @classmethod
+    def load_model(cls, *args, **kwargs):
+        cls.load_model_calls.append((args, kwargs))
+        return _FakeWhisperModel()
+
+
+class _FakeOpenAIWhisper(_FakeWhisperModel):
+    init_calls = []
+    load_state_dict_calls = []
+    to_calls = []
+
+    def __init__(self, dims):
+        self.init_calls.append(dims)
+
+    def load_state_dict(self, *args, **kwargs):
+        self.load_state_dict_calls.append((args, kwargs))
+        return [], []
+
+    def to(self, device):
+        self.to_calls.append(device)
+        return self
+
+
+class _FakeModelDimensions:
+    def __init__(self, **kwargs):
+        self.values = kwargs
+
+
+class _FakeTensor:
+    def __init__(self, shape):
+        self.shape = shape
 
 
 class _FakeLanguageOnlyResult:
@@ -192,7 +244,7 @@ def test_recognize_subtitle_segments_uses_official_qwen3_asr_api(monkeypatch, tm
     monkeypatch.setitem(sys.modules, "torch", _FakeTorch())
     monkeypatch.setitem(sys.modules, "qwen_asr", fake_qwen_asr)
 
-    result = subtitles.recognize_subtitle_segments(
+    result = qwen_asr.recognize_subtitle_segments(
         tmp_path / "audio.wav",
         tmp_path / "Qwen3-ASR-1.7B",
         tmp_path / "Qwen3-ForcedAligner-0.6B",
@@ -225,14 +277,108 @@ def test_recognize_subtitle_segments_uses_official_qwen3_asr_api(monkeypatch, tm
     )]
 
 
+def test_recognize_subtitle_segments_with_whisper_uses_comfy_audio_encoder_loader(monkeypatch, tmp_path):
+    model_path = tmp_path / "audio_encoders" / "whisper_large_v3_fp16.safetensors"
+    model_path.parent.mkdir(parents=True)
+    model_path.write_bytes(b"weights")
+    _FakeWhisperModel.transcribe_calls.clear()
+    _FakeOpenAIWhisper.init_calls.clear()
+    _FakeOpenAIWhisper.load_state_dict_calls.clear()
+    _FakeOpenAIWhisper.to_calls.clear()
+    loaded_files = []
+    state_dict = {
+        "model.encoder.conv1.weight": _FakeTensor((1280, 128, 3)),
+        "model.encoder.embed_positions.weight": _FakeTensor((1500, 1280)),
+        "model.decoder.embed_tokens.weight": _FakeTensor((51866, 1280)),
+        "model.decoder.embed_positions.weight": _FakeTensor((448, 1280)),
+    }
+    fake_comfy = types.ModuleType("comfy")
+    fake_comfy_utils = types.ModuleType("comfy.utils")
+    fake_comfy_utils.load_torch_file = lambda path, safe_load=True: loaded_files.append((path, safe_load)) or state_dict
+    fake_comfy.utils = fake_comfy_utils
+    fake_whisper = types.ModuleType("whisper")
+    fake_whisper_model = types.ModuleType("whisper.model")
+    fake_whisper_model.ModelDimensions = _FakeModelDimensions
+    fake_whisper_model.Whisper = _FakeOpenAIWhisper
+    monkeypatch.setitem(sys.modules, "torch", _FakeTorch())
+    monkeypatch.setitem(sys.modules, "comfy", fake_comfy)
+    monkeypatch.setitem(sys.modules, "comfy.utils", fake_comfy_utils)
+    monkeypatch.setitem(sys.modules, "whisper", fake_whisper)
+    monkeypatch.setitem(sys.modules, "whisper.model", fake_whisper_model)
+
+    result = whisper_asr.recognize_subtitle_segments(tmp_path / "audio.wav", model_path)
+
+    assert result == [
+        {"start": 0.0, "end": 1.0, "text": "hello world."},
+    ]
+    assert loaded_files == [(str(model_path), True)]
+    assert len(_FakeOpenAIWhisper.init_calls) == 1
+    assert _FakeOpenAIWhisper.to_calls[-1] == "cpu"
+    assert _FakeWhisperModel.transcribe_calls == [(
+        (str(tmp_path / "audio.wav"),),
+        {
+            "verbose": False,
+            "word_timestamps": False,
+        },
+    )]
+
+
+def test_convert_hf_whisper_state_dict_to_openai_keys(monkeypatch):
+    fake_whisper_model = types.ModuleType("whisper.model")
+    fake_whisper_model.ModelDimensions = _FakeModelDimensions
+    monkeypatch.setitem(sys.modules, "whisper.model", fake_whisper_model)
+    state_dict = {
+        "model.encoder.conv1.weight": _FakeTensor((1280, 128, 3)),
+        "model.encoder.conv1.bias": _FakeTensor((1280,)),
+        "model.encoder.embed_positions.weight": _FakeTensor((1500, 1280)),
+        "model.encoder.layer_norm.weight": _FakeTensor((1280,)),
+        "model.encoder.layers.0.self_attn.q_proj.weight": _FakeTensor((1280, 1280)),
+        "model.encoder.layers.0.self_attn_layer_norm.bias": _FakeTensor((1280,)),
+        "model.encoder.layers.0.fc1.weight": _FakeTensor((5120, 1280)),
+        "model.encoder.layers.0.fc2.weight": _FakeTensor((1280, 5120)),
+        "model.encoder.layers.0.final_layer_norm.weight": _FakeTensor((1280,)),
+        "model.decoder.embed_tokens.weight": _FakeTensor((51866, 1280)),
+        "model.decoder.embed_positions.weight": _FakeTensor((448, 1280)),
+        "model.decoder.layer_norm.bias": _FakeTensor((1280,)),
+        "model.decoder.layers.0.self_attn.q_proj.weight": _FakeTensor((1280, 1280)),
+        "model.decoder.layers.0.encoder_attn.q_proj.weight": _FakeTensor((1280, 1280)),
+        "model.decoder.layers.0.encoder_attn_layer_norm.weight": _FakeTensor((1280,)),
+        "model.decoder.layers.0.fc1.weight": _FakeTensor((5120, 1280)),
+        "model.decoder.layers.0.fc2.weight": _FakeTensor((1280, 5120)),
+        "model.decoder.layers.0.final_layer_norm.weight": _FakeTensor((1280,)),
+    }
+
+    converted, dims = whisper_asr._convert_hf_whisper_state_dict(state_dict)
+
+    assert converted["encoder.positional_embedding"] is state_dict["model.encoder.embed_positions.weight"]
+    assert converted["encoder.blocks.0.attn.query.weight"] is state_dict["model.encoder.layers.0.self_attn.q_proj.weight"]
+    assert converted["encoder.blocks.0.attn_ln.bias"] is state_dict["model.encoder.layers.0.self_attn_layer_norm.bias"]
+    assert converted["encoder.blocks.0.mlp.0.weight"] is state_dict["model.encoder.layers.0.fc1.weight"]
+    assert converted["decoder.token_embedding.weight"] is state_dict["model.decoder.embed_tokens.weight"]
+    assert converted["decoder.blocks.0.cross_attn.query.weight"] is state_dict["model.decoder.layers.0.encoder_attn.q_proj.weight"]
+    assert converted["decoder.blocks.0.cross_attn_ln.weight"] is state_dict["model.decoder.layers.0.encoder_attn_layer_norm.weight"]
+    assert dims.values == {
+        "n_mels": 128,
+        "n_audio_ctx": 1500,
+        "n_audio_state": 1280,
+        "n_audio_head": 20,
+        "n_audio_layer": 1,
+        "n_vocab": 51866,
+        "n_text_ctx": 448,
+        "n_text_state": 1280,
+        "n_text_head": 20,
+        "n_text_layer": 1,
+    }
+
+
 def test_recognize_subtitle_segments_cleans_model_memory(monkeypatch, tmp_path):
     fake_qwen_asr = types.SimpleNamespace(Qwen3ASRModel=_FakeQwen3ASRModel)
     cleaned = []
     monkeypatch.setitem(sys.modules, "torch", _FakeTorch())
     monkeypatch.setitem(sys.modules, "qwen_asr", fake_qwen_asr)
-    monkeypatch.setattr(subtitles, "cleanup_model_memory", lambda *models: cleaned.extend(models), raising=False)
+    monkeypatch.setattr(qwen_asr, "cleanup_model_memory", lambda *models: cleaned.extend(models), raising=False)
 
-    subtitles.recognize_subtitle_segments(
+    qwen_asr.recognize_subtitle_segments(
         tmp_path / "audio.wav",
         tmp_path / "Qwen3-ASR-1.7B",
         tmp_path / "Qwen3-ForcedAligner-0.6B",
@@ -249,7 +395,7 @@ def test_recognize_subtitle_segments_reads_forced_align_result_time_stamps(monke
     monkeypatch.setitem(sys.modules, "torch", _FakeTorch())
     monkeypatch.setitem(sys.modules, "qwen_asr", fake_qwen_asr)
 
-    result = subtitles.recognize_subtitle_segments(
+    result = qwen_asr.recognize_subtitle_segments(
         tmp_path / "audio.wav",
         tmp_path / "Qwen3-ASR-1.7B",
         tmp_path / "Qwen3-ForcedAligner-0.6B",
@@ -268,7 +414,7 @@ def test_recognize_subtitle_segments_retries_with_detected_language(monkeypatch,
     monkeypatch.setitem(sys.modules, "torch", _FakeTorch())
     monkeypatch.setitem(sys.modules, "qwen_asr", fake_qwen_asr)
 
-    result = subtitles.recognize_subtitle_segments(
+    result = qwen_asr.recognize_subtitle_segments(
         tmp_path / "audio.wav",
         tmp_path / "Qwen3-ASR-1.7B",
         tmp_path / "Qwen3-ForcedAligner-0.6B",
@@ -309,7 +455,7 @@ def test_recognize_subtitle_segments_falls_back_to_direct_forced_aligner(monkeyp
     monkeypatch.setitem(sys.modules, "torch", _FakeTorch())
     monkeypatch.setitem(sys.modules, "qwen_asr", fake_qwen_asr)
 
-    result = subtitles.recognize_subtitle_segments(
+    result = qwen_asr.recognize_subtitle_segments(
         tmp_path / "audio.wav",
         tmp_path / "Qwen3-ASR-1.7B",
         tmp_path / "Qwen3-ForcedAligner-0.6B",
@@ -347,7 +493,7 @@ def test_recognize_subtitle_segments_normalizes_language_code_for_aligner(monkey
     monkeypatch.setitem(sys.modules, "torch", _FakeTorch())
     monkeypatch.setitem(sys.modules, "qwen_asr", fake_qwen_asr)
 
-    result = subtitles.recognize_subtitle_segments(
+    result = qwen_asr.recognize_subtitle_segments(
         tmp_path / "audio.wav",
         tmp_path / "Qwen3-ASR-1.7B",
         tmp_path / "Qwen3-ForcedAligner-0.6B",
@@ -378,7 +524,7 @@ def test_recognize_subtitle_segments_infers_chinese_language_from_text(monkeypat
     monkeypatch.setitem(sys.modules, "torch", _FakeTorch())
     monkeypatch.setitem(sys.modules, "qwen_asr", fake_qwen_asr)
 
-    result = subtitles.recognize_subtitle_segments(
+    result = qwen_asr.recognize_subtitle_segments(
         tmp_path / "audio.wav",
         tmp_path / "Qwen3-ASR-1.7B",
         tmp_path / "Qwen3-ForcedAligner-0.6B",
@@ -403,7 +549,7 @@ def test_recognize_subtitle_segments_reports_result_summary(monkeypatch, tmp_pat
     monkeypatch.setitem(sys.modules, "qwen_asr", fake_qwen_asr)
 
     try:
-        subtitles.recognize_subtitle_segments(
+        qwen_asr.recognize_subtitle_segments(
             tmp_path / "audio.wav",
             tmp_path / "Qwen3-ASR-1.7B",
             tmp_path / "Qwen3-ForcedAligner-0.6B",
@@ -515,7 +661,7 @@ def test_restore_subtitle_punctuation_falls_back_by_text_language():
     ]
 
 
-def test_missing_subtitle_dependencies_reports_setuptools_for_pkg_resources(monkeypatch):
+def test_qwen_missing_dependencies_reports_setuptools_for_pkg_resources(monkeypatch):
     def fake_find_spec(name: str):
         if name == "pkg_resources":
             return None
@@ -523,7 +669,7 @@ def test_missing_subtitle_dependencies_reports_setuptools_for_pkg_resources(monk
 
     monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
 
-    assert subtitles.missing_subtitle_dependencies() == ["setuptools"]
+    assert qwen_asr.missing_dependencies() == ["setuptools"]
 
 
 def test_collect_multitrack_subtitle_segments_uses_frame_timing_and_style():

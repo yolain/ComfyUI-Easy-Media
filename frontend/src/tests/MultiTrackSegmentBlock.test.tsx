@@ -11,6 +11,9 @@ vi.mock('@/components/ui/context-menu', () => ({
   ContextMenuItem: ({ children, onClick }: { children: ReactNode; onClick?: () => void }) => (
     <button type="button" onClick={onClick}>{children}</button>
   ),
+  ContextMenuSub: ({ children }: { children: ReactNode }) => <>{children}</>,
+  ContextMenuSubContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  ContextMenuSubTrigger: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }))
 
 function segment(type: MultiTrackType): MultiTrackSegment {
@@ -103,9 +106,11 @@ describe('MultiTrackSegmentBlock context menu', () => {
   it.each(['video', 'audio'] as const)('offers subtitle recognition for %s segments', (trackType) => {
     const { onRecognizeSubtitles } = renderBlock(trackType)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Recognize subtitles' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Qwen3-ASR' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Whisper Large V3' }))
 
-    expect(onRecognizeSubtitles).toHaveBeenCalledWith(`${trackType}-segment`)
+    expect(onRecognizeSubtitles).toHaveBeenCalledWith(`${trackType}-segment`, 'qwen3-asr')
+    expect(onRecognizeSubtitles).toHaveBeenCalledWith(`${trackType}-segment`, 'whisper-large-v3')
   })
 
   it('cuts at the clicked frame without starting a drag', () => {

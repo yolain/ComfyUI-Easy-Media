@@ -55,6 +55,7 @@ import {
   DEFAULT_SUBTITLE_STYLE,
   MULTITRACK_SUBTITLE_COLOR,
   requestSubtitleRecognition,
+  type SubtitleRecognitionMethod,
 } from '@/lib/subtitle-recognition'
 import {
   applySubtitleSpeechAudio,
@@ -881,7 +882,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     }
   }
 
-  async function handleRecognizeSubtitles(segmentId: string) {
+  async function handleRecognizeSubtitles(segmentId: string, method: SubtitleRecognitionMethod) {
     const segment = data.tracks
       .find((track) => (track.type === 'video' || track.type === 'audio') && track.segments.some((item) => item.id === segmentId))
       ?.segments.find((item) => item.id === segmentId)
@@ -890,7 +891,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     setIsPlaying(false)
     setIsRecognizingSubtitles(true)
     try {
-      const result = await requestSubtitleRecognition(segment, data.frame_rate)
+      const result = await requestSubtitleRecognition(segment, data.frame_rate, method)
       commitNormalizedTrackChange(applySubtitleRecognition(data, segmentId, result))
     } catch (error) {
       if (error instanceof MissingModelError) {

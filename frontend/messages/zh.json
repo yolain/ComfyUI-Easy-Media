@@ -98,6 +98,8 @@
     "text": "文字",
     "editSubtitle": "编辑字幕",
     "recognizeSubtitles": "识别字幕",
+    "recognizeSubtitlesQwen3": "Qwen3-ASR",
+    "recognizeSubtitlesWhisper": "Whisper Large V3",
     "recognizingSubtitles": "正在识别字幕...",
     "subtitleRecognitionFailed": "识别字幕失败",
     "subtitleSpeechComplete": "音频生成完成",

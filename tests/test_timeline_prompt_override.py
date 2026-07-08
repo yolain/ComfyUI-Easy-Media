@@ -126,6 +126,10 @@ def _load_basic_module(monkeypatch):
     comfy.utils = comfy_utils
     monkeypatch.setitem(sys.modules, "comfy", comfy)
     monkeypatch.setitem(sys.modules, "comfy.utils", comfy_utils)
+    folder_paths = types.ModuleType("folder_paths")
+    folder_paths.get_temp_directory = lambda: "/tmp"
+    folder_paths.get_output_directory = lambda: "/tmp"
+    monkeypatch.setitem(sys.modules, "folder_paths", folder_paths)
     monkeypatch.setitem(sys.modules, "easy_media", types.ModuleType("easy_media"))
     monkeypatch.setitem(sys.modules, "easy_media.nodes", types.ModuleType("easy_media.nodes"))
     monkeypatch.setitem(sys.modules, "easy_media.utils", utils)

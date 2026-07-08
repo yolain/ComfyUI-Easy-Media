@@ -3,6 +3,9 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { AudioWaveform } from '@/components/widgets/timeline/AudioWaveform'
@@ -11,6 +14,7 @@ import { useT } from '@/lib/i18n'
 import { formatMultiTrackTime, getMultiTrackTaskModeLabel } from '@/lib/multitrack-utils'
 import { getSegmentTrackPresentation } from '@/lib/multitrack-segment-style'
 import { captureVideoPosterFrame } from '@/lib/video-utils'
+import type { SubtitleRecognitionMethod } from '@/lib/subtitle-recognition'
 import type { MultiTrackSegment, MultiTrackType } from '@/types/multitrack'
 
 const RESIZE_ZONE_DEFAULT = 8
@@ -38,7 +42,7 @@ interface MultiTrackSegmentBlockProps {
   onSplitTask?: (segmentId: string) => void
   onSmartSplit?: (segmentId: string) => void
   onSmartSplitTasks?: (segmentId: string) => void
-  onRecognizeSubtitles?: (segmentId: string) => void
+  onRecognizeSubtitles?: (segmentId: string, method: SubtitleRecognitionMethod) => void
   cutMode?: boolean
   onCut?: (segmentId: string, splitFrame: number) => void
   onResize: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
@@ -436,9 +440,19 @@ export function MultiTrackSegmentBlock({
           </ContextMenuItem>
         ) : null}
         {(trackType === 'video' || trackType === 'audio') && onRecognizeSubtitles ? (
-          <ContextMenuItem onClick={() => onRecognizeSubtitles(segment.id)}>
-            {t('multitrack.recognizeSubtitles')}
-          </ContextMenuItem>
+          <ContextMenuSub>
+            <ContextMenuSubTrigger>
+              {t('multitrack.recognizeSubtitles')}
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent>
+              <ContextMenuItem onClick={() => onRecognizeSubtitles(segment.id, 'whisper-large-v3')}>
+                {t('multitrack.recognizeSubtitlesWhisper')}
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => onRecognizeSubtitles(segment.id, 'qwen3-asr')}>
+                {t('multitrack.recognizeSubtitlesQwen3')}
+              </ContextMenuItem>
+            </ContextMenuSubContent>
+          </ContextMenuSub>
         ) : null}
         {trackType === 'task' && onDistribute ? (
           <ContextMenuItem onClick={onDistribute}>

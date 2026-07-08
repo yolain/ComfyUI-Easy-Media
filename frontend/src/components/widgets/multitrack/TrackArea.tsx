@@ -19,6 +19,7 @@ import { MultiTrackSegmentBlock } from './MultiTrackSegmentBlock'
 import { AudioTrack } from './AudioTrack'
 import { VideoTrack } from './VideoTrack'
 import { SubtitleTrack } from './SubtitleTrack'
+import type { SubtitleRecognitionMethod } from '@/lib/subtitle-recognition'
 
 interface TrackAreaProps {
   data: TrackData
@@ -56,7 +57,7 @@ interface TrackAreaProps {
   onMoveSegment: (segmentId: string, targetTrackId: string, nextStartTime: number) => void
   onSmartSplit: (segmentId: string) => void
   onSmartSplitTasks: (segmentId: string) => void
-  onRecognizeSubtitles?: (segmentId: string) => void
+  onRecognizeSubtitles?: (segmentId: string, method: SubtitleRecognitionMethod) => void
   onEditSubtitleSegment?: (segmentId: string) => void
   cutMode: boolean
   onCutSegment: (segmentId: string, splitFrame: number) => void

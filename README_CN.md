@@ -65,37 +65,34 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 - 仅统计了热门开源模型常见的生成类型，理论上任何视频模型流程都可以通过多轨编辑器作为前置处理工具
 
+#### 与其他节点的区别
+
+![Compare](https://github.com/user-attachments/assets/e7a30db8-48b3-480a-a211-a2633b4b1243)
+
+> **提示：** 多轨编辑器的优势在于解耦，它只用来做媒体的编辑与加载，不与任何模型绑定，用户可以自由选择任何模型节点来处理多轨编辑器输出的媒体数据。
+
 #### 额外模型（可选）
 
 | 场景 | 功能说明 | 下载地址 | 本地路径 | 前置依赖
 |------|----------|----------|----------|-------------|
-| **视频字幕** | 音视频识别生成字幕 | [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) <br>[Qwen3-ForcedAligner](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B) | models/Qwen3-ASR/ | `pip install qwen-asr torchaudio` |
+| **视频字幕（Whisper）** | 音视频识别生成字幕 | [Whisper Large V3](https://huggingface.co/Comfy-Org/HuMo_ComfyUI/tree/main/split_files/audio_encoders) | models/audio_encoders/whisper_large_v3_fp16.safetensors | `pip install openai-whisper` |
+| **视频字幕（Qwen3）** | 音视频识别生成字幕 | [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) <br>[Qwen3-ForcedAligner](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B) | models/Qwen3-ASR/ | `pip install qwen-asr torchaudio` |
 | **字幕朗读** | 字幕转语音配音 | [VoxCPM2](https://huggingface.co/openbmb/VoxCPM2) | models/voxcpm/ |  `pip install voxcpm` |
 | **镜头检测** | 智能分割视频镜头 | [OmniShotCut](https://huggingface.co/uva-cv-lab/OmniShotCut/resolve/main/OmniShotCut_ckpt.pth) | models/checkpoints | - |
 
 > **提示：** 部分模型支持通过 Easy-Media 内置的模型下载接口自动下载，模型文件将放置在 `ComfyUI/models/` 目录下。
 
-#### 字幕烧录到视频
+<details>
+<summary>动态参数注入 - 通用</summary>
 
-![SubtitleToVideo](https://github.com/user-attachments/assets/58f90eb7-d671-437d-8adf-d8a04a3e261e)
-
-#### 对比视频
-
-![CompareVideos](https://github.com/user-attachments/assets/3bad558c-c5f4-411d-ba4c-b2edee9b9f11)
-
-### 🎞️ 媒体时间线编辑器 Timeline Editor
-
-![timelineEditor](https://github.com/user-attachments/assets/d7c9e894-6e7e-488c-90fb-d3aa8310419d)
-
-#### 动态参数注入 (05-23)
-
-> 如果你想通过`agents`或`app`方式动态地调用时间线编辑器，目前提供了一种方案，你可以将媒体素材输入到时间线编辑器的对应输入端口（`prompt_override`、`image`、`audio`）中。当`prompt_override`注入时，它会覆盖时间线编辑器中的片段数据。但相比于可视化界面直接编辑片段内容，动态参数注入的方式有局限性，例如无法很方便的控制音频时长和出现的范围，`prompt_override`提供了一种提示词格式化模板的规范写法，类似于 `promptRelay + seedance2.0` 动态提示词结合，具体可参考下方的示例。
+> 如果你想通过`agents`或`app`方式动态地调用时间线编辑器，目前提供了一种方案，你可以将媒体素材输入到时间线编辑器的对应输入端口（`prompt_override`、`image`、`audio`、`video`）中。当`prompt_override`注入时，它会覆盖时间线编辑器中的片段数据。但相比于可视化界面直接编辑片段内容，动态参数注入的方式有局限性，例如无法很方便的控制音频时长和出现的范围，`prompt_override`提供了一种提示词格式化模板的规范写法，类似于 `promptRelay + seedance2.0` 动态提示词结合，具体可参考下方的示例。
 
 ![dynamicInput](https://github.com/user-attachments/assets/eef6798e-a68d-4724-8e72-69b1a13825dd)
 
 **可选参数**：
 - `prompt_override`：由于ComfyUI存在force_input兼容性问题，当force_input存在时自定义部件将无法被获取，所以目前该参数的类型被设置为了`AnyType`，建议使用常规的字符串类型节点进行连入即可。
 - `image`：输入的图片资源列表，建议使用新增加的`easy makeImageList`节点来创建图片列表。
+- `video`: 输入的视频资源列表，若片段只需要一段视频直接将视频连接到video输入口即可，如需要多段视频则建议使用新增加的`easy makeVideoList`节点来创建视频列表。
 - `audio`：输入的音频资源列表，若片段只需要一段音频直接将音频连接到audio输入口即可，如需要多段音频则建议使用新增加的`easy makeAudioList`节点来创建音频列表。
 
 
@@ -108,42 +105,43 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 - [0-120] 和 [121-241] 表示时间轴上片段的起止帧范围，单位为帧（frame），也支持 [0-5s] [5-10s] 这种写法，单位为秒。如果不指定时间范围，默认会均分原先时间轴编辑器上设置的总时长。
 - 片段之间使用 `|` 分隔，表示不同的时间段。每个片段可以包含`媒体占位符`、`文本提示词`和`起止帧范围`。
 - 图片注入：支持 `@image{n}`、`@img{n}`、`@图{n}`、`@图片{n}`、`@图像{n}` 作为占位符来注入图片资源, 其中`{n}`表示图片列表中的第n张图（从1开始计数）。例如，`@image1`将注入图片列表中的第一张图。
+- 视频注入：支持 `@video{n}`、`@视频{n}` 作为占位符来注入视频资源, 其中`{n}`表示视频列表中的第n段视频（从1开始计数）。例如，`@video1`将注入视频列表中的第一段视频。
 - 音频注入：支持 `@audio{n}`、`@音频{n}` 作为占位符来注入音频资源, 其中`{n}`表示音频列表中的第n段音频（从1开始计数）。例如，`@audio1`将注入音频列表中的第一段音频。
-
-
-**使用时间线编辑器添加输入口的媒体**：
-> 如果你只想通过`image`或`audio`输入端口传递参数，不想使用`prompt_override`，你也可以在添加图片或添加音频的地方使用`slot`方式关联到对应输入端口的媒体，这样在执行工作流任务时，便会自动将输入的媒体资源关联到时间线编辑器中对应的片段上。
-（注意：时间编辑器上显示的预览是溯源到最初加载图片或加载音频的节点中对应资源的，如果你在加载与时间编辑器流程之间使用了裁剪或者截断等节点对原始媒体进行处理，后端同样会执行这一块的处理，只是前端的预览显示是初始加载的状态。）
 
 ![dynamicInput2](https://github.com/user-attachments/assets/6dd84d52-1fd3-4b27-a890-2a0e22cecda4)
 
+**使用时间线编辑器添加输入口的媒体**：
+> 如果你只想通过`image`或`audio`、`video`输入端口传递参数，不想使用`prompt_override`，你也可以在添加图片或添加音频的地方使用`slot`方式关联到对应输入端口的媒体，这样在执行工作流任务时，便会自动将输入的媒体资源关联到时间线编辑器中对应的片段上。
+（注意：时间编辑器上显示的预览是溯源到最初加载图片或加载音频的节点中对应资源的，如果你在加载与时间编辑器流程之间使用了裁剪或者截断等节点对原始媒体进行处理，后端同样会执行这一块的处理，只是前端的预览显示是初始加载的状态。）
+</details>
 
-### 🎞️ 从路径合并视频 MergeVideoFromPath
+#### 🎞️ 字幕烧录到视频 Subtitle To Video
 
-> 该节点可以从指定路径加载视频文件，并将它们合并成一个视频输出。
+![SubtitleToVideo](https://github.com/user-attachments/assets/58f90eb7-d671-437d-8adf-d8a04a3e261e)
 
-`截取帧数` 默认值为 `-1`，表示保留合并后的全部帧；当设置为大于 `0` 的数值时，节点会按合并后视频帧率换算为时长，并使用 FFmpeg 截取得到最终视频。
+#### 🎞️ 对比视频 Compare Videos
 
-**推荐安装 FFmpeg** 以获得最佳性能和转场质量：
+![CompareVideos](https://github.com/user-attachments/assets/3bad558c-c5f4-411d-ba4c-b2edee9b9f11)
 
-```bash
-# macOS (Homebrew)
-brew install ffmpeg
+> 预览源视频和输出视频的输入，支持交互式对比滑块进行左右对比。
 
-# Windows — 下载完整构建版（包含 xfade 滤镜）：
-# https://ffmpeg.org/download.html
-# 推荐使用 BtbN 或 gyan.dev 提供的完整版（full build）
+### 🎞️ 时间线编辑器 Timeline Editor
 
-# Linux (Ubuntu/Debian)
-sudo apt install ffmpeg
-```
+![timelineEditor](https://github.com/user-attachments/assets/d7c9e894-6e7e-488c-90fb-d3aa8310419d)
 
-
-### 保存视频 SaveVideo
+### 🎞️ 保存视频 SaveVideo
 
 ![保存视频](https://github.com/user-attachments/assets/30e2dcc3-9ed3-4d5f-bb15-69e50c3e8fca)
 > 已整合 SaveVideoRGBA 节点包的视频保存节点，并进行了功能完善。支持视频导出，可自定义输出路径、文件名前缀、帧率等参数。
 
+### 🎞️ 从路径合并视频 MergeVideoFromPath
+
+> 从文件路径列表（或 URL）加载视频文件并将其拼接成单个视频输出。
+
+`截取帧数` 参数默认值为 `-1`，表示保留合并后视频的全部帧；当设置为大于 `0` 的数值时，节点会按合并后视频的帧率换算时长，并使用 FFmpeg 截取最终视频。
+
+![保存视频](https://github.com/user-attachments/assets/30e2dcc3-9ed3-4d5f-bb15-69e50c3e8fca)
+> 已整合 SaveVideoRGBA 节点包的视频保存节点，并进行了功能完善。支持视频导出，可自定义输出路径、文件名前缀、帧率等参数。
 
 
 ## 开发测试
@@ -199,6 +197,7 @@ bun run build:release
 
 - [OmniShotCut](https://github.com/UVA-Computer-Vision-Lab/OmniShotCut)
 - [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B)
+- [Whisper](https://github.com/openai/whisper)
 - [VoxCPM2](https://github.com/OpenBMB/VoxCPM)
 
 ## Source of Inspiration

@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
 import type { MediaTab } from '@/components/widgets/mediaSelector/MediaSelector'
 import { useT } from '@/lib/i18n'
+import type { SubtitleRecognitionMethod } from '@/lib/subtitle-recognition'
 import type { MultiTrack, MultiTrackSourceType } from '@/types/multitrack'
 import { MULTITRACK_LEFT_GUTTER } from './MultiTrackRuler'
 import { MultiTrackSegmentBlock } from './MultiTrackSegmentBlock'
@@ -33,7 +34,7 @@ interface VideoTrackProps {
   onReplaceVideo: (trackId: string, segmentId: string, filePath: string, sourceType: MultiTrackSourceType) => void
   onSmartSplit: (segmentId: string) => void
   onSmartSplitTasks: (segmentId: string) => void
-  onRecognizeSubtitles?: (segmentId: string) => void
+  onRecognizeSubtitles?: (segmentId: string, method: SubtitleRecognitionMethod) => void
   cutMode: boolean
   onCutSegment: (segmentId: string, splitFrame: number) => void
 }

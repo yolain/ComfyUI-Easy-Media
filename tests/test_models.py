@@ -77,3 +77,34 @@ def test_qwen_model_payload_includes_bundle_urls(monkeypatch, tmp_path):
         "https://huggingface.co/Qwen/Qwen3-ASR-1.7B",
         "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B",
     ]
+
+
+def test_whisper_large_v3_model_uses_audio_encoders_directory(monkeypatch, tmp_path):
+    monkeypatch.setattr(models.folder_paths, "models_dir", str(tmp_path))
+
+    payload = models.model_payload(models.get_model_info("whisper-large-v3"))
+
+    assert payload["path"] == str(tmp_path / "audio_encoders" / "whisper_large_v3_fp16.safetensors")
+    assert payload["url"] == (
+        "https://huggingface.co/Comfy-Org/HuMo_ComfyUI/resolve/main/"
+        "split_files/audio_encoders/whisper_large_v3_fp16.safetensors"
+    )
+
+
+def test_require_whisper_large_v3_matches_audio_encoder_filename(monkeypatch, tmp_path):
+    monkeypatch.setattr(models.folder_paths, "models_dir", str(tmp_path))
+    model_file = tmp_path / "audio_encoders" / "nested" / "Whisper_Large_V3_FP16.safetensors"
+    model_file.parent.mkdir(parents=True)
+    model_file.write_bytes(b"weights")
+    monkeypatch.setattr(
+        models.folder_paths,
+        "get_filename_list",
+        lambda category: ["nested/Whisper_Large_V3_FP16.safetensors"] if category == "audio_encoders" else [],
+    )
+    monkeypatch.setattr(
+        models.folder_paths,
+        "get_full_path",
+        lambda category, filename: str(model_file) if category == "audio_encoders" else None,
+    )
+
+    assert models.require_whisper_large_v3_model_path() == model_file

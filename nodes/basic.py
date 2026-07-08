@@ -738,10 +738,11 @@ def _build_tracks_info_and_media_outputs(
     if progress is not None and progress_value < progress.total:
         progress.update_absolute(progress.total)
 
+    output_total_length = total_length if data.get("_total_length_is_final") is True else total_length + 1
     tracks_info = {
-        # The editor stores an exclusive timeline end; TRACKS_INFO exposes the
-        # inclusive frame sequence used by generation nodes (0..end).
-        "total_length": total_length + 1,
+        # UI track data stores an exclusive timeline end, while prompt_override
+        # data has already normalized total_length to the final output value.
+        "total_length": output_total_length,
         "frame_rate": frame_rate,
         "muted": global_muted,
         "volume_db": global_volume_db,
@@ -1004,7 +1005,8 @@ class TimelineEditor(io.ComfyNode):
                 frame_rate=frame_rate,
             )
             if prompt_override_has_frame_ranges(prompt_override):
-                total_length = max((s['end_frame'] for s in override_segs), default=120) + 1
+                max_override_end = max((s['end_frame'] for s in override_segs), default=120)
+                total_length = max_override_end + 1
 
             # Build maintain_segs — images stored as slot refs with _tensor_idx
             maintain_segs: list[dict] = []

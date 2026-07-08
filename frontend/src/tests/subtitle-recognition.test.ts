@@ -133,7 +133,7 @@ describe('requestSubtitleRecognition', () => {
       json: async () => ({ segments: [] }),
     } as Response)
 
-    await requestSubtitleRecognition(segment, data.frame_rate)
+    await requestSubtitleRecognition(segment, data.frame_rate, 'whisper-large-v3')
 
     const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
     expect(body).toMatchObject({
@@ -143,6 +143,7 @@ describe('requestSubtitleRecognition', () => {
       start_frame: 48,
       end_frame: 96,
       origin_start_frame: 24,
+      method: 'whisper-large-v3',
     })
   })
 })

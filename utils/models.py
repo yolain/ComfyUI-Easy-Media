@@ -51,6 +51,13 @@ MODEL_REGISTRY: dict[str, EasyMediaModel] = {
             "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B",
         ),
     ),
+    "whisper-large-v3": EasyMediaModel(
+        name="whisper-large-v3",
+        display_name="Whisper Large V3",
+        category="audio_encoders",
+        filename="whisper_large_v3_fp16.safetensors",
+        url="https://huggingface.co/Comfy-Org/HuMo_ComfyUI/resolve/main/split_files/audio_encoders/whisper_large_v3_fp16.safetensors",
+    ),
     "voxcpm2": EasyMediaModel(
         name="voxcpm2",
         display_name="VoxCPM2",
@@ -167,6 +174,23 @@ def require_qwen_asr_model_dirs() -> tuple[Path, Path]:
         return asr_dir, aligner_dir
     notify_missing_model("qwen3-asr")
     raise MissingEasyMediaModelError(get_model_info("qwen3-asr"))
+
+
+def require_whisper_large_v3_model_path() -> Path:
+    """Return the local Whisper Large V3 audio encoder safetensors file."""
+    model = get_model_info("whisper-large-v3")
+    target_name = "whisper_large_v3"
+    for filename in folder_paths.get_filename_list("audio_encoders"):
+        path = Path(filename)
+        if path.suffix.lower() != ".safetensors":
+            continue
+        if target_name not in filename.lower():
+            continue
+        full_path = folder_paths.get_full_path("audio_encoders", filename)
+        if full_path:
+            return Path(full_path)
+    notify_missing_model("whisper-large-v3")
+    raise MissingEasyMediaModelError(model)
 
 
 async def _download_qwen3_asr_bundle(model: EasyMediaModel) -> Path:

@@ -25,6 +25,8 @@ export const DEFAULT_SUBTITLE_STYLE: MultiTrackSubtitleStyle = {
   width: 0.75,
 }
 
+export type SubtitleRecognitionMethod = 'qwen3-asr' | 'whisper-large-v3'
+
 export interface SubtitleRecognitionSegment {
   start: number
   end: number
@@ -83,6 +85,7 @@ function createSubtitleTrack(index: number): MultiTrack {
 export async function requestSubtitleRecognition(
   segment: MultiTrackSegment,
   fps: number,
+  method: SubtitleRecognitionMethod = 'qwen3-asr',
 ): Promise<SubtitleRecognitionResult> {
   const response = await fetch('/easy-media/subtitles/recognize', {
     method: 'POST',
@@ -97,6 +100,7 @@ export async function requestSubtitleRecognition(
       start_frame: segment.start_frame,
       end_frame: segment.end_frame,
       origin_start_frame: segment.origin_start_frame,
+      method,
     }),
   })
   let payload: unknown

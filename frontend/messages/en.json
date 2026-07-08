@@ -98,6 +98,8 @@
     "text": "Text",
     "editSubtitle": "Edit subtitle",
     "recognizeSubtitles": "Recognize subtitles",
+    "recognizeSubtitlesQwen3": "Qwen3-ASR",
+    "recognizeSubtitlesWhisper": "Whisper Large V3",
     "recognizingSubtitles": "Recognizing subtitles...",
     "subtitleRecognitionFailed": "Subtitle recognition failed",
     "subtitleSpeechComplete": "Audio generation complete",

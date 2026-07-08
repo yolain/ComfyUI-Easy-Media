@@ -210,6 +210,7 @@ def build_multitrack_data_from_prompt_override(base_data: dict, prompt_override)
 
     override_data = dict(base_data)
     override_data["total_length"] = max(total_length, max_end_frame, 1)
+    override_data["_total_length_is_final"] = True
     override_data["frame_rate"] = frame_rate
     tracks: list[dict] = [{
         "id": "override-task-track",
