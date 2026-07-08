@@ -75,15 +75,29 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 | 场景 | 功能说明 | 下载地址 | 本地路径 | 前置依赖
 |------|----------|----------|----------|-------------|
-| **视频字幕（Whisper）** | 音视频识别生成字幕 | [Whisper Large V3](https://huggingface.co/Comfy-Org/HuMo_ComfyUI/tree/main/split_files/audio_encoders) | models/audio_encoders/whisper_large_v3_fp16.safetensors | `pip install openai-whisper` |
+| **视频字幕（Whisper）** | 音视频识别生成字幕 | [Whisper Large V3](https://huggingface.co/Comfy-Org/HuMo_ComfyUI/tree/main/split_files/audio_encoders) | models/audio_encoders/ | `pip install openai-whisper` |
 | **视频字幕（Qwen3）** | 音视频识别生成字幕 | [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) <br>[Qwen3-ForcedAligner](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B) | models/Qwen3-ASR/ | `pip install qwen-asr torchaudio` |
 | **字幕朗读** | 字幕转语音配音 | [VoxCPM2](https://huggingface.co/openbmb/VoxCPM2) | models/voxcpm/ |  `pip install voxcpm` |
 | **镜头检测** | 智能分割视频镜头 | [OmniShotCut](https://huggingface.co/uva-cv-lab/OmniShotCut/resolve/main/OmniShotCut_ckpt.pth) | models/checkpoints | - |
 
 > **提示：** 部分模型支持通过 Easy-Media 内置的模型下载接口自动下载，模型文件将放置在 `ComfyUI/models/` 目录下。
 
+### 🎞️ 字幕烧录到视频 Subtitle To Video
+
+![SubtitleToVideo](https://github.com/user-attachments/assets/58f90eb7-d671-437d-8adf-d8a04a3e261e)
+
+#### 🎞️ 对比视频 Compare Videos
+
+![CompareVideos](https://github.com/user-attachments/assets/3bad558c-c5f4-411d-ba4c-b2edee9b9f11)
+
+> 预览源视频和输出视频的输入，支持交互式对比滑块进行左右对比。
+
+### 🎞️ 时间线编辑器 Timeline Editor
+
+![timelineEditor](https://github.com/user-attachments/assets/d7c9e894-6e7e-488c-90fb-d3aa8310419d)
+
 <details>
-<summary>动态参数注入 - 通用</summary>
+<summary>动态参数注入</summary>
 
 > 如果你想通过`agents`或`app`方式动态地调用时间线编辑器，目前提供了一种方案，你可以将媒体素材输入到时间线编辑器的对应输入端口（`prompt_override`、`image`、`audio`、`video`）中。当`prompt_override`注入时，它会覆盖时间线编辑器中的片段数据。但相比于可视化界面直接编辑片段内容，动态参数注入的方式有局限性，例如无法很方便的控制音频时长和出现的范围，`prompt_override`提供了一种提示词格式化模板的规范写法，类似于 `promptRelay + seedance2.0` 动态提示词结合，具体可参考下方的示例。
 
@@ -115,19 +129,6 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 （注意：时间编辑器上显示的预览是溯源到最初加载图片或加载音频的节点中对应资源的，如果你在加载与时间编辑器流程之间使用了裁剪或者截断等节点对原始媒体进行处理，后端同样会执行这一块的处理，只是前端的预览显示是初始加载的状态。）
 </details>
 
-#### 🎞️ 字幕烧录到视频 Subtitle To Video
-
-![SubtitleToVideo](https://github.com/user-attachments/assets/58f90eb7-d671-437d-8adf-d8a04a3e261e)
-
-#### 🎞️ 对比视频 Compare Videos
-
-![CompareVideos](https://github.com/user-attachments/assets/3bad558c-c5f4-411d-ba4c-b2edee9b9f11)
-
-> 预览源视频和输出视频的输入，支持交互式对比滑块进行左右对比。
-
-### 🎞️ 时间线编辑器 Timeline Editor
-
-![timelineEditor](https://github.com/user-attachments/assets/d7c9e894-6e7e-488c-90fb-d3aa8310419d)
 
 ### 🎞️ 保存视频 SaveVideo
 

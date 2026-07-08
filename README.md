@@ -64,22 +64,28 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 
 - Only the most common open-source model generation types are listed; theoretically any video model pipeline can use the multi-track editor as a preprocessing tool
 
+#### Comparison
+
+![Compare](https://github.com/user-attachments/assets/e7a30db8-48b3-480a-a211-a2633b4b1243)
+
+> **Tips:** The advantage of the multi-track editor is its decoupling design — it is used solely for media editing and loading, and is not bound to any model. Users can freely choose any model node to process the media data output by the multi-track editor.
+
 #### Optional Models
 
 | Scenario | Description | Download | Local Path | Prerequisites 
 | - | - | - | - | - | 
-| **Video Subtitles (Whisper)** | Audio/video recognition to generate subtitles | [Whisper Large V3](https://huggingface.co/Comfy-Org/HuMo_ComfyUI/tree/main/split_files/audio_encoders) | models/audio_encoders/whisper_large_v3_fp16.safetensors | `pip install openai-whisper` |
+| **Video Subtitles (Whisper)** | Audio/video recognition to generate subtitles | [Whisper Large V3](https://huggingface.co/Comfy-Org/HuMo_ComfyUI/tree/main/split_files/audio_encoders) | models/audio_encoders/ | `pip install openai-whisper` |
 | **Video Subtitles (Qwen3)** | Audio/video recognition to generate subtitles | [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) <br> [Qwen3-ForcedAligner](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B) | models/Qwen3-ASR/ | `pip install qwen-asr torchaudio` |
 | **Subtitle Narration** | Convert subtitles to speech voiceover | [VoxCPM2](https://huggingface.co/openbmb/VoxCPM2) | models/voxcpm/ | `pip install voxcpm` |
 | **Shot Detection** | Intelligently segment video shots | [OmniShotCut](https://huggingface.co/uva-cv-lab/OmniShotCut/resolve/main/OmniShotCut_ckpt.pth) | models/checkpoints | - |
 
 > **Note:** Some models support automatic download via the built-in Easy-Media model download interface. Model files will be placed in the `ComfyUI/models/` directory.
 
-#### Subtitle To Video
+### 🎞️ Subtitle To Video
 
 ![SubtitleToVideo](https://github.com/user-attachments/assets/58f90eb7-d671-437d-8adf-d8a04a3e261e)
 
-#### Compare Videos
+### 🎞️ Compare Videos
 
 ![CompareVideos](https://github.com/user-attachments/assets/3bad558c-c5f4-411d-ba4c-b2edee9b9f11)
 
@@ -88,7 +94,7 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 ![timelineEditor](https://github.com/user-attachments/assets/d7c9e894-6e7e-488c-90fb-d3aa8310419d)
 
 <details>
-<summary>Dynamic Parameter Injection - Universal</summary>
+<summary>Dynamic Parameter Injection</summary>
 
 > If you want to dynamically invoke the timeline editor via `agents` or `app`, a method is available: input media assets into the corresponding input ports of the timeline editor (`prompt_override`, `image`, `audio`, `video`). When `prompt_override` is injected, it will override the segment data in the timeline editor. However, compared to directly editing segment content via the visual interface, the dynamic parameter injection method has limitations—for example, it is not convenient to control audio duration and ranges. `prompt_override` provides a prompt formatting template specification, similar to `promptRelay + seedance2.0` dynamic prompts. See the example below for details.
 
