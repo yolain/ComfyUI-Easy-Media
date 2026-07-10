@@ -2,6 +2,16 @@
 
 ---
 
+## [1.1.1] - 2026-07-11
+
+### 🐛 Bug Fixes
+
+- **MultiTrack Editor**: Added empty state prompt message, removed 720 panorama feature from image items, added single image preview
+- **Merge Videos From Paths**: Optimize video processing and add audio option
+- **Compare Video**: Fix mute issue by default, and add option to save video to reduce the need for extra video save nodes
+
+---
+
 ## [1.1.0] — 2026-07-09
 
 ### ✨ Features
