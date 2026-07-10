@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { PanelLeft, PanelRight, Plus, X } from 'lucide-react'
+import { ArrowLeft, Captions, Clapperboard, Eye, ListTree, PanelLeft, PanelRight, Plus, Volume2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -35,11 +35,9 @@ import {
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
 import { DEFAULT_SUBTITLE_STYLE } from '@/lib/subtitle-recognition'
 import { invalidateMediaListCache } from '@/stores/media-list-store'
-import type { MultiTrackPanoramaView, MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSubtitleStyle, MultiTrackTaskImage, MultiTrackTaskMode, TrackData } from '@/types/multitrack'
+import type { MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSubtitleStyle, MultiTrackTaskImage, MultiTrackTaskMode, TrackData } from '@/types/multitrack'
 import { PreviewFloatingToolbar } from './PreviewFloatingToolbar'
 import { PreviewAudioPlayback } from './PreviewAudioPlayback'
-import { PanoramaViewerOverlay } from '@/components/widgets/panorama/PanoramaViewerOverlay'
-import { PanoramaIcon } from '@/components/widgets/panorama/PanoramaIcon'
 import { PanoramaImagePreview } from '@/components/widgets/panorama/PanoramaImagePreview'
 import { TaskSegmentEditor } from './TaskSegmentEditor'
 import { VideoPreview } from './VideoPreview'
@@ -47,6 +45,9 @@ import { SubtitleSettingsPanel } from './SubtitleSettingsPanel'
 
 const RESOLUTION_POLL_INTERVAL_MS = 250
 const SUBTITLE_SETTINGS_PANEL_TOOLBAR_INSET = 'calc(max(35%, 18rem) + 12px)'
+const EXPANDED_IMAGE_MIN_ZOOM = 1
+const EXPANDED_IMAGE_MAX_ZOOM = 6
+const EXPANDED_IMAGE_ZOOM_STEP = 1.15
 
 interface PreviewAreaProps {
   data: TrackData
@@ -93,7 +94,7 @@ interface ActiveTaskPrompt {
 
 type PreviewLayoutMode = 'balanced' | 'image-large'
 
-interface ActivePanoramaTarget {
+interface ExpandedTaskImageTarget {
   imageId: string
   segmentId: string
   source: 'active' | 'selected'
@@ -112,20 +113,6 @@ function moveTaskImage(
   const [movedImage] = nextImages.splice(sourceIndex, 1)
   nextImages.splice(targetIndex, 0, movedImage)
   return nextImages
-}
-
-function updateTaskImagePanoramaView(
-  images: MultiTrackTaskImage[],
-  imageId: string,
-  panoramaView: MultiTrackPanoramaView | undefined,
-): MultiTrackTaskImage[] {
-  return images.map((image) => {
-    if (image.id !== imageId) return image
-    if (panoramaView) return { ...image, panorama_view: panoramaView }
-    const restored = { ...image }
-    delete restored.panorama_view
-    return restored
-  })
 }
 
 function getActiveTaskImages(data: TrackData, currentTime: number): ActiveTaskImages | null {
@@ -251,7 +238,10 @@ export function PreviewArea({
 }: Readonly<PreviewAreaProps>) {
   const t = useT()
   const draggedTaskImageIdRef = useRef<string | null>(null)
-  const [activePanoramaTarget, setActivePanoramaTarget] = useState<ActivePanoramaTarget | null>(null)
+  const expandedTaskImageRef = useRef<HTMLImageElement>(null)
+  const [expandedTaskImageTarget, setExpandedTaskImageTarget] = useState<ExpandedTaskImageTarget | null>(null)
+  const [expandedTaskImageZoom, setExpandedTaskImageZoom] = useState(EXPANDED_IMAGE_MIN_ZOOM)
+  const [expandedTaskImageOrigin, setExpandedTaskImageOrigin] = useState({ x: 50, y: 50 })
   const [activeTaskPreviewImageId, setActiveTaskPreviewImageId] = useState<string | null>(null)
   const [previewLayoutMode, setPreviewLayoutMode] = useState<PreviewLayoutMode>('balanced')
   const [activeTaskMediaSelectorOpen, setActiveTaskMediaSelectorOpen] = useState(false)
@@ -266,6 +256,10 @@ export function PreviewArea({
       .filter((track) => track.type === 'video')
       .flatMap((track) => track.segments)
   ), [data.tracks])
+  const hasSegments = useMemo(
+    () => data.tracks.some((track) => track.segments.length > 0),
+    [data.tracks],
+  )
   const firstVideoUrl = useMemo(() => {
     const firstVideoSegment = videoSegments.find((segment) => segment.content.media_type === 'video')
     if (!firstVideoSegment) return null
@@ -306,10 +300,10 @@ export function PreviewArea({
   const selectedTaskImages = selectedSegment?.trackType === 'task'
     ? selectedSegment.segment.content.images ?? []
     : []
-  const activePanoramaImage = activePanoramaTarget?.source === 'selected'
-    ? selectedTaskImages.find((image) => image.id === activePanoramaTarget.imageId) ?? null
-    : activePanoramaTarget?.source === 'active'
-      ? activeTaskImages?.allImages.find((image) => image.id === activePanoramaTarget.imageId) ?? null
+  const expandedTaskImage = expandedTaskImageTarget?.source === 'selected'
+    ? selectedTaskImages.find((image) => image.id === expandedTaskImageTarget.imageId) ?? null
+    : expandedTaskImageTarget?.source === 'active'
+      ? activeTaskImages?.allImages.find((image) => image.id === expandedTaskImageTarget.imageId) ?? null
       : null
   const activeTaskPreviewImage = activeTaskImages?.images.find(({ image }) => image.id === activeTaskPreviewImageId)
     ?? activeTaskImages?.images[0]
@@ -328,7 +322,7 @@ export function PreviewArea({
     : 'mx-auto flex h-full min-h-24 w-fit max-w-full items-center justify-center gap-3'
 
   useEffect(() => {
-    setActivePanoramaTarget(null)
+    setExpandedTaskImageTarget(null)
   }, [selectedSegment?.segment.id])
 
   useEffect(() => {
@@ -361,10 +355,24 @@ export function PreviewArea({
   }, [activeTaskPrompt, editingTaskPrompt?.segmentId])
 
   useEffect(() => {
-    if (activePanoramaTarget?.source === 'active' && activePanoramaTarget.segmentId !== activeTaskImages?.segmentId) {
-      setActivePanoramaTarget(null)
+    if (expandedTaskImageTarget?.source === 'active' && expandedTaskImageTarget.segmentId !== activeTaskImages?.segmentId) {
+      setExpandedTaskImageTarget(null)
     }
-  }, [activePanoramaTarget, activeTaskImages?.segmentId])
+  }, [expandedTaskImageTarget, activeTaskImages?.segmentId])
+
+  useEffect(() => {
+    if (!expandedTaskImageTarget) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setExpandedTaskImageTarget(null)
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [expandedTaskImageTarget])
+
+  useEffect(() => {
+    setExpandedTaskImageZoom(EXPANDED_IMAGE_MIN_ZOOM)
+    setExpandedTaskImageOrigin({ x: 50, y: 50 })
+  }, [expandedTaskImageTarget?.imageId, expandedTaskImageTarget?.segmentId])
 
   useEffect(() => {
     if (!firstVideoUrl) {
@@ -548,7 +556,10 @@ export function PreviewArea({
     )
   }
 
-  function renderActiveTaskImageAddSlot(className = 'aspect-square w-full') {
+  function renderActiveTaskImageAddSlot(
+    className = 'h-10 w-10 aspect-square',
+    showLabel = false,
+  ) {
     if (!activeTaskImages || activeTaskImages.allImages.length >= MAX_TASK_IMAGES) return null
     return (
       <Popover open={activeTaskMediaSelectorOpen} onOpenChange={setActiveTaskMediaSelectorOpen}>
@@ -556,10 +567,12 @@ export function PreviewArea({
           <Button
             type="button"
             variant="outline"
-            data-testid="task-preview-add-image"
-            className={`cursor-pointer w-10 h-10 shrink-0 border-dashed bg-background/70 text-muted-foreground transition-colors hover:bg-background/90 ${
+            data-testid={activeTaskImages.images.length === 0
+              ? 'task-preview-empty-add-image'
+              : 'task-preview-add-image'}
+            className={`cursor-pointer shrink-0 border-dashed bg-background/70 text-muted-foreground transition-colors hover:bg-background/90 ${
               activeTaskImageDragOver ? 'border-primary bg-accent/20 text-foreground' : 'border-border'
-            } ${className}`}
+            } ${showLabel ? 'flex-col gap-1' : ''} ${className}`}
             aria-label={t('multitrack.addImage')}
             onClick={(event) => {
               event.stopPropagation()
@@ -571,6 +584,7 @@ export function PreviewArea({
             onDrop={handleActiveTaskImageDrop}
           >
             <Plus className="h-5 w-5" />
+            {showLabel ? <span className="text-[10px] font-semibold">{t('multitrack.addImage')}</span> : null}
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="end">
@@ -584,52 +598,13 @@ export function PreviewArea({
     )
   }
 
-  function renderEmptyActiveTaskImageDropZone(className = 'aspect-square h-full max-h-full max-w-full') {
-    return (
-      <div
-        className={`flex items-center justify-center rounded-sm border border-dashed transition-colors ${
-          activeTaskImageDragOver ? 'border-primary bg-accent/20' : 'border-border bg-background/70'
-        } ${className}`}
-        onDragEnter={handleActiveTaskImageDragEnter}
-        onDragOver={handleActiveTaskImageDragOver}
-        onDragLeave={handleActiveTaskImageDragLeave}
-        onDrop={handleActiveTaskImageDrop}
-      >
-        <Popover open={activeTaskMediaSelectorOpen} onOpenChange={setActiveTaskMediaSelectorOpen}>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              data-testid="task-preview-empty-add-image"
-              className="h-full w-full flex-col gap-1 rounded-none text-muted-foreground hover:bg-background/80 hover:text-foreground"
-              aria-label={t('multitrack.addImage')}
-              onClick={(event) => {
-                event.stopPropagation()
-                setActiveTaskMediaSelectorOpen(true)
-              }}
-            >
-              <Plus className="h-6 w-6" />
-              <span className="text-[10px] font-semibold">{t('multitrack.addImage')}</span>
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0" align="center">
-            <MediaSelector
-              value=""
-              mediaType="image"
-              onChange={handleActiveTaskSelectedMedia}
-            />
-          </PopoverContent>
-        </Popover>
-      </div>
-    )
-  }
-
   function renderActiveTaskImageThumbnail(
     image: MultiTrackTaskImage,
     url: string,
     selected: boolean,
     className = 'aspect-square w-full',
     showControls = true,
+    layout: 'thumbnail' | 'flow' = 'thumbnail',
   ) {
     if (!activeTaskImages) return null
     const imageName = image.file_name ?? image.file_path ?? image.local_path ?? image.url ?? image.id
@@ -653,13 +628,22 @@ export function PreviewArea({
         <Button
           type="button"
           variant="ghost"
-          className="h-full w-full rounded-none p-0 hover:bg-transparent"
+          className={layout === 'flow'
+            ? 'h-full w-auto max-w-full rounded-none p-0 hover:bg-transparent'
+            : 'h-full w-full rounded-none p-0 hover:bg-transparent'}
           aria-label={imageName}
           onClick={() => setActiveTaskPreviewImageId(image.id)}
         >
-          {renderActiveTaskImagePreview(image, url, imageName, 'h-full w-full object-contain')}
+          {renderActiveTaskImagePreview(
+            image,
+            url,
+            imageName,
+            layout === 'flow'
+              ? 'h-full w-auto max-w-full object-contain'
+              : 'h-full w-full object-contain',
+          )}
         </Button>
-        {showControls ? renderActiveTaskImageControls(image, imageName, 'split') : null}
+        {showControls ? renderActiveTaskImageControls(image, imageName, layout === 'flow' ? 'flow' : 'split') : null}
       </div>
     )
   }
@@ -838,12 +822,13 @@ export function PreviewArea({
   function renderActiveTaskImageControls(
     image: MultiTrackTaskImage,
     imageName: string,
-    layout: 'split' | 'corner',
+    layout: 'split' | 'corner' | 'flow',
   ) {
     if (!activeTaskImages) return null
-    const panoramaClassName = image.panorama_view ? 'text-highlight' : 'text-foreground'
     const wrapperClassName = layout === 'corner'
       ? 'absolute right-2 top-2 flex gap-1'
+      : layout === 'flow'
+        ? 'absolute right-1 top-1 flex gap-0.5'
       : `absolute left-0 top-0 ${image.panorama_view ? '' : ' opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100'}`
     const deleteWrapperClassName = layout === 'corner'
       ? ''
@@ -858,20 +843,20 @@ export function PreviewArea({
             type="button"
             size="icon"
             variant="ghost"
-            className={`${controlClassName} cursor-pointer rounded-none bg-background/70 hover:bg-background/90 ${iconClassName} ${panoramaClassName}`}
-            aria-label={t('panorama.preview')}
+            className={`${controlClassName} cursor-pointer rounded-none bg-background/70 text-foreground hover:bg-background/90 ${iconClassName}`}
+            aria-label={t('multitrack.previewImage')}
             onClick={(event) => {
               event.stopPropagation()
-              setActivePanoramaTarget({
+              setExpandedTaskImageTarget({
                 imageId: image.id,
                 segmentId: activeTaskImages.segmentId,
                 source: 'active',
               })
             }}
           >
-            <PanoramaIcon />
+            <Eye />
           </Button>
-          {layout === 'corner' ? (
+          {layout !== 'split' ? (
             <Button
               type="button"
               size="icon"
@@ -1011,6 +996,109 @@ export function PreviewArea({
     )
   }
 
+  function renderEmptyPreview() {
+    const trackGuides = [
+      [ListTree, 'multitrack.emptyTaskTrack', 'multitrack.emptyTaskTrackPurpose'],
+      [Clapperboard, 'multitrack.emptyVideoTrack', 'multitrack.emptyVideoTrackPurpose'],
+      [Volume2, 'multitrack.emptyAudioTrack', 'multitrack.emptyAudioTrackPurpose'],
+      [Captions, 'multitrack.emptySubtitleTrack', 'multitrack.emptySubtitleTrackPurpose'],
+    ] as const
+
+    return (
+      <div
+        data-testid="multitrack-empty-preview"
+        className="flex h-full w-full flex-col items-center justify-center px-6 py-5 text-center"
+      >
+        <Clapperboard className="mb-2 h-9 w-9 text-muted-foreground" aria-hidden="true" />
+        <h3 className="text-sm font-semibold text-foreground">
+          {t('multitrack.emptyPreviewTitle')}
+        </h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {t('multitrack.emptyPreviewDescription')}
+        </p>
+        <dl className="mt-4 grid max-w-xl grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-left text-[11px] leading-4">
+          {trackGuides.map(([Icon, trackKey, purposeKey]) => (
+            <div key={trackKey} className="contents">
+              <dt className="flex items-center gap-1.5 font-medium text-foreground">
+                <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span>{t(trackKey)}</span>
+              </dt>
+              <dd className="text-muted-foreground">{t(purposeKey)}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    )
+  }
+
+  function renderExpandedTaskImage(image: MultiTrackTaskImage) {
+    const imageUrl = mediaContentToViewUrl({
+      source_type: image.source_type ?? 'input',
+      file_path: image.file_path,
+      local_path: image.local_path,
+      url: image.url,
+      slot_name: image.slot_name,
+    })
+    if (!imageUrl) return null
+    const imageName = image.file_name ?? image.file_path ?? image.local_path ?? image.url ?? image.id
+
+    function handleWheel(event: React.WheelEvent<HTMLDivElement>) {
+      event.preventDefault()
+      event.stopPropagation()
+      const imageElement = expandedTaskImageRef.current
+      if (imageElement) {
+        const rect = imageElement.getBoundingClientRect()
+        if (rect.width > 0 && rect.height > 0) {
+          setExpandedTaskImageOrigin({
+            x: Math.max(0, Math.min(100, (event.clientX - rect.left) / rect.width * 100)),
+            y: Math.max(0, Math.min(100, (event.clientY - rect.top) / rect.height * 100)),
+          })
+        }
+      }
+      const zoomFactor = event.deltaY < 0
+        ? EXPANDED_IMAGE_ZOOM_STEP
+        : 1 / EXPANDED_IMAGE_ZOOM_STEP
+      setExpandedTaskImageZoom((current) => Math.max(
+        EXPANDED_IMAGE_MIN_ZOOM,
+        Math.min(EXPANDED_IMAGE_MAX_ZOOM, current * zoomFactor),
+      ))
+    }
+
+    return (
+      <div
+        data-testid="task-image-expanded-preview"
+        data-zoom={expandedTaskImageZoom.toFixed(2)}
+        className="absolute inset-0 z-30 flex items-center justify-center overflow-hidden bg-black p-3 pt-12"
+        onWheel={handleWheel}
+      >
+        <Button
+          type="button"
+          variant="secondary"
+          className="absolute left-2 top-2 z-20 h-8 cursor-pointer gap-1.5 px-2.5 text-xs"
+          aria-label={t('multitrack.backToPreview')}
+          onClick={() => setExpandedTaskImageTarget(null)}
+        >
+          <ArrowLeft className="h-4 w-4" />
+          <span>{t('multitrack.backToPreview')}</span>
+        </Button>
+        <span className="pointer-events-none absolute right-2 top-2 z-20 rounded bg-background/70 px-2 py-1 text-[10px] tabular-nums text-foreground">
+          {Math.round(expandedTaskImageZoom * 100)}%
+        </span>
+        <img
+          ref={expandedTaskImageRef}
+          src={imageUrl}
+          alt={imageName}
+          className="max-h-full max-w-full object-contain transition-transform duration-100 ease-out"
+          style={{
+            transform: `scale(${expandedTaskImageZoom})`,
+            transformOrigin: `${expandedTaskImageOrigin.x}% ${expandedTaskImageOrigin.y}%`,
+          }}
+          draggable={false}
+        />
+      </div>
+    )
+  }
+
   if (selectedSegment?.trackType === 'task') {
     return (
       <div
@@ -1018,28 +1106,8 @@ export function PreviewArea({
         className="relative flex min-h-24 flex-1 overflow-hidden rounded-sm bg-background"
         onClick={(event) => event.stopPropagation()}
       >
-        {activePanoramaImage ? (
-          <PanoramaViewerOverlay
-            key={`${selectedSegment.segment.id}:${activePanoramaImage.id}`}
-            imageUrl={mediaContentToViewUrl({
-              source_type: activePanoramaImage.source_type ?? 'input',
-              file_path: activePanoramaImage.file_path,
-              local_path: activePanoramaImage.local_path,
-              url: activePanoramaImage.url,
-              slot_name: activePanoramaImage.slot_name,
-            }) ?? ''}
-            savedView={activePanoramaImage.panorama_view}
-            onPanoramaViewChange={(panoramaView) => {
-              onSelectedSegmentContentChange({
-                images: updateTaskImagePanoramaView(
-                  selectedTaskImages,
-                  activePanoramaImage.id,
-                  panoramaView,
-                ),
-              })
-            }}
-            onExit={() => setActivePanoramaTarget(null)}
-          />
+        {expandedTaskImage ? (
+          renderExpandedTaskImage(expandedTaskImage)
         ) : (
           <TaskSegmentEditor
             segment={selectedSegment.segment}
@@ -1051,7 +1119,7 @@ export function PreviewArea({
             onTrackSegmentsContentChange={onTrackSegmentsContentChange}
             onTrackSegmentsChange={onTaskTrackSegmentsChange}
             onDurationChange={onSelectedSegmentDurationChange}
-            onOpenPanorama={(imageId) => setActivePanoramaTarget({
+            onOpenImagePreview={(imageId) => setExpandedTaskImageTarget({
               imageId,
               segmentId: selectedSegment.segment.id,
               source: 'selected',
@@ -1068,74 +1136,29 @@ export function PreviewArea({
       className="relative flex min-h-24 flex-1 items-center justify-center overflow-hidden rounded-sm bg-black text-xs text-muted-foreground"
       onClick={(event) => event.stopPropagation()}
     >
-      {activePanoramaImage && activePanoramaTarget?.source === 'active' ? (
-        <PanoramaViewerOverlay
-          key={`${activePanoramaTarget.segmentId}:${activePanoramaImage.id}`}
-          imageUrl={mediaContentToViewUrl({
-            source_type: activePanoramaImage.source_type ?? 'input',
-            file_path: activePanoramaImage.file_path,
-            local_path: activePanoramaImage.local_path,
-            url: activePanoramaImage.url,
-            slot_name: activePanoramaImage.slot_name,
-          }) ?? ''}
-          savedView={activePanoramaImage.panorama_view}
-          onPanoramaViewChange={(panoramaView) => {
-            if (!activeTaskImages) return
-            onTrackSegmentsContentChange?.([{
-              segmentId: activePanoramaTarget.segmentId,
-              patch: {
-                images: updateTaskImagePanoramaView(
-                  activeTaskImages.allImages,
-                  activePanoramaImage.id,
-                  panoramaView,
-                ),
-              },
-            }])
-          }}
-          onExit={() => setActivePanoramaTarget(null)}
-        />
-      ) : null}
+      {expandedTaskImage && expandedTaskImageTarget?.source === 'active'
+        ? renderExpandedTaskImage(expandedTaskImage)
+        : null}
       <div className="flex h-full min-h-24 w-full flex-col items-center justify-center gap-0.5">
-        <div className={previewMediaGroupClassName}>
+        {!hasSegments ? renderEmptyPreview() : null}
+        <div className={!hasSegments ? 'hidden' : previewMediaGroupClassName}>
           {usesTaskImageOnlyPreview && activeTaskImages ? (
             <div
               data-testid="task-preview-images"
-              className="flex h-full min-h-0 w-full max-w-xl flex-col bg-black"
+              data-layout="flow"
+              className="flex h-full min-h-0 w-full flex-wrap content-center items-center justify-center gap-2 overflow-y-auto bg-black p-2"
             >
-              <div className={`relative flex min-h-0 items-center justify-center overflow-hidden p-2 ${activeTaskImages.images.length > 0 ? 'flex-[9]' : 'flex-1'}`}>
-                {activeTaskPreviewImage ? (() => {
-                  const imageName = activeTaskPreviewImage.image.file_name
-                    ?? activeTaskPreviewImage.image.file_path
-                    ?? activeTaskPreviewImage.image.local_path
-                    ?? activeTaskPreviewImage.image.url
-                    ?? activeTaskPreviewImage.image.id
-                  return (
-                    <>
-                      {renderActiveTaskImagePreview(
-                        activeTaskPreviewImage.image,
-                        activeTaskPreviewImage.url,
-                        imageName,
-                        'max-h-full h-full max-w-full w-auto object-contain',
-                      )}
-                      {renderActiveTaskImageControls(activeTaskPreviewImage.image, imageName, 'corner')}
-                    </>
-                  )
-                })() : renderEmptyActiveTaskImageDropZone()}
-              </div>
-              {activeTaskImages.images.length > 0 ? (
-                <div className="flex min-h-0 flex-[1] items-center justify-center gap-2 overflow-x-auto p-2">
-                  {activeTaskImages.images.map(({ image, url }) => (
-                    renderActiveTaskImageThumbnail(
-                      image,
-                      url,
-                      image.id === activeTaskPreviewImage?.image.id,
-                      'h-full aspect-square',
-                      false,
-                    )
-                  ))}
-                  {renderActiveTaskImageAddSlot('h-full aspect-square')}
-                </div>
-              ) : null}
+              {activeTaskImages.images.map(({ image, url }) => (
+                renderActiveTaskImageThumbnail(
+                  image,
+                  url,
+                  image.id === activeTaskPreviewImage?.image.id,
+                  'h-32 w-fit max-w-full',
+                  true,
+                  'flow',
+                )
+              ))}
+              {renderActiveTaskImageAddSlot('h-32 w-32 aspect-square', true)}
             </div>
           ) : activeTaskImages && (
             <div
@@ -1193,7 +1216,7 @@ export function PreviewArea({
             />
           ) : null}
         </div>
-        {renderActiveTaskPromptBar()}
+        {hasSegments ? renderActiveTaskPromptBar() : null}
       </div>
       <PreviewAudioPlayback sources={activeAudioSources} isPlaying={isPlaying} playbackNonce={playbackNonce} />
       <PreviewFloatingToolbar

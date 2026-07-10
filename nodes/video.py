@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io as _io
+import glob
+import json
 import logging
 import os
 import shutil
@@ -20,7 +22,7 @@ from ..utils.video import extract_merge_spec, ffmpeg_concat, ffmpeg_concat_with_
 logger = logging.getLogger(__name__)
 
 CATEGORY_VIDEO = "EasyUse/Video"
-TYPE_COMPARE_VIDEO = io.Custom(io_type="COMPARE_VIDEO")
+TYPE_COMPARE_VIDEO = io.Custom(io_type="EASY_COMPARE_VIDEO")
 
 _OUTPUT_MODE_OPTIONS = [
     io.DynamicCombo.Option(
@@ -298,6 +300,55 @@ def _replace_video_audio(source_video, audio: dict):
     )
 
 
+def _replace_video_audio_with_ffmpeg(source_video: Input.Video, audio: dict, tag: str) -> Input.Video:
+    """Mux ``audio`` onto ``source_video`` without copying file-backed VIDEO inputs first."""
+    ext = Types.VideoContainer.get_extension(Types.VideoContainer.AUTO)
+    video_path: str | None = None
+    video_temp_files: list[str] = []
+    audio_path: str | None = None
+    output_path: str | None = None
+    completed = False
+    try:
+        video_path, video_temp_files = video_input_to_local_file(
+            source_video,
+            suffix=f".{ext}",
+            save_kwargs={
+                "format": Types.VideoContainer.AUTO,
+                "codec": Types.VideoCodec.AUTO,
+            },
+        )
+        audio_path = _save_audio_to_temp_wav(audio)
+        if audio_path is None:
+            raise ValueError(f"{tag} could not serialize the AUDIO input.")
+
+        output_ext = os.path.splitext(video_path)[1] or f".{ext}"
+        output_fd, output_path = tempfile.mkstemp(
+            suffix=output_ext,
+            dir=folder_paths.get_temp_directory(),
+        )
+        os.close(output_fd)
+        if not ffmpeg_replace_audio(video_path, audio_path, output_path):
+            raise RuntimeError(f"{tag} requires FFmpeg to attach the AUDIO input.")
+        completed = True
+        return InputImpl.VideoFromFile(output_path)
+    except (ValueError, RuntimeError):
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"{tag} failed to attach the AUDIO input with FFmpeg.") from exc
+    finally:
+        for path in [*video_temp_files, audio_path]:
+            if path:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+        if output_path and not completed:
+            try:
+                os.unlink(output_path)
+            except OSError:
+                pass
+
+
 def _video_to_local_file(video: Input.Video) -> "tuple[str | None, list[str]]":
     """Return a local file path for ffmpeg, creating temp files when needed."""
     temp_files: list[str] = []
@@ -410,6 +461,47 @@ def _compare_video_preview_from_path(path: str, label: str) -> dict:
     }
 
 
+def _compare_video_settings(value: object) -> dict[str, object]:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _save_compare_video_output(
+    path: str,
+    filename_prefix: str,
+    metadata: dict[str, object],
+) -> dict[str, str]:
+    output_dir = folder_paths.get_output_directory()
+    width = int(metadata.get("width") or 0)
+    height = int(metadata.get("height") or 0)
+    safe_prefix = filename_prefix.strip() or "ComfyUI"
+    full_output_folder, filename, counter, subfolder, _ = folder_paths.get_save_image_path(
+        safe_prefix,
+        output_dir,
+        width,
+        height,
+    )
+    extension = os.path.splitext(path)[1] or f".{Types.VideoContainer.get_extension(Types.VideoContainer.AUTO)}"
+    output_filename = f"{filename}_{counter:05}_{extension}"
+    output_path = os.path.join(full_output_folder, output_filename)
+    try:
+        shutil.copy2(path, output_path)
+    except Exception as exc:
+        raise RuntimeError("Failed to save output VIDEO comparison file.") from exc
+    return {
+        "filename": output_filename,
+        "subfolder": subfolder,
+        "type": "output",
+    }
+
+
 def _compare_video_local_path(video: Input.Video, label: str) -> "tuple[str, list[str]]":
     try:
         return video_input_to_local_file(
@@ -446,6 +538,8 @@ def _compare_video_metadata(path: str, label: str) -> dict[str, object]:
         "fps_fraction": fps_fraction,
         "frame_count": frame_count,
         "duration": float(duration),
+        "width": int(info.get("width") or 0),
+        "height": int(info.get("height") or 0),
     }
 
 
@@ -496,11 +590,14 @@ class EasyCompareVideos(io.ComfyNode):
         cls,
         source: Optional[Input.Video] = None,
         output: Optional[Input.Video] = None,
-        compare_video: str = "{}",
+        compare_video: object = "{}",
     ) -> io.NodeOutput:
-        _ = compare_video
         if source is None and output is None:
             raise ValueError("At least one VIDEO input is required.")
+
+        settings = _compare_video_settings(compare_video)
+        save_output = settings.get("save_output") is True
+        filename_prefix = str(settings.get("filename_prefix") or "ComfyUI")
 
         payload: dict[str, object] = {
             "source": None,
@@ -538,8 +635,19 @@ class EasyCompareVideos(io.ComfyNode):
                     payload["frame_count"] = int(metadata["frame_count"]) if metadata["frame_count"] is not None else None
                     payload["duration"] = float(metadata["duration"])
 
-            for label, (path, _temp_files, _metadata) in prepared.items():
-                payload[label] = _compare_video_preview_from_path(path, label)
+            source_prepared = prepared.get("source")
+            if source_prepared is not None:
+                source_path, _source_temp_files, _source_metadata = source_prepared
+                payload["source"] = _compare_video_preview_from_path(source_path, "source")
+
+            output_prepared = prepared.get("output")
+            if output_prepared is not None:
+                output_path, _output_temp_files, output_metadata = output_prepared
+                payload["output"] = (
+                    _save_compare_video_output(output_path, filename_prefix, output_metadata)
+                    if save_output
+                    else _compare_video_preview_from_path(output_path, "output")
+                )
         finally:
             for _path, temp_files, _metadata in prepared.values():
                 _cleanup_compare_temp_files(temp_files)
@@ -776,6 +884,7 @@ def _resolve_video_path(raw: str) -> str | _io.BytesIO:
 
     Supported formats:
     - HTTP/HTTPS URL
+    - ``input/<filename>`` — file in ComfyUI input directory
     - ``temp/<filename>`` — file in ComfyUI temp directory
     - ``output/<filename>`` — file in ComfyUI output directory
     - Absolute file path
@@ -793,13 +902,17 @@ def _resolve_video_path(raw: str) -> str | _io.BytesIO:
 
     # ComfyUI-style prefixed paths: temp/<file> or output/<file>
     _PREFIXED = {
+        "input": folder_paths.get_input_directory,
         "temp": folder_paths.get_temp_directory,
         "output": folder_paths.get_output_directory,
     }
     for prefix, get_dir in _PREFIXED.items():
         if raw.startswith(prefix + "/") or raw.startswith(prefix + os.sep):
             rel = raw[len(prefix) + 1:]
-            candidate = os.path.join(get_dir(), rel)
+            base_dir = os.path.realpath(get_dir())
+            candidate = os.path.realpath(os.path.join(base_dir, rel))
+            if os.path.commonpath((base_dir, candidate)) != base_dir:
+                raise ValueError(f"Path escapes the ComfyUI {prefix!r} directory: {rel!r}")
             if os.path.isfile(candidate):
                 return candidate
             raise FileNotFoundError(f"File not found in {prefix!r} directory: {rel!r}")
@@ -816,13 +929,57 @@ def _resolve_video_path(raw: str) -> str | _io.BytesIO:
     except Exception:
         pass
 
-    # Bare filename: check output then temp directories
-    for base_dir in (folder_paths.get_output_directory(), folder_paths.get_temp_directory()):
+    # Bare filename: check output, temp, then input directories
+    for base_dir in (
+        folder_paths.get_output_directory(),
+        folder_paths.get_temp_directory(),
+        folder_paths.get_input_directory(),
+    ):
         candidate = os.path.join(base_dir, raw)
         if os.path.isfile(candidate):
             return candidate
 
     raise FileNotFoundError(f"Cannot resolve video path: {raw!r}")
+
+
+def _expand_comfy_video_path_patterns(raw_paths: list[str]) -> list[str]:
+    """Expand recursive glob patterns under ComfyUI input/output/temp directories."""
+    prefix_dirs = {
+        "input": folder_paths.get_input_directory,
+        "temp": folder_paths.get_temp_directory,
+        "output": folder_paths.get_output_directory,
+    }
+    expanded: list[str] = []
+    for raw in raw_paths:
+        matched_prefix = next(
+            (prefix for prefix in prefix_dirs if raw.startswith(prefix + "/") or raw.startswith(prefix + os.sep)),
+            None,
+        )
+        if matched_prefix is None:
+            expanded.append(raw)
+            continue
+
+        relative_pattern = raw[len(matched_prefix) + 1:]
+        if not glob.has_magic(relative_pattern):
+            expanded.append(raw)
+            continue
+
+        base_dir = os.path.realpath(prefix_dirs[matched_prefix]())
+        absolute_pattern = os.path.abspath(os.path.join(base_dir, relative_pattern))
+        if os.path.commonpath((base_dir, absolute_pattern)) != base_dir:
+            raise ValueError(
+                f"Path pattern escapes the ComfyUI {matched_prefix!r} directory: {relative_pattern!r}"
+            )
+
+        matches = []
+        for match in sorted(glob.glob(absolute_pattern, recursive=True)):
+            resolved_match = os.path.realpath(match)
+            if os.path.commonpath((base_dir, resolved_match)) == base_dir and os.path.isfile(resolved_match):
+                matches.append(resolved_match)
+        if not matches:
+            raise FileNotFoundError(f"No video files match path pattern: {raw!r}")
+        expanded.extend(matches)
+    return expanded
 
 class EasyMergeVideosFromPaths(io.ComfyNode):
     @classmethod
@@ -833,7 +990,7 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
             category=CATEGORY_VIDEO,
             description=(
                 "Load and concatenate videos from a list of file paths or URLs. "
-                "Supports ComfyUI temp/output paths, absolute local paths, and HTTP(S) URLs. "
+                "Supports ComfyUI input/temp/output paths and subdirectory globs, absolute local paths, and HTTP(S) URLs. "
                 "All clips must share the same fps, dimensions, and audio configuration."
             ),
             inputs=[
@@ -843,7 +1000,8 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
                     default="",
                     tooltip=(
                         "One path per line (or comma-separated). "
-                        "Accepts ComfyUI output/temp filenames, absolute paths, or URLs."
+                        "Accepts ComfyUI input/output/temp paths (including subdirectories and ** globs), "
+                        "absolute paths, or URLs."
                     ),
                 ),
                 io.Int.Input(
@@ -852,6 +1010,11 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
                     min=-1,
                     step=1,
                     tooltip="Maximum frames to keep after merging. Use -1 to keep all frames.",
+                ),
+                io.Audio.Input(
+                    "audio",
+                    optional=True,
+                    tooltip="Optional audio to replace or add to the final merged VIDEO using FFmpeg.",
                 ),
                 # io.Combo.Input("transition", default="None", options=['None', 'Fade'], tooltip="Transition type to apply between clips."),
                 # io.Float.Input(
@@ -870,8 +1033,13 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, paths: str, frame_count: int = -1) -> io.NodeOutput:
-        raw_paths = _parse_path_list(paths)
+    def execute(
+        cls,
+        paths: str,
+        frame_count: int = -1,
+        audio: Optional[dict] = None,
+    ) -> io.NodeOutput:
+        raw_paths = _expand_comfy_video_path_patterns(_parse_path_list(paths))
         if len(raw_paths) == 0:
             raise ValueError("At least 1 video path is required.")
 
@@ -887,25 +1055,69 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
             if node_id:
                 PromptServer.instance.send_progress_text(msg, node_id)
 
+        def _cleanup_owned(paths_to_clean: set[str], keep: str | None = None) -> None:
+            for path in paths_to_clean:
+                if path == keep:
+                    continue
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+
+        def _finalize_video(
+            video: Input.Video,
+            message: str,
+            owned_paths: set[str] | None = None,
+            final_path: str | None = None,
+        ) -> io.NodeOutput:
+            paths_to_clean = owned_paths or set()
+            if audio is not None:
+                try:
+                    video = _replace_video_audio_with_ffmpeg(
+                        video,
+                        audio,
+                        "[EasyMergeVideosFromPaths]",
+                    )
+                finally:
+                    _cleanup_owned(paths_to_clean)
+                    paths_to_clean.clear()
+            else:
+                _cleanup_owned(paths_to_clean, keep=final_path)
+                paths_to_clean.clear()
+            _progress(total + 2, message)
+            return io.NodeOutput(video)
+
         if len(raw_paths) == 1:
             _progress(1, f"Loading single video: {raw_paths[0]}")
-            source = _resolve_video_path(raw_paths[0])
-            if isinstance(source, _io.BytesIO):
-                source.seek(0)
-                ext = os.path.splitext(raw_paths[0])[1] or ".mp4"
-                tmp_fd, tmp_path = tempfile.mkstemp(suffix=ext, dir=folder_paths.get_temp_directory())
-                os.write(tmp_fd, source.read())
-                os.close(tmp_fd)
-                source = tmp_path
-            source = _trim_video_to_frame_count(
-                source,
-                frame_count,
-                "[EasyMergeVideosFromPaths]",
-                progress=lambda msg: _progress(1, msg),
-            )
-            merged_video = InputImpl.VideoFromFile(source)
-            _progress(2, "Done — loaded single video")
-            return io.NodeOutput(merged_video)
+            owned_paths: set[str] = set()
+            try:
+                source = _resolve_video_path(raw_paths[0])
+                if isinstance(source, _io.BytesIO):
+                    source.seek(0)
+                    ext = os.path.splitext(raw_paths[0])[1] or ".mp4"
+                    tmp_fd, tmp_path = tempfile.mkstemp(suffix=ext, dir=folder_paths.get_temp_directory())
+                    os.write(tmp_fd, source.read())
+                    os.close(tmp_fd)
+                    source = tmp_path
+                    owned_paths.add(tmp_path)
+                final_path = _trim_video_to_frame_count(
+                    source,
+                    frame_count,
+                    "[EasyMergeVideosFromPaths]",
+                    progress=lambda msg: _progress(1, msg),
+                )
+                if final_path != source:
+                    owned_paths.add(final_path)
+                merged_video = InputImpl.VideoFromFile(final_path)
+                return _finalize_video(
+                    merged_video,
+                    "Done — loaded single video",
+                    owned_paths=owned_paths,
+                    final_path=final_path,
+                )
+            except Exception:
+                _cleanup_owned(owned_paths)
+                raise
 
         _progress(0, f"Resolving {total} paths…")
         resolved: list[str | _io.BytesIO] = []
@@ -934,6 +1146,7 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
         ext = os.path.splitext(string_paths[0])[1] if string_paths else ".mp4"
         tmp_fd, tmp_path = tempfile.mkstemp(suffix=ext, dir=folder_paths.get_temp_directory())
         os.close(tmp_fd)
+        generated_outputs = {tmp_path}
 
         tag = "[EasyMergeVideosFromPaths]"
         # logger.info("%s transition=%s, clips=%d", tag, transition, total)
@@ -953,15 +1166,22 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
                         logger.info(
                             "%s backend=ffmpeg-xfade, transition=fade(%.2fs) ✓", tag, fade_duration
                         )
-                        tmp_path = _trim_video_to_frame_count(
+                        trimmed_path = _trim_video_to_frame_count(
                             tmp_path,
                             frame_count,
                             tag,
                             progress=lambda msg: _progress(total + 1, msg),
                         )
+                        if trimmed_path != tmp_path:
+                            generated_outputs.add(trimmed_path)
+                        tmp_path = trimmed_path
                         merged_video = InputImpl.VideoFromFile(tmp_path)
-                        _progress(total + 2, f"Done — merged {total} clips with fade")
-                        return io.NodeOutput(merged_video)
+                        return _finalize_video(
+                            merged_video,
+                            f"Done — merged {total} clips with fade",
+                            owned_paths=generated_outputs,
+                            final_path=tmp_path,
+                        )
                     _log_ffmpeg_unavailable_hint(tag, need_xfade=True)
                 except RuntimeError as exc:
                     logger.warning(
@@ -978,15 +1198,22 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
                 )
                 if success:
                     logger.info("%s backend=ffmpeg-concat (stream copy), transition=none ✓", tag)
-                    tmp_path = _trim_video_to_frame_count(
+                    trimmed_path = _trim_video_to_frame_count(
                         tmp_path,
                         frame_count,
                         tag,
                         progress=lambda msg: _progress(total + 1, msg),
                     )
+                    if trimmed_path != tmp_path:
+                        generated_outputs.add(trimmed_path)
+                    tmp_path = trimmed_path
                     merged_video = InputImpl.VideoFromFile(tmp_path)
-                    _progress(total + 2, f"Done — merged {total} clips")
-                    return io.NodeOutput(merged_video)
+                    return _finalize_video(
+                        merged_video,
+                        f"Done — merged {total} clips",
+                        owned_paths=generated_outputs,
+                        final_path=tmp_path,
+                    )
                 _log_ffmpeg_unavailable_hint(tag)
             except RuntimeError as exc:
                 logger.warning(
@@ -996,10 +1223,14 @@ class EasyMergeVideosFromPaths(io.ComfyNode):
             # --- Slow fallback: tensor-based merge (no transition) ---
             logger.info("%s backend=tensor-merge, transition=none (ffmpeg unavailable)", tag)
             merged_video = _tensor_merge_video_files(resolved, total, _progress)
-            _progress(total + 2, f"Done — merged {total} clips")
-            return io.NodeOutput(merged_video)
+            return _finalize_video(
+                merged_video,
+                f"Done — merged {total} clips",
+                owned_paths=generated_outputs,
+            )
         finally:
-            # Clean up downloaded temp files (but not the output tmp_path which is returned)
+            _cleanup_owned(generated_outputs)
+            # Clean up downloaded URL inputs. Final returned files have already had ownership transferred.
             for f in temp_files:
                 try:
                     os.unlink(f)

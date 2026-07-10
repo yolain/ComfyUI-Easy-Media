@@ -71,15 +71,19 @@
   },
   "easy mergeVideosFromPaths": {
     "display_name": "从路径合并视频",
-    "description": "从文件路径或 URL 列表加载并按顺序拼接视频。支持 ComfyUI temp/output 文件名、绝对本地路径和 HTTP(S) URL。所有片段必须具有相同的帧率、分辨率和音频配置。",
+    "description": "从文件路径或 URL 列表加载并按顺序拼接视频。支持 ComfyUI input/temp/output 路径、子目录与 ** 通配模式、绝对本地路径和 HTTP(S) URL；可使用 FFmpeg 为最终视频添加或替换音频。所有片段必须具有相同的帧率、分辨率和音频配置。",
     "inputs": {
       "paths": {
         "name": "路径列表",
-        "tooltip": "每行一个路径（或逗号分隔）。支持 ComfyUI output/temp 文件名、绝对路径或 URL。"
+        "tooltip": "每行一个路径（或逗号分隔）。支持 ComfyUI input/output/temp 路径、子目录、** 通配模式、绝对路径或 URL。"
       },
       "frame_count": {
         "name": "截取帧数",
         "tooltip": "合并后最多保留的帧数。设置为 -1 时保留所有帧。"
+      },
+      "audio": {
+        "name": "音频",
+        "tooltip": "可选。使用 FFmpeg 替换或添加到最终合并视频的音频轨道。"
       }
     },
     "outputs": {

@@ -17,7 +17,11 @@
     "seek": "Video time",
     "mute": "Mute audio",
     "unmute": "Unmute audio",
-    "volume": "Volume"
+    "volume": "Volume",
+    "saveOutput": "Save output video",
+    "filenamePrefix": "Save prefix",
+    "settings": "Output settings",
+    "downloadOutput": "Download output video"
   },
   "toolbar": {
     "frames": "Frames",
@@ -67,6 +71,7 @@
     "addImage": "Add image",
     "imageDropHint": "Click to choose, or drag files here.",
     "previewImage": "Preview image",
+    "backToPreview": "Back to preview",
     "deleteImage": "Delete image",
     "previewLayoutBalanced": "Use balanced preview layout",
     "previewLayoutImageLarge": "Enlarge task images",
@@ -76,6 +81,16 @@
     "combinedEdit": "Combined",
     "taskNumber": "Task {n}",
     "previewTaskLabel": "Task{n}",
+    "emptyPreviewTitle": "No segments yet",
+    "emptyPreviewDescription": "Add a task segment or video clip to the tracks below.",
+    "emptyTaskTrack": "Task track",
+    "emptyTaskTrackPurpose": "Configure looped task counts in the queue, prompts, reference images, and more.",
+    "emptyVideoTrack": "Video track",
+    "emptyVideoTrackPurpose": "Drag or select videos to add them; right-click clips for smart split and subtitle recognition.",
+    "emptyAudioTrack": "Audio track",
+    "emptyAudioTrackPurpose": "Drag or select audio to add it; right-click clips for subtitle recognition.",
+    "emptySubtitleTrack": "Subtitle track",
+    "emptySubtitleTrackPurpose": "Add and edit subtitle styles and positioning, with text-to-speech support.",
     "addVideo": "Add video",
     "addAudioSegment": "Add audio",
     "addTrack": "Add track:",
@@ -253,7 +268,6 @@
     "insertAfter": "Insert segment after"
   },
   "panorama": {
-    "preview": "720° panorama preview",
     "applyView": "Apply view",
     "cancel": "Cancel panorama",
     "cancelHint": "Remove the saved panorama view and exit",

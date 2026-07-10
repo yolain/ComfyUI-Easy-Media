@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Columns2, FilePlay, Pause, Play, Volume2, VolumeX } from 'lucide-react'
+import { Check, Columns2, Download, FilePlay, Pause, Play, Settings2, Volume2, VolumeX } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCanvasScale } from '@/hooks/use-canvas-scale'
@@ -11,6 +13,16 @@ import { cn } from '@/lib/utils'
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 
 type CompareMode = 'source' | 'compare' | 'output'
+
+export interface CompareVideoSettings {
+  save_output: boolean
+  filename_prefix: string
+}
+
+const DEFAULT_COMPARE_VIDEO_SETTINGS: CompareVideoSettings = {
+  save_output: false,
+  filename_prefix: 'ComfyUI',
+}
 
 export interface CompareVideoResult {
   filename: string
@@ -29,6 +41,8 @@ export interface CompareVideoPayload {
 interface CompareVideoInnerProps {
   app: ComfyApp
   node: CompareVideoNode
+  settings: CompareVideoSettings
+  onSettingsChange: (settings: CompareVideoSettings) => void
 }
 
 type ExecutedHandler = (output: unknown) => void
@@ -65,6 +79,17 @@ function normalizeCompareVideoPayload(value: unknown): CompareVideoPayload | nul
   }
   if (!value || typeof value !== 'object') return null
   return value as CompareVideoPayload
+}
+
+function normalizeCompareVideoSettings(value: unknown): CompareVideoSettings {
+  if (!value || typeof value !== 'object') return DEFAULT_COMPARE_VIDEO_SETTINGS
+  const record = value as Record<string, unknown>
+  return {
+    save_output: record.save_output === true,
+    filename_prefix: typeof record.filename_prefix === 'string'
+      ? record.filename_prefix
+      : DEFAULT_COMPARE_VIDEO_SETTINGS.filename_prefix,
+  }
 }
 
 function parseCompareVideoPayload(output: unknown): CompareVideoPayload | null {
@@ -108,18 +133,57 @@ function seek(video: HTMLVideoElement | null, time: number) {
   }
 }
 
-export function CompareVideoWidget({ app, node }: Readonly<ReactWidgetProps<Record<string, never>>>) {
+export function CompareVideoWidget({ app, node, value, onChange }: Readonly<ReactWidgetProps<CompareVideoSettings>>) {
   const locale = app?.ui?.settings?.settingsValues?.['Comfy.Locale']
   const compareNode = node as CompareVideoNode
+  const settings = normalizeCompareVideoSettings(value)
 
   return (
     <LocaleContext.Provider value={locale}>
-      <CompareVideoWidgetInner app={app} node={compareNode} />
+      <CompareVideoWidgetInner app={app} node={compareNode} settings={settings} onSettingsChange={onChange} />
     </LocaleContext.Provider>
   )
 }
 
-function CompareVideoWidgetInner({ app, node }: Readonly<CompareVideoInnerProps>) {
+function CompareVideoSettingsFields({
+  settings,
+  onSettingsChange,
+}: Readonly<Pick<CompareVideoInnerProps, 'settings' | 'onSettingsChange'>>) {
+  const t = useT()
+  return (
+    <div className="flex w-64 flex-col gap-3">
+      <Button
+        type="button"
+        variant="ghost"
+        role="checkbox"
+        aria-checked={settings.save_output}
+        className="h-auto cursor-pointer justify-start gap-2 px-0 py-1 hover:bg-transparent"
+        onClick={() => onSettingsChange({ ...settings, save_output: !settings.save_output })}
+      >
+        <span
+          className={cn(
+            'flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-border',
+            settings.save_output && 'border-primary bg-primary text-primary-foreground',
+          )}
+        >
+          {settings.save_output ? <Check className="h-3 w-3" /> : null}
+        </span>
+        <span>{t('compareVideo.saveOutput')}</span>
+      </Button>
+      <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+        <span>{t('compareVideo.filenamePrefix')}</span>
+        <Input
+          value={settings.filename_prefix}
+          placeholder="ComfyUI"
+          aria-label={t('compareVideo.filenamePrefix')}
+          onChange={(event) => onSettingsChange({ ...settings, filename_prefix: event.currentTarget.value })}
+        />
+      </label>
+    </div>
+  )
+}
+
+function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Readonly<CompareVideoInnerProps>) {
   const t = useT()
   const canvasScale = useCanvasScale(app)
   const sourceRef = useRef<HTMLVideoElement>(null)
@@ -130,7 +194,7 @@ function CompareVideoWidgetInner({ app, node }: Readonly<CompareVideoInnerProps>
   const [split, setSplit] = useState(50)
   const [isPointerInside, setIsPointerInside] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
-  const [muted, setMuted] = useState(true)
+  const [muted, setMuted] = useState(false)
   const [volume, setVolume] = useState(0.75)
   const [currentTime, setCurrentTime] = useState(0)
   const [metadataDuration, setMetadataDuration] = useState(0)
@@ -186,12 +250,15 @@ function CompareVideoWidgetInner({ app, node }: Readonly<CompareVideoInnerProps>
   }, [app.api, node])
 
   useEffect(() => {
-    for (const video of [sourceRef.current, outputRef.current]) {
-      if (!video) continue
-      video.muted = muted
-      video.volume = volume
+    if (sourceRef.current) {
+      sourceRef.current.muted = muted || hasOutput
+      sourceRef.current.volume = volume
     }
-  }, [muted, volume])
+    if (outputRef.current) {
+      outputRef.current.muted = muted
+      outputRef.current.volume = volume
+    }
+  }, [hasOutput, muted, volume])
 
   useEffect(() => {
     if (!canCompare && hasSource) setMode('source')
@@ -270,20 +337,36 @@ function CompareVideoWidgetInner({ app, node }: Readonly<CompareVideoInnerProps>
     setMode((current) => current === 'compare' ? 'source' : current === 'source' ? 'output' : 'compare')
   }
 
+  function downloadOutputVideo() {
+    if (!outputUrl || !payload?.output?.filename) return
+    try {
+      const anchor = document.createElement('a')
+      anchor.href = outputUrl
+      anchor.download = payload.output.filename
+      anchor.rel = 'noopener'
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+    } catch (error) {
+      console.error('[CompareVideoWidget] failed to download output video:', error)
+    }
+  }
+
   if (!payload || (!hasSource && !hasOutput)) {
     return (
-      <div className="flex h-full min-h-[260px] w-full items-center justify-center rounded border border-border bg-background p-3 text-xs text-muted-foreground">
-        {t('compareVideo.empty')}
+      <div className="flex h-full min-h-[260px] w-full flex-col items-center justify-center gap-4 rounded border border-border bg-background p-4 text-xs text-muted-foreground">
+        <p>{t('compareVideo.empty')}</p>
+        <CompareVideoSettingsFields settings={settings} onSettingsChange={onSettingsChange} />
       </div>
     )
   }
 
   return (
     <TooltipProvider>
-      <div className="flex h-full min-h-[320px] w-full flex-col overflow-hidden rounded border border-border bg-background text-foreground">
+      <div className="group relative h-full min-h-[320px] w-full overflow-hidden rounded border border-border bg-background text-foreground">
         <div
           ref={stageRef}
-          className="relative min-h-0 flex-1 overflow-hidden bg-black"
+          className="relative h-full min-h-[320px] overflow-hidden bg-black"
           onPointerEnter={() => setIsPointerInside(true)}
           onPointerMove={(event) => {
             updateSplitFromPointer(event)
@@ -306,7 +389,7 @@ function CompareVideoWidgetInner({ app, node }: Readonly<CompareVideoInnerProps>
               )}
               src={sourceUrl}
               loop
-              muted={muted}
+              muted={muted || hasOutput}
               playsInline
               preload="auto"
               onLoadedMetadata={(event) => {
@@ -378,7 +461,10 @@ function CompareVideoWidgetInner({ app, node }: Readonly<CompareVideoInnerProps>
           ) : null}
         </div>
 
-        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-t border-border bg-background/30 px-1">
+        <div
+          data-compare-video-toolbar
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-10 grid translate-y-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-t border-border bg-background/90 px-1 opacity-0 shadow-sm backdrop-blur-sm transition-[opacity,transform] duration-300 ease-out group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:opacity-100"
+        >
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -433,6 +519,39 @@ function CompareVideoWidgetInner({ app, node }: Readonly<CompareVideoInnerProps>
               onValueChange={(value) => setVolume(value[0] ?? 0)}
               aria-label={t('compareVideo.volume')}
             />
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="cursor-pointer"
+                  aria-label={t('compareVideo.settings')}
+                >
+                  <Settings2 className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-auto">
+                <CompareVideoSettingsFields settings={settings} onSettingsChange={onSettingsChange} />
+              </PopoverContent>
+            </Popover>
+            {hasOutput ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="cursor-pointer"
+                    aria-label={t('compareVideo.downloadOutput')}
+                    onClick={downloadOutputVideo}
+                  >
+                    <Download className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{t('compareVideo.downloadOutput')}</TooltipContent>
+              </Tooltip>
+            ) : null}
           </div>
         </div>
       </div>

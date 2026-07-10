@@ -34,7 +34,6 @@ import type {
   MultiTrackTaskImage,
   MultiTrackTaskMode,
 } from '@/types/multitrack'
-import { PanoramaIcon } from '@/components/widgets/panorama/PanoramaIcon'
 import { PanoramaImagePreview } from '@/components/widgets/panorama/PanoramaImagePreview'
 
 type PromptTab = 'user' | 'system'
@@ -55,7 +54,7 @@ interface TaskSegmentEditorProps {
   onTrackSegmentsContentChange?: (updates: TrackSegmentContentUpdate[]) => void
   onTrackSegmentsChange?: (segments: MultiTrackSegment[]) => void
   onDurationChange?: (duration: number) => void
-  onOpenPanorama?: (imageId: string) => void
+  onOpenImagePreview?: (imageId: string) => void
 }
 
 interface SystemPromptResponse {
@@ -166,7 +165,7 @@ export function TaskSegmentEditor({
   onTrackSegmentsContentChange,
   onTrackSegmentsChange,
   onDurationChange,
-  onOpenPanorama,
+  onOpenImagePreview,
 }: Readonly<TaskSegmentEditorProps>) {
   const t = useT()
   const draggedImageIdRef = useRef<string | null>(null)
@@ -369,18 +368,6 @@ export function TaskSegmentEditor({
     onContentChange({ images: images.filter((image) => image.id !== imageId) })
   }
 
-  function handlePreviewImage(image: MultiTrackTaskImage) {
-    const url = mediaContentToViewUrl({
-      source_type: image.source_type ?? 'input',
-      file_path: image.file_path,
-      local_path: image.local_path,
-      url: image.url,
-      slot_name: image.slot_name,
-    })
-    if (!url) return
-    window.open(url, '_blank', 'noopener,noreferrer')
-  }
-
   const imageGridColumns = images.length > 0 && images.length < 4 ? 'grid-cols-2' : 'grid-cols-3'
   const imagePickerSurfaceClass = isImageDragOver ? 'border-primary bg-accent/20' : 'border-border bg-muted/20'
 
@@ -486,25 +473,13 @@ export function TaskSegmentEditor({
                             type="button"
                             size="icon"
                             variant="ghost"
-                            className={cn(
-                              'h-6 w-6 cursor-pointer bg-background/70 hover:bg-background/90 [&_svg]:!size-4',
-                              image.panorama_view ? 'text-highlight' : 'text-foreground',
-                            )}
-                            aria-label={t('panorama.preview')}
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              onOpenPanorama?.(image.id)
-                            }}
-                          >
-                            <PanoramaIcon />
-                          </Button>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
                             className="h-6 w-6 cursor-pointer bg-background/70 text-foreground hover:bg-background/90 [&_svg]:!size-3"
                             aria-label={t('multitrack.previewImage')}
-                            onClick={() => handlePreviewImage(image)}
+                            disabled={!imageUrl}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              onOpenImagePreview?.(image.id)
+                            }}
                           >
                             <Eye />
                           </Button>

@@ -17,7 +17,11 @@
     "seek": "视频时间",
     "mute": "静音",
     "unmute": "取消静音",
-    "volume": "音量"
+    "volume": "音量",
+    "saveOutput": "保存输出视频",
+    "filenamePrefix": "保存前缀",
+    "settings": "输出设置",
+    "downloadOutput": "下载输出视频"
   },
   "toolbar": {
     "frames": "帧",
@@ -67,6 +71,7 @@
     "addImage": "添加图片",
     "imageDropHint": "点击从文件选择，或将文件拖到这里。",
     "previewImage": "预览图片",
+    "backToPreview": "返回预览",
     "deleteImage": "删除图片",
     "previewLayoutBalanced": "使用均衡预览布局",
     "previewLayoutImageLarge": "放大任务图片区",
@@ -76,6 +81,16 @@
     "combinedEdit": "整体编辑",
     "taskNumber": "任务 {n}",
     "previewTaskLabel": "任务{n}",
+    "emptyPreviewTitle": "还没有可预览的片段",
+    "emptyPreviewDescription": "请在下方轨道添加任务片段或视频片段。",
+    "emptyTaskTrack": "任务轨道",
+    "emptyTaskTrackPurpose": "编排队列中的循环任务数量、提示词、参考图片等。",
+    "emptyVideoTrack": "视频轨道",
+    "emptyVideoTrackPurpose": "拖拽或选择视频以添加，片段上右键支持智能分割、识别字幕。",
+    "emptyAudioTrack": "音频轨道",
+    "emptyAudioTrackPurpose": "拖拽或选择音频以添加，片段上右键支持识别字幕。",
+    "emptySubtitleTrack": "字幕轨道",
+    "emptySubtitleTrackPurpose": "添加、编辑字幕样式与定位，支持字幕朗读。",
     "addVideo": "添加视频",
     "addAudioSegment": "添加音频",
     "addTrack": "添加轨道：",
@@ -253,7 +268,6 @@
     "insertAfter": "在此之后插入片段"
   },
   "panorama": {
-    "preview": "720° 全景预览",
     "applyView": "应用视角",
     "cancel": "取消全景",
     "cancelHint": "删除已保存的全景视角并退出",

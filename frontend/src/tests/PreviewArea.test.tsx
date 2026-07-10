@@ -16,31 +16,6 @@ vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
   ),
 }))
 
-vi.mock('@/components/widgets/panorama/PanoramaViewerOverlay', () => ({
-  PanoramaViewerOverlay: ({ onPanoramaViewChange, onExit }: {
-    onPanoramaViewChange: (view: unknown) => void
-    onExit: () => void
-  }) => (
-    <div data-testid="mock-panorama-overlay">
-      <button
-        type="button"
-        onClick={() => onPanoramaViewChange({
-          version: 1,
-          projection: 'equirectangular',
-          yaw: 30,
-          pitch: -10,
-          hfov: 75,
-          aspect_ratio: 1.6,
-        })}
-      >
-        mock apply panorama
-      </button>
-      <button type="button" onClick={() => onPanoramaViewChange(undefined)}>mock restore panorama</button>
-      <button type="button" onClick={onExit}>mock exit panorama</button>
-    </div>
-  ),
-}))
-
 function trackData(): { data: TrackData; selectedSegment: SelectedMultiTrackSegment } {
   const videoSegment = {
     id: 'selected-video',
@@ -141,6 +116,36 @@ describe('PreviewArea', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('shows track guidance in the preview when the timeline has no segments', () => {
+    const { data } = trackData()
+    data.tracks[0].segments = []
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={0}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('multitrack-empty-preview')).not.toBeNull()
+    expect(screen.getByText('Add a task segment or video clip to the tracks below.')).not.toBeNull()
+    expect(screen.getByText('Task track')).not.toBeNull()
+    expect(screen.getByText('Video track')).not.toBeNull()
+    expect(screen.getByText('Audio track')).not.toBeNull()
+    expect(screen.getByText('Subtitle track')).not.toBeNull()
+    expect(screen.getByText('Task track').closest('dt')?.querySelector('svg')).not.toBeNull()
+    expect(screen.getByText('Video track').closest('dt')?.querySelector('svg')).not.toBeNull()
+    expect(screen.getByText('Audio track').closest('dt')?.querySelector('svg')).not.toBeNull()
+    expect(screen.getByText('Subtitle track').closest('dt')?.querySelector('svg')).not.toBeNull()
+    expect(screen.getByTestId('multitrack-video-stage').closest('.hidden')).not.toBeNull()
   })
 
   it('does not bubble preview clicks to the widget clear-selection handler when a segment is selected', () => {
@@ -256,7 +261,7 @@ describe('PreviewArea', () => {
     expect(screen.getByText('picked.png')).not.toBeNull()
   })
 
-  it('opens panorama mode and updates only the selected task image metadata', () => {
+  it('opens and exits the enlarged image preview for a selected task segment', () => {
     const { data } = trackData()
     const taskSegment = {
       id: 'selected-task',
@@ -285,7 +290,6 @@ describe('PreviewArea', () => {
       trackType: 'task',
       segment: taskSegment,
     }
-    const onSelectedSegmentContentChange = vi.fn()
     const props = {
       data,
       currentTime: 0,
@@ -293,36 +297,48 @@ describe('PreviewArea', () => {
       isPlaying: false,
       node: { widgets: [] },
       onGlobalSettingsChange: vi.fn(),
-      onSelectedSegmentContentChange,
+      onSelectedSegmentContentChange: vi.fn(),
       onSelectedSegmentDurationChange: vi.fn(),
     }
     const { rerender } = render(<PreviewArea {...props} />)
 
     expect(screen.getByTestId('task-image-drop-zone')).not.toBeNull()
-    fireEvent.click(screen.getAllByRole('button', { name: '720° panorama preview' })[0])
-    expect(screen.getByTestId('mock-panorama-overlay')).not.toBeNull()
+    expect(screen.queryByRole('button', { name: '720° panorama preview' })).toBeNull()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Preview image' })[0])
+    const expandedPreview = screen.getByTestId('task-image-expanded-preview')
+    const expandedImage = screen.getByRole('img', { name: 'a.png' }) as HTMLImageElement
+    expect(expandedPreview).not.toBeNull()
+    expect(expandedImage.className).toContain('object-contain')
     expect(screen.queryByTestId('task-image-drop-zone')).toBeNull()
-    expect(screen.getByTestId('mock-panorama-overlay').closest('[data-multitrack-preview-area]')).not.toBeNull()
+    expect(screen.getByTestId('task-image-expanded-preview').closest('[data-multitrack-preview-area]')).not.toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: 'mock apply panorama' }))
-    expect(onSelectedSegmentContentChange).toHaveBeenLastCalledWith({
-      images: [
-        expect.objectContaining({ id: 'a', panorama_view: expect.objectContaining({ yaw: 30 }) }),
-        expect.objectContaining({ id: 'b' }),
-      ],
+    vi.spyOn(expandedImage, 'getBoundingClientRect').mockReturnValue({
+      bottom: 250,
+      height: 200,
+      left: 100,
+      right: 500,
+      top: 50,
+      width: 400,
+      x: 100,
+      y: 50,
+      toJSON: () => ({}),
     })
+    fireEvent.wheel(expandedPreview, { clientX: 200, clientY: 100, deltaY: -100 })
+    expect(expandedPreview.getAttribute('data-zoom')).toBe('1.15')
+    expect(expandedImage.style.transform).toBe('scale(1.15)')
+    expect(expandedImage.style.transformOrigin).toBe('25% 25%')
 
-    fireEvent.click(screen.getByRole('button', { name: 'mock restore panorama' }))
-    const restoredImages = onSelectedSegmentContentChange.mock.lastCall?.[0].images
-    expect(restoredImages[0]).toEqual(expect.objectContaining({ id: 'a' }))
-    expect(restoredImages[0]).not.toHaveProperty('panorama_view')
+    fireEvent.wheel(expandedPreview, { clientX: 200, clientY: 100, deltaY: 100 })
+    expect(expandedPreview.getAttribute('data-zoom')).toBe('1.00')
 
-    fireEvent.click(screen.getByRole('button', { name: 'mock exit panorama' }))
+    const backButton = screen.getByRole('button', { name: 'Back to preview' })
+    expect(backButton.className).toContain('z-20')
+    fireEvent.click(backButton)
     expect(screen.getByTestId('task-image-drop-zone')).not.toBeNull()
 
-    fireEvent.click(screen.getAllByRole('button', { name: '720° panorama preview' })[0])
+    fireEvent.click(screen.getAllByRole('button', { name: 'Preview image' })[0])
     rerender(<PreviewArea {...props} selectedSegment={{ ...selectedSegment, segment: { ...taskSegment, id: 'other-task' } }} />)
-    expect(screen.queryByTestId('mock-panorama-overlay')).toBeNull()
+    expect(screen.queryByTestId('task-image-expanded-preview')).toBeNull()
   })
 
   it('updates preview aspect ratio when resolution child widgets change after render', () => {
@@ -380,19 +396,27 @@ describe('PreviewArea', () => {
     const { rerender } = render(<PreviewArea {...props} currentTime={36} />)
 
     const imageArea = screen.getByTestId('task-preview-images')
-    expect(imageArea.className).toContain('flex-col')
-    expect(imageArea.className).toContain('max-w-xl')
+    expect(imageArea.getAttribute('data-layout')).toBe('flow')
+    expect(imageArea.className).toContain('flex-wrap')
+    expect(imageArea.className).toContain('overflow-y-auto')
     expect(screen.queryByTestId('multitrack-video-preview')).toBeNull()
     expect(screen.getAllByRole('img').map((image) => image.getAttribute('src'))).toContain(
       '/view?filename=first.png&type=input&subfolder=tasks',
     )
     expect(screen.getAllByRole('img').map((image) => image.getAttribute('src'))).toContain('https://example.com/second.png')
-    expect(screen.getByRole('img', { name: 'second.png' }).className).toContain('object-contain')
-    expect(screen.getAllByTestId('panorama-image-preview-first')[0].className).toContain('aspect-video')
-    expect(screen.getAllByLabelText('720° panorama preview')[0].className).toContain('text-highlight')
+    expect(screen.getByRole('img', { name: 'second.png' }).className).toContain('w-auto')
+    expect(screen.getByTestId('task-preview-image-first').className).toContain('h-32')
+    expect(screen.getByTestId('task-preview-image-second').className).toContain('h-32')
+    expect(screen.getByTestId('panorama-image-preview-first').className).toContain('aspect-video')
+    expect(screen.queryByLabelText('720° panorama preview')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'second.png' }))
-    expect(screen.getAllByRole('img', { name: 'second.png' })).toHaveLength(2)
+    expect(screen.getByTestId('task-preview-image-second').className).toContain('border-primary')
+
+    const addImage = screen.getByTestId('task-preview-add-image')
+    expect(addImage.className).toContain('h-32')
+    expect(addImage.className).toContain('w-32')
+    expect(imageArea.lastElementChild).toBe(addImage)
 
     rerender(<PreviewArea {...props} currentTime={48} />)
     expect(screen.queryByTestId('task-preview-images')).toBeNull()
@@ -579,7 +603,7 @@ describe('PreviewArea', () => {
     expect(screen.queryByTestId('task-prompt-overlay')).toBeNull()
   })
 
-  it('opens and updates panorama mode from an unselected active task image', () => {
+  it('opens and exits the enlarged preview from an active task image', () => {
     const { data } = trackData()
     addActiveTaskTrack(data)
     const onTrackSegmentsContentChange = vi.fn()
@@ -598,19 +622,18 @@ describe('PreviewArea', () => {
       />,
     )
 
-    fireEvent.click(screen.getAllByLabelText('720° panorama preview')[0])
-    expect(screen.getByTestId('mock-panorama-overlay')).not.toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'mock apply panorama' }))
+    const firstImage = screen.getByTestId('task-preview-image-first')
+    const viewButton = firstImage.querySelector<HTMLButtonElement>('[aria-label="Preview image"]')
+    expect(viewButton).not.toBeNull()
+    fireEvent.click(viewButton!)
+    const expandedPreview = screen.getByTestId('task-image-expanded-preview')
+    expect(expandedPreview).not.toBeNull()
+    expect(expandedPreview.querySelector('img[alt="first.png"]')).not.toBeNull()
+    expect(screen.queryByLabelText('720° panorama preview')).toBeNull()
 
-    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
-      segmentId: 'active-task',
-      patch: {
-        images: [
-          expect.objectContaining({ id: 'first', panorama_view: expect.objectContaining({ yaw: 30 }) }),
-          expect.objectContaining({ id: 'second' }),
-        ],
-      },
-    }])
+    fireEvent.click(screen.getByRole('button', { name: 'Back to preview' }))
+    expect(screen.getByTestId('task-preview-images')).not.toBeNull()
+    expect(onTrackSegmentsContentChange).not.toHaveBeenCalled()
   })
 
   it('deletes an active task image from the global preview', () => {
@@ -634,9 +657,10 @@ describe('PreviewArea', () => {
 
     const firstImage = screen.getByTestId('task-preview-image-first')
     expect(firstImage.className).toContain('cursor-pointer')
-    expect(firstImage.querySelector('[aria-label="Delete image first.png"]')).toBeNull()
     const deleteButton = screen.getByRole('button', { name: 'Delete image first.png' })
-    expect(deleteButton.parentElement?.className).toContain('right-2')
+    expect(firstImage.contains(deleteButton)).toBe(true)
+    expect(deleteButton.parentElement?.className).toContain('right-1')
+    expect(deleteButton.className).toContain('h-5')
     expect(deleteButton.className).toContain('text-destructive')
 
     fireEvent.click(deleteButton)
@@ -752,7 +776,7 @@ describe('PreviewArea', () => {
       />,
     )
 
-    expect(screen.getByTestId('task-preview-images').className).toContain('max-w-xl')
+    expect(screen.getByTestId('task-preview-images').className).toContain('flex-wrap')
     fireEvent.click(screen.getByTestId('task-preview-empty-add-image'))
     fireEvent.click(await screen.findByRole('button', { name: 'mock select image' }))
 

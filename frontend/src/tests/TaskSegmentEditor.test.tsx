@@ -180,13 +180,12 @@ describe('TaskSegmentEditor', () => {
 
   it('previews and deletes images from the image grid actions', () => {
     const onContentChange = vi.fn()
-    const onOpenPanorama = vi.fn()
-    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
+    const onOpenImagePreview = vi.fn()
     render(
       <TaskSegmentEditor
         segment={taskSegment()}
         onContentChange={onContentChange}
-        onOpenPanorama={onOpenPanorama}
+        onOpenImagePreview={onOpenImagePreview}
       />,
     )
 
@@ -201,29 +200,23 @@ describe('TaskSegmentEditor', () => {
     expect(screen.getByTestId('task-image-index-a').className).toContain('bottom-0')
     expect(screen.getByTestId('task-image-index-b').textContent).toBe('1')
     expect(screen.getAllByRole('button', { name: 'Preview image' })[0].className).toContain('cursor-pointer')
-    expect(screen.getAllByRole('button', { name: '720° panorama preview' })[0].className).toContain('cursor-pointer')
+    expect(screen.getAllByRole('button', { name: 'Preview image' })).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: '720° panorama preview' })).toBeNull()
     expect(screen.getAllByRole('button', { name: 'Delete image' })[0].className).toContain('cursor-pointer')
     expect(screen.getAllByRole('button', { name: 'Delete image' })[0].className).toContain('text-destructive')
-    const panoramaButton = screen.getAllByRole('button', { name: '720° panorama preview' })[0]
     const previewButton = screen.getAllByRole('button', { name: 'Preview image' })[0]
-    expect(panoramaButton.compareDocumentPosition(previewButton) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
-    expect(panoramaButton.querySelector('path')?.getAttribute('d')).toContain('M1.48 7.624')
+    expect(previewButton.querySelector('.lucide-eye')).not.toBeNull()
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'Preview image' })[0])
-    expect(openSpy).toHaveBeenCalledWith('/view?filename=a.png&type=input&subfolder=', '_blank', 'noopener,noreferrer')
-
-    fireEvent.click(screen.getAllByRole('button', { name: '720° panorama preview' })[0])
-    expect(onOpenPanorama).toHaveBeenCalledWith('a')
+    fireEvent.click(previewButton)
+    expect(onOpenImagePreview).toHaveBeenCalledWith('a')
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Delete image' })[0])
     expect(onContentChange).toHaveBeenCalledWith({
       images: [expect.objectContaining({ id: 'b' })],
     })
-
-    openSpy.mockRestore()
   })
 
-  it('highlights the panorama icon when a view is applied', () => {
+  it('renders saved panorama framing without showing a panorama action icon', () => {
     const segment = taskSegment()
     segment.content.images![0].panorama_view = {
       version: 1,
@@ -235,8 +228,8 @@ describe('TaskSegmentEditor', () => {
     }
     render(<TaskSegmentEditor segment={segment} onContentChange={vi.fn()} />)
 
-    expect(screen.getAllByRole('button', { name: '720° panorama preview' })[0].className).toContain('text-highlight')
-    expect(screen.getAllByRole('button', { name: '720° panorama preview' })[1].className).toContain('text-foreground')
+    expect(screen.queryByRole('button', { name: '720° panorama preview' })).toBeNull()
+    expect(screen.getAllByRole('button', { name: 'Preview image' })).toHaveLength(2)
     expect(screen.getByTestId('task-image-grid').className).toContain('w-full')
     expect(screen.getByTestId('panorama-image-preview-a').className).toContain('absolute')
   })

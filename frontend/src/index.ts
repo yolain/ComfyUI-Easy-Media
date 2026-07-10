@@ -4,6 +4,7 @@ import { preserveTimelineEditorNodeSize } from "@/lib/timeline-node-size";
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 import type { TimelineData } from '@/types/timeline'
 import type { TrackData } from '@/types/multitrack'
+import type { CompareVideoSettings } from '@/components/widgets/compareVideoWidget'
 
 declare const __COMFY_EASY_MEDIA_GLOBAL_CSS__: string;
 
@@ -26,7 +27,7 @@ const [
 
 const DEFAULT_TIMELINE_VALUE = JSON.stringify(createDefaultTimelineData())
 const DEFAULT_TRACK_DATA_VALUE = JSON.stringify(createDefaultTrackData())
-const DEFAULT_COMPARE_VIDEO_VALUE = JSON.stringify({})
+const DEFAULT_COMPARE_VIDEO_VALUE = JSON.stringify({ save_output: true, filename_prefix: 'ComfyUI' })
 
 globalThis.comfyAPI!.app.app.registerExtension({
   name: 'Comfy.EasyMedia.widgets',
@@ -57,7 +58,7 @@ globalThis.comfyAPI!.app.app.registerExtension({
           getMinHeight: () => 320,
         },
       }),
-      COMPARE_VIDEO: createReactWidget<Record<string, never>>(CompareVideoWidget, {
+      EASY_COMPARE_VIDEO: createReactWidget<CompareVideoSettings>(CompareVideoWidget, {
         defaultValue: DEFAULT_COMPARE_VIDEO_VALUE,
         domWidgetOptions: {
           getMinHeight: () => 360,

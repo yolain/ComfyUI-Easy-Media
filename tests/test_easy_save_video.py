@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import types
 from fractions import Fraction
@@ -161,10 +162,13 @@ def _install_comfy_stubs(monkeypatch, tmp_path: Path):
     folder_paths = types.ModuleType("folder_paths")
     output_dir = tmp_path / "output"
     temp_dir = tmp_path / "temp"
+    input_dir = tmp_path / "input"
     output_dir.mkdir()
     temp_dir.mkdir()
+    input_dir.mkdir()
     folder_paths.get_output_directory = lambda: str(output_dir)
     folder_paths.get_temp_directory = lambda: str(temp_dir)
+    folder_paths.get_input_directory = lambda: str(input_dir)
     folder_paths.get_save_image_path = lambda prefix, out, width, height: (
         out,
         prefix,
@@ -313,7 +317,7 @@ def test_compare_videos_schema_uses_socketless_widget(monkeypatch, tmp_path):
 
     widget = schema.inputs[2]
     assert widget.args[0] == "compare_video"
-    assert video_module.TYPE_COMPARE_VIDEO.io_type == "COMPARE_VIDEO"
+    assert video_module.TYPE_COMPARE_VIDEO.io_type == "EASY_COMPARE_VIDEO"
 
 
 def test_compare_videos_saves_matching_pair(monkeypatch, tmp_path):
@@ -333,6 +337,29 @@ def test_compare_videos_saves_matching_pair(monkeypatch, tmp_path):
     assert output_video.saved == []
     assert source_video.component_reads == 0
     assert output_video.component_reads == 0
+
+
+def test_compare_videos_optionally_saves_output_with_prefix(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    source_video = _FakeVideo(frames=24, fps=24)
+    output_video = _FakeVideo(frames=24, fps=24)
+
+    result = video_module.EasyCompareVideos.execute(
+        source=source_video,
+        output=output_video,
+        compare_video=json.dumps({"save_output": True, "filename_prefix": "compare"}),
+    )
+
+    payload = result.ui["compare_videos"][0]
+    assert payload["source"]["type"] == "temp"
+    assert payload["source"]["filename"].startswith("easy_compare_source_")
+    assert payload["output"] == {
+        "filename": "compare_00001_.mp4",
+        "subfolder": "",
+        "type": "output",
+    }
+    assert (tmp_path / "output" / "compare_00001_.mp4").read_bytes() == b"video"
+    assert [path.name for path in (tmp_path / "output").iterdir()] == ["compare_00001_.mp4"]
 
 
 def test_compare_videos_allows_mismatched_fps_when_duration_matches(monkeypatch, tmp_path):
@@ -434,6 +461,126 @@ def test_merge_videos_from_paths_schema_has_frame_count_widget(monkeypatch, tmp_
     assert frame_input.kwargs["default"] == -1
     assert frame_input.kwargs["min"] == -1
     assert frame_input.kwargs["step"] == 1
+    audio_input = schema.inputs[-1]
+    assert audio_input.args[0] == "audio"
+    assert audio_input.kwargs["optional"] is True
+
+
+def test_merge_videos_from_single_comfy_path_reuses_existing_file(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    source = tmp_path / "output" / "clip.mp4"
+    source.write_bytes(b"clip")
+
+    result = video_module.EasyMergeVideosFromPaths.execute("output/clip.mp4")
+
+    assert result.values == (str(source),)
+    assert list((tmp_path / "temp").iterdir()) == []
+
+
+def test_merge_videos_from_nested_input_path_reuses_existing_file(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    source = tmp_path / "input" / "projects" / "scene" / "1.mp4"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"clip")
+
+    result = video_module.EasyMergeVideosFromPaths.execute("input/projects/scene/1.mp4")
+
+    assert result.values == (str(source),)
+    assert list((tmp_path / "temp").iterdir()) == []
+
+
+def test_merge_videos_from_input_recursive_glob_uses_sorted_matches(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    first = tmp_path / "input" / "a" / "1.mp4"
+    second = tmp_path / "input" / "b" / "nested" / "1.mp4"
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True)
+    first.write_bytes(b"a")
+    second.write_bytes(b"b")
+    calls = []
+
+    def fake_concat(inputs, output, progress_callback=None):
+        calls.append(list(inputs))
+        Path(output).write_bytes(b"merged")
+        return True
+
+    monkeypatch.setattr(video_module, "ffmpeg_concat", fake_concat)
+
+    result = video_module.EasyMergeVideosFromPaths.execute("input/**/1.mp4")
+
+    assert calls == [[str(first), str(second)]]
+    assert Path(result.values[0]).read_bytes() == b"merged"
+
+
+def test_merge_videos_rejects_comfy_directory_escape(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    escaped = tmp_path / "output" / "outside.mp4"
+    escaped.write_bytes(b"clip")
+
+    try:
+        video_module.EasyMergeVideosFromPaths.execute("input/../output/outside.mp4")
+    except ValueError as exc:
+        assert "escapes" in str(exc)
+    else:
+        raise AssertionError("Expected path traversal outside input to be rejected.")
+
+
+def test_merge_videos_from_paths_attaches_optional_audio_to_final_video(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    source = tmp_path / "output" / "clip.mp4"
+    source.write_bytes(b"clip")
+    audio = {"waveform": object(), "sample_rate": 48000}
+    calls = []
+
+    def fake_replace(video, replacement_audio, tag):
+        calls.append((video, replacement_audio, tag))
+        return "muxed.mp4"
+
+    monkeypatch.setattr(video_module, "_replace_video_audio_with_ffmpeg", fake_replace)
+
+    result = video_module.EasyMergeVideosFromPaths.execute(
+        "output/clip.mp4",
+        audio=audio,
+    )
+
+    assert calls == [(str(source), audio, "[EasyMergeVideosFromPaths]")]
+    assert result.values == ("muxed.mp4",)
+    assert source.read_bytes() == b"clip"
+
+
+def test_ffmpeg_audio_mux_reuses_file_backed_video(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    source = tmp_path / "output" / "clip.mp4"
+    source.write_bytes(b"clip")
+    audio_path = tmp_path / "temp" / "audio.wav"
+    audio_path.write_bytes(b"audio")
+    video = object()
+    calls = []
+
+    def fake_local_file(input_video, suffix, save_kwargs):
+        calls.append((input_video, suffix, save_kwargs))
+        return str(source), []
+
+    def fake_replace(video_path, replacement_audio_path, output_path):
+        calls.append((video_path, replacement_audio_path, output_path))
+        Path(output_path).write_bytes(b"muxed")
+        return True
+
+    monkeypatch.setattr(video_module, "video_input_to_local_file", fake_local_file)
+    monkeypatch.setattr(video_module, "_save_audio_to_temp_wav", lambda _audio: str(audio_path))
+    monkeypatch.setattr(video_module, "ffmpeg_replace_audio", fake_replace)
+
+    result = video_module._replace_video_audio_with_ffmpeg(
+        video,
+        {"waveform": object(), "sample_rate": 48000},
+        "[test]",
+    )
+
+    assert calls[0][0] is video
+    assert calls[1][0] == str(source)
+    assert source.read_bytes() == b"clip"
+    assert Path(result).read_bytes() == b"muxed"
+    assert not audio_path.exists()
 
 
 def test_merge_videos_from_paths_trims_ffmpeg_output(monkeypatch, tmp_path):
@@ -464,6 +611,7 @@ def test_merge_videos_from_paths_trims_ffmpeg_output(monkeypatch, tmp_path):
     assert calls[1][0] == "trim"
     assert calls[1][2] == 24
     assert result.values == (str(tmp_path / "temp" / "trimmed.mp4"),)
+    assert [path.name for path in (tmp_path / "temp").iterdir()] == ["trimmed.mp4"]
 
 
 def test_merge_videos_from_single_path_trims_loaded_video(monkeypatch, tmp_path):
