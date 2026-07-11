@@ -1777,7 +1777,7 @@ class MultiTrackAudioOutput(io.ComfyNode):
                 io.Audio.Input("audio"),
                 io.Combo.Input(
                     "mode",
-                    options=["default", "s2v"],
+                    options=["default", "crop"],
                     default="default",
                     socketless=True,
                 ),
@@ -1855,7 +1855,7 @@ class MultiTrackAudioOutput(io.ComfyNode):
             )
 
         selected_mode = str(_unwrap_list_scalar(mode, "default"))
-        if selected_mode != "s2v":
+        if selected_mode == "default":
             return io.NodeOutput(
                 combined_audio,
                 audios[0] if audios else None,

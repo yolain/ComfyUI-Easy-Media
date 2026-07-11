@@ -2,6 +2,19 @@
 
 ---
 
+## [1.1.2] - 2026-07-12
+
+### ✨ Features
+
+- **MultiTrack to S2V Output**: Outputs cropped audio clips and starting frame number for easier S2V usage
+
+### 🐛 Bug Fixes
+
+- **MultiTrack Editor**: Fixed inconsistent left-side crop behavior compared to standard editing tools
+- **MultiTrack Editor**: Fixed incorrect waveform display after cropping audio clips
+
+---
+
 ## [1.1.1] - 2026-07-11
 
 ### 🐛 Bug Fixes
