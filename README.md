@@ -200,6 +200,7 @@ bun run build:release
 | LTXVMakeRefVideo | Expand a reference image batch into an IC-LoRA reference video |
 | BerniniModelPatch | Add Bernini context latent support for Wan model |
 | BerniniConditioning | Bernini context conditioning for video/image condition injection |
+| easy berniniS2VConditioning | Unified Bernini + Wan S2V conditioning: original optional single-speaker audio, spatially masked single-speaker audio, or optional sequential two-speaker audio |
 
 ## Credits
 
@@ -207,6 +208,7 @@ bun run build:release
 - [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B)
 - [Whisper](https://github.com/openai/whisper)
 - [VoxCPM2](https://github.com/OpenBMB/VoxCPM)
+- [Bernini S2V](https://huggingface.co/rzgar/Bernini-R-S2V)
 
 ## Source of Inspiration
 

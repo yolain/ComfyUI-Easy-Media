@@ -204,6 +204,7 @@ bun run build:release
 | LTXVMakeRefVideo | 将参考图像批次扩展为 IC-LoRA 参考视频 |
 | BerniniModelPatch | 为 Wan 模型添加 Bernini 上下文潜在支持 |
 | BerniniConditioning | Bernini 上下文条件处理，用于视频/图像条件注入 |
+| easy berniniS2VConditioning | 统一 Bernini + Wan S2V 条件处理，保留可选单人全画面音频，并支持单人遮罩或可选双人顺序音频 |
 
 ## Credits
 
@@ -211,6 +212,7 @@ bun run build:release
 - [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B)
 - [Whisper](https://github.com/openai/whisper)
 - [VoxCPM2](https://github.com/OpenBMB/VoxCPM)
+- [Bernini S2V](https://huggingface.co/rzgar/Bernini-R-S2V)
 
 ## Source of Inspiration
 
