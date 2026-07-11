@@ -24,6 +24,8 @@ from ..utils import (
     frames_to_seconds,
     load_audio_waveform,
     load_image_tensor,
+    iter_valid_audio_inputs,
+    merge_audio_inputs,
     merge_video_track_with_ffmpeg,
     parse_override_segments,
     prompt_override_has_frame_ranges,
@@ -117,6 +119,7 @@ CATEGORY_MEDIA = "EasyUse/Media"
 CATEGORY_TIMELINE = "EasyUse/TimelineEditor"
 CATEGORY_MULTITRACK = "EasyUse/MultiTrackEditor"
 CATEGORY_AUDIO = "EasyUse/Audio"
+CATEGORY_BASIC = "EasyUse/Basic"
 CATEGORY_LOGIC = "EasyUse/Logic"
 PROMPT_FORMAT_OPTIONS = ["default", "promptRelay"]
 
@@ -1667,6 +1670,213 @@ class MultiTrackInfoOutput(io.ComfyNode):
             int(info.get("total_length", 121)),
             float(info.get("frame_rate", 24)),
             task_count,
+        )
+
+
+def _audio_track_frame_range(track: object, frame_rate: float) -> tuple[int, int] | None:
+    if not isinstance(track, dict):
+        return None
+    segments = track.get("segments")
+    if not isinstance(segments, list):
+        return None
+
+    starts: list[int] = []
+    ends: list[int] = []
+    for segment in segments:
+        if not isinstance(segment, dict):
+            continue
+        try:
+            if segment.get("start_frame") is not None:
+                starts.append(int(segment["start_frame"]))
+            elif segment.get("start_time") is not None:
+                starts.append(round(float(segment["start_time"]) * frame_rate))
+
+            if segment.get("end_frame") is not None:
+                ends.append(int(segment["end_frame"]))
+            elif segment.get("end_time") is not None:
+                ends.append(round(float(segment["end_time"]) * frame_rate))
+        except (TypeError, ValueError, OverflowError):
+            continue
+    if not starts or not ends:
+        return None
+    start_frame = min(starts)
+    end_frame = max(ends)
+    return (start_frame, end_frame) if end_frame > start_frame else None
+
+
+def _trim_audio_to_track(audio: dict | None, frame_range: tuple[int, int] | None, frame_rate: float) -> dict | None:
+    if audio is None or frame_range is None:
+        return None
+    start_frame, end_frame = frame_range
+    try:
+        return trim_audio(audio, start_frame / frame_rate, (end_frame - start_frame) / frame_rate)
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def _audio_track_range_within_task(
+    track: object,
+    task_range: tuple[int, int] | None,
+    frame_rate: float,
+) -> tuple[int, int] | None:
+    if not isinstance(track, dict) or task_range is None:
+        return None
+    segments = track.get("segments")
+    if not isinstance(segments, list):
+        return None
+
+    task_start, task_end = task_range
+    intersections: list[tuple[int, int]] = []
+    for segment in segments:
+        segment_range = _audio_track_frame_range({"segments": [segment]}, frame_rate)
+        if segment_range is None:
+            continue
+        start_frame = max(task_start, segment_range[0])
+        end_frame = min(task_end, segment_range[1])
+        if end_frame > start_frame:
+            intersections.append((start_frame, end_frame))
+    if not intersections:
+        return None
+    return min(start for start, _end in intersections), max(end for _start, end in intersections)
+
+
+def _silent_audio_for_range(
+    audio: dict | None,
+    frame_range: tuple[int, int] | None,
+    frame_rate: float,
+) -> dict | None:
+    if frame_range is None:
+        return None
+    sample_rate = 44100
+    channels = 2
+    if isinstance(audio, dict):
+        try:
+            sample_rate = int(audio.get("sample_rate", sample_rate))
+            waveform = audio.get("waveform")
+            if isinstance(waveform, torch.Tensor) and waveform.ndim >= 2:
+                channels = int(waveform.shape[-2])
+        except (TypeError, ValueError, OverflowError):
+            sample_rate = 44100
+            channels = 2
+    start_frame, end_frame = frame_range
+    duration = (end_frame - start_frame) / frame_rate
+    return {"waveform": silence(sample_rate, duration, channels), "sample_rate": sample_rate}
+
+
+class MultiTrackAudioOutput(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy multiTrackAudioOutput",
+            display_name="MultiTrack Audio Output",
+            category=CATEGORY_BASIC,
+            description="Merge all audio tracks and output the first two tracks in full or cropped for S2V.",
+            is_input_list=True,
+            inputs=[
+                TYPE_TRACKS_INFO.Input("tracks_info"),
+                io.Audio.Input("audio"),
+                io.Combo.Input(
+                    "mode",
+                    options=["default", "s2v"],
+                    default="default",
+                    socketless=True,
+                ),
+                io.Int.Input(
+                    "task_index",
+                    default=0,
+                    min=0,
+                    step=1,
+                    tooltip="Select a zero-based task segment range.",
+                ),
+            ],
+            outputs=[
+                io.Audio.Output("combine_audio"),
+                io.Audio.Output("audio_0"),
+                io.Int.Output("audio_0_start"),
+                io.Audio.Output("audio_1"),
+                io.Int.Output("audio_1_start"),
+            ],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        tracks_info: list | dict | str,
+        audio: list | dict | None,
+        mode: str | list[str] = "default",
+        task_index: int | list[int] = 0,
+    ) -> io.NodeOutput:
+        raw_info = _unwrap_list_scalar(tracks_info, {})
+        info = _parse_track_data(raw_info)
+        frame_rate = max(0.001, float(info.get("frame_rate", 24)))
+        tracks = info.get("tracks", [])
+        audio_tracks = [
+            track for track in tracks
+            if isinstance(track, dict) and track.get("type") == "audio"
+        ] if isinstance(tracks, list) else []
+
+        audios = iter_valid_audio_inputs(audio)
+        combined_audio = merge_audio_inputs(audios, "add")
+        selected_task_index = int(_unwrap_list_scalar(task_index, 0))
+        if selected_task_index >= 0:
+            task_segments = [
+                segment
+                for track in tracks
+                if isinstance(track, dict) and track.get("type") == "task"
+                for segment in track.get("segments", [])
+                if isinstance(segment, dict)
+            ] if isinstance(tracks, list) else []
+            task_range = (
+                _audio_track_frame_range({"segments": [task_segments[selected_task_index]]}, frame_rate)
+                if selected_task_index < len(task_segments)
+                else None
+            )
+            first_range = _audio_track_range_within_task(
+                audio_tracks[0] if audio_tracks else None,
+                task_range,
+                frame_rate,
+            )
+            second_range = _audio_track_range_within_task(
+                audio_tracks[1] if len(audio_tracks) > 1 else None,
+                task_range,
+                frame_rate,
+            )
+            task_start = task_range[0] if task_range is not None else -1
+            first_input = audios[0] if audios else None
+            second_input = audios[1] if len(audios) > 1 else None
+            return io.NodeOutput(
+                combined_audio,
+                _trim_audio_to_track(first_input, first_range, frame_rate)
+                or _silent_audio_for_range(first_input, task_range, frame_rate),
+                first_range[0] - task_start if first_range is not None else -1,
+                _trim_audio_to_track(second_input, second_range, frame_rate)
+                or _silent_audio_for_range(second_input, task_range, frame_rate),
+                second_range[0] - task_start if second_range is not None else -1,
+            )
+
+        selected_mode = str(_unwrap_list_scalar(mode, "default"))
+        if selected_mode != "s2v":
+            return io.NodeOutput(
+                combined_audio,
+                audios[0] if audios else None,
+                0,
+                audios[1] if len(audios) > 1 else None,
+                0,
+            )
+
+        first_range = _audio_track_frame_range(audio_tracks[0], frame_rate) if audio_tracks else None
+        second_range = _audio_track_frame_range(audio_tracks[1], frame_rate) if len(audio_tracks) > 1 else None
+        first_audio = _trim_audio_to_track(audios[0] if audios else None, first_range, frame_rate)
+        second_audio = _trim_audio_to_track(audios[1] if len(audios) > 1 else None, second_range, frame_rate)
+        first_start = first_range[0] if first_range is not None else -1
+        second_start = second_range[0] if second_range is not None else -1
+
+        return io.NodeOutput(
+            combined_audio,
+            first_audio,
+            first_start,
+            second_audio,
+            second_start,
         )
 
 

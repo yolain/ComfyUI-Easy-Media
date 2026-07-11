@@ -8,6 +8,9 @@ from comfy_api.latest import ComfyExtension, io
 from aiohttp import web
 from .nodes import *
 from .routes import *
+from .utils.bernini_s2v_model_patch import apply_bernini_s2v_model_patches
+
+apply_bernini_s2v_model_patches()
 
 # Define the path
 root_path = os.path.dirname(__file__)
@@ -51,6 +54,7 @@ class EasyMediaExtension(ComfyExtension):
             MultiTrackEditor,
             TimelineInfoOutput,
             MultiTrackInfoOutput,
+            MultiTrackAudioOutput,
             MultiTrackAddSubtitleToVideo,
             MultiTrackTaskOutput,
             TimelineSegmentOutput,
@@ -66,6 +70,7 @@ class EasyMediaExtension(ComfyExtension):
             APIWorkflowGate,
             # Wan
             BerniniModelPatch,
+            EasyBerniniS2VConditioning,
             # LTXV
             LTXVAddGuidesFromBatchIndexes,
             LTXVMakeRefVideo,

@@ -182,6 +182,8 @@ def _load_basic_module():
         "frames_to_seconds",
         "load_audio_waveform",
         "load_image_tensor",
+        "iter_valid_audio_inputs",
+        "merge_audio_inputs",
         "merge_video_track_with_ffmpeg",
         "resize_image",
         "resize_video_with_ffmpeg",
@@ -197,6 +199,26 @@ def _load_basic_module():
     utils_module.audio_is_muted = lambda value: bool(value.get("muted", False))
     utils_module.audio_volume_db = lambda value: float(value.get("volume_db", 0.0))
     utils_module.default_subtitle_filename = lambda prefix="easy_multitrack_subtitles": f"{prefix}_20260704_120000"
+    utils_module.silence = lambda sample_rate, duration, channels=2: torch.zeros(
+        1, channels, max(1, int(sample_rate * duration)),
+    )
+    def trim_audio(audio, start_index, duration):
+        sample_rate = audio["sample_rate"]
+        start = round(start_index * sample_rate)
+        end = start + round(duration * sample_rate)
+        return {"waveform": audio["waveform"][..., start:end], "sample_rate": sample_rate}
+
+    utils_module.trim_audio = trim_audio
+    def iter_valid_audio_inputs(*values):
+        result = []
+        for value in values:
+            if isinstance(value, dict) and "waveform" in value:
+                result.append(value)
+            elif isinstance(value, list):
+                result.extend(iter_valid_audio_inputs(*value))
+        return result
+
+    utils_module.iter_valid_audio_inputs = iter_valid_audio_inputs
     utils_module.video_input_to_local_file = lambda video, **kwargs: (video.get_stream_source(), [])
     folder_paths = types.ModuleType("folder_paths")
     folder_paths.get_temp_directory = lambda: "/tmp"
@@ -1350,6 +1372,162 @@ def test_multitrack_task_output_schema_and_task_media_selection():
     assert video_track.trim_calls == [(1.0, 2.0, False)]
 
 
+def test_multitrack_audio_output_schema_is_basic_and_exposes_mode_and_two_tracks():
+    module = _load_basic_module()
+
+    schema = module.MultiTrackAudioOutput.define_schema()
+
+    assert schema.node_id == "easy multiTrackAudioOutput"
+    assert schema.category == "EasyUse/Basic"
+    assert schema.is_input_list is True
+    assert [input_.name for input_ in schema.inputs] == ["tracks_info", "audio", "mode", "task_index"]
+    assert schema.inputs[2].kwargs["options"] == ["default", "s2v"]
+    assert schema.inputs[2].kwargs["default"] == "default"
+    assert schema.inputs[3].kwargs["default"] == 0
+    assert schema.inputs[3].kwargs["min"] == 0
+    assert [output.name for output in schema.outputs] == [
+        "combine_audio", "audio_0", "audio_0_start", "audio_1", "audio_1_start",
+    ]
+
+
+def test_multitrack_audio_output_s2v_merges_audio_and_crops_to_track_frame_ranges(monkeypatch):
+    module = _load_basic_module()
+    first = {"waveform": torch.arange(12).reshape(1, 1, 12), "sample_rate": 4}
+    second = {"waveform": torch.arange(20, 32).reshape(1, 1, 12), "sample_rate": 4}
+    calls = []
+
+    def fake_merge(audios, method="add"):
+        calls.append((audios, method))
+        return {"waveform": torch.tensor([[[0.75, 0.75]]]), "sample_rate": 4}
+
+    monkeypatch.setattr(module, "merge_audio_inputs", fake_merge)
+    tracks_info = {
+        "frame_rate": 4,
+        "tracks": [
+            {"type": "video", "segments": [{"start_frame": 1}]},
+            {"type": "audio", "segments": [
+                {"start_frame": 6, "end_frame": 9},
+                {"start_frame": 2, "end_frame": 4},
+            ]},
+            {"type": "audio", "segments": [
+                {"start_time": 1.5, "end_time": 2.0},
+                {"start_time": 0.5, "end_time": 1.0},
+            ]},
+        ],
+    }
+
+    result = module.MultiTrackAudioOutput.execute([tracks_info], [[first, second]], ["s2v"], [-1])
+
+    assert calls == [([first, second], "add")]
+    assert result.values[1]["waveform"].flatten().tolist() == list(range(2, 9))
+    assert result.values[2] == 2
+    assert result.values[3]["waveform"].flatten().tolist() == list(range(22, 28))
+    assert result.values[4] == 2
+
+
+def test_multitrack_audio_output_s2v_uses_minus_one_for_missing_tracks_or_segments(monkeypatch):
+    module = _load_basic_module()
+    first = {"waveform": torch.ones(1, 1, 2), "sample_rate": 4}
+    monkeypatch.setattr(module, "merge_audio_inputs", lambda audios, method="add": first)
+
+    result = module.MultiTrackAudioOutput.execute(
+        [{"frame_rate": 24, "tracks": [{"type": "audio", "segments": []}]}],
+        [[first]],
+        ["s2v"],
+        [-1],
+    )
+
+    assert result.values == (first, None, -1, None, -1)
+
+
+def test_multitrack_audio_output_default_returns_full_tracks_with_zero_starts(monkeypatch):
+    module = _load_basic_module()
+    first = {"waveform": torch.arange(12).reshape(1, 1, 12), "sample_rate": 4}
+    second = {"waveform": torch.arange(20, 32).reshape(1, 1, 12), "sample_rate": 4}
+    monkeypatch.setattr(module, "merge_audio_inputs", lambda audios, method="add": first)
+
+    result = module.MultiTrackAudioOutput.execute(
+        [{"frame_rate": 4, "tracks": []}],
+        [[first, second]],
+        ["default"],
+        [-1],
+    )
+
+    assert result.values == (first, first, 0, second, 0)
+
+
+def test_multitrack_audio_output_task_index_uses_track_segments_relative_to_task_start(monkeypatch):
+    module = _load_basic_module()
+    first = {"waveform": torch.arange(12).reshape(1, 1, 12), "sample_rate": 4}
+    second = {"waveform": torch.arange(20, 32).reshape(1, 1, 12), "sample_rate": 4}
+    monkeypatch.setattr(module, "merge_audio_inputs", lambda audios, method="add": first)
+    tracks_info = {
+        "frame_rate": 4,
+        "tracks": [{
+            "type": "task",
+            "segments": [
+                {"start_frame": 0, "end_frame": 2},
+                {"start_frame": 3, "end_frame": 8},
+            ],
+        }, {
+            "type": "audio",
+            "segments": [{"start_frame": 0, "end_frame": 2}],
+        }, {
+            "type": "audio",
+            "segments": [{"start_frame": 5, "end_frame": 7}],
+        }],
+    }
+
+    result = module.MultiTrackAudioOutput.execute(
+        [tracks_info], [[first, second]], ["default"], [1],
+    )
+    task_zero_result = module.MultiTrackAudioOutput.execute(
+        [tracks_info], [[first, second]], ["default"], [0],
+    )
+
+    assert result.values[0] is first
+    assert result.values[1]["sample_rate"] == 4
+    assert result.values[1]["waveform"].flatten().tolist() == [0, 0, 0, 0, 0]
+    assert result.values[2] == -1
+    assert result.values[3]["waveform"].flatten().tolist() == [25, 26]
+    assert result.values[4] == 2
+    assert task_zero_result.values[1]["waveform"].flatten().tolist() == [0, 1]
+    assert task_zero_result.values[2] == 0
+    assert task_zero_result.values[4] == -1
+
+
+def test_multitrack_audio_output_task_index_clips_overlapping_track_to_task_start(monkeypatch):
+    module = _load_basic_module()
+    first = {"waveform": torch.arange(12).reshape(1, 1, 12), "sample_rate": 4}
+    monkeypatch.setattr(module, "merge_audio_inputs", lambda audios, method="add": first)
+    tracks_info = {
+        "frame_rate": 4,
+        "tracks": [
+            {"type": "task", "segments": [{"start_frame": 3, "end_frame": 8}]},
+            {"type": "audio", "segments": [{"start_frame": 1, "end_frame": 5}]},
+        ],
+    }
+
+    result = module.MultiTrackAudioOutput.execute(
+        [tracks_info], [[first]], ["s2v"], [0],
+    )
+
+    assert result.values[1]["waveform"].flatten().tolist() == [3, 4]
+    assert result.values[2] == 0
+
+
+def test_multitrack_audio_output_invalid_task_index_returns_empty_track_outputs(monkeypatch):
+    module = _load_basic_module()
+    first = {"waveform": torch.arange(8).reshape(1, 1, 8), "sample_rate": 4}
+    monkeypatch.setattr(module, "merge_audio_inputs", lambda audios, method="add": first)
+
+    result = module.MultiTrackAudioOutput.execute(
+        [{"frame_rate": 4, "tracks": []}], [[first]], ["s2v"], [0],
+    )
+
+    assert result.values == (first, None, -1, None, -1)
+
+
 def test_multitrack_task_output_supports_prompt_formats_and_non_overlapping_ranges():
     module = _load_basic_module()
     images = [torch.zeros(1, 2, 2, 3), torch.ones(1, 2, 2, 3)]
@@ -1497,7 +1675,7 @@ def test_workflow_format_gate_has_chinese_localization():
     locale_path = Path(__file__).parents[1] / "locales" / "zh" / "nodeDefs.json"
     node_defs = json.loads(locale_path.read_text(encoding="utf-8"))
 
-    translation = node_defs["easy workflowFormatGate"]
+    translation = node_defs["easy apiWorkflowGate"]
 
     assert translation["display_name"] == "工作流格式阀门"
     assert set(translation["inputs"]) == {"value"}
