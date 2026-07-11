@@ -601,6 +601,32 @@
       "4": { "name": "任务数量" }
     }
   },
+  "easy multiTrackAudioOutput": {
+    "display_name": "多轨音频输出",
+    "description": "合并全部音频，并以完整轨道或 S2V 裁剪模式输出前两条音频轨。",
+    "inputs": {
+      "tracks_info": { "name": "轨道信息" },
+      "audio": { "name": "音频" },
+      "mode": {
+        "name": "模式",
+        "options": {
+          "default": "默认",
+          "s2v": "S2V"
+        }
+      },
+      "task_index": {
+        "name": "任务索引",
+        "tooltip": "按零基索引选择任务片段，例如 0 对应任务 0、1 对应任务 1；仅输出相交音频，开始帧相对于任务片段起点计算。"
+      }
+    },
+    "outputs": {
+      "0": { "name": "合并音频" },
+      "1": { "name": "音频 0" },
+      "2": { "name": "音频 0 开始帧" },
+      "3": { "name": "音频 1" },
+      "4": { "name": "音频 1 开始帧" }
+    }
+  },
   "easy multiTrackAddSubtitleToVIdeo": {
     "display_name": "多轨字幕烧录到视频",
     "description": "将轨道信息中的所有字幕轨片段烧录到视频中，并保存 SRT 字幕文件。",
@@ -713,6 +739,50 @@
       "1": {
         "name": "遮罩"
       }
+    }
+  },
+  "easy berniniS2VConditioning": {
+    "display_name": "简易 Bernini S2V 条件",
+    "description": "统一 Bernini 上下文与 Wan S2V 音频条件。单路音频不连接遮罩时保留原版全画面单人逻辑；连接遮罩后启用空间注入，并可选第二位音频。",
+    "inputs": {
+      "positive": { "name": "正向条件" },
+      "negative": { "name": "负向条件" },
+      "vae": { "name": "VAE" },
+      "width": { "name": "宽度" },
+      "height": { "name": "高度" },
+      "length": { "name": "帧数" },
+      "batch_size": { "name": "批次大小" },
+      "audio_0": {
+        "name": "音频 0 音频",
+        "tooltip": "可选。未连接音频 0 遮罩时，使用原版全画面单人音频注入。"
+      },
+      "mask_0": {
+        "name": "音频 0 遮罩",
+        "tooltip": "白色区域为音频 0 的口型同步区域；连接后启用空间遮罩注入。"
+      },
+      "audio_1": { "name": "音频 1 音频" },
+      "mask_1": {
+        "name": "音频 1 遮罩",
+        "tooltip": "连接音频 1 音频时必需。"
+      },
+      "second_speaker_start_frame": {
+        "name": "音频 1 起始帧",
+        "tooltip": "-1 表示在音频 0 音频结束后自动开始；其他值表示指定输出视频帧。"
+      },
+      "source_video": { "name": "源视频" },
+      "reference_video": { "name": "参考视频" },
+      "reference_images": { "name": "参考图像" },
+      "ref_max_size": { "name": "参考最大尺寸" },
+      "mask_crossfade_frames": {
+        "name": "遮罩交叉淡化帧数",
+        "tooltip": "平滑两位音频的遮罩切换；0 表示硬切。"
+      },
+      "audio_inject_scale": { "name": "音频注入强度" }
+    },
+    "outputs": {
+      "0": { "name": "正向条件" },
+      "1": { "name": "负向条件" },
+      "2": { "name": "潜空间" }
     }
   }
 }
