@@ -1304,6 +1304,62 @@ describe('MultiTrackWidget', () => {
     if (updatedAudioTrack) expect(updatedAudioTrack.segments[0][frameKey]).toBe(expectedFrame)
   })
 
+  it.each([
+    'video',
+    'audio',
+  ] as const)('keeps the playhead-to-end range when trimming the left side of a non-zero %s segment', (trackType) => {
+    const data = createDefaultTrackData()
+    const track = data.tracks.find((item) => item.type === trackType) ?? {
+      id: 'audio-track', name: 'Audio', type: 'audio' as const, color: 'var(--highlight)', muted: false, locked: false, segments: [],
+    }
+    if (!data.tracks.includes(track)) data.tracks.push(track)
+    track.segments = [{
+      id: `${trackType}-offset`,
+      start_frame: 2,
+      end_frame: 10,
+      color: track.color,
+      content: { media_type: trackType, duration: 8 },
+    }]
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByTestId('multitrack-ruler'))
+    fireEvent.click(screen.getByRole('button', { name: 'trim left current time' }))
+
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    expect(updated.tracks.find((item) => item.type === trackType)?.segments[0]).toMatchObject({
+      start_frame: 5,
+      end_frame: 10,
+      origin_start_frame: 2,
+    })
+  })
+
+  it.each([
+    'video',
+    'audio',
+  ] as const)('keeps the start-to-playhead range when trimming the right side of a non-zero %s segment', (trackType) => {
+    const data = createDefaultTrackData()
+    const track = data.tracks.find((item) => item.type === trackType) ?? {
+      id: 'audio-track', name: 'Audio', type: 'audio' as const, color: 'var(--highlight)', muted: false, locked: false, segments: [],
+    }
+    if (!data.tracks.includes(track)) data.tracks.push(track)
+    track.segments = [{
+      id: `${trackType}-offset`,
+      start_frame: 2,
+      end_frame: 10,
+      color: track.color,
+      content: { media_type: trackType, duration: 8 },
+    }]
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByTestId('multitrack-ruler'))
+    fireEvent.click(screen.getByRole('button', { name: 'trim right current time' }))
+
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    expect(updated.tracks.find((item) => item.type === trackType)?.segments[0]).toMatchObject({ start_frame: 2, end_frame: 5 })
+  })
+
   it('trims a selected video segment and keeps the matching task aligned', () => {
     const data = createDefaultTrackData()
     data.tracks[0].segments = [{

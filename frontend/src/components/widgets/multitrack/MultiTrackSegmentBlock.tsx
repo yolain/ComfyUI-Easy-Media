@@ -122,9 +122,19 @@ export function MultiTrackSegmentBlock({
     url: segment.content.url,
   })
   const segmentDuration = Math.max(0, segment.end_frame - segment.start_frame)
+  const sourceDurationFrames = segment.content.duration && segment.content.duration > 0
+    ? segment.content.duration * Math.max(frameRate, 1)
+    : null
+  const sourceOriginFrame = segment.origin_start_frame ?? segment.start_frame
+  const waveformStartRatio = sourceDurationFrames
+    ? Math.max(0, Math.min(1, (segment.start_frame - sourceOriginFrame) / sourceDurationFrames))
+    : 0
+  const waveformEndRatio = sourceDurationFrames
+    ? Math.max(waveformStartRatio, Math.min(1, (segment.end_frame - sourceOriginFrame) / sourceDurationFrames))
+    : 1
   const sourceStartTime = Math.max(
     0,
-    (segment.start_frame - (segment.origin_start_frame ?? segment.start_frame)) / Math.max(frameRate, 1),
+    (segment.start_frame - sourceOriginFrame) / Math.max(frameRate, 1),
   )
   const label = trackType === 'task'
     ? t('multitrackSegment.taskLabel', {
@@ -410,6 +420,8 @@ export function MultiTrackSegmentBlock({
                     url: segment.content.url,
                     slot_name: segment.content.slot_name,
                   }}
+                  startRatio={waveformStartRatio}
+                  endRatio={waveformEndRatio}
                   className="h-full w-full"
                   color={presentation.waveformColor ?? undefined}
                 />

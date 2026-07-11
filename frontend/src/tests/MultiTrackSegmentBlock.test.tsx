@@ -16,6 +16,12 @@ vi.mock('@/components/ui/context-menu', () => ({
   ContextMenuSubTrigger: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }))
 
+vi.mock('@/components/widgets/timeline/AudioWaveform', () => ({
+  AudioWaveform: ({ startRatio, endRatio }: { startRatio?: number; endRatio?: number }) => (
+    <canvas data-start-ratio={startRatio} data-end-ratio={endRatio} />
+  ),
+}))
+
 function segment(type: MultiTrackType): MultiTrackSegment {
   return {
     id: `${type}-segment`,
@@ -199,5 +205,35 @@ describe('MultiTrackSegmentBlock context menu', () => {
     const canvas = container.querySelector('canvas')
     expect(canvas).not.toBeNull()
     expect(canvas?.parentElement?.className).toContain('flex-1')
+  })
+
+  it('renders only the waveform range visible after trimming an audio segment', () => {
+    const { container } = render(
+      <MultiTrackSegmentBlock
+        trackType="audio"
+        segmentIndex={0}
+        segment={{
+          ...segment('audio'),
+          start_frame: 48,
+          end_frame: 144,
+          origin_start_frame: 0,
+          content: { media_type: 'audio', duration: 8 },
+        }}
+        totalLength={240}
+        frameRate={24}
+        areaWidth={200}
+        canvasScale={1}
+        selected={false}
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        onResize={vi.fn()}
+        onResizePreview={vi.fn()}
+        onMove={vi.fn()}
+      />,
+    )
+
+    const canvas = container.querySelector('canvas')
+    expect(canvas?.dataset.startRatio).toBe('0.25')
+    expect(canvas?.dataset.endRatio).toBe('0.75')
   })
 })

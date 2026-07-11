@@ -652,9 +652,15 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
           const nextStart = snapTimeToFrame(nextTime, sourceData.frame_rate)
           const minStart = Math.max(0, prevSegment?.end_frame ?? 0, segment.end_frame - sourceDuration)
           const maxStart = segment.end_frame - 1
+          const startFrame = Math.max(minStart, Math.min(nextStart, maxStart))
           return {
             ...segment,
-            start_frame: Math.max(minStart, Math.min(nextStart, maxStart)),
+            start_frame: startFrame,
+            ...(
+              startFrame !== segment.start_frame && (track.type === 'video' || track.type === 'audio')
+                ? { origin_start_frame: segment.origin_start_frame ?? segment.start_frame }
+                : {}
+            ),
           }
         }
 
