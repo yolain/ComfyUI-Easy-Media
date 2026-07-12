@@ -153,6 +153,7 @@ class LTXVMakeRefVideo(io.ComfyNode):
             display_name="LTXVMakeRefVideo",
             category="image/ltxv",
             description="Expands a batch of reference images into a reference video for IC-LoRA.",
+            is_input_list=True,
             inputs=[
                 io.Image.Input("images"),
                 io.Int.Input("frame_count", default=17, min=17, step=8),
@@ -163,13 +164,65 @@ class LTXVMakeRefVideo(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, images: torch.Tensor, frame_count: int) -> io.NodeOutput:
+    def execute(cls, images: list[torch.Tensor], frame_count: list[int]) -> io.NodeOutput:
         try:
-            frames = cls._expand_frames(images, frame_count)
+            image_batch = cls._prepare_image_batch(images)
+            if not frame_count:
+                raise ValueError("frame_count must contain one value")
+            frames = cls._expand_frames(image_batch, int(frame_count[0]))
         except Exception as exc:
             raise RuntimeError("Failed to create IC-LoRA reference video frames") from exc
 
         return io.NodeOutput(frames)
+
+    @staticmethod
+    def _prepare_image_batch(images: list[torch.Tensor]) -> torch.Tensor:
+        if not images:
+            raise ValueError("images must contain at least one image tensor")
+        if not all(isinstance(image, torch.Tensor) for image in images):
+            raise TypeError("images must contain only torch.Tensor values")
+        if any(image.ndim != 4 or image.shape[0] < 1 for image in images):
+            raise ValueError("Each image input must have shape [B, H, W, C] with B >= 1")
+
+        if len(images) == 1:
+            return images[0]
+
+        individual_images = [frame for batch in images for frame in batch.split(1, dim=0)]
+        background = individual_images[-1]
+        target_height, target_width, target_channels = background.shape[1:]
+        prepared = []
+
+        for image in individual_images[:-1]:
+            if image.shape[-1] != target_channels:
+                raise ValueError("All image inputs must have the same channel count as the background")
+
+            image = image.to(device=background.device, dtype=background.dtype)
+            source_height, source_width = image.shape[1:3]
+            if (source_height, source_width) == (target_height, target_width):
+                prepared.append(image)
+                continue
+
+            scale = min(target_width / source_width, target_height / source_height)
+            resized_width = max(1, min(target_width, round(source_width * scale)))
+            resized_height = max(1, min(target_height, round(source_height * scale)))
+            resized = torch.nn.functional.interpolate(
+                image.movedim(-1, 1),
+                size=(resized_height, resized_width),
+                mode="bilinear",
+                align_corners=False,
+            ).movedim(1, -1)
+            canvas = torch.ones(
+                (1, target_height, target_width, target_channels),
+                device=background.device,
+                dtype=background.dtype,
+            )
+            top = (target_height - resized_height) // 2
+            left = (target_width - resized_width) // 2
+            canvas[:, top:top + resized_height, left:left + resized_width] = resized
+            prepared.append(canvas)
+
+        prepared.append(background)
+        return torch.cat(prepared, dim=0)
 
     @staticmethod
     def _expand_frames(images: torch.Tensor, frame_count: int) -> torch.Tensor:

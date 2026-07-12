@@ -16,8 +16,12 @@ def _load_make_ref_video_class():
     class _ComfyNode:
         pass
 
+    class _NodeOutput:
+        def __init__(self, *values):
+            self.values = values
+
     namespace = {
-        "io": type("IO", (), {"ComfyNode": _ComfyNode, "NodeOutput": object}),
+        "io": type("IO", (), {"ComfyNode": _ComfyNode, "NodeOutput": _NodeOutput}),
         "torch": torch,
     }
     exec(compile(module, str(path), "exec"), namespace)
@@ -52,3 +56,26 @@ def test_subjects_are_distributed_by_latent_sections_before_background():
     assert frames[:, 0, 0, 0].tolist() == (
         [0.0] * 9 + [1.0] * 8 + [2.0] * 8 + [3.0] * 8 + [4.0] * 8
     )
+
+
+def test_single_list_value_preserves_existing_image_batch_behavior():
+    node = _load_make_ref_video_class()
+    batch = _labeled_images(3)
+
+    output = node.execute([batch], [41]).values[0]
+
+    assert output[:, 0, 0, 0].tolist() == [0.0] * 17 + [1.0] * 16 + [2.0] * 8
+
+
+def test_multiple_list_values_fit_subjects_to_the_background_canvas():
+    node = _load_make_ref_video_class()
+    subject = torch.zeros(1, 2, 4, 3)
+    background = torch.full((1, 4, 4, 3), 0.25)
+
+    output = node.execute([subject, background], [17]).values[0]
+
+    assert output.shape == (17, 4, 4, 3)
+    assert torch.all(output[0, 0] == 1)
+    assert torch.all(output[0, 1:3] == 0)
+    assert torch.all(output[0, 3] == 1)
+    assert torch.all(output[-1] == 0.25)

@@ -10,6 +10,7 @@
 
 ### 🐛 Bug Fixes
 
+- **LTXV Reference Video**: Optimizing the Use of `LTXVMakeRefVideo`
 - **MultiTrack Editor**: Fixed inconsistent left-side crop behavior compared to standard editing tools
 - **MultiTrack Editor**: Fixed incorrect waveform display after cropping audio clips
 
