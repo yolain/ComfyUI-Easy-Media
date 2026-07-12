@@ -7,6 +7,7 @@ from utils.prompt_builder import (
     I2V_TEMPLATE,
     R2V_TEMPLATE,
     T2V_TEMPLATE,
+    build_prompt_request,
     get_system_prompt_options,
 )
 
@@ -43,3 +44,15 @@ def test_system_prompt_options_include_ref_template_without_image_filtering():
         "max_images": None,
         "system_prompt": R2V_TEMPLATE,
     } in options
+
+
+def test_custom_system_prompt_preserves_unknown_braced_text():
+    custom_template = 'Write JSON like {"subject": "{character}"}. Prompt: {user_prompt}'
+
+    _, prompt, _ = build_prompt_request(
+        "v2v",
+        "make it move",
+        custom_system_prompt=custom_template,
+    )
+
+    assert prompt == 'Write JSON like {"subject": "{character}"}. Prompt: make it move'

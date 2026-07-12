@@ -296,6 +296,14 @@ def _media_count(value) -> int:
         return len(value)
     return 1
 
+
+def _format_prompt_template(template: str, **values: object) -> str:
+    """Replace supported prompt placeholders while preserving other braces."""
+    for key, value in values.items():
+        template = template.replace("{" + key + "}", str(value))
+    return template
+
+
 def build_prompt_request(task_type, user_prompt, video=None, image=None, images=None, video_frames=DEFAULT_VIDEO_FRAMES, custom_system_prompt=None, json_mode=False):
     """Return the official system/user prompt pair for an external API node."""
     user_prompt = (user_prompt or "").strip()
@@ -310,23 +318,23 @@ def build_prompt_request(task_type, user_prompt, video=None, image=None, images=
         return custom_system_prompt or T2V_TEMPLATE, user_prompt, False
     if task_type in ("i2v", "defalt"):
         template = custom_system_prompt or I2V_TEMPLATE
-        return base_sys, template.format(user_prompt=user_prompt, image_num=max(count, 1)), False
+        return base_sys, _format_prompt_template(template, user_prompt=user_prompt, image_num=max(count, 1)), False
     if task_type in ("v2v", "mv2v"):
         template = custom_system_prompt or V2V_TEMPLATE
-        return base_sys, template.format(user_prompt=user_prompt), False
+        return base_sys, _format_prompt_template(template, user_prompt=user_prompt), False
     if task_type == "ads2v":
         template = custom_system_prompt or ADS2V_TEMPLATE
-        return base_sys, template.format(user_prompt=user_prompt), False
+        return base_sys, _format_prompt_template(template, user_prompt=user_prompt), False
     if task_type == "vi2v":
         template = custom_system_prompt or VI2V_TEMPLATE
-        return base_sys, template.format(user_prompt=user_prompt, image_num=image_num), False
+        return base_sys, _format_prompt_template(template, user_prompt=user_prompt, image_num=image_num), False
     if task_type == "r2v":
         template = custom_system_prompt or R2V_TEMPLATE
-        text = template.format(image_num=max(image_num, 1), original_text=user_prompt, return_format=RETURN_JSON if json_mode else RETURN_RAW)
+        text = _format_prompt_template(template, image_num=max(image_num, 1), original_text=user_prompt, return_format=RETURN_JSON if json_mode else RETURN_RAW)
         return base_sys, text, json_mode
     if task_type in ("rv2v", "vrc2v"):
         template = custom_system_prompt or VR2V_TEMPLATE
-        text = template.format(image_num=max(image_num, 1), original_text=user_prompt, return_format=RETURN_JSON if json_mode else RETURN_RAW)
+        text = _format_prompt_template(template, image_num=max(image_num, 1), original_text=user_prompt, return_format=RETURN_JSON if json_mode else RETURN_RAW)
         return base_sys, text, json_mode
 
     logger.warning("unknown task_type=%r; using the raw prompt", task_type)
