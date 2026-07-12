@@ -2010,7 +2010,7 @@
       ],
       "size": [
         230.22382841210526,
-        58
+        102
       ],
       "flags": {},
       "order": 36,
@@ -2020,6 +2020,12 @@
           "name": "paths",
           "type": "STRING",
           "link": 79
+        },
+        {
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": null
         }
       ],
       "outputs": [
@@ -2037,7 +2043,8 @@
         "Node name for S&R": "easy mergeVideosFromPaths"
       },
       "widgets_values": [
-        -1
+        -1,
+        "merge"
       ]
     },
     {
@@ -2216,7 +2223,7 @@
         "960 x 544 (16:9)",
         "crop",
         "Wan",
-        "{\"muted\":false,\"volume_db\":0,\"tracks\":[{\"id\":\"mrbing2u-iq9iamgr7\",\"name\":\"Task 0\",\"type\":\"task\",\"task_mode\":\"default\",\"color\":\"var(--multitrack-task-bg)\",\"muted\":false,\"solo\":false,\"volume_db\":0,\"locked\":false,\"segments\":[]},{\"id\":\"mrbing2u-kifzb0lmk\",\"name\":\"Video 0\",\"type\":\"video\",\"color\":\"var(--primary)\",\"muted\":false,\"solo\":false,\"volume_db\":0,\"locked\":false,\"segments\":[]}],\"total_length\":120,\"frame_rate\":24}"
+        "{\"muted\":false,\"volume_db\":0,\"tracks\":[{\"id\":\"mrbing2u-iq9iamgr7\",\"name\":\"Task 0\",\"type\":\"task\",\"task_mode\":\"default\",\"color\":\"var(--multitrack-task-bg)\",\"muted\":false,\"solo\":false,\"volume_db\":0,\"locked\":false,\"segments\":[]},{\"id\":\"mrbing2u-kifzb0lmk\",\"name\":\"Video 0\",\"type\":\"video\",\"color\":\"var(--primary)\",\"muted\":false,\"solo\":false,\"volume_db\":0,\"locked\":false,\"segments\":[]}],\"total_length\":80,\"frame_rate\":16}"
       ]
     }
   ],
@@ -2921,8 +2928,8 @@
     "ds": {
       "scale": 0.7601959907957749,
       "offset": [
-        -797.0104848471002,
-        -826.4429615377138
+        -641.3762780997713,
+        -868.1879528086889
       ]
     },
     "frontendVersion": "1.45.20",

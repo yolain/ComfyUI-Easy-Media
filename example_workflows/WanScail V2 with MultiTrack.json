@@ -2,7 +2,7 @@
   "id": "61c55f57-003d-475e-84d0-392280ff9495",
   "revision": 0,
   "last_node_id": 73,
-  "last_link_id": 128,
+  "last_link_id": 130,
   "nodes": [
     {
       "id": 14,
@@ -1186,138 +1186,6 @@
       ]
     },
     {
-      "id": 55,
-      "type": "easy mergeVideosFromPaths",
-      "pos": [
-        2401.969707756959,
-        1044.0907924099417
-      ],
-      "size": [
-        210.4771484375,
-        108
-      ],
-      "flags": {},
-      "order": 58,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "paths",
-          "type": "STRING",
-          "link": 83
-        }
-      ],
-      "outputs": [
-        {
-          "name": "VIDEO",
-          "type": "VIDEO",
-          "links": [
-            96
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-media",
-        "ver": "a22fdcfbef30a0ceba4a930cc72cb5b99e801546",
-        "Node name for S&R": "easy mergeVideosFromPaths"
-      },
-      "widgets_values": [
-        -1
-      ]
-    },
-    {
-      "id": 62,
-      "type": "easy getAudioFromVideo",
-      "pos": [
-        590.2715680303614,
-        724.3057068657582
-      ],
-      "size": [
-        184.9244140625,
-        26
-      ],
-      "flags": {},
-      "order": 19,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "video",
-          "type": "VIDEO",
-          "link": 97
-        }
-      ],
-      "outputs": [
-        {
-          "name": "AUDIO",
-          "type": "AUDIO",
-          "links": [
-            99
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-media",
-        "ver": "a22fdcfbef30a0ceba4a930cc72cb5b99e801546",
-        "Node name for S&R": "easy getAudioFromVideo"
-      },
-      "widgets_values": []
-    },
-    {
-      "id": 63,
-      "type": "easy audioMerge",
-      "pos": [
-        608.9833514796113,
-        813.5046678983658
-      ],
-      "size": [
-        270,
-        98
-      ],
-      "flags": {
-        "collapsed": true
-      },
-      "order": 23,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "audio_0",
-          "name": "audios.audio_0",
-          "type": "AUDIO",
-          "link": 99
-        },
-        {
-          "label": "audio_1",
-          "name": "audios.audio_1",
-          "shape": 7,
-          "type": "AUDIO",
-          "link": 100
-        },
-        {
-          "label": "audio_2",
-          "name": "audios.audio_2",
-          "shape": 7,
-          "type": "AUDIO",
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "AUDIO",
-          "type": "AUDIO",
-          "links": [
-            101
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-media",
-        "ver": "a22fdcfbef30a0ceba4a930cc72cb5b99e801546",
-        "Node name for S&R": "easy audioMerge"
-      },
-      "widgets_values": [
-        "add"
-      ]
-    },
-    {
       "id": 4,
       "type": "CLIPLoader",
       "pos": [
@@ -2276,7 +2144,7 @@
       ],
       "size": [
         288.31347405295037,
-        305.3776352966719
+        150
       ],
       "flags": {},
       "order": 40,
@@ -2860,150 +2728,6 @@
       ]
     },
     {
-      "id": 16,
-      "type": "easy multiTrackEditor",
-      "pos": [
-        110.58679536411442,
-        1469.538375072401
-      ],
-      "size": [
-        823.3811413586707,
-        730.9454289396331
-      ],
-      "flags": {},
-      "order": 14,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "prompt_override",
-          "shape": 7,
-          "type": "*",
-          "link": null
-        },
-        {
-          "name": "image",
-          "shape": 7,
-          "type": "IMAGE",
-          "link": null
-        },
-        {
-          "name": "audio",
-          "shape": 7,
-          "type": "AUDIO",
-          "link": null
-        },
-        {
-          "name": "video",
-          "shape": 7,
-          "type": "VIDEO",
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "TRACKS_INFO",
-          "type": "TRACKS_INFO",
-          "links": [
-            5,
-            6
-          ]
-        },
-        {
-          "name": "IMAGES",
-          "shape": 6,
-          "type": "IMAGE",
-          "links": [
-            7
-          ]
-        },
-        {
-          "name": "AUDIO",
-          "shape": 6,
-          "type": "AUDIO",
-          "links": [
-            8,
-            100
-          ]
-        },
-        {
-          "name": "VIDEO",
-          "shape": 6,
-          "type": "VIDEO",
-          "links": [
-            9,
-            95,
-            97
-          ]
-        }
-      ],
-      "properties": {
-        "easyMediaTimelineHeight": 730.9454289396331,
-        "cnr_id": "comfyui-easy-media",
-        "ver": "a22fdcfbef30a0ceba4a930cc72cb5b99e801546",
-        "Node name for S&R": "easy multiTrackEditor"
-      },
-      "widgets_values": [
-        "960 x 544 (16:9)",
-        "crop",
-        "Wan",
-        "{\"muted\":false,\"volume_db\":0,\"tracks\":[{\"id\":\"mrbing2u-iq9iamgr7\",\"name\":\"Task 0\",\"type\":\"task\",\"task_mode\":\"default\",\"color\":\"var(--multitrack-task-bg)\",\"muted\":false,\"solo\":false,\"volume_db\":0,\"locked\":false,\"segments\":[]},{\"id\":\"mrbing2u-kifzb0lmk\",\"name\":\"Video 0\",\"type\":\"video\",\"color\":\"var(--primary)\",\"muted\":false,\"solo\":false,\"volume_db\":0,\"locked\":false,\"segments\":[]}],\"total_length\":80,\"frame_rate\":16}"
-      ]
-    },
-    {
-      "id": 58,
-      "type": "easy saveVideo",
-      "pos": [
-        875.1740834578931,
-        708.8855509650057
-      ],
-      "size": [
-        267.2890625,
-        126
-      ],
-      "flags": {},
-      "order": 59,
-      "mode": 0,
-      "inputs": [
-        {
-          "label": "video",
-          "name": "input_mode.video",
-          "type": "VIDEO",
-          "link": 96
-        },
-        {
-          "label": "audio",
-          "name": "input_mode.audio",
-          "shape": 7,
-          "type": "AUDIO",
-          "link": 101
-        }
-      ],
-      "outputs": [
-        {
-          "name": "VIDEO",
-          "type": "VIDEO",
-          "links": [
-            85
-          ]
-        },
-        {
-          "name": "file_path",
-          "type": "STRING",
-          "links": []
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfyui-easy-media",
-        "ver": "a22fdcfbef30a0ceba4a930cc72cb5b99e801546",
-        "Node name for S&R": "easy saveVideo"
-      },
-      "widgets_values": [
-        "video",
-        "hide&save",
-        "ComfyUI"
-      ]
-    },
-    {
       "id": 32,
       "type": "SimpleMath+",
       "pos": [
@@ -3507,18 +3231,247 @@
       ]
     },
     {
+      "id": 16,
+      "type": "easy multiTrackEditor",
+      "pos": [
+        110.58679536411442,
+        1469.538375072401
+      ],
+      "size": [
+        823.3811413586707,
+        730.9454289396331
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "prompt_override",
+          "shape": 7,
+          "type": "*",
+          "link": null
+        },
+        {
+          "name": "image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": null
+        },
+        {
+          "name": "video",
+          "shape": 7,
+          "type": "VIDEO",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "TRACKS_INFO",
+          "type": "TRACKS_INFO",
+          "links": [
+            5,
+            6
+          ]
+        },
+        {
+          "name": "IMAGES",
+          "shape": 6,
+          "type": "IMAGE",
+          "links": [
+            7
+          ]
+        },
+        {
+          "name": "AUDIO",
+          "shape": 6,
+          "type": "AUDIO",
+          "links": [
+            8,
+            100
+          ]
+        },
+        {
+          "name": "VIDEO",
+          "shape": 6,
+          "type": "VIDEO",
+          "links": [
+            9,
+            95,
+            97
+          ]
+        }
+      ],
+      "properties": {
+        "easyMediaTimelineHeight": 730.9454289396331,
+        "cnr_id": "comfyui-easy-media",
+        "ver": "a22fdcfbef30a0ceba4a930cc72cb5b99e801546",
+        "Node name for S&R": "easy multiTrackEditor"
+      },
+      "widgets_values": [
+        "960 x 544 (16:9)",
+        "crop",
+        "Wan",
+        "{\"muted\":false,\"volume_db\":0,\"tracks\":[{\"id\":\"mrbing2u-iq9iamgr7\",\"name\":\"Task 0\",\"type\":\"task\",\"task_mode\":\"default\",\"color\":\"var(--multitrack-task-bg)\",\"muted\":false,\"solo\":false,\"volume_db\":0,\"locked\":false,\"segments\":[]},{\"id\":\"mrbing2u-kifzb0lmk\",\"name\":\"Video 0\",\"type\":\"video\",\"color\":\"var(--primary)\",\"muted\":false,\"solo\":false,\"volume_db\":0,\"locked\":false,\"segments\":[]}],\"total_length\":80,\"frame_rate\":16}"
+      ]
+    },
+    {
+      "id": 62,
+      "type": "easy getAudioFromVideo",
+      "pos": [
+        596.5645122235717,
+        738.1969661699551
+      ],
+      "size": [
+        184.9244140625,
+        26
+      ],
+      "flags": {},
+      "order": 19,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "video",
+          "type": "VIDEO",
+          "link": 97
+        }
+      ],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "links": [
+            99
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-media",
+        "ver": "a22fdcfbef30a0ceba4a930cc72cb5b99e801546",
+        "Node name for S&R": "easy getAudioFromVideo"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 63,
+      "type": "easy audioMerge",
+      "pos": [
+        2027.9366300956558,
+        1030.1886947525884
+      ],
+      "size": [
+        270,
+        98
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 23,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "audio_0",
+          "name": "audios.audio_0",
+          "type": "AUDIO",
+          "link": 99
+        },
+        {
+          "label": "audio_1",
+          "name": "audios.audio_1",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": 100
+        },
+        {
+          "label": "audio_2",
+          "name": "audios.audio_2",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "AUDIO",
+          "type": "AUDIO",
+          "links": [
+            129
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-media",
+        "ver": "a22fdcfbef30a0ceba4a930cc72cb5b99e801546",
+        "Node name for S&R": "easy audioMerge"
+      },
+      "widgets_values": [
+        "add"
+      ]
+    },
+    {
+      "id": 55,
+      "type": "easy mergeVideosFromPaths",
+      "pos": [
+        2340.156999326768,
+        1032.0783617677473
+      ],
+      "size": [
+        210.4771484375,
+        108
+      ],
+      "flags": {},
+      "order": 58,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "paths",
+          "type": "STRING",
+          "link": 83
+        },
+        {
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": 129
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [
+            130
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-media",
+        "ver": "a22fdcfbef30a0ceba4a930cc72cb5b99e801546",
+        "Node name for S&R": "easy mergeVideosFromPaths"
+      },
+      "widgets_values": [
+        -1,
+        "merge"
+      ]
+    },
+    {
       "id": 57,
       "type": "easy compareVideos",
       "pos": [
-        565.2865100861601,
-        881.0114916105424
+        551.2048265109712,
+        825.0791044040425
       ],
       "size": [
-        628.7098165455122,
-        427.85367606946784
+        652.3574029981755,
+        477.7143178305396
       ],
       "flags": {},
-      "order": 60,
+      "order": 59,
       "mode": 0,
       "inputs": [
         {
@@ -3531,7 +3484,7 @@
           "name": "output",
           "shape": 7,
           "type": "VIDEO",
-          "link": 85
+          "link": 130
         }
       ],
       "outputs": [],
@@ -3541,7 +3494,7 @@
         "Node name for S&R": "easy compareVideos"
       },
       "widgets_values": [
-        "{}"
+        "{\"save_output\":true,\"filename_prefix\":\"MultiTrack/ComfyUI\"}"
       ]
     }
   ],
@@ -4091,14 +4044,6 @@
       "STRING"
     ],
     [
-      85,
-      58,
-      0,
-      57,
-      1,
-      "VIDEO"
-    ],
-    [
       86,
       59,
       0,
@@ -4179,14 +4124,6 @@
       "VIDEO"
     ],
     [
-      96,
-      55,
-      0,
-      58,
-      0,
-      "VIDEO"
-    ],
-    [
       97,
       16,
       3,
@@ -4207,14 +4144,6 @@
       16,
       2,
       63,
-      1,
-      "AUDIO"
-    ],
-    [
-      101,
-      63,
-      0,
-      58,
       1,
       "AUDIO"
     ],
@@ -4385,6 +4314,22 @@
       21,
       4,
       "INT"
+    ],
+    [
+      129,
+      63,
+      0,
+      55,
+      1,
+      "AUDIO"
+    ],
+    [
+      130,
+      55,
+      0,
+      57,
+      1,
+      "VIDEO"
     ]
   ],
   "groups": [
@@ -4466,8 +4411,8 @@
       "bounding": [
         2777.9953266084553,
         1032.5492507414099,
-        385.9706428434665,
-        701.7316676965324
+        360.01968908747403,
+        655.5305515068262
       ],
       "color": "#3f789e",
       "flags": {}
@@ -4488,10 +4433,10 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.4656124232233008,
+      "scale": 0.42688700785965733,
       "offset": [
-        1223.0019573677139,
-        -255.78858998171557
+        349.52842887911095,
+        227.50489417333495
       ]
     },
     "frontendVersion": "1.45.20",
