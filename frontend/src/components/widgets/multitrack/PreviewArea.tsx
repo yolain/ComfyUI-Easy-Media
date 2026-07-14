@@ -248,7 +248,6 @@ export function PreviewArea({
   const [activeTaskImageDragOver, setActiveTaskImageDragOver] = useState(false)
   const [editingTaskPrompt, setEditingTaskPrompt] = useState<{ segmentId: string; text: string } | null>(null)
   const [editingSubtitle, setEditingSubtitle] = useState<{ segmentId: string; text: string } | null>(null)
-  const [subtitleSpeechSettings, setSubtitleSpeechSettings] = useState<SubtitleSpeechSettings>(DEFAULT_SUBTITLE_SPEECH_SETTINGS)
   const [firstVideoMetadata, setFirstVideoMetadata] = useState<MultiTrackVideoMetadata | null>(null)
   const [resolutionInput, setResolutionInput] = useState(() => collectMultiTrackPreviewResolutionInput(node))
   const videoSegments = useMemo(() => (
@@ -297,6 +296,12 @@ export function PreviewArea({
         ...selectedSegment.segment.content.subtitle_style,
       })
     : null
+  const selectedSubtitleSpeechSettings = selectedSegment?.trackType === 'subtitle'
+    ? {
+        ...DEFAULT_SUBTITLE_SPEECH_SETTINGS,
+        ...selectedSegment.segment.content.subtitle_speech,
+      }
+    : DEFAULT_SUBTITLE_SPEECH_SETTINGS
   const selectedTaskImages = selectedSegment?.trackType === 'task'
     ? selectedSegment.segment.content.images ?? []
     : []
@@ -1210,8 +1215,8 @@ export function PreviewArea({
                   }),
                 })
               }}
-              speechSettings={subtitleSpeechSettings}
-              onSpeechSettingsChange={setSubtitleSpeechSettings}
+              speechSettings={selectedSubtitleSpeechSettings}
+              onSpeechSettingsChange={(settings) => onSelectedSegmentContentChange({ subtitle_speech: settings })}
               onGenerateSpeech={(settings) => onGenerateSubtitleSpeech?.(selectedSegment.segment, settings) ?? Promise.resolve()}
             />
           ) : null}

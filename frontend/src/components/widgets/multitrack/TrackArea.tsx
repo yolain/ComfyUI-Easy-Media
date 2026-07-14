@@ -38,6 +38,13 @@ interface TrackAreaProps {
     previewUrl?: string,
     startFrame?: number,
   ) => void
+  onReplaceAudio: (
+    trackId: string,
+    segmentId: string,
+    filePath: string,
+    sourceType: MultiTrackSourceType,
+    previewUrl?: string,
+  ) => void
   onAddTrack: (type: MultiTrackType) => void
   onAddSubtitleSegment: (trackId: string) => void
   onReplaceVideo: (trackId: string, segmentId: string, filePath: string, sourceType: MultiTrackSourceType) => void
@@ -147,6 +154,7 @@ export function TrackArea({
   selectedSegmentIds,
   onAddVideo,
   onAddAudio,
+  onReplaceAudio,
   onAddTrack,
   onAddSubtitleSegment,
   onReplaceVideo,
@@ -516,6 +524,7 @@ export function TrackArea({
               node={node}
               app={app}
               onAddAudio={onAddAudio}
+              onReplaceAudio={onReplaceAudio}
               onSelectSegment={onSelectSegment}
               onDeleteSegment={onDeleteSegment}
               onDeleteTrack={onDeleteTrack}
@@ -546,6 +555,7 @@ export function TrackArea({
               onSelectSegment={onSelectSegment}
               onAddSubtitleSegment={onAddSubtitleSegment}
               onDeleteSegment={onDeleteSegment}
+              onCloneSegment={(segmentId) => onCloneTaskSegment(track.id, segmentId)}
               onDeleteTrack={onDeleteTrack}
               onTrackVisibilityChange={onTrackVisibilityChange}
               onEditSubtitleSegment={onEditSubtitleSegment}

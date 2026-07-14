@@ -6,16 +6,9 @@ import {
   secondsToFrame,
 } from '@/lib/multitrack-utils'
 import { uuid } from '@/lib/uuid'
-import type { MultiTrack, MultiTrackSegment, MultiTrackSourceType, TrackData } from '@/types/multitrack'
+import type { MultiTrack, MultiTrackSegment, MultiTrackSubtitleSpeechSettings, TrackData } from '@/types/multitrack'
 
-export interface SubtitleSpeechSettings {
-  model: 'VoxCPM2'
-  prompt: string
-  cfg: number
-  steps: number
-  referenceAudio: string
-  referenceAudioSourceType?: Extract<MultiTrackSourceType, 'input' | 'output' | 'local'>
-}
+export type SubtitleSpeechSettings = MultiTrackSubtitleSpeechSettings
 
 export const DEFAULT_SUBTITLE_SPEECH_SETTINGS: SubtitleSpeechSettings = {
   model: 'VoxCPM2',
@@ -36,6 +29,43 @@ export interface SubtitleSpeechResult {
   absolutePath: string
   message: string
   duration?: number
+}
+
+interface ResolvedReferenceAudio {
+  path: string | undefined
+  sourceType: SubtitleSpeechSettings['referenceAudioSourceType'] | undefined
+}
+
+async function resolveReferenceAudio(settings: SubtitleSpeechSettings): Promise<ResolvedReferenceAudio> {
+  if (!settings.referenceAudio) return { path: undefined, sourceType: undefined }
+  if (!/^https?:\/\//i.test(settings.referenceAudio)) {
+    return {
+      path: settings.referenceAudio,
+      sourceType: settings.referenceAudioSourceType ?? 'input',
+    }
+  }
+
+  const response = await fetch('/easy-media/download-url', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: settings.referenceAudio }),
+  })
+  let payload: unknown
+  try {
+    payload = await response.json()
+  } catch (error) {
+    throw new Error(`Reference audio download returned invalid JSON: ${String(error)}`)
+  }
+  const fileName = payload && typeof payload === 'object' && 'file_name' in payload
+    ? (payload as { file_name?: unknown }).file_name
+    : undefined
+  if (!response.ok || typeof fileName !== 'string' || !fileName) {
+    const message = payload && typeof payload === 'object' && 'error' in payload
+      ? String((payload as { error: unknown }).error)
+      : `Reference audio download failed (${response.status})`
+    throw new Error(message)
+  }
+  return { path: fileName, sourceType: 'input' }
 }
 
 export interface ApplySubtitleSpeechAudioOptions {
@@ -72,6 +102,7 @@ function parseSubtitleSpeechResult(value: unknown): SubtitleSpeechResult {
 }
 
 export async function requestSubtitleSpeechAudio(request: SubtitleSpeechRequest): Promise<SubtitleSpeechResult> {
+  const referenceAudio = await resolveReferenceAudio(request)
   const response = await fetch('/easy-media/subtitles/speech', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -81,10 +112,8 @@ export async function requestSubtitleSpeechAudio(request: SubtitleSpeechRequest)
       prompt: request.prompt,
       cfg: request.cfg,
       steps: request.steps,
-      reference_audio_path: request.referenceAudio || undefined,
-      reference_audio_source_type: request.referenceAudio
-        ? request.referenceAudioSourceType ?? 'input'
-        : undefined,
+      reference_audio_path: referenceAudio.path,
+      reference_audio_source_type: referenceAudio.sourceType,
     }),
   })
   let payload: unknown

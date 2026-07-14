@@ -172,7 +172,7 @@ describe('PreviewArea', () => {
     expect(onParentClick).not.toHaveBeenCalled()
   })
 
-  it('keeps subtitle speech settings in memory while the settings panel unmounts', () => {
+  it('saves subtitle speech settings into the selected subtitle segment', () => {
     const { data } = trackData()
     const subtitleSegment = {
       id: 'subtitle-1',
@@ -191,6 +191,14 @@ describe('PreviewArea', () => {
           x: 0.15,
           y: 0.8,
           width: 0.7,
+        },
+        subtitle_speech: {
+          model: 'VoxCPM2' as const,
+          prompt: '旧提示',
+          cfg: 3.4,
+          steps: 18,
+          referenceAudio: 'picked.png',
+          referenceAudioSourceType: 'input' as const,
         },
       },
     }
@@ -229,6 +237,7 @@ describe('PreviewArea', () => {
       trackType: 'task',
       segment: taskSegment,
     }
+    const onSelectedSegmentContentChange = vi.fn()
     const props = {
       data,
       currentTime: 0,
@@ -236,29 +245,32 @@ describe('PreviewArea', () => {
       isPlaying: false,
       node: { widgets: [] },
       onGlobalSettingsChange: vi.fn(),
-      onSelectedSegmentContentChange: vi.fn(),
+      onSelectedSegmentContentChange,
       onSelectedSegmentDurationChange: vi.fn(),
     }
 
     const { rerender } = render(<PreviewArea {...props} />)
 
     fireEvent.mouseDown(screen.getByRole('tab', { name: /Speech/ }))
-    fireEvent.change(screen.getByRole('textbox', { name: 'Control prompt' }), { target: { value: '四川话' } })
-    fireEvent.change(screen.getByRole('spinbutton', { name: 'CFG' }), { target: { value: '3.4' } })
-    fireEvent.change(screen.getByRole('spinbutton', { name: 'Steps' }), { target: { value: '18' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Add reference audio' }))
-    fireEvent.click(screen.getByRole('button', { name: 'mock select image' }))
-
-    rerender(<PreviewArea {...props} selectedSegment={taskSelection} />)
-    expect(screen.queryByTestId('subtitle-settings-panel')).toBeNull()
-
-    rerender(<PreviewArea {...props} selectedSegment={subtitleSelection} />)
-    fireEvent.mouseDown(screen.getByRole('tab', { name: /Speech/ }))
-
-    expect((screen.getByRole('textbox', { name: 'Control prompt' }) as HTMLTextAreaElement).value).toBe('四川话')
+    expect((screen.getByRole('textbox', { name: 'Control prompt' }) as HTMLTextAreaElement).value).toBe('旧提示')
     expect(screen.getByRole('spinbutton', { name: 'CFG' }).getAttribute('value')).toBe('3.4')
     expect(screen.getByRole('spinbutton', { name: 'Steps' }).getAttribute('value')).toBe('18')
     expect(screen.getByText('picked.png')).not.toBeNull()
+    fireEvent.change(screen.getByRole('textbox', { name: 'Control prompt' }), { target: { value: '四川话' } })
+
+    expect(onSelectedSegmentContentChange).toHaveBeenLastCalledWith({
+      subtitle_speech: {
+        model: 'VoxCPM2',
+        prompt: '四川话',
+        cfg: 3.4,
+        steps: 18,
+        referenceAudio: 'picked.png',
+        referenceAudioSourceType: 'input',
+      },
+    })
+
+    rerender(<PreviewArea {...props} selectedSegment={taskSelection} />)
+    expect(screen.queryByTestId('subtitle-settings-panel')).toBeNull()
   })
 
   it('opens and exits the enlarged image preview for a selected task segment', () => {

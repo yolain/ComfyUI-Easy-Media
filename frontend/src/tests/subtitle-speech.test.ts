@@ -68,6 +68,45 @@ describe('subtitle speech audio', () => {
     vi.unstubAllGlobals()
   })
 
+  it('downloads a URL reference before requesting generated speech', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ source_type: 'input', file_name: 'downloaded-reference.wav' }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          file_path: 'easy_media/hello.wav',
+          source_type: 'output',
+          message: 'done',
+        }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await requestSubtitleSpeechAudio({
+      text: '字幕',
+      model: 'VoxCPM2',
+      prompt: '',
+      cfg: 2,
+      steps: 10,
+      referenceAudio: 'https://example.com/reference.wav',
+      referenceAudioSourceType: 'input',
+    })
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/easy-media/download-url')
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      url: 'https://example.com/reference.wav',
+    })
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      reference_audio_path: 'downloaded-reference.wav',
+      reference_audio_source_type: 'input',
+    })
+    vi.unstubAllGlobals()
+  })
+
   it('adds generated speech to an existing free audio track starting at the subtitle start', () => {
     const data = baseData([
       audioTrack('audio-a', [{

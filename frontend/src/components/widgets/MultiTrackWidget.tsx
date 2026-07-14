@@ -9,6 +9,7 @@ import type { ReactWidgetProps } from '@/lib/create-react-widget'
 import { LocaleContext, translate } from '@/lib/i18n'
 import {
   addDefaultTaskSegmentIfRangeEmpty,
+  calculateReplacementAudioEndFrame,
   createDefaultTrackData,
   calculateTotalLength,
   cloneMultiTrackSegment,
@@ -381,6 +382,57 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     commitNormalizedTrackChange({ ...latestData, tracks: updatedTracks, total_length: calculateTotalLength(updatedTracks, latestData.frame_rate) })
   }
 
+  async function handleReplaceAudio(
+    trackId: string,
+    segmentId: string,
+    filePath: string,
+    sourceType: MultiTrackSourceType,
+    previewUrl?: string,
+  ) {
+    const content = createMultiTrackAudioContent(filePath, sourceType)
+    if (previewUrl) content.url = previewUrl
+    const src = mediaContentToViewUrl(content)
+    let duration: number | null = null
+    if (src) {
+      try {
+        duration = (await loadBrowserAudioMetadata(src)).duration
+      } catch (error) {
+        console.error('[MultiTrackWidget] failed to read replacement audio metadata:', error)
+      }
+    }
+
+    const latestData = dataRef.current
+    const updatedTracks = latestData.tracks.map((track) => {
+      if (track.id !== trackId || track.type !== 'audio') return track
+      return {
+        ...track,
+        segments: track.segments.map((segment) => {
+          if (segment.id !== segmentId) return segment
+          const fallbackDuration = Math.max(1, segment.end_frame - segment.start_frame)
+            / Math.max(1, latestData.frame_rate)
+          return {
+            ...segment,
+            end_frame: duration === null
+              ? segment.end_frame
+              : calculateReplacementAudioEndFrame(segment, duration, latestData.frame_rate),
+            origin_start_frame: segment.start_frame,
+            content: {
+              ...content,
+              duration: duration ?? fallbackDuration,
+              muted: segment.content.muted ?? content.muted,
+              volume_db: segment.content.volume_db ?? content.volume_db,
+            },
+          }
+        }),
+      }
+    })
+    commitNormalizedTrackChange({
+      ...latestData,
+      tracks: updatedTracks,
+      total_length: calculateTotalLength(updatedTracks, latestData.frame_rate),
+    })
+  }
+
   function handleAddTrack(type: MultiTrackType) {
     if (type !== 'audio' && type !== 'subtitle') return
     const trackNumber = data.tracks.filter((track) => track.type === type).length
@@ -596,20 +648,20 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
 
   function handleCloneTaskSegment(trackId: string, segmentId: string) {
     let clonedSegmentId: string | null = null
-    let taskTrackEnd = 0
+    let trackEnd = 0
     const updatedTracks = data.tracks.map((track) => {
-      if (track.id !== trackId || track.type !== 'task') return track
+      if (track.id !== trackId || (track.type !== 'task' && track.type !== 'subtitle')) return track
       const result = cloneMultiTrackSegment(track.segments, segmentId)
       if (!result) return track
       clonedSegmentId = result.clonedSegmentId
-      taskTrackEnd = result.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0)
+      trackEnd = result.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0)
       return { ...track, segments: result.segments }
     })
     if (!clonedSegmentId) return
     commitNormalizedTrackChange({
       ...data,
       tracks: updatedTracks,
-      total_length: Math.max(data.total_length, taskTrackEnd),
+      total_length: Math.max(data.total_length, trackEnd),
     })
     setSingleSelectedSegment(clonedSegmentId)
   }
@@ -1146,6 +1198,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     selectedSegmentIds={selectedSegmentIds}
                     onAddVideo={handleAddVideo}
                     onAddAudio={handleAddAudio}
+                    onReplaceAudio={handleReplaceAudio}
                     onAddTrack={handleAddTrack}
                     onAddSubtitleSegment={handleAddSubtitleSegment}
                     onReplaceVideo={handleReplaceVideo}

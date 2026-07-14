@@ -60,6 +60,16 @@ export function createMultiTrackAudioContent(
   }
 }
 
+export function calculateReplacementAudioEndFrame(
+  segment: Pick<MultiTrackSegment, 'start_frame' | 'end_frame'>,
+  replacementDuration: number,
+  frameRate: number,
+): number {
+  const currentDuration = Math.max(1, segment.end_frame - segment.start_frame)
+  const replacementDurationFrames = Math.max(1, snapSecondsToFrame(replacementDuration, frameRate))
+  return segment.start_frame + Math.min(currentDuration, replacementDurationFrames)
+}
+
 export const MULTITRACK_TRACK_COLORS: Record<MultiTrack['type'], string> = {
   task: 'var(--multitrack-task-bg)',
   video: 'var(--primary)',

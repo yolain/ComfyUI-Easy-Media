@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   addDefaultTaskSegmentIfRangeEmpty,
   calculateTotalLength,
+  calculateReplacementAudioEndFrame,
   cloneMultiTrackSegment,
   collectMultiTrackPreviewResolutionInput,
   createDefaultTrackData,
@@ -37,6 +38,14 @@ import {
 } from '@/lib/multitrack-utils'
 
 describe('multitrack utilities', () => {
+  it('crops a longer replacement audio to the current clip duration', () => {
+    expect(calculateReplacementAudioEndFrame({ start_frame: 24, end_frame: 120 }, 10, 24)).toBe(120)
+  })
+
+  it('shrinks an audio clip when its replacement is shorter', () => {
+    expect(calculateReplacementAudioEndFrame({ start_frame: 24, end_frame: 120 }, 2, 24)).toBe(72)
+  })
+
   it('evenly distributes multitrack segments across a half-open frame range', () => {
     const source = {
       id: 'source',

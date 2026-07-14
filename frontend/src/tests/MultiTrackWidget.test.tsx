@@ -4,6 +4,7 @@ import { createDefaultTrackData } from '@/lib/multitrack-utils'
 import type { ReactWidgetProps } from '@/lib/create-react-widget'
 import type { TrackData } from '@/types/multitrack'
 import { MultiTrackWidget } from '@/components/widgets/MultiTrackWidget'
+import { loadBrowserAudioMetadata } from '@/lib/audio-utils'
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
 
 vi.mock('@/hooks/use-canvas-scale', () => ({
@@ -103,7 +104,7 @@ vi.mock('@/components/widgets/multitrack/MultiTrackRuler', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
-  TrackArea: ({ data, node, app, onCloneTaskSegment, onSplitTaskSegment, onAddTrack, onAddVideo, onAddAudio, onAddSubtitleSegment, onSmartSplit, onSmartSplitTasks, onRecognizeSubtitles, onResizeSegment, onResizeSegmentPreview, onMoveSegment, onTrackAudioSettingsChange, selectedSegmentIds, onSelectSegment, onSelectSegments, cutMode }: {
+  TrackArea: ({ data, node, app, onCloneTaskSegment, onSplitTaskSegment, onAddTrack, onAddVideo, onAddAudio, onReplaceAudio, onAddSubtitleSegment, onSmartSplit, onSmartSplitTasks, onRecognizeSubtitles, onResizeSegment, onResizeSegmentPreview, onMoveSegment, onTrackAudioSettingsChange, selectedSegmentIds, onSelectSegment, onSelectSegments, cutMode }: {
     data: TrackData
     node: unknown
     app: unknown
@@ -112,6 +113,7 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
     onAddTrack: (type: 'audio') => void
     onAddVideo: (trackId: string, filePath: string, sourceType: 'input', startFrame?: number) => void
     onAddAudio: (trackId: string, filePath: string, sourceType: 'input', previewUrl?: string) => void
+    onReplaceAudio: (trackId: string, segmentId: string, filePath: string, sourceType: 'input') => void
     onAddSubtitleSegment: (trackId: string) => void
     onSmartSplit: (segmentId: string) => void
     onSmartSplitTasks: (segmentId: string) => void
@@ -167,6 +169,14 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
         {audioTrack ? (
           <button type="button" onClick={() => onAddAudio(audioTrack.id, 'audio.wav', 'input')}>add audio segment</button>
         ) : null}
+        {audioTrack?.segments[0] ? (
+          <button
+            type="button"
+            onClick={() => onReplaceAudio(audioTrack.id, audioTrack.segments[0].id, 'replacement.wav', 'input')}
+          >
+            replace audio segment
+          </button>
+        ) : null}
         {firstVideoTrack ? (
           <button type="button" onClick={() => onTrackAudioSettingsChange(firstVideoTrack.id, { solo: !firstVideoTrack.solo })}>
             toggle first video solo
@@ -206,6 +216,11 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
             }}
           >
             select subtitle segment
+          </button>
+        ) : null}
+        {subtitleTrack && subtitleSegment ? (
+          <button type="button" onClick={() => onCloneTaskSegment(subtitleTrack.id, subtitleSegment.id)}>
+            clone subtitle
           </button>
         ) : null}
         {videoSegment && segment ? (
@@ -432,6 +447,39 @@ describe('MultiTrackWidget', () => {
     expect(onChange.mock.lastCall?.[0]).toEqual(cloned)
   })
 
+  it('clones subtitle segments from the subtitle context action', () => {
+    const data = createDefaultTrackData()
+    data.tracks.push({
+      id: 'subtitle-track',
+      name: 'Subtitle 0',
+      type: 'subtitle',
+      color: 'var(--accent)',
+      muted: false,
+      locked: false,
+      segments: [{
+        id: 'subtitle-0',
+        start_frame: 12,
+        end_frame: 36,
+        color: 'var(--accent)',
+        content: { media_type: 'subtitle', text: 'Hello' },
+      }],
+    })
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'clone subtitle' }))
+
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    const subtitles = updated.tracks.at(-1)?.segments ?? []
+    expect(subtitles).toHaveLength(2)
+    expect(subtitles[1]).toMatchObject({
+      start_frame: 36,
+      end_frame: 60,
+      content: { media_type: 'subtitle', text: 'Hello' },
+    })
+    expect(subtitles[1].id).not.toBe('subtitle-0')
+  })
+
   it('splits a task segment from the context dialog', () => {
     const data = createDefaultTrackData()
     data.frame_rate = 16
@@ -647,6 +695,88 @@ describe('MultiTrackWidget', () => {
       end_frame: 48,
       content: { media_type: 'audio', file_path: 'audio.wav', duration: 2, volume_db: 0 },
     })
+  })
+
+  it('replaces audio without extending its existing timeline range', async () => {
+    const data = createDefaultTrackData()
+    data.tracks.push({
+      id: 'audio-track',
+      name: 'Audio 0',
+      type: 'audio',
+      color: 'var(--highlight)',
+      muted: false,
+      locked: false,
+      segments: [{
+        id: 'audio-segment',
+        start_frame: 24,
+        end_frame: 120,
+        color: 'var(--highlight)',
+        content: {
+          media_type: 'audio',
+          source_type: 'output',
+          file_path: 'original.wav',
+          duration: 4,
+          muted: true,
+          volume_db: -6,
+        },
+      }],
+    })
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'replace audio segment' }))
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    expect(updated.tracks.at(-1)?.segments[0]).toMatchObject({
+      start_frame: 24,
+      end_frame: 72,
+      origin_start_frame: 24,
+      content: {
+        source_type: 'input',
+        file_path: 'replacement.wav',
+        duration: 2,
+        muted: true,
+        volume_db: -6,
+      },
+    })
+  })
+
+  it('preserves the audio clip range when replacement metadata cannot be read', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(loadBrowserAudioMetadata).mockRejectedValueOnce(new Error('metadata unavailable'))
+    const data = createDefaultTrackData()
+    data.tracks.push({
+      id: 'audio-track',
+      name: 'Audio 0',
+      type: 'audio',
+      color: 'var(--highlight)',
+      muted: false,
+      locked: false,
+      segments: [{
+        id: 'audio-segment',
+        start_frame: 24,
+        end_frame: 120,
+        color: 'var(--highlight)',
+        content: { media_type: 'audio', source_type: 'input', file_path: 'original.wav' },
+      }],
+    })
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'replace audio segment' }))
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    expect((onChange.mock.lastCall?.[0] as TrackData).tracks.at(-1)?.segments[0]).toMatchObject({
+      start_frame: 24,
+      end_frame: 120,
+      content: { duration: 4 },
+    })
+    expect(consoleError).toHaveBeenCalledWith(
+      '[MultiTrackWidget] failed to read replacement audio metadata:',
+      expect.any(Error),
+    )
+    consoleError.mockRestore()
   })
 
   it('solos a video track by muting other video and audio tracks, then restores them when solo is cleared', () => {

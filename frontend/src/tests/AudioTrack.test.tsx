@@ -6,18 +6,32 @@ import { AudioTrack } from '@/components/widgets/multitrack/AudioTrack'
 import type { MultiTrack } from '@/types/multitrack'
 
 vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
-  MediaSelector: ({ slotItems, onChange }: {
+  MediaSelector: ({ value, defaultTab, slotItems, onChange }: {
+    value: string
+    defaultTab: string
     slotItems: Array<{ value: string }>
-    onChange: (value: string) => void
+    onChange: (value: string, source?: 'input' | 'output') => void
   }) => (
-    <button type="button" onClick={() => onChange(slotItems[0]?.value ?? '')}>
-      {slotItems.map((item) => item.value).join(',')}
+    <button
+      type="button"
+      data-default-tab={defaultTab}
+      data-slot-items={slotItems.map((item) => item.value).join(',')}
+      onClick={() => onChange(value ? 'replacement.wav' : slotItems[0]?.value ?? '', 'input')}
+    >
+      {value ? `replace ${value}` : slotItems.map((item) => item.value).join(',')}
     </button>
   ),
 }))
 
 vi.mock('@/components/widgets/multitrack/MultiTrackSegmentBlock', () => ({
-  MultiTrackSegmentBlock: () => null,
+  MultiTrackSegmentBlock: ({ segment, onDoubleClick }: {
+    segment: { id: string }
+    onDoubleClick?: (segmentId: string, event: React.MouseEvent) => void
+  }) => (
+    <button type="button" onDoubleClick={(event) => onDoubleClick?.(segment.id, event)}>
+      {segment.id}
+    </button>
+  ),
 }))
 
 vi.mock('@/components/widgets/multitrack/TrackAudioControls', () => ({
@@ -37,6 +51,7 @@ function renderAudioTrack(track: MultiTrack, props?: Partial<ComponentProps<type
         node={null}
         app={null}
         onAddAudio={vi.fn()}
+        onReplaceAudio={vi.fn()}
         onSelectSegment={vi.fn()}
         onDeleteSegment={vi.fn()}
         onDeleteTrack={vi.fn()}
@@ -123,5 +138,85 @@ describe('AudioTrack', () => {
     expect(actionGroup?.classList.contains('flex')).toBe(true)
     expect(actionGroup?.classList.contains('gap-1')).toBe(true)
     expect(actionGroup?.style.left).toBe('486px')
+  })
+
+  it('opens the current audio in the media selector on double click and replaces it', () => {
+    const track: MultiTrack = {
+      id: 'audio-track',
+      name: 'Audio 0',
+      type: 'audio',
+      color: 'var(--highlight)',
+      muted: false,
+      locked: false,
+      segments: [{
+        id: 'audio-segment',
+        start_frame: 24,
+        end_frame: 120,
+        color: 'var(--highlight)',
+        content: {
+          media_type: 'audio',
+          source_type: 'output',
+          file_path: 'renders/original.wav',
+          file_name: 'original.wav',
+        },
+      }],
+    }
+    const onReplaceAudio = vi.fn()
+
+    renderAudioTrack(track, { onReplaceAudio })
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'audio-segment' }), {
+      clientX: 20,
+      clientY: 10,
+    })
+
+    const selector = screen.getByRole('button', { name: 'replace renders/original.wav' })
+    expect(selector.getAttribute('data-default-tab')).toBe('outputs')
+    fireEvent.click(selector)
+
+    expect(onReplaceAudio).toHaveBeenCalledWith(
+      'audio-track',
+      'audio-segment',
+      'replacement.wav',
+      'input',
+      undefined,
+    )
+  })
+
+  it('refreshes connected audio slots when the reselect popover opens', () => {
+    const track: MultiTrack = {
+      id: 'audio-track',
+      name: 'Audio 0',
+      type: 'audio',
+      color: 'var(--highlight)',
+      muted: false,
+      locked: false,
+      segments: [{
+        id: 'audio-segment',
+        start_frame: 0,
+        end_frame: 48,
+        color: 'var(--highlight)',
+        content: { media_type: 'audio', source_type: 'input', file_path: 'original.wav' },
+      }],
+    }
+    const sourceNode = {
+      type: 'LoadAudio',
+      outputs: [{ shape: 0 }],
+      widgets_values: ['connected.wav'],
+    }
+    const node = { inputs: [{ name: 'audio', type: 'AUDIO', link: null as number | null }] }
+    const app = {
+      graph: {
+        links: {} as Record<number, { origin_id: number; origin_slot: number }>,
+        getNodeById: () => sourceNode,
+      },
+    }
+
+    renderAudioTrack(track, { node, app })
+    node.inputs[0].link = 7
+    app.graph.links[7] = { origin_id: 3, origin_slot: 0 }
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'audio-segment' }))
+
+    expect(screen.getByRole('button', { name: 'replace original.wav' }).getAttribute('data-slot-items'))
+      .toContain('__slot__:audio')
   })
 })

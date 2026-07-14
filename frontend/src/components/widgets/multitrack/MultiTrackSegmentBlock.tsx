@@ -471,7 +471,7 @@ export function MultiTrackSegmentBlock({
             {t('multitrack.distributeTaskSegments')}
           </ContextMenuItem>
         ) : null}
-        {trackType === 'task' && onClone ? (
+        {(trackType === 'task' || trackType === 'subtitle') && onClone ? (
           <ContextMenuItem onClick={() => onClone(segment.id)}>
             {t('multitrack.cloneTaskSegment')}
           </ContextMenuItem>

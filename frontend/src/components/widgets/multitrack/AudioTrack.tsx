@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Music2, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
+import type { MediaTab } from '@/components/widgets/mediaSelector/MediaSelector'
 import { useT } from '@/lib/i18n'
 import { mediaPathToViewUrl } from '@/lib/media-url'
 import type { SubtitleRecognitionMethod } from '@/lib/subtitle-recognition'
@@ -28,6 +29,13 @@ interface AudioTrackProps {
     sourceType: MultiTrackSourceType,
     previewUrl?: string,
   ) => void
+  onReplaceAudio: (
+    trackId: string,
+    segmentId: string,
+    filePath: string,
+    sourceType: MultiTrackSourceType,
+    previewUrl?: string,
+  ) => void
   onSelectSegment: (segmentId: string, mode?: 'replace' | 'toggle' | 'add') => void
   onDeleteSegment: (segmentId: string) => void
   onDeleteTrack: (trackId: string) => void
@@ -43,6 +51,14 @@ interface AudioTrackProps {
   onCutSegment: (segmentId: string, splitFrame: number) => void
 }
 
+function sourceTypeToTab(sourceType: MultiTrackSourceType | undefined): MediaTab {
+  if (sourceType === 'output') return 'outputs'
+  if (sourceType === 'local') return 'local'
+  if (sourceType === 'url') return 'url'
+  if (sourceType === 'slot') return 'slot'
+  return 'inputs'
+}
+
 export function AudioTrack({
   track,
   totalLength,
@@ -53,6 +69,7 @@ export function AudioTrack({
   node,
   app,
   onAddAudio,
+  onReplaceAudio,
   onSelectSegment,
   onDeleteSegment,
   onDeleteTrack,
@@ -68,13 +85,22 @@ export function AudioTrack({
   onCutSegment,
 }: Readonly<AudioTrackProps>) {
   const t = useT()
+  const contentRef = useRef<HTMLDivElement>(null)
   const [mediaSelectorOpen, setMediaSelectorOpen] = useState(false)
+  const [reselectAnchor, setReselectAnchor] = useState<{ segmentId: string; x: number; y: number } | null>(null)
   const slotItems = useMemo(
     () => computeSlotItems(node, app, 'audio'),
-    [node, app, mediaSelectorOpen],
+    [node, app, mediaSelectorOpen, reselectAnchor],
   )
   const lastEnd = track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0)
   const actionLeft = track.segments.length === 0 ? 6 : (lastEnd / Math.max(totalLength, 1)) * width + 6
+  const reselectSegment = reselectAnchor
+    ? track.segments.find((segment) => segment.id === reselectAnchor.segmentId)
+    : undefined
+  const reselectValue = reselectSegment?.content.file_path
+    ?? reselectSegment?.content.local_path
+    ?? reselectSegment?.content.url
+    ?? (reselectSegment?.content.slot_name ? `__slot__:${reselectSegment.content.slot_name}` : '')
 
   return (
     <div className="relative flex h-16 border-b border-border">
@@ -86,7 +112,7 @@ export function AudioTrack({
           onChange={(patch) => onTrackAudioSettingsChange(track.id, patch)}
         />
       </div>
-      <div className="relative min-w-0 flex-1">
+      <div ref={contentRef} className="relative min-w-0 flex-1">
         {track.segments.map((segment, index) => (
           <MultiTrackSegmentBlock
             key={segment.id}
@@ -109,6 +135,15 @@ export function AudioTrack({
             onRecognizeSubtitles={onRecognizeSubtitles}
             cutMode={cutMode}
             onCut={onCutSegment}
+            onDoubleClick={(segmentId, event) => {
+              const rect = contentRef.current?.getBoundingClientRect()
+              if (!rect) return
+              setReselectAnchor({
+                segmentId,
+                x: (event.clientX - rect.left) / Math.max(canvasScale, 0.01),
+                y: (event.clientY - rect.top) / Math.max(canvasScale, 0.01),
+              })
+            }}
           />
         ))}
         <div className="absolute top-1/2 flex -translate-y-1/2 gap-1" style={{ left: actionLeft }}>
@@ -157,6 +192,33 @@ export function AudioTrack({
             </Tooltip>
           ) : null}
         </div>
+        <Popover open={reselectAnchor !== null} onOpenChange={(open) => {
+          if (!open) setReselectAnchor(null)
+        }}>
+          {reselectAnchor ? (
+            <PopoverAnchor asChild>
+              <div
+                className="absolute h-px w-px"
+                style={{ left: reselectAnchor.x, top: reselectAnchor.y }}
+              />
+            </PopoverAnchor>
+          ) : null}
+          <PopoverContent className="w-auto p-0" align="start">
+            <MediaSelector
+              value={reselectValue}
+              mediaType="audio"
+              defaultTab={sourceTypeToTab(reselectSegment?.content.source_type)}
+              slotItems={slotItems}
+              onChange={(filePath, sourceType = 'input') => {
+                if (!reselectAnchor) return
+                const slotAudioName = slotItems.find((item) => item.value === filePath)?.audio_name
+                const previewUrl = slotAudioName ? mediaPathToViewUrl(slotAudioName, 'input') : undefined
+                onReplaceAudio(track.id, reselectAnchor.segmentId, filePath, sourceType, previewUrl)
+                setReselectAnchor(null)
+              }}
+            />
+          </PopoverContent>
+        </Popover>
       </div>
     </div>
   )
