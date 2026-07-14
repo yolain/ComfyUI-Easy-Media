@@ -147,6 +147,8 @@
     "referenceAudio": "参考音频",
     "addReferenceAudio": "添加参考音频",
     "reselectReferenceAudio": "重选参考音频",
+    "playReferenceAudio": "播放参考音频",
+    "pauseReferenceAudio": "暂停参考音频",
     "clearReferenceAudio": "清除参考音频",
     "distributeTaskSegments": "均分片段",
     "cloneTaskSegment": "克隆片段",

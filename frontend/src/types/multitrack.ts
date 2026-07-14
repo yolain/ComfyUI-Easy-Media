@@ -45,6 +45,16 @@ export interface MultiTrackSegmentContent {
   speed?: number
   media_index?: number
   subtitle_style?: MultiTrackSubtitleStyle
+  subtitle_speech?: MultiTrackSubtitleSpeechSettings
+}
+
+export interface MultiTrackSubtitleSpeechSettings {
+  model: 'VoxCPM2'
+  prompt: string
+  cfg: number
+  steps: number
+  referenceAudio: string
+  referenceAudioSourceType?: Extract<MultiTrackSourceType, 'input' | 'output' | 'local'>
 }
 
 export interface MultiTrackSubtitleStyle {

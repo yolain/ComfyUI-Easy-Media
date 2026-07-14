@@ -3,6 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
 import { DEFAULT_LAZY_INTERSECTION_DELAY_MS } from '@/hooks/use-delayed-intersection'
 import { clearMediaListCache } from '@/stores/media-list-store'
+import { uploadInputMediaFile } from '@/lib/media-upload'
+
+vi.mock('@/lib/media-upload', () => ({
+  uploadInputMediaFile: vi.fn().mockResolvedValue('ref/uploaded.wav'),
+}))
 
 vi.mock('@/lib/i18n', () => ({
   useT: () => (key: string) => key,
@@ -167,6 +172,69 @@ describe('MediaSelector', () => {
     await screen.findByTitle('inside.mp4')
     expect(searchInput.value).toBe('')
     expect(fetch).toHaveBeenLastCalledWith('/easy-media/media/list?source=inputs&type=video&subfolder=clips')
+  })
+
+  it('reopens a selector with a selected value at its source tab and last subdirectory', async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = new URL(String(input), 'http://localhost')
+      const source = url.searchParams.get('source')
+      const subfolder = url.searchParams.get('subfolder')
+      return {
+        ok: true,
+        json: async () => ({
+          items: source === 'outputs' && subfolder === 'ref'
+            ? [{ type: 'file', name: 'chosen.png', path: 'ref/chosen.png', size: 10, mtime: 1 }]
+            : [{ type: 'dir', name: 'ref', path: 'ref' }],
+        }),
+      } as Response
+    })
+
+    const first = render(<MediaSelector value="" mediaType="image" onChange={vi.fn()} />)
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'mediaSelector.tabOutputs' }))
+    await screen.findByTitle('ref')
+    fireEvent.click(screen.getByTitle('ref'))
+    await screen.findByTitle('chosen.png')
+    fireEvent.click(screen.getByTitle('chosen.png'))
+    first.unmount()
+
+    render(<MediaSelector value="ref/chosen.png" mediaType="image" defaultTab="outputs" onChange={vi.fn()} />)
+
+    expect(screen.getByRole('tab', { name: 'mediaSelector.tabOutputs' }).getAttribute('data-state')).toBe('active')
+    await screen.findByTitle('chosen.png')
+    expect(fetch).toHaveBeenLastCalledWith('/easy-media/media/list?source=outputs&type=image&subfolder=ref')
+  })
+
+  it('uploads local files into the current input subdirectory', async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = new URL(String(input), 'http://localhost')
+      const subfolder = url.searchParams.get('subfolder')
+      return {
+        ok: true,
+        json: async () => ({
+          items: subfolder === 'ref'
+            ? [{ type: 'file', name: 'existing.wav', path: 'ref/existing.wav', size: 10, mtime: 1 }]
+            : [{ type: 'dir', name: 'ref', path: 'ref' }],
+        }),
+      } as Response
+    })
+    const originalCreateElement = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation(((tagName: string, options?: ElementCreationOptions) => {
+      const element = originalCreateElement(tagName, options)
+      if (tagName.toLowerCase() === 'input') {
+        const file = new File(['audio'], 'voice.wav', { type: 'audio/wav' })
+        Object.defineProperty(element, 'files', { configurable: true, value: [file] })
+        element.click = () => { void (element as HTMLInputElement).onchange?.(new Event('change')) }
+      }
+      return element
+    }) as typeof document.createElement)
+
+    render(<MediaSelector value="" mediaType="audio" onChange={vi.fn()} />)
+    await screen.findByTitle('ref')
+    fireEvent.click(screen.getByTitle('ref'))
+    await screen.findByTitle('existing.wav')
+    fireEvent.click(screen.getByText('mediaSelector.addLocal'))
+
+    await waitFor(() => expect(uploadInputMediaFile).toHaveBeenCalledWith(expect.any(File), 'ref'))
   })
 
   it('keeps folders after files until folders-first sorting is selected', async () => {

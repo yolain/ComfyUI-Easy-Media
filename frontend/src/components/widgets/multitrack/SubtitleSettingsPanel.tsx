@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Ban, FileAudio, Loader2, Mic2, Plus, Trash2, Type } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Ban, FileAudio, Loader2, Mic2, Pause, Play, Plus, Trash2, Type } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ColorPickerPopover } from '@/components/ui/color-picker'
 import { NumberInput } from '@/components/ui/number-input'
@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
 import { useT } from '@/lib/i18n'
+import { mediaContentToViewUrl } from '@/lib/media-url'
 import { cn } from '@/lib/utils'
 import {
   DEFAULT_SUBTITLE_SPEECH_SETTINGS,
@@ -148,10 +149,40 @@ export function SubtitleSettingsPanel({
   const [uncontrolledSpeechSettings, setUncontrolledSpeechSettings] = useState<SubtitleSpeechSettings>(DEFAULT_SUBTITLE_SPEECH_SETTINGS)
   const speechSettings = controlledSpeechSettings ?? uncontrolledSpeechSettings
   const [referenceAudioSelectorOpen, setReferenceAudioSelectorOpen] = useState(false)
+  const [isReferenceAudioPlaying, setIsReferenceAudioPlaying] = useState(false)
+  const referenceAudioRef = useRef<HTMLAudioElement>(null)
   const [isGeneratingSpeech, setIsGeneratingSpeech] = useState(false)
   const backgroundOpacity = style.background_opacity ?? 0.7
   const backgroundOpacityPercent = percentValue(backgroundOpacity)
   const backgroundOpacityDisabled = !hasBackgroundColor(style.background_color)
+  const referenceAudioUrl = useMemo(() => {
+    if (!speechSettings.referenceAudio) return null
+    if (/^https?:\/\//i.test(speechSettings.referenceAudio)) return speechSettings.referenceAudio
+    const sourceType = speechSettings.referenceAudioSourceType ?? 'input'
+    return mediaContentToViewUrl({
+      source_type: sourceType,
+      file_path: sourceType === 'input' || sourceType === 'output'
+        ? speechSettings.referenceAudio
+        : undefined,
+      local_path: sourceType === 'local' ? speechSettings.referenceAudio : undefined,
+    })
+  }, [speechSettings.referenceAudio, speechSettings.referenceAudioSourceType])
+
+  useEffect(() => {
+    const audio = referenceAudioRef.current
+    setIsReferenceAudioPlaying(false)
+    if (audio) {
+      audio.pause()
+      try {
+        audio.currentTime = 0
+      } catch (error) {
+        console.error('[SubtitleSettingsPanel] failed to reset reference audio preview:', error)
+      }
+    }
+    return () => {
+      audio?.pause()
+    }
+  }, [referenceAudioUrl])
 
   function updateSpeechSettings(patch: Partial<SubtitleSpeechSettings>) {
     const next = { ...speechSettings, ...patch }
@@ -172,12 +203,46 @@ export function SubtitleSettingsPanel({
     }
   }
 
+  async function toggleReferenceAudioPreview() {
+    const audio = referenceAudioRef.current
+    if (!audio || !referenceAudioUrl) return
+    if (isReferenceAudioPlaying) {
+      audio.pause()
+      setIsReferenceAudioPlaying(false)
+      return
+    }
+    if (audio.ended) {
+      try {
+        audio.currentTime = 0
+      } catch (error) {
+        console.error('[SubtitleSettingsPanel] failed to restart reference audio preview:', error)
+      }
+    }
+    setIsReferenceAudioPlaying(true)
+    try {
+      await audio.play()
+    } catch (error) {
+      setIsReferenceAudioPlaying(false)
+      console.error('[SubtitleSettingsPanel] failed to play reference audio preview:', error)
+    }
+  }
+
   return (
     <aside
       data-testid="subtitle-settings-panel"
       className="flex h-full min-h-0 w-[35%] min-w-72 shrink-0 flex-col overflow-hidden border-l border-border bg-muted/30 text-card-foreground shadow-lg"
       aria-label={t('multitrack.subtitleTextSettings')}
     >
+      {referenceAudioUrl ? (
+        <audio
+          ref={referenceAudioRef}
+          data-testid="reference-audio-preview"
+          src={referenceAudioUrl}
+          preload="metadata"
+          className="hidden"
+          onEnded={() => setIsReferenceAudioPlaying(false)}
+        />
+      ) : null}
       <Tabs defaultValue="text" className="flex min-h-0 flex-1 flex-col">
         <div className="border-b border-border p-1">
           <TabsList className="h-8 bg-card border-0 cursor-pointer">
@@ -463,13 +528,13 @@ export function SubtitleSettingsPanel({
                 <span className="pt-1.5 text-[11px] font-medium text-foreground">{t('multitrack.referenceAudio')}</span>
                 <div className="min-w-0">
                   {speechSettings.referenceAudio ? (
-                    <div className="flex min-w-0 items-center gap-2">
+                    <div className="flex min-w-0 items-center gap-1">
                       <Popover open={referenceAudioSelectorOpen} onOpenChange={setReferenceAudioSelectorOpen}>
                         <PopoverTrigger asChild>
                           <Button
                             type="button"
                             variant="secondary"
-                            className="h-8 min-w-0 flex-1 cursor-pointer justify-start bg-card px-2 text-xs"
+                            className="h-8 min-w-0 flex-1 cursor-pointer justify-start bg-card px-1 text-xs"
                             aria-label={t('multitrack.reselectReferenceAudio')}
                           >
                             <FileAudio className="h-3.5 w-3.5 shrink-0 text-highlight" />
@@ -491,6 +556,22 @@ export function SubtitleSettingsPanel({
                           />
                         </PopoverContent>
                       </Popover>
+                      {referenceAudioUrl ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0 cursor-pointer"
+                          aria-label={t(isReferenceAudioPlaying
+                            ? 'multitrack.pauseReferenceAudio'
+                            : 'multitrack.playReferenceAudio')}
+                          onClick={() => void toggleReferenceAudioPreview()}
+                        >
+                          {isReferenceAudioPlaying
+                            ? <Pause className="h-3.5 w-3.5" />
+                            : <Play className="h-3.5 w-3.5" />}
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         variant="ghost"

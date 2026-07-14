@@ -16,6 +16,7 @@ interface SubtitleTrackProps {
   onSelectSegment: (segmentId: string, mode?: 'replace' | 'toggle' | 'add') => void
   onAddSubtitleSegment: (trackId: string) => void
   onDeleteSegment: (segmentId: string) => void
+  onCloneSegment: (segmentId: string) => void
   onDeleteTrack: (trackId: string) => void
   onTrackVisibilityChange?: (trackId: string, visible: boolean) => void
   onEditSubtitleSegment: (segmentId: string) => void
@@ -37,6 +38,7 @@ export function SubtitleTrack({
   onSelectSegment,
   onAddSubtitleSegment,
   onDeleteSegment,
+  onCloneSegment,
   onDeleteTrack,
   onTrackVisibilityChange = () => {},
   onEditSubtitleSegment,
@@ -74,6 +76,7 @@ export function SubtitleTrack({
             selected={selectedSegmentIds.has(segment.id)}
             onSelect={onSelectSegment}
             onDelete={onDeleteSegment}
+            onClone={onCloneSegment}
             onResize={onResizeSegment}
             onResizePreview={onResizeSegmentPreview}
             onMove={onMoveSegment}

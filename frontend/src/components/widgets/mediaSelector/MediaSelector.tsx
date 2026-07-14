@@ -43,6 +43,14 @@ export type MediaType = MediaListMediaType
 export type MediaTab = 'inputs' | 'outputs' | 'local' | 'url' | 'slot'
 type ViewMode = 'grid' | 'list'
 type SortBy = 'name' | 'date' | 'folders'
+type BrowsableMediaTab = Extract<MediaTab, 'inputs' | 'outputs' | 'local'>
+
+interface MediaSelectorSession {
+  activeTab: MediaTab
+  subfolders: Partial<Record<BrowsableMediaTab, string>>
+}
+
+const mediaSelectorSessions = new Map<MediaType, MediaSelectorSession>()
 
 const MULTIPLE_MEDIA_SEPARATOR = '|MULTIPLE|'
 
@@ -301,6 +309,7 @@ function RemoteFileList({
   searchQuery,
   value,
   onChange,
+  initialSubfolder,
   onNavigateSubfolder,
   onAddLocalFile,
 }: Readonly<{
@@ -312,12 +321,13 @@ function RemoteFileList({
   searchQuery: string
   value: string
   onChange: (v: string, source: 'input' | 'output' | 'local') => void
-  onNavigateSubfolder?: () => void
+  initialSubfolder?: string
+  onNavigateSubfolder?: (path: string) => void
   onAddLocalFile?: () => void
 }>) {
   const t = useT()
   const [items, setItems] = useState<MediaItem[]>([])
-  const [subfolder, setSubfolder] = useState('')
+  const [subfolder, setSubfolder] = useState(initialSubfolder ?? '')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const cacheRevision = useSyncExternalStore(
@@ -393,7 +403,7 @@ function RemoteFileList({
   function navigateSubfolder(path: string) {
     if (path === subfolder) return
     setSubfolder(path)
-    onNavigateSubfolder?.()
+    onNavigateSubfolder?.(path)
   }
 
   function renderGridFile(file: MediaFileEntry, selected: boolean) {
@@ -586,7 +596,11 @@ export function MediaSelector({
 }: Readonly<MediaSelectorProps>) {
   const t = useT()
   const showSlotTab = mediaType === 'image' || mediaType === 'audio'
-  const [activeTab, setActiveTab] = useState<MediaTab>(defaultTab)
+  const initialSession = mediaSelectorSessions.get(mediaType)
+  const [activeTab, setActiveTab] = useState<MediaTab>(value ? defaultTab : initialSession?.activeTab ?? defaultTab)
+  const [subfolders, setSubfolders] = useState<Partial<Record<BrowsableMediaTab, string>>>(
+    initialSession?.subfolders ?? {},
+  )
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [sortBy, setSortBy] = useState<SortBy>('name')
   const [searchQuery, setSearchQuery] = useState('')
@@ -595,11 +609,32 @@ export function MediaSelector({
   const [urlChecking, setUrlChecking] = useState(false)
   const selectedValues = getSelectedMediaValues(value)
 
-  // Sync defaultTab when it changes (e.g. popover re-opens for a different segment)
+  const previousDefaultTabRef = useRef(defaultTab)
+
+  // Sync defaultTab when it changes after mount (e.g. a mounted selector targets another segment).
   useEffect(() => {
+    if (previousDefaultTabRef.current === defaultTab) return
+    previousDefaultTabRef.current = defaultTab
     setActiveTab(defaultTab)
     setSearchQuery('')
   }, [defaultTab])
+
+  function rememberSession(nextTab: MediaTab, nextSubfolders = subfolders) {
+    mediaSelectorSessions.set(mediaType, { activeTab: nextTab, subfolders: nextSubfolders })
+  }
+
+  function handleTabChange(nextTab: MediaTab) {
+    setActiveTab(nextTab)
+    setSearchQuery('')
+    rememberSession(nextTab)
+  }
+
+  function handleSubfolderChange(tab: BrowsableMediaTab, path: string) {
+    const nextSubfolders = { ...subfolders, [tab]: path }
+    setSubfolders(nextSubfolders)
+    rememberSession(activeTab, nextSubfolders)
+    setSearchQuery('')
+  }
 
   function cycleSortBy() {
     setSortBy((prev) => {
@@ -674,7 +709,7 @@ export function MediaSelector({
       if (input.files.length === 1) {
         const file = input.files[0]
         try {
-          const uploaded = await uploadInputMediaFile(file)
+          const uploaded = await uploadInputMediaFile(file, subfolders.inputs ?? '')
           invalidateMediaListCache('inputs')
           onChange(uploaded)
         } catch (err) {
@@ -687,7 +722,7 @@ export function MediaSelector({
       const paths: string[] = []
       for (const file of input.files) {
         try {
-          const uploaded = await uploadInputMediaFile(file)
+          const uploaded = await uploadInputMediaFile(file, subfolders.inputs ?? '')
           paths.push(uploaded)
         } catch (err) {
           console.error('[MediaSelector] upload failed:', err)
@@ -704,7 +739,7 @@ export function MediaSelector({
 
   return (
     <div data-media-selector="" className="flex flex-col w-72 h-80 text-xs select-none">
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as MediaTab)} className="flex flex-col flex-1 overflow-hidden">
+      <Tabs value={activeTab} onValueChange={(v) => handleTabChange(v as MediaTab)} className="flex flex-col flex-1 overflow-hidden">
         {/* Tab header */}
         <TabsList className="w-full rounded-none rounded-t-md h-7 p-0.5 gap-0.5 shrink-0">
           <TabsTrigger value="inputs" className="flex-1 h-full text-[11px] px-1">
@@ -779,7 +814,8 @@ export function MediaSelector({
             searchQuery={searchQuery}
             value={value}
             onChange={(path) => handleFileChange(path, 'input')}
-            onNavigateSubfolder={() => setSearchQuery('')}
+            initialSubfolder={subfolders.inputs}
+            onNavigateSubfolder={(path) => handleSubfolderChange('inputs', path)}
             onAddLocalFile={handleAddLocalFile}
           />
         </TabsContent>
@@ -794,7 +830,8 @@ export function MediaSelector({
             searchQuery={searchQuery}
             value={value}
             onChange={(path) => handleFileChange(path, 'output')}
-            onNavigateSubfolder={() => setSearchQuery('')}
+            initialSubfolder={subfolders.outputs}
+            onNavigateSubfolder={(path) => handleSubfolderChange('outputs', path)}
           />
         </TabsContent>
 
@@ -817,7 +854,8 @@ export function MediaSelector({
             searchQuery={searchQuery}
             value={value}
             onChange={(path) => handleFileChange(path, 'local')}
-            onNavigateSubfolder={() => setSearchQuery('')}
+            initialSubfolder={subfolders.local}
+            onNavigateSubfolder={(path) => handleSubfolderChange('local', path)}
           />
         </TabsContent>
 

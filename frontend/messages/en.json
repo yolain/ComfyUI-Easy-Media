@@ -147,6 +147,8 @@
     "referenceAudio": "Reference audio",
     "addReferenceAudio": "Add reference audio",
     "reselectReferenceAudio": "Reselect reference audio",
+    "playReferenceAudio": "Play reference audio",
+    "pauseReferenceAudio": "Pause reference audio",
     "clearReferenceAudio": "Clear reference audio",
     "distributeTaskSegments": "Distribute segments evenly",
     "cloneTaskSegment": "Clone segment",

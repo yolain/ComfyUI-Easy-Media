@@ -28,6 +28,7 @@ describe('SubtitleSettingsPanel', () => {
       unobserve() {}
       disconnect() {}
     })
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
   })
 
   it('edits subtitle text and style from a side panel', () => {
@@ -171,6 +172,85 @@ describe('SubtitleSettingsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear reference audio' }))
 
     expect(screen.getByRole('button', { name: 'Add reference audio' })).not.toBeNull()
+  })
+
+  it('plays and pauses an existing reference audio preview', async () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
+    const view = render(
+      <SubtitleSettingsPanel
+        text="Hello"
+        style={baseStyle}
+        onTextChange={vi.fn()}
+        onStyleChange={vi.fn()}
+        speechSettings={{
+          model: 'VoxCPM2',
+          prompt: '',
+          cfg: 2,
+          steps: 10,
+          referenceAudio: 'voices/sample.wav',
+          referenceAudioSourceType: 'output',
+        }}
+      />,
+    )
+
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /Speech/ }))
+    const audio = screen.getByTestId('reference-audio-preview') as HTMLAudioElement
+    expect(audio.getAttribute('src')).toBe('/view?filename=sample.wav&type=output&subfolder=voices')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play reference audio' }))
+    await waitFor(() => expect(play).toHaveBeenCalledOnce())
+    expect(screen.getByRole('button', { name: 'Pause reference audio' })).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pause reference audio' }))
+    expect(pause).toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Play reference audio' })).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play reference audio' }))
+    await waitFor(() => expect(play).toHaveBeenCalledTimes(2))
+    fireEvent.ended(audio)
+    expect(screen.getByRole('button', { name: 'Play reference audio' })).not.toBeNull()
+
+    pause.mockClear()
+    view.rerender(
+      <SubtitleSettingsPanel
+        text="Hello"
+        style={baseStyle}
+        onTextChange={vi.fn()}
+        onStyleChange={vi.fn()}
+        speechSettings={{
+          model: 'VoxCPM2',
+          prompt: '',
+          cfg: 2,
+          steps: 10,
+          referenceAudio: '',
+          referenceAudioSourceType: 'input',
+        }}
+      />,
+    )
+    await waitFor(() => expect(pause).toHaveBeenCalledOnce())
+  })
+
+  it('previews a legacy URL reference directly', () => {
+    render(
+      <SubtitleSettingsPanel
+        text="Hello"
+        style={baseStyle}
+        onTextChange={vi.fn()}
+        onStyleChange={vi.fn()}
+        speechSettings={{
+          model: 'VoxCPM2',
+          prompt: '',
+          cfg: 2,
+          steps: 10,
+          referenceAudio: 'https://example.com/reference.wav',
+          referenceAudioSourceType: 'input',
+        }}
+      />,
+    )
+
+    expect(screen.getByTestId('reference-audio-preview').getAttribute('src'))
+      .toBe('https://example.com/reference.wav')
   })
 
   it('keeps the speech button loading until generation settles', async () => {
