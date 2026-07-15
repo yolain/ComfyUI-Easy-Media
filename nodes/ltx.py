@@ -176,7 +176,7 @@ class LTXI2VInplaceAndUpsample(io.ComfyNode):
             is_input_list=True,
             inputs=[
                 io.Vae.Input("vae"),
-                io.Image.Input("image"),
+                io.Image.Input("image", optional=True),
                 io.Latent.Input("video_latent"),
                 io.LatentUpscaleModel.Input("upscale_models", optional=True),
                 io.Int.Input("img_index", default=0, min=0, step=1),
@@ -191,8 +191,8 @@ class LTXI2VInplaceAndUpsample(io.ComfyNode):
     def execute(
         cls,
         vae: list | Any,
-        image: list | torch.Tensor,
-        video_latent: list | dict[str, Any],
+        image: list | torch.Tensor | None = None,
+        video_latent: list | dict[str, Any] | None = None,
         upscale_models: list | Any | None = None,
         img_index: list[int] | int = 0,
         img_compression: list[int] | int = 18,
@@ -211,6 +211,8 @@ class LTXI2VInplaceAndUpsample(io.ComfyNode):
             return io.NodeOutput(latent)
 
         images = _flatten_images(image)
+        if not images:
+            return io.NodeOutput(latent)
         index = int(_first_value(img_index, 0))
         if not 0 <= index < len(images):
             raise ValueError(f"image_index {index} is outside the available image range (count: {len(images)})")

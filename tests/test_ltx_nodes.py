@@ -374,6 +374,7 @@ def test_ltx_i2v_inplace_and_upsample_schema_matches_split_interface(monkeypatch
     assert [item.name for item in schema.inputs] == [
         "vae", "image", "video_latent", "upscale_models", "img_index", "img_compression", "strength", "bypass",
     ]
+    assert schema.inputs[1].kwargs["optional"] is True
     assert schema.inputs[3].kwargs["optional"] is True
     assert schema.inputs[4].kwargs["default"] == 0
     assert schema.inputs[5].kwargs["default"] == 18
@@ -452,6 +453,24 @@ def test_ltx_i2v_inplace_and_upsample_bypass_keeps_only_upsampling(monkeypatch):
         bypass=[True],
     )
 
+    assert result.values == ({"samples": "base->upscale-1"},)
+    assert ("upsample", {"samples": "base"}, "upscale-1", "vae") in calls
+    assert not any(call[0] in {"preprocess", "inplace"} for call in calls)
+
+
+def test_ltx_i2v_inplace_and_upsample_missing_image_auto_bypasses(monkeypatch):
+    module, calls = _load_ltx_module(monkeypatch)
+    signature = inspect.signature(module.LTXI2VInplaceAndUpsample.execute)
+
+    result = module.LTXI2VInplaceAndUpsample.execute(
+        vae=["vae"],
+        image=None,
+        video_latent=[{"samples": "base"}],
+        upscale_models=[["upscale-1"]],
+        bypass=[False],
+    )
+
+    assert signature.parameters["image"].default is None
     assert result.values == ({"samples": "base->upscale-1"},)
     assert ("upsample", {"samples": "base"}, "upscale-1", "vae") in calls
     assert not any(call[0] in {"preprocess", "inplace"} for call in calls)
@@ -540,6 +559,7 @@ def test_ltx_nodes_have_complete_chinese_localization():
         assert translation["description"]
         assert set(translation["inputs"]) == localization["inputs"]
         assert set(translation["outputs"]) == {str(index) for index in range(localization["outputs"])}
+    assert "未连接" in node_defs["easy ltxI2VInplaceAndUpsample"]["inputs"]["image"]["tooltip"]
 
 
 def test_ltx_nodes_use_the_real_node_output_indexing_api():

@@ -778,7 +778,10 @@
     "description": "可选使用潜空间放大模型，并将指定图像作为 LTX 视频潜空间的原位引导。",
     "inputs": {
       "vae": { "name": "VAE" },
-      "image": { "name": "图像" },
+      "image": {
+        "name": "图像",
+        "tooltip": "可选。未连接图像时自动跳过图生视频原位引导。"
+      },
       "video_latent": { "name": "视频潜空间" },
       "upscale_models": {
         "name": "潜空间放大模型",
