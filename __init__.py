@@ -72,6 +72,8 @@ class EasyMediaExtension(ComfyExtension):
             BerniniModelPatch,
             EasyBerniniS2VConditioning,
             # LTXV
+            LTXMultiTrackEncode,
+            LTXSamplerSimple,
             LTXVAddGuidesFromBatchIndexes,
             LTXVMakeRefVideo,
             # Video
