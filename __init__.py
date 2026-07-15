@@ -73,6 +73,7 @@ class EasyMediaExtension(ComfyExtension):
             EasyBerniniS2VConditioning,
             # LTXV
             LTXMultiTrackEncode,
+            LTXI2VInplaceAndUpsample,
             LTXSamplerSimple,
             LTXVAddGuidesFromBatchIndexes,
             LTXVMakeRefVideo,
