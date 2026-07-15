@@ -1,7 +1,7 @@
 {
   "easy compareVideos": {
     "display_name": "视频对比",
-    "description": "使用交互式对比滑块左右并排预览源视频和输出视频。当两个输入都连接时，时长必须匹配。",
+    "description": "使用交互式对比滑块左右并排预览源视频和输出视频。当两个输入都连接时，以输出视频时长为准。",
     "inputs": {
       "source": {
         "name": "源视频",
