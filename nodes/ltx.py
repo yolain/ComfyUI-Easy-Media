@@ -21,7 +21,7 @@ from comfy_extras.nodes_lt_upsampler import LTXVLatentUpsampler
 from comfy_extras.nodes_mask import SolidMask
 
 from ..modules.prompt_relay.encode import _encode_relay
-from ..utils import iter_valid_audio_inputs, merge_audio_inputs
+from ..utils import audio_is_silent, iter_valid_audio_inputs, merge_audio_inputs
 
 
 CATEGORY_LTX = "EasyUse/LTX"
@@ -130,7 +130,11 @@ class LTXMultiTrackEncode(io.ComfyNode):
             1,
         )[0]
 
-        audio_inputs = iter_valid_audio_inputs(audio)
+        audio_inputs = [
+            audio_input
+            for audio_input in iter_valid_audio_inputs(audio)
+            if not audio_is_silent(audio_input)
+        ]
         merged_audio = merge_audio_inputs(audio_inputs, "add") if audio_inputs else None
         if merged_audio is None:
             audio_latent = LTXVEmptyLatentAudio.execute(

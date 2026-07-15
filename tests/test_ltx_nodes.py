@@ -219,6 +219,11 @@ def _load_ltx_module(monkeypatch):
         calls.append(("merge_audio", audios, method))
         return {"waveform": "merged", "sample_rate": 44100} if audios else None
 
+    def audio_is_silent(audio):
+        waveform = audio["waveform"]
+        return waveform.numel() == 0 or torch.count_nonzero(waveform).item() == 0
+
+    utils.audio_is_silent = audio_is_silent
     utils.iter_valid_audio_inputs = iter_valid_audio_inputs
     utils.merge_audio_inputs = merge_audio_inputs
     modules = types.ModuleType("easy_media.modules")
@@ -349,6 +354,34 @@ def test_encode_uses_empty_audio_when_input_is_missing(monkeypatch, audio):
     assert ("empty_audio", 97, 25, 1, "audio-vae") in calls
     assert not any(call[0] == "audio_encode" for call in calls)
     assert ("empty_video", 768, 512, 97, 1) in calls
+
+
+def test_encode_uses_empty_audio_when_all_fragments_are_silent(monkeypatch):
+    module, calls = _load_ltx_module(monkeypatch)
+
+    result = _execute_encode(module, audio=[[_audio(0), _audio(0)]])
+
+    assert result.values[-1] == {"samples": "empty-audio"}
+    assert ("empty_audio", 121, 24.0, 1, "audio-vae") in calls
+    assert not any(
+        call[0] in {"merge_audio", "audio_encode", "solid_mask", "set_mask"}
+        for call in calls
+    )
+
+
+def test_encode_ignores_silent_fragments_when_audio_is_present(monkeypatch):
+    module, calls = _load_ltx_module(monkeypatch)
+    silent_audio = _audio(0)
+    audible_audio = _audio(2)
+
+    result = _execute_encode(module, audio=[[silent_audio, audible_audio]])
+
+    assert result.values[-1] == {
+        "samples": "encoded-audio",
+        "noise_mask": {"mask": (0.0, 1280, 720)},
+    }
+    assert ("merge_audio", [audible_audio], "add") in calls
+    assert any(call[0] == "audio_encode" for call in calls)
 
 
 def test_encode_preserves_fractional_frame_rate_for_empty_audio(monkeypatch):
