@@ -1362,7 +1362,7 @@ def test_multitrack_task_output_schema_and_task_media_selection():
     )
 
     system_prompt, user_prompt, task_type, length, selected_images, selected_audio, selected_video = result.values
-    assert system_prompt == "api:make it move"
+    assert system_prompt == ""
     assert user_prompt == "make it move"
     assert task_type == "rv2v"
     assert length == 5
@@ -1554,7 +1554,9 @@ def test_multitrack_task_output_supports_prompt_formats_and_non_overlapping_rang
     api = execute("api")
     llm = execute("llm")
 
-    assert default[0] == api[0] == llm[0] == "api:first | second"
+    assert default[0] == ""
+    assert relay[0] == ""
+    assert api[0] == llm[0] == "api:first | second"
     assert default[1] == "first | second"
     assert relay[1] == "first [0-60] | second [61-120]"
     assert api[1] == "api:first | second"
