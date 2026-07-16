@@ -14,7 +14,6 @@ import { LocaleContext } from '@/lib/i18n'
 import { useCanvasScale } from '@/hooks/use-canvas-scale'
 import { useElementWidth } from '@/hooks/use-element-width'
 import { useLatestRef } from '@/hooks/use-latest-ref'
-import { useNodeInputConnectionDisabled } from '@/hooks/use-node-input-connection-disabled'
 
 function ensureDefaults(raw: unknown): TimelineData {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
@@ -73,7 +72,7 @@ function syncOneAudio(
   }
 }
 
-export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<ReactWidgetProps<TimelineData>>) {
+export function TimelineWidget({ value, onChange, app, node }: Readonly<ReactWidgetProps<TimelineData>>) {
   const data = ensureDefaults(value)
   const [displayFormat, setDisplayFormat] = useState<TimeDisplayFormat>('frames')
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -87,7 +86,6 @@ export function TimelineWidget({ value, onChange, app, node, widget }: Readonly<
   const isNodeV2 = app?.ui?.settings?.settingsValues?.['Comfy.VueNodes.Enabled']
   const locale = app?.ui?.settings?.settingsValues?.['Comfy.Locale']
   const canvasScale = useCanvasScale(app)
-  useNodeInputConnectionDisabled(node, widget, 'prompt_override')
   // Refs for playback loop (avoid stale closures)
   const playbackRef = useRef<{
     rafId: number | null
