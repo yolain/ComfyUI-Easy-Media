@@ -121,6 +121,38 @@ describe('CompareVideoWidget', () => {
     expect(toolbar?.className).toContain('group-focus-within:opacity-100')
   })
 
+  it('uses output metadata duration when source and output durations differ', () => {
+    render(createElement(CompareVideoWidget, widgetProps({
+      id: 6,
+      __easyMediaCompareVideos: { source, output, duration: 2 },
+    })))
+
+    const videos = document.querySelectorAll('video')
+    Object.defineProperty(videos[0], 'duration', { configurable: true, value: 10 })
+    Object.defineProperty(videos[1], 'duration', { configurable: true, value: 2 })
+    fireEvent.loadedMetadata(videos[0])
+    fireEvent.loadedMetadata(videos[1])
+
+    expect(screen.getByText('0:02')).not.toBeNull()
+    expect(screen.queryByText('0:10')).toBeNull()
+  })
+
+  it('uses output playback time as the comparison clock', () => {
+    render(createElement(CompareVideoWidget, widgetProps({
+      id: 7,
+      __easyMediaCompareVideos: { source, output, duration: 10 },
+    })))
+
+    const videos = document.querySelectorAll('video')
+    Object.defineProperty(videos[0], 'currentTime', { configurable: true, writable: true, value: 8 })
+    Object.defineProperty(videos[1], 'currentTime', { configurable: true, writable: true, value: 1 })
+    fireEvent.timeUpdate(videos[0])
+
+    expect(screen.queryByText('0:08')).toBeNull()
+    fireEvent.timeUpdate(videos[1])
+    expect(screen.getByText('0:01')).not.toBeNull()
+  })
+
   it('hides the download control when no output video is connected', () => {
     render(createElement(CompareVideoWidget, widgetProps({
       id: 4,

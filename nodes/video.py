@@ -594,7 +594,7 @@ class EasyCompareVideos(io.ComfyNode):
             category=CATEGORY_VIDEO,
             description=(
                 "Preview source and output VIDEO inputs side by side with an interactive comparison slider. "
-                "When both inputs are provided, duration must match."
+                "When both inputs are provided, playback duration follows the output VIDEO."
             ),
             inputs=[
                 io.Video.Input("source", optional=True),
@@ -638,16 +638,11 @@ class EasyCompareVideos(io.ComfyNode):
             output_metadata = prepared.get("output", (None, None, None))[2]
 
             if source_metadata is not None and output_metadata is not None:
-                source_duration = float(source_metadata["duration"])
                 output_duration = float(output_metadata["duration"])
-                if abs(source_duration - output_duration) > 0.05:
-                    raise ValueError(
-                        f"source and output durations must match: {source_duration:.6g}s != {output_duration:.6g}s"
-                    )
 
                 payload["fps"] = float(source_metadata["fps"]) if source_metadata["fps"] is not None else None
                 payload["frame_count"] = int(source_metadata["frame_count"]) if source_metadata["frame_count"] is not None else None
-                payload["duration"] = source_duration
+                payload["duration"] = output_duration
             else:
                 metadata = source_metadata if source_metadata is not None else output_metadata
                 if metadata is not None:

@@ -1,7 +1,7 @@
 {
   "easy compareVideos": {
     "display_name": "视频对比",
-    "description": "使用交互式对比滑块左右并排预览源视频和输出视频。当两个输入都连接时，时长必须匹配。",
+    "description": "使用交互式对比滑块左右并排预览源视频和输出视频。当两个输入都连接时，以输出视频时长为准。",
     "inputs": {
       "source": {
         "name": "源视频",
@@ -615,7 +615,7 @@
         "name": "模式",
         "options": {
           "default": "默认",
-          "s2v": "S2V"
+          "crop": "S2V 裁剪"
         }
       },
       "task_index": {
@@ -745,6 +745,131 @@
       }
     }
   },
+  "easy ltxMultiTrackEncode": {
+    "display_name": "LTX 多轨编码",
+    "description": "生成提示词条件以及 LTX 视频和音频潜空间。",
+    "inputs": {
+      "model": { "name": "模型" },
+      "clip": { "name": "CLIP" },
+      "audio_vae": { "name": "音频 VAE" },
+      "audio": { "name": "音频" },
+      "local_prompt": { "name": "局部提示词" },
+      "global_prompt": { "name": "全局提示词" },
+      "epsilon": { "name": "Epsilon" },
+      "width": { "name": "宽度" },
+      "height": { "name": "高度" },
+      "frame_rate": { "name": "帧率" },
+      "video_length": { "name": "视频帧数" },
+      "half_latent_size": {
+        "name": "潜空间尺寸减半",
+        "tooltip": "创建视频潜空间时将输入宽高减半。"
+      }
+    },
+    "outputs": {
+      "0": { "name": "模型" },
+      "1": { "name": "正向条件" },
+      "2": { "name": "负向条件" },
+      "3": { "name": "视频潜空间" },
+      "4": { "name": "音频潜空间" }
+    }
+  },
+  "easy ltxI2VInplaceAndUpsample": {
+    "display_name": "LTX 图生视频原位处理与放大",
+    "description": "可选使用潜空间放大模型，并将指定图像作为 LTX 视频潜空间的原位引导。",
+    "inputs": {
+      "vae": { "name": "VAE" },
+      "image": {
+        "name": "图像",
+        "tooltip": "可选。未连接图像时自动跳过图生视频原位引导。"
+      },
+      "video_latent": { "name": "视频潜空间" },
+      "upscale_models": {
+        "name": "潜空间放大模型",
+        "tooltip": "可选。连接多个模型时将按顺序依次放大视频潜空间。"
+      },
+      "img_index": {
+        "name": "图像索引",
+        "tooltip": "从图像列表或批次中选择用于引导的图像，索引从 0 开始。"
+      },
+      "strength": { "name": "强度" },
+      "img_compression": {
+        "name": "图像压缩",
+        "tooltip": "传入图生视频原位处理前应用的图像压缩量。"
+      },
+      "bypass": {
+        "name": "跳过",
+        "tooltip": "跳过图生视频原位引导。"
+      }
+    },
+    "outputs": {
+      "0": { "name": "视频潜空间" }
+    }
+  },
+  "easy ltxSamplerSimple": {
+    "display_name": "LTX 简易采样器",
+    "description": "合并 LTX 视频和音频潜空间进行采样，并分离最终的视频与音频潜空间。",
+    "inputs": {
+      "model": { "name": "模型" },
+      "positive": { "name": "正向条件" },
+      "negative": { "name": "负向条件" },
+      "video_latent": { "name": "视频潜空间" },
+      "audio_latent": { "name": "音频潜空间" },
+      "sampler_name": { "name": "采样器" },
+      "sigmas": { "name": "Sigma 序列" },
+      "cfg": { "name": "CFG" },
+      "seed": { "name": "种子" }
+    },
+    "outputs": {
+      "0": { "name": "正向条件" },
+      "1": { "name": "负向条件" },
+      "2": { "name": "视频潜空间" },
+      "3": { "name": "音频潜空间" }
+    }
+  },
+  "BerniniModelPatch": {
+    "display_name": "Bernini 模型补丁",
+    "description": "使用 ComfyUI 模型包装器为 Wan 模型添加 Bernini 上下文潜空间支持。",
+    "inputs": {
+      "model": { "name": "模型" }
+    },
+    "outputs": {
+      "0": { "name": "模型" }
+    }
+  },
+  "BerniniConditioning": {
+    "display_name": "Bernini 条件",
+    "description": "为 Bernini 上下文视频与图像生成条件，将源视频和参考图像编码后附加到正向与负向条件中。",
+    "inputs": {
+      "positive": { "name": "正向条件" },
+      "negative": { "name": "负向条件" },
+      "vae": { "name": "VAE" },
+      "width": { "name": "宽度" },
+      "height": { "name": "高度" },
+      "length": { "name": "帧数" },
+      "batch_size": { "name": "批次大小" },
+      "source_video": {
+        "name": "源视频",
+        "tooltip": "要编辑或重绘的源视频（v2v 或 rv2v 任务）。将调整至指定宽高并裁剪到指定帧数，作为编辑底图或画布。"
+      },
+      "reference_video": {
+        "name": "参考视频",
+        "tooltip": "合成到源视频中的动态内容（视频植入或 ads2v），例如屏幕内播放的片段。保持原始宽高比，长边限制为参考最大尺寸，并裁剪到指定帧数。"
+      },
+      "reference_images": {
+        "name": "参考图像",
+        "tooltip": "作为上下文标记注入的参考图像（r2v 或 rv2v）。每个插槽按自身宽高比单独编码，长边限制为参考最大尺寸；不同尺寸的参考图像请连接到不同插槽。"
+      },
+      "ref_max_size": {
+        "name": "参考最大尺寸",
+        "tooltip": "参考视频和参考图像的长边最大尺寸。调整时保持宽高比并对齐到 16 像素。"
+      }
+    },
+    "outputs": {
+      "0": { "name": "正向条件" },
+      "1": { "name": "负向条件" },
+      "2": { "name": "潜空间" }
+    }
+  },
   "easy berniniS2VConditioning": {
     "display_name": "简易 Bernini S2V 条件",
     "description": "统一 Bernini 上下文与 Wan S2V 音频条件。单路音频不连接遮罩时保留原版全画面单人逻辑；连接遮罩后启用空间注入，并可选第二位音频。",
@@ -764,7 +889,10 @@
         "name": "音频 0 遮罩",
         "tooltip": "白色区域为音频 0 的口型同步区域；连接后启用空间遮罩注入。"
       },
-      "audio_1": { "name": "音频 1 音频" },
+      "audio_1": {
+        "name": "音频 1 音频",
+        "tooltip": "可选的第二位说话者音频。"
+      },
       "mask_1": {
         "name": "音频 1 遮罩",
         "tooltip": "连接音频 1 音频时必需。"

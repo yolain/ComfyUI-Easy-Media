@@ -2200,8 +2200,11 @@ class MultiTrackTaskOutput(io.ComfyNode):
             user_prompt = llm_prompt
         else:
             user_prompt = chat_user_prompt
+        output_system_prompt = (
+            "" if selected_prompt_format in {"default", "promptRelay"} else chat_system_prompt
+        )
         return io.NodeOutput(
-            chat_system_prompt,
+            output_system_prompt,
             user_prompt,
             task_type,
             length,

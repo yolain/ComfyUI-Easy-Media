@@ -394,18 +394,18 @@ def test_compare_videos_allows_duration_only_probe(monkeypatch, tmp_path):
     assert payload["frame_count"] is None
 
 
-def test_compare_videos_rejects_mismatched_duration(monkeypatch, tmp_path):
+def test_compare_videos_uses_output_duration_when_durations_differ(monkeypatch, tmp_path):
     video_module = _load_video_module(monkeypatch, tmp_path)
 
-    try:
-        video_module.EasyCompareVideos.execute(
-            source=_FakeVideo(frames=24, fps=24),
-            output=_FakeVideo(frames=27, fps=24),
-        )
-    except ValueError as exc:
-        assert "durations must match" in str(exc)
-    else:
-        raise AssertionError("Expected mismatched duration to raise ValueError.")
+    result = video_module.EasyCompareVideos.execute(
+        source=_FakeVideo(frames=48, fps=24),
+        output=_FakeVideo(frames=27, fps=24),
+    )
+
+    payload = result.ui["compare_videos"][0]
+    assert payload["duration"] == 1.125
+    assert payload["source"]["filename"].startswith("easy_compare_source_")
+    assert payload["output"]["filename"].startswith("easy_compare_output_")
 
 
 def test_make_video_list_fills_missing_inputs_with_empty_video(monkeypatch, tmp_path):

@@ -1362,7 +1362,7 @@ def test_multitrack_task_output_schema_and_task_media_selection():
     )
 
     system_prompt, user_prompt, task_type, length, selected_images, selected_audio, selected_video = result.values
-    assert system_prompt == "api:make it move"
+    assert system_prompt == ""
     assert user_prompt == "make it move"
     assert task_type == "rv2v"
     assert length == 5
@@ -1381,7 +1381,7 @@ def test_multitrack_audio_output_schema_is_basic_and_exposes_mode_and_two_tracks
     assert schema.category == "EasyUse/Basic"
     assert schema.is_input_list is True
     assert [input_.name for input_ in schema.inputs] == ["tracks_info", "audio", "mode", "task_index"]
-    assert schema.inputs[2].kwargs["options"] == ["default", "s2v"]
+    assert schema.inputs[2].kwargs["options"] == ["default", "crop"]
     assert schema.inputs[2].kwargs["default"] == "default"
     assert schema.inputs[3].kwargs["default"] == 0
     assert schema.inputs[3].kwargs["min"] == 0
@@ -1390,7 +1390,30 @@ def test_multitrack_audio_output_schema_is_basic_and_exposes_mode_and_two_tracks
     ]
 
 
-def test_multitrack_audio_output_s2v_merges_audio_and_crops_to_track_frame_ranges(monkeypatch):
+def test_multitrack_audio_output_chinese_options_match_schema():
+    module = _load_basic_module()
+    schema = module.MultiTrackAudioOutput.define_schema()
+    locale_path = Path(__file__).parents[1] / "locales" / "zh" / "nodeDefs.json"
+    node_defs = json.loads(locale_path.read_text(encoding="utf-8"))
+
+    translation = node_defs[schema.node_id]
+    mode_options = translation["inputs"]["mode"]["options"]
+
+    assert translation["display_name"]
+    assert translation["description"]
+    assert set(translation["inputs"]) == {input_.name for input_ in schema.inputs}
+    assert set(translation["outputs"]) == {str(index) for index in range(len(schema.outputs))}
+    for input_ in schema.inputs:
+        assert translation["inputs"][input_.name]["name"]
+        if input_.kwargs.get("tooltip"):
+            assert translation["inputs"][input_.name]["tooltip"]
+    for output_index in range(len(schema.outputs)):
+        assert translation["outputs"][str(output_index)]["name"]
+    assert set(mode_options) == set(schema.inputs[2].kwargs["options"])
+    assert mode_options["crop"] == "S2V 裁剪"
+
+
+def test_multitrack_audio_output_crop_merges_audio_and_crops_to_track_frame_ranges(monkeypatch):
     module = _load_basic_module()
     first = {"waveform": torch.arange(12).reshape(1, 1, 12), "sample_rate": 4}
     second = {"waveform": torch.arange(20, 32).reshape(1, 1, 12), "sample_rate": 4}
@@ -1416,7 +1439,7 @@ def test_multitrack_audio_output_s2v_merges_audio_and_crops_to_track_frame_range
         ],
     }
 
-    result = module.MultiTrackAudioOutput.execute([tracks_info], [[first, second]], ["s2v"], [-1])
+    result = module.MultiTrackAudioOutput.execute([tracks_info], [[first, second]], ["crop"], [-1])
 
     assert calls == [([first, second], "add")]
     assert result.values[1]["waveform"].flatten().tolist() == list(range(2, 9))
@@ -1425,7 +1448,7 @@ def test_multitrack_audio_output_s2v_merges_audio_and_crops_to_track_frame_range
     assert result.values[4] == 2
 
 
-def test_multitrack_audio_output_s2v_uses_minus_one_for_missing_tracks_or_segments(monkeypatch):
+def test_multitrack_audio_output_crop_uses_minus_one_for_missing_tracks_or_segments(monkeypatch):
     module = _load_basic_module()
     first = {"waveform": torch.ones(1, 1, 2), "sample_rate": 4}
     monkeypatch.setattr(module, "merge_audio_inputs", lambda audios, method="add": first)
@@ -1433,7 +1456,7 @@ def test_multitrack_audio_output_s2v_uses_minus_one_for_missing_tracks_or_segmen
     result = module.MultiTrackAudioOutput.execute(
         [{"frame_rate": 24, "tracks": [{"type": "audio", "segments": []}]}],
         [[first]],
-        ["s2v"],
+        ["crop"],
         [-1],
     )
 
@@ -1509,7 +1532,7 @@ def test_multitrack_audio_output_task_index_clips_overlapping_track_to_task_star
     }
 
     result = module.MultiTrackAudioOutput.execute(
-        [tracks_info], [[first]], ["s2v"], [0],
+        [tracks_info], [[first]], ["crop"], [0],
     )
 
     assert result.values[1]["waveform"].flatten().tolist() == [3, 4]
@@ -1522,7 +1545,7 @@ def test_multitrack_audio_output_invalid_task_index_returns_empty_track_outputs(
     monkeypatch.setattr(module, "merge_audio_inputs", lambda audios, method="add": first)
 
     result = module.MultiTrackAudioOutput.execute(
-        [{"frame_rate": 4, "tracks": []}], [[first]], ["s2v"], [0],
+        [{"frame_rate": 4, "tracks": []}], [[first]], ["crop"], [0],
     )
 
     assert result.values == (first, None, -1, None, -1)
@@ -1554,7 +1577,9 @@ def test_multitrack_task_output_supports_prompt_formats_and_non_overlapping_rang
     api = execute("api")
     llm = execute("llm")
 
-    assert default[0] == api[0] == llm[0] == "api:first | second"
+    assert default[0] == ""
+    assert relay[0] == ""
+    assert api[0] == llm[0] == "api:first | second"
     assert default[1] == "first | second"
     assert relay[1] == "first [0-60] | second [61-120]"
     assert api[1] == "api:first | second"
@@ -1628,36 +1653,36 @@ def test_match_line_has_chinese_localization():
 
 def test_workflow_format_gate_skips_input_for_workflow_metadata():
     module = _load_basic_module()
-    module.WorkflowFormatGate.hidden = types.SimpleNamespace(
+    module.APIWorkflowGate.hidden = types.SimpleNamespace(
         extra_pnginfo={"workflow": {"nodes": []}},
     )
 
-    assert module.WorkflowFormatGate.check_lazy_status() == []
-    assert module.WorkflowFormatGate.execute("ignored").values == (None, [])
+    assert module.APIWorkflowGate.check_lazy_status() == []
+    assert module.APIWorkflowGate.execute("ignored").values == (None, [])
 
 
 def test_workflow_format_gate_requests_input_for_api_prompt():
     module = _load_basic_module()
-    module.WorkflowFormatGate.hidden = types.SimpleNamespace(extra_pnginfo={})
+    module.APIWorkflowGate.hidden = types.SimpleNamespace(extra_pnginfo={})
 
-    assert module.WorkflowFormatGate.check_lazy_status() == ["value"]
-    assert module.WorkflowFormatGate.check_lazy_status("payload") == []
-    assert module.WorkflowFormatGate.execute("payload").values == ("payload", [])
+    assert module.APIWorkflowGate.check_lazy_status() == ["value"]
+    assert module.APIWorkflowGate.check_lazy_status("payload") == []
+    assert module.APIWorkflowGate.execute("payload").values == ("payload", [])
 
 
 def test_workflow_format_gate_passes_list_values_through_list_output():
     module = _load_basic_module()
-    module.WorkflowFormatGate.hidden = types.SimpleNamespace(extra_pnginfo={})
+    module.APIWorkflowGate.hidden = types.SimpleNamespace(extra_pnginfo={})
 
     value = ["a", "b"]
 
-    assert module.WorkflowFormatGate.execute(value).values == (None, value)
+    assert module.APIWorkflowGate.execute(value).values == (None, value)
 
 
 def test_workflow_format_gate_schema_has_list_output():
     module = _load_basic_module()
 
-    schema = module.WorkflowFormatGate.define_schema()
+    schema = module.APIWorkflowGate.define_schema()
 
     assert schema.outputs[0].name == "VALUE"
     assert schema.outputs[1].name == "VALUES"
@@ -1677,7 +1702,7 @@ def test_workflow_format_gate_has_chinese_localization():
 
     translation = node_defs["easy apiWorkflowGate"]
 
-    assert translation["display_name"] == "工作流格式阀门"
+    assert translation["display_name"] == "API工作流阀门"
     assert set(translation["inputs"]) == {"value"}
     assert translation["outputs"] == {"0": {"name": "输出"}, "1": {"name": "列表输出"}}
 

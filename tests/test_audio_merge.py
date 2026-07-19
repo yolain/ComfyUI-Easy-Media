@@ -34,6 +34,16 @@ def test_iter_valid_audio_inputs_flattens_lists_and_ignores_empty_items():
     assert result == [first, second]
 
 
+def test_audio_is_silent_detects_empty_and_nonzero_waveforms():
+    audio_utils = _load_audio_utils()
+
+    assert audio_utils.audio_is_silent(_audio([0.0, 0.0])) is True
+    assert audio_utils.audio_is_silent(_audio([0.0, 0.01])) is False
+    assert audio_utils.audio_is_silent(
+        {"waveform": torch.empty(1, 1, 0), "sample_rate": 4}
+    ) is True
+
+
 def test_merge_audio_inputs_merges_three_tracks_with_padding_and_normalization():
     audio_utils = _load_audio_utils()
 

@@ -156,6 +156,12 @@ def iter_valid_audio_inputs(*inputs: Any) -> list[dict]:
     return audios
 
 
+def audio_is_silent(audio: dict[str, Any]) -> bool:
+    """Return whether an AUDIO value has no non-zero waveform samples."""
+    waveform = audio["waveform"]
+    return waveform.numel() == 0 or torch.count_nonzero(waveform).item() == 0
+
+
 def merge_audio_inputs(audios: list[dict], merge_method: str = "add") -> dict | None:
     """Combine AUDIO dicts using ComfyUI AudioMerge or AudioConcat rules."""
     if not audios:

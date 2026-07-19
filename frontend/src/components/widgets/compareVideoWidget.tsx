@@ -314,6 +314,8 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
 
   function handleTimeUpdate(event: React.SyntheticEvent<HTMLVideoElement>) {
     const video = event.currentTarget
+    const master = outputRef.current ?? sourceRef.current
+    if (video !== master) return
     setCurrentTime(video.currentTime)
     const other = video === sourceRef.current ? outputRef.current : sourceRef.current
     if (other && Math.abs(other.currentTime - video.currentTime) > 0.08) {
@@ -394,7 +396,7 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
               preload="auto"
               onLoadedMetadata={(event) => {
                 const nextDuration = event.currentTarget.duration || 0
-                setMetadataDuration((prev) => Math.max(prev, nextDuration))
+                if (!hasOutput) setMetadataDuration(nextDuration)
               }}
               onTimeUpdate={handleTimeUpdate}
               onEnded={handleEnded}
@@ -418,7 +420,7 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
               preload="auto"
               onLoadedMetadata={(event) => {
                 const nextDuration = event.currentTarget.duration || 0
-                setMetadataDuration((prev) => Math.max(prev, nextDuration))
+                setMetadataDuration(nextDuration)
               }}
               onTimeUpdate={handleTimeUpdate}
               onEnded={handleEnded}
