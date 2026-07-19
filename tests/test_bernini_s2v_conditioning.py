@@ -276,7 +276,7 @@ def test_unified_node_has_complete_chinese_localization():
     assert translation["display_name"] == "简易 Bernini S2V 条件"
     assert set(translation["inputs"]) == {
         "positive", "negative", "vae", "width", "height", "length", "batch_size",
-        "audio_0", "mask_0", "audio_1", "mask_1", "speaker_1_start_frame",
+        "audio_0", "mask_0", "audio_1", "mask_1", "second_speaker_start_frame",
         "source_video", "reference_video", "reference_images", "ref_max_size",
         "mask_crossfade_frames", "audio_inject_scale",
     }

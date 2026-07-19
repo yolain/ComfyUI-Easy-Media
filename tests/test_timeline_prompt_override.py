@@ -97,6 +97,8 @@ def _load_basic_module(monkeypatch):
     utils.frames_to_seconds = lambda frames, frame_rate: (frames - 1) / frame_rate
     utils.load_audio_waveform = lambda *args, **kwargs: None
     utils.load_image_tensor = lambda *args, **kwargs: None
+    utils.iter_valid_audio_inputs = lambda *args, **kwargs: []
+    utils.merge_audio_inputs = lambda *args, **kwargs: None
     utils.resize_image = lambda image, *args, **kwargs: image
     utils.merge_video_track_with_ffmpeg = lambda *args, **kwargs: None
     utils.resize_video_with_ffmpeg = lambda *args, **kwargs: None
