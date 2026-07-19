@@ -615,7 +615,7 @@
         "name": "模式",
         "options": {
           "default": "默认",
-          "s2v": "S2V"
+          "crop": "S2V 裁剪"
         }
       },
       "task_index": {
@@ -826,6 +826,50 @@
       "3": { "name": "音频潜空间" }
     }
   },
+  "BerniniModelPatch": {
+    "display_name": "Bernini 模型补丁",
+    "description": "使用 ComfyUI 模型包装器为 Wan 模型添加 Bernini 上下文潜空间支持。",
+    "inputs": {
+      "model": { "name": "模型" }
+    },
+    "outputs": {
+      "0": { "name": "模型" }
+    }
+  },
+  "BerniniConditioning": {
+    "display_name": "Bernini 条件",
+    "description": "为 Bernini 上下文视频与图像生成条件，将源视频和参考图像编码后附加到正向与负向条件中。",
+    "inputs": {
+      "positive": { "name": "正向条件" },
+      "negative": { "name": "负向条件" },
+      "vae": { "name": "VAE" },
+      "width": { "name": "宽度" },
+      "height": { "name": "高度" },
+      "length": { "name": "帧数" },
+      "batch_size": { "name": "批次大小" },
+      "source_video": {
+        "name": "源视频",
+        "tooltip": "要编辑或重绘的源视频（v2v 或 rv2v 任务）。将调整至指定宽高并裁剪到指定帧数，作为编辑底图或画布。"
+      },
+      "reference_video": {
+        "name": "参考视频",
+        "tooltip": "合成到源视频中的动态内容（视频植入或 ads2v），例如屏幕内播放的片段。保持原始宽高比，长边限制为参考最大尺寸，并裁剪到指定帧数。"
+      },
+      "reference_images": {
+        "name": "参考图像",
+        "tooltip": "作为上下文标记注入的参考图像（r2v 或 rv2v）。每个插槽按自身宽高比单独编码，长边限制为参考最大尺寸；不同尺寸的参考图像请连接到不同插槽。"
+      },
+      "ref_max_size": {
+        "name": "参考最大尺寸",
+        "tooltip": "参考视频和参考图像的长边最大尺寸。调整时保持宽高比并对齐到 16 像素。"
+      }
+    },
+    "outputs": {
+      "0": { "name": "正向条件" },
+      "1": { "name": "负向条件" },
+      "2": { "name": "潜空间" }
+    }
+  },
   "easy berniniS2VConditioning": {
     "display_name": "简易 Bernini S2V 条件",
     "description": "统一 Bernini 上下文与 Wan S2V 音频条件。单路音频不连接遮罩时保留原版全画面单人逻辑；连接遮罩后启用空间注入，并可选第二位音频。",
@@ -845,7 +889,10 @@
         "name": "音频 0 遮罩",
         "tooltip": "白色区域为音频 0 的口型同步区域；连接后启用空间遮罩注入。"
       },
-      "audio_1": { "name": "音频 1 音频" },
+      "audio_1": {
+        "name": "音频 1 音频",
+        "tooltip": "可选的第二位说话者音频。"
+      },
       "mask_1": {
         "name": "音频 1 遮罩",
         "tooltip": "连接音频 1 音频时必需。"

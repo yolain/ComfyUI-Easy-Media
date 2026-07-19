@@ -1390,6 +1390,29 @@ def test_multitrack_audio_output_schema_is_basic_and_exposes_mode_and_two_tracks
     ]
 
 
+def test_multitrack_audio_output_chinese_options_match_schema():
+    module = _load_basic_module()
+    schema = module.MultiTrackAudioOutput.define_schema()
+    locale_path = Path(__file__).parents[1] / "locales" / "zh" / "nodeDefs.json"
+    node_defs = json.loads(locale_path.read_text(encoding="utf-8"))
+
+    translation = node_defs[schema.node_id]
+    mode_options = translation["inputs"]["mode"]["options"]
+
+    assert translation["display_name"]
+    assert translation["description"]
+    assert set(translation["inputs"]) == {input_.name for input_ in schema.inputs}
+    assert set(translation["outputs"]) == {str(index) for index in range(len(schema.outputs))}
+    for input_ in schema.inputs:
+        assert translation["inputs"][input_.name]["name"]
+        if input_.kwargs.get("tooltip"):
+            assert translation["inputs"][input_.name]["tooltip"]
+    for output_index in range(len(schema.outputs)):
+        assert translation["outputs"][str(output_index)]["name"]
+    assert set(mode_options) == set(schema.inputs[2].kwargs["options"])
+    assert mode_options["crop"] == "S2V 裁剪"
+
+
 def test_multitrack_audio_output_crop_merges_audio_and_crops_to_track_frame_ranges(monkeypatch):
     module = _load_basic_module()
     first = {"waveform": torch.arange(12).reshape(1, 1, 12), "sample_rate": 4}

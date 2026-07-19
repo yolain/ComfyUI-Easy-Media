@@ -132,6 +132,22 @@ def _audio(value, frames=8):
     return {"audio_samples": frames * 1000, "encoded_audio_all_layers": [torch.full((1, frames, 1), value)]}
 
 
+def _assert_complete_chinese_localization(schema, translation):
+    assert translation["display_name"]
+    assert translation["description"]
+    assert set(translation["inputs"]) == {input_.name for input_ in schema.inputs}
+    assert set(translation["outputs"]) == {str(index) for index in range(len(schema.outputs))}
+
+    for input_ in schema.inputs:
+        localized_input = translation["inputs"][input_.name]
+        assert localized_input["name"]
+        if input_.kwargs.get("tooltip"):
+            assert localized_input["tooltip"]
+
+    for output_index in range(len(schema.outputs)):
+        assert translation["outputs"][str(output_index)]["name"]
+
+
 def test_schema_exposes_one_optional_primary_speaker_and_optional_second_speaker(monkeypatch):
     module, _ = _load_wan_module(monkeypatch)
 
@@ -267,12 +283,17 @@ def test_audio_injector_without_mask_delegates_to_comfyui():
     assert result is expected
 
 
-def test_unified_node_has_complete_chinese_localization():
+def test_unified_node_has_complete_chinese_localization(monkeypatch):
+    module, _ = _load_wan_module(monkeypatch)
     locale_path = Path(__file__).parents[1] / "locales" / "zh" / "nodeDefs.json"
     node_defs = json.loads(locale_path.read_text(encoding="utf-8"))
 
     translation = node_defs["easy berniniS2VConditioning"]
 
+    _assert_complete_chinese_localization(
+        module.EasyBerniniS2VConditioning.define_schema(),
+        translation,
+    )
     assert translation["display_name"] == "简易 Bernini S2V 条件"
     assert set(translation["inputs"]) == {
         "positive", "negative", "vae", "width", "height", "length", "batch_size",
@@ -285,6 +306,23 @@ def test_unified_node_has_complete_chinese_localization():
         "1": {"name": "负向条件"},
         "2": {"name": "潜空间"},
     }
+
+
+@pytest.mark.parametrize(
+    ("class_name", "node_id"),
+    [
+        ("BerniniModelPatch", "BerniniModelPatch"),
+        ("BerniniConditioning", "BerniniConditioning"),
+    ],
+)
+def test_bernini_nodes_have_complete_chinese_localization(monkeypatch, class_name, node_id):
+    module, _ = _load_wan_module(monkeypatch)
+    schema = getattr(module, class_name).define_schema()
+    locale_path = Path(__file__).parents[1] / "locales" / "zh" / "nodeDefs.json"
+    node_defs = json.loads(locale_path.read_text(encoding="utf-8"))
+
+    assert schema.node_id == node_id
+    _assert_complete_chinese_localization(schema, node_defs[node_id])
 
 
 def test_s2v_condition_patch_transports_context_latents_without_parent_support(monkeypatch):
