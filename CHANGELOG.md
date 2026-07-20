@@ -2,6 +2,21 @@
 
 ---
 
+## [1.1.3] - 2026-07-21
+
+### ✨ Features
+
+- **MultiTrack Editor**: Add task markers, allowing multiple task segments to be used as one loop task
+- **MultiTrack Editor**: Add track overview, allowing segments to be expanded to view prompts and reference images
+- **MultiTrack Audio Output**: Add cropped audio output mode, outputting cropped audio clips and starting frame number for easier S2V usage
+- **LTX Workflow Simplification**: Add `easy ltxMultiTrackEncode` and multiple simplified LTX workflow nodes
+
+### 🐛 Bug Fixes
+
+- **MultiTrack Task Output**: Should output empty system prompt when prompt format is `default` or `promptRelay`
+- **MultiTrack Editor**: Fix issue where only the first audio was output when inputting audio list in App mode
+- **MultiTrack Editor**: Fix issue where segments cannot be added at the beginning or between segments on audio and subtitle tracks
+
 ## [1.1.2] - 2026-07-12
 
 ### ✨ Features
@@ -10,6 +25,7 @@
 
 ### 🐛 Bug Fixes
 
+- **Media Selector**: Fix issue where media selector did not stay in subdirectory after reopening when subdirectory was selected last time
 - **LTXV Reference Video**: Optimizing the Use of `LTXVMakeRefVideo`
 - **MultiTrack Editor**: Fixed inconsistent left-side crop behavior compared to standard editing tools
 - **MultiTrack Editor**: Fixed incorrect waveform display after cropping audio clips
