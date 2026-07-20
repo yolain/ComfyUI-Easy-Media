@@ -202,8 +202,9 @@ bun run build:release
 | easy apiWorkflowGate | 判断是否为 API 调用的工作流，透传前面输入项 |
 | LTXVAddGuidesFromBatchIndexes | 从批量图像添加引导图到潜在变量的指定帧索引 |
 | LTXVMakeRefVideo | 将参考图像批次扩展为 IC-LoRA 参考视频 |
-| BerniniModelPatch | 为 Wan 模型添加 Bernini 上下文潜在支持 |
-| BerniniConditioning | Bernini 上下文条件处理，用于视频/图像条件注入 |
+| easy ltxMultiTrackEncode | 构建 Prompt Relay 条件并生成 LTX 视频/音频潜变量 |
+| easy ltxI2VInplaceAndUpsample | 可选地对 LTX 视频潜变量进行 upscale 并应用图像引导 |
+| easy ltxSamplerSimple | 对组合的 LTX 音视频潜变量进行采样并裁剪视频引导 |
 | easy berniniS2VConditioning | 统一 Bernini + Wan S2V 条件处理，保留可选单人全画面音频，并支持单人遮罩或可选双人顺序音频 |
 
 ## Credits
