@@ -180,12 +180,27 @@ def require_whisper_large_v3_model_path() -> Path:
     """Return the local Whisper Large V3 audio encoder safetensors file."""
     model = get_model_info("whisper-large-v3")
     target_name = "whisper_large_v3"
+    preferred_filenames = {
+        model.filename.lower(),
+        "whisper-large-v3.safetensors",
+    }
+    candidates = []
     for filename in folder_paths.get_filename_list("audio_encoders"):
         path = Path(filename)
         if path.suffix.lower() != ".safetensors":
             continue
-        if target_name not in filename.lower():
+        normalized_filename = filename.lower()
+        is_preferred = path.name.lower() in preferred_filenames
+        if "encode" in normalized_filename:
             continue
+        if not is_preferred and target_name not in normalized_filename:
+            continue
+        candidates.append(filename)
+
+    candidates.sort(
+        key=lambda filename: Path(filename).name.lower() not in preferred_filenames
+    )
+    for filename in candidates:
         full_path = folder_paths.get_full_path("audio_encoders", filename)
         if full_path:
             return Path(full_path)
