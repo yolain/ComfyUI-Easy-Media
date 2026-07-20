@@ -13,6 +13,7 @@ try:
         _restore_subtitle_punctuation,
         _summarize_value,
         normalize_subtitle_segments,
+        normalize_subtitle_tokens,
     )
 except ImportError:
     from utils.model_memory import cleanup_model_memory
@@ -22,6 +23,7 @@ except ImportError:
         _restore_subtitle_punctuation,
         _summarize_value,
         normalize_subtitle_segments,
+        normalize_subtitle_tokens,
     )
 
 
@@ -179,7 +181,11 @@ def _load_openai_whisper_from_audio_encoder(model_path: Path, device: str) -> ob
     return model.to(device)
 
 
-def recognize_subtitle_segments(audio_path: Path, model_path: Path) -> list[dict]:
+def recognize_subtitle_segments(
+    audio_path: Path,
+    model_path: Path,
+    unload_model: bool = True,
+) -> list[dict]:
     import torch
 
     import whisper  # type: ignore[import]
@@ -191,10 +197,19 @@ def recognize_subtitle_segments(audio_path: Path, model_path: Path) -> list[dict
         result = model.transcribe(
             str(audio_path),
             verbose=False,
-            word_timestamps=False,
+            word_timestamps=True,
         )
         transcript = _detect_text(result)
         detected_language = _detect_language(result)
+        timed_units = normalize_subtitle_tokens(result)
+        if timed_units:
+            return _restore_subtitle_punctuation(
+                timed_units,
+                transcript,
+                detected_language,
+                add_fallback=False,
+                add_final_fallback=True,
+            )
         segments = normalize_subtitle_segments(result)
         if segments:
             return _restore_subtitle_punctuation(segments, transcript, detected_language)
@@ -203,4 +218,5 @@ def recognize_subtitle_segments(audio_path: Path, model_path: Path) -> list[dict
             f"transcribe={_summarize_value(result)}"
         )
     finally:
-        cleanup_model_memory(model)
+        if unload_model:
+            cleanup_model_memory(model)

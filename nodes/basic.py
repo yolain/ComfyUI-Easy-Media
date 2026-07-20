@@ -27,6 +27,7 @@ from ..utils import (
     iter_valid_audio_inputs,
     merge_audio_inputs,
     merge_video_track_with_ffmpeg,
+    parse_subtitle_text,
     parse_override_segments,
     prompt_override_has_frame_ranges,
     prompt_override_has_value,
@@ -120,6 +121,7 @@ CATEGORY_TIMELINE = "EasyUse/TimelineEditor"
 CATEGORY_MULTITRACK = "EasyUse/MultiTrackEditor"
 CATEGORY_AUDIO = "EasyUse/Audio"
 CATEGORY_LOGIC = "EasyUse/Logic"
+CATEGORY_VIDEO = "EasyUse/Video"
 PROMPT_FORMAT_OPTIONS = ["default", "promptRelay"]
 
 
@@ -1984,6 +1986,114 @@ def _subtitle_base_name(video_path: str | None) -> str:
     return default_subtitle_filename()
 
 
+def _add_subtitle_segments_to_video(
+    video: object,
+    subtitle_segments: list[object],
+    srt_save: str,
+) -> io.NodeOutput:
+    if not subtitle_segments:
+        return io.NodeOutput(video)
+
+    save_mode = str(_unwrap_list_scalar(srt_save, "temp"))
+    if save_mode not in {"temp", "output"}:
+        save_mode = "temp"
+
+    width, height = video.get_dimensions()
+    input_path, temp_files = video_input_to_local_file(
+        video,
+        suffix=".mp4",
+        save_kwargs={
+            "format": Types.VideoContainer.AUTO,
+            "codec": Types.VideoCodec.AUTO,
+        },
+    )
+    ass_path: Path | None = None
+    try:
+        base_name = _subtitle_base_name(input_path)
+        if save_mode == "output":
+            srt_dir = Path(folder_paths.get_output_directory()) / "srt"
+        else:
+            srt_dir = Path(folder_paths.get_temp_directory())
+        write_srt_file(subtitle_segments, srt_dir / f"{base_name}.srt")
+
+        ass_fd, ass_raw_path = tempfile.mkstemp(
+            prefix=f"{base_name}_",
+            suffix=".ass",
+            dir=folder_paths.get_temp_directory(),
+        )
+        os.close(ass_fd)
+        ass_path = write_ass_file(subtitle_segments, Path(ass_raw_path), width, height)
+
+        output_fd, output_path = tempfile.mkstemp(
+            prefix=f"{base_name}_subtitled_",
+            suffix=".mp4",
+            dir=folder_paths.get_temp_directory(),
+        )
+        os.close(output_fd)
+        burn_subtitles_with_ffmpeg(input_path, str(ass_path), output_path)
+        return io.NodeOutput(InputImpl.VideoFromFile(output_path))
+    finally:
+        for path in temp_files:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        if ass_path is not None:
+            try:
+                ass_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+class AddSubtitleToVideo(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy addSubtitleToVideo",
+            display_name="Add Subtitle To Video",
+            category=CATEGORY_VIDEO,
+            description=(
+                "Burn multiline SRT, timestamp, or bracket-formatted subtitle text "
+                "into a VIDEO and save a normalized SRT file."
+            ),
+            inputs=[
+                io.String.Input(
+                    "subtitle_text",
+                    multiline=True,
+                    default="",
+                    placeholder=(
+                        "1\n00:00:00,000 --> 00:00:02,000\nSubtitle text\n\n"
+                        "or [00:02.000 --> 00:04.000] Subtitle text"
+                    ),
+                    dynamic_prompts=False,
+                ),
+                io.Video.Input("video"),
+                io.Combo.Input(
+                    "srt_save",
+                    options=["temp", "output"],
+                    default="temp",
+                    tooltip="Save the normalized SRT in temp or output/srt.",
+                ),
+                io.Int.Input("font_size", default=16, min=8, max=96, step=1),
+            ],
+            outputs=[io.Video.Output("VIDEO")],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        subtitle_text: str,
+        video: object,
+        srt_save: str = "temp",
+        font_size: int = 16,
+    ) -> io.NodeOutput:
+        segments = parse_subtitle_text(
+            str(_unwrap_list_scalar(subtitle_text, "")),
+            style={"font_size": int(_unwrap_list_scalar(font_size, 16))},
+        )
+        return _add_subtitle_segments_to_video(video, segments, srt_save)
+
+
 class MultiTrackAddSubtitleToVideo(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -2012,59 +2122,8 @@ class MultiTrackAddSubtitleToVideo(io.ComfyNode):
         if isinstance(tracks_info, list):
             tracks_info = tracks_info[0] if tracks_info else {}
         info = _parse_track_data(tracks_info)
-        save_mode = str(_unwrap_list_scalar(srt_save, "temp"))
-        if save_mode not in {"temp", "output"}:
-            save_mode = "temp"
-
         subtitle_segments = collect_multitrack_subtitle_segments(info)
-        if not subtitle_segments:
-            return io.NodeOutput(video)
-
-        width, height = video.get_dimensions()
-        input_path, temp_files = video_input_to_local_file(
-            video,
-            suffix=".mp4",
-            save_kwargs={
-                "format": Types.VideoContainer.AUTO,
-                "codec": Types.VideoCodec.AUTO,
-            },
-        )
-        ass_path: Path | None = None
-        try:
-            base_name = _subtitle_base_name(input_path)
-            if save_mode == "output":
-                srt_dir = Path(folder_paths.get_output_directory()) / "srt"
-            else:
-                srt_dir = Path(folder_paths.get_temp_directory())
-            srt_path = write_srt_file(subtitle_segments, srt_dir / f"{base_name}.srt")
-
-            ass_fd, ass_raw_path = tempfile.mkstemp(
-                prefix=f"{base_name}_",
-                suffix=".ass",
-                dir=folder_paths.get_temp_directory(),
-            )
-            os.close(ass_fd)
-            ass_path = write_ass_file(subtitle_segments, Path(ass_raw_path), width, height)
-
-            output_fd, output_path = tempfile.mkstemp(
-                prefix=f"{base_name}_subtitled_",
-                suffix=".mp4",
-                dir=folder_paths.get_temp_directory(),
-            )
-            os.close(output_fd)
-            burn_subtitles_with_ffmpeg(input_path, str(ass_path), output_path)
-            return io.NodeOutput(InputImpl.VideoFromFile(output_path))
-        finally:
-            for path in temp_files:
-                try:
-                    os.unlink(path)
-                except OSError:
-                    pass
-            if ass_path is not None:
-                try:
-                    ass_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
+        return _add_subtitle_segments_to_video(video, subtitle_segments, srt_save)
 
 
 def _unwrap_list_scalar(value, default=None):

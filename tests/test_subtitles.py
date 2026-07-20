@@ -3,6 +3,8 @@ import importlib.util
 import sys
 import types
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from utils import subtitles
@@ -251,7 +253,8 @@ def test_recognize_subtitle_segments_uses_official_qwen3_asr_api(monkeypatch, tm
     )
 
     assert result == [
-        {"start": 0.0, "end": 1.0, "text": "hello world."},
+        {"start": 0.0, "end": 0.5, "text": "hello"},
+        {"start": 0.5, "end": 1.0, "text": "world."},
     ]
     assert _FakeQwen3ASRModel.from_pretrained_calls == [(
         (str(tmp_path / "Qwen3-ASR-1.7B"),),
@@ -309,7 +312,8 @@ def test_recognize_subtitle_segments_with_whisper_uses_comfy_audio_encoder_loade
     result = whisper_asr.recognize_subtitle_segments(tmp_path / "audio.wav", model_path)
 
     assert result == [
-        {"start": 0.0, "end": 1.0, "text": "hello world."},
+        {"start": 0.0, "end": 0.5, "text": "hello"},
+        {"start": 0.5, "end": 1.0, "text": "world."},
     ]
     assert loaded_files == [(str(model_path), True)]
     assert len(_FakeOpenAIWhisper.init_calls) == 1
@@ -318,7 +322,7 @@ def test_recognize_subtitle_segments_with_whisper_uses_comfy_audio_encoder_loade
         (str(tmp_path / "audio.wav"),),
         {
             "verbose": False,
-            "word_timestamps": False,
+            "word_timestamps": True,
         },
     )]
 
@@ -386,6 +390,44 @@ def test_recognize_subtitle_segments_cleans_model_memory(monkeypatch, tmp_path):
 
     assert len(cleaned) == 1
     assert isinstance(cleaned[0], _FakeQwen3ASRModel)
+
+
+def test_qwen_recognition_can_keep_model_loaded(monkeypatch, tmp_path):
+    fake_qwen_asr = types.SimpleNamespace(Qwen3ASRModel=_FakeQwen3ASRModel)
+    cleaned = []
+    monkeypatch.setitem(sys.modules, "torch", _FakeTorch())
+    monkeypatch.setitem(sys.modules, "qwen_asr", fake_qwen_asr)
+    monkeypatch.setattr(qwen_asr, "cleanup_model_memory", lambda *models: cleaned.extend(models))
+
+    qwen_asr.recognize_subtitle_segments(
+        tmp_path / "audio.wav",
+        tmp_path / "Qwen3-ASR-1.7B",
+        tmp_path / "Qwen3-ForcedAligner-0.6B",
+        unload_model=False,
+    )
+
+    assert cleaned == []
+
+
+def test_whisper_recognition_can_keep_model_loaded(monkeypatch, tmp_path):
+    cleaned = []
+    model = _FakeWhisperModel()
+    monkeypatch.setitem(sys.modules, "torch", _FakeTorch())
+    monkeypatch.setitem(sys.modules, "whisper", types.ModuleType("whisper"))
+    monkeypatch.setattr(
+        whisper_asr,
+        "_load_openai_whisper_from_audio_encoder",
+        lambda path, device: model,
+    )
+    monkeypatch.setattr(whisper_asr, "cleanup_model_memory", lambda *models: cleaned.extend(models))
+
+    whisper_asr.recognize_subtitle_segments(
+        tmp_path / "audio.wav",
+        tmp_path / "whisper.safetensors",
+        unload_model=False,
+    )
+
+    assert cleaned == []
 
 
 def test_recognize_subtitle_segments_reads_forced_align_result_time_stamps(monkeypatch, tmp_path):
@@ -732,6 +774,156 @@ def test_write_srt_file_formats_timestamps(tmp_path):
         "hello\n"
         "world\n"
     )
+
+
+def test_subtitle_segments_to_srt_formats_recognition_dicts():
+    assert subtitles.subtitle_segments_to_srt([
+        {"start": 0.42, "end": 1.4, "text": "黄雨萱，"},
+        {"start": 2.52, "end": 3.66, "text": "不要生气啦，"},
+    ]) == (
+        "1\n00:00:00,420 --> 00:00:01,400\n黄雨萱，\n\n"
+        "2\n00:00:02,520 --> 00:00:03,660\n不要生气啦，\n"
+    )
+
+
+def test_subtitle_segments_to_timestamp_text_uses_decimal_second_pairs():
+    assert subtitles.subtitle_segments_to_timestamp_text([
+        {"start": 0.42, "end": 1.4, "text": "黄雨萱，"},
+        {"start": 2.52, "end": 3.66, "text": "不要生气啦，"},
+    ]) == (
+        "(0.42, 1.4) 黄雨萱，\n"
+        "(2.52, 3.66) 不要生气啦，"
+    )
+
+
+def test_smart_split_subtitle_segments_uses_timed_word_and_punctuation_boundaries():
+    result = subtitles.smart_split_subtitle_segments([
+        {"start": 0.0, "end": 0.4, "text": "黄雨萱"},
+        {"start": 0.4, "end": 0.5, "text": "，"},
+        {"start": 0.5, "end": 0.9, "text": "不要"},
+        {"start": 0.9, "end": 1.4, "text": "生气啦"},
+        {"start": 1.4, "end": 1.5, "text": "。"},
+    ], 8)
+
+    assert result == [
+        {"start": 0.0, "end": 0.5, "text": "黄雨萱，"},
+        {"start": 0.5, "end": 1.5, "text": "不要生气啦。"},
+    ]
+
+
+def test_smart_split_subtitle_segments_does_not_cut_english_words():
+    result = subtitles.smart_split_subtitle_segments([
+        {"start": 0.0, "end": 0.6, "text": "recognition"},
+        {"start": 0.6, "end": 1.0, "text": "works"},
+        {"start": 1.0, "end": 1.1, "text": "."},
+    ], 12)
+
+    assert result == [
+        {"start": 0.0, "end": 0.6, "text": "recognition"},
+        {"start": 0.6, "end": 1.1, "text": "works."},
+    ]
+
+
+def test_normalize_subtitle_tokens_prefers_whisper_word_timestamps():
+    result = subtitles.normalize_subtitle_tokens({
+        "segments": [{
+            "start": 0.0,
+            "end": 1.0,
+            "text": "hello world",
+            "words": [
+                {"start": 0.0, "end": 0.45, "word": "hello"},
+                {"start": 0.45, "end": 1.0, "word": "world"},
+            ],
+        }],
+    })
+
+    assert result == [
+        {"start": 0.0, "end": 0.45, "text": "hello"},
+        {"start": 0.45, "end": 1.0, "text": "world"},
+    ]
+
+
+def test_parse_subtitle_text_accepts_standard_srt_with_multiline_cues():
+    result = subtitles.parse_subtitle_text(
+        "1\n"
+        "00:00:01,250 --> 00:00:02,500\n"
+        "hello\n"
+        "world\n\n"
+        "2\n"
+        "00:00:03,000 --> 00:00:04,250\n"
+        "second line\n"
+    )
+
+    assert [(item.start, item.end, item.text) for item in result] == [
+        (1.25, 2.5, "hello\nworld"),
+        (3.0, 4.25, "second line"),
+    ]
+
+
+def test_parse_subtitle_text_accepts_inline_timestamp_lines():
+    result = subtitles.parse_subtitle_text(
+        "00:01.250 --> 00:02.500 First line\n"
+        "00:02.500 --> 00:04.000 Second line"
+    )
+
+    assert [(item.start, item.end, item.text) for item in result] == [
+        (1.25, 2.5, "First line"),
+        (2.5, 4.0, "Second line"),
+    ]
+
+
+def test_parse_subtitle_text_applies_font_size_to_every_segment():
+    result = subtitles.parse_subtitle_text(
+        "[00:01.000 --> 00:02.000] First\n"
+        "[00:02.000 --> 00:03.000] Second",
+        style={"font_size": 28},
+    )
+
+    assert [item.style["font_size"] for item in result] == [28, 28]
+
+
+@pytest.mark.parametrize(
+    ("subtitle_text", "expected"),
+    [
+        ("[00:00:01.250 --> 00:00:02.500] Square brackets", (1.25, 2.5, "Square brackets")),
+        ("(00:01.250 - 00:02.500) Parentheses", (1.25, 2.5, "Parentheses")),
+        ("【00:01,250 至 00:02,500】中文括号", (1.25, 2.5, "中文括号")),
+    ],
+)
+def test_parse_subtitle_text_accepts_bracket_formats(subtitle_text, expected):
+    result = subtitles.parse_subtitle_text(subtitle_text)
+    assert [(item.start, item.end, item.text) for item in result] == [expected]
+
+
+def test_parse_subtitle_text_accepts_parenthesized_decimal_second_pairs(tmp_path):
+    subtitle_text = (
+        "(0.42, 1.4) 黄雨萱，\n"
+        "(2.52, 3.66) 不要生气啦，\n"
+        "(4.28, 5.02) 又生气，\n"
+        "(5.5, 6.34) 早上生气，\n"
+        "(6.5, 7.18) 中午生气，\n"
+        "(7.38, 8.16) 下午要生气。"
+    )
+
+    segments = subtitles.parse_subtitle_text(subtitle_text)
+    output = subtitles.write_srt_file(segments, tmp_path / "normalized.srt")
+
+    assert output.read_text(encoding="utf-8") == (
+        "1\n00:00:00,420 --> 00:00:01,400\n黄雨萱，\n\n"
+        "2\n00:00:02,520 --> 00:00:03,660\n不要生气啦，\n\n"
+        "3\n00:00:04,280 --> 00:00:05,020\n又生气，\n\n"
+        "4\n00:00:05,500 --> 00:00:06,340\n早上生气，\n\n"
+        "5\n00:00:06,500 --> 00:00:07,180\n中午生气，\n\n"
+        "6\n00:00:07,380 --> 00:00:08,160\n下午要生气。\n"
+    )
+
+
+def test_parse_subtitle_text_rejects_unrecognized_or_invalid_ranges():
+    with pytest.raises(ValueError, match="subtitle timestamp"):
+        subtitles.parse_subtitle_text("plain text without timing")
+
+    with pytest.raises(ValueError, match="later than"):
+        subtitles.parse_subtitle_text("[00:02.000 --> 00:01.000] invalid")
 
 
 def test_write_ass_file_scales_preview_font_to_video_height(tmp_path):

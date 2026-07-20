@@ -631,6 +631,72 @@
       "4": { "name": "音频 1 起始帧" }
     }
   },
+  "easy recognizeSubtitle": {
+    "display_name": "识别字幕",
+    "description": "使用 Qwen3-ASR 或 Whisper Large V3 从音频或视频中识别带时间戳的字幕，并输出 SRT 或时间戳文本。",
+    "inputs": {
+      "audio": {
+        "name": "音频",
+        "tooltip": "可选 AUDIO 输入；同时连接音频和视频时优先识别音频。"
+      },
+      "video": {
+        "name": "视频",
+        "tooltip": "可选 VIDEO 输入；未连接音频时从视频中提取音轨。"
+      },
+      "model_type": {
+        "name": "模型类型",
+        "options": {
+          "qwen3-asr": "Qwen3-ASR",
+          "whisper-large-v3": "Whisper Large V3"
+        }
+      },
+      "output_format": {
+        "name": "输出格式",
+        "tooltip": "输出标准 SRT，或每行一条“(开始秒, 结束秒) 字幕”的时间戳文本。",
+        "options": {
+          "srt": "SRT",
+          "timestamp": "时间戳"
+        }
+      },
+      "max_sentence_length": {
+        "name": "每句最大长度",
+        "tooltip": "每条字幕允许的最大字符数，超长字幕会切分并按字符比例分配时间。"
+      },
+      "unload_model": {
+        "name": "卸载模型",
+        "tooltip": "识别完成后将模型移至 CPU，并清理加速设备缓存。"
+      }
+    },
+    "outputs": {
+      "0": { "name": "字幕文本" }
+    }
+  },
+  "easy addSubtitleToVideo": {
+    "display_name": "添加字幕到视频",
+    "description": "将 SRT、时间戳或括号格式的多行字幕文本规范化为 SRT，并烧录到视频中。",
+    "inputs": {
+      "subtitle_text": {
+        "name": "字幕文本",
+        "tooltip": "支持标准 SRT、行内时间戳和括号格式，例如 [00:01.000 --> 00:03.000] 字幕。"
+      },
+      "video": { "name": "视频" },
+      "font_size": {
+        "name": "字体大小",
+        "tooltip": "设置烧录字幕的字体大小。"
+      },
+      "srt_save": {
+        "name": "SRT 保存位置",
+        "tooltip": "将规范化后的 SRT 保存到临时目录或 output/srt。",
+        "options": {
+          "temp": "临时目录",
+          "output": "输出目录"
+        }
+      }
+    },
+    "outputs": {
+      "0": { "name": "视频" }
+    }
+  },
   "easy multiTrackAddSubtitleToVIdeo": {
     "display_name": "多轨字幕烧录到视频",
     "description": "将轨道信息中的所有字幕轨片段烧录到视频中，并保存 SRT 字幕文件。",

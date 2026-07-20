@@ -12,6 +12,7 @@ try:
         _restore_subtitle_punctuation,
         _summarize_value,
         normalize_subtitle_segments,
+        normalize_subtitle_tokens,
     )
 except ImportError:
     from utils.model_memory import cleanup_model_memory
@@ -21,6 +22,7 @@ except ImportError:
         _restore_subtitle_punctuation,
         _summarize_value,
         normalize_subtitle_segments,
+        normalize_subtitle_tokens,
     )
 
 _ALIGNER_LANGUAGE_ALIASES = {
@@ -122,6 +124,7 @@ def _align_subtitle_segments(
     aligner_model_dir: Path,
     dtype: object,
     device: str,
+    unload_model: bool = True,
 ) -> list[dict]:
     from qwen_asr import Qwen3ForcedAligner  # type: ignore[import]
 
@@ -137,12 +140,18 @@ def _align_subtitle_segments(
             text=text,
             language=language,
         )
-        return normalize_subtitle_segments(result)
+        return normalize_subtitle_tokens(result) or normalize_subtitle_segments(result)
     finally:
-        cleanup_model_memory(aligner)
+        if unload_model:
+            cleanup_model_memory(aligner)
 
 
-def recognize_subtitle_segments(audio_path: Path, asr_model_dir: Path, aligner_model_dir: Path) -> list[dict]:
+def recognize_subtitle_segments(
+    audio_path: Path,
+    asr_model_dir: Path,
+    aligner_model_dir: Path,
+    unload_model: bool = True,
+) -> list[dict]:
     import torch
     from qwen_asr import Qwen3ASRModel  # type: ignore[import]
 
@@ -167,9 +176,15 @@ def recognize_subtitle_segments(audio_path: Path, asr_model_dir: Path, aligner_m
         result_summaries = [f"transcribe={_summarize_value(result)}"]
         detected_language = _detect_language(result)
         transcript = _detect_text(result)
-        segments = normalize_subtitle_segments(result)
+        segments = normalize_subtitle_tokens(result) or normalize_subtitle_segments(result)
         if segments:
-            return _restore_subtitle_punctuation(segments, transcript, detected_language)
+            return _restore_subtitle_punctuation(
+                segments,
+                transcript,
+                detected_language,
+                add_fallback=False,
+                add_final_fallback=True,
+            )
 
         retry_language = _normalize_aligner_language(detected_language) or detected_language
         aligner_language = _normalize_aligner_language(detected_language) or _infer_aligner_language_from_text(transcript)
@@ -177,9 +192,15 @@ def recognize_subtitle_segments(audio_path: Path, asr_model_dir: Path, aligner_m
             retry_result = _transcribe(model, audio_path, retry_language)
             result_summaries.append(f"retry={_summarize_value(retry_result)}")
             transcript = _detect_text(retry_result) or transcript
-            retry_segments = normalize_subtitle_segments(retry_result)
+            retry_segments = normalize_subtitle_tokens(retry_result) or normalize_subtitle_segments(retry_result)
             if retry_segments:
-                return _restore_subtitle_punctuation(retry_segments, transcript, detected_language)
+                return _restore_subtitle_punctuation(
+                    retry_segments,
+                    transcript,
+                    detected_language,
+                    add_fallback=False,
+                    add_final_fallback=True,
+                )
 
             aligner_language = _normalize_aligner_language(detected_language) or _infer_aligner_language_from_text(transcript)
 
@@ -191,14 +212,22 @@ def recognize_subtitle_segments(audio_path: Path, asr_model_dir: Path, aligner_m
                 aligner_model_dir,
                 dtype,
                 device,
+                unload_model,
             )
             result_summaries.append(f"align={_summarize_value(align_segments)}")
             if align_segments:
-                return _restore_subtitle_punctuation(align_segments, transcript, aligner_language)
+                return _restore_subtitle_punctuation(
+                    align_segments,
+                    transcript,
+                    aligner_language,
+                    add_fallback=False,
+                    add_final_fallback=True,
+                )
 
         raise RuntimeError(
             "Qwen3-ASR did not return timestamped subtitle text. "
             + "; ".join(result_summaries)
         )
     finally:
-        cleanup_model_memory(model)
+        if unload_model:
+            cleanup_model_memory(model)

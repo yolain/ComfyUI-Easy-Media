@@ -195,6 +195,8 @@ bun run build:release
 | easy multiTrackEditor | 多轨编辑器，编辑和传递多轨媒体数据 |
 | easy multiTrackInfoOutput | 输出多轨维度、时长、帧率和任务数量 |
 | easy multiTrackTaskOutput | 输出多轨任务段的提示词和任务范围媒体 |
+| easy recognizeSubtitle | 使用 Qwen3-ASR 或 Whisper Large V3 识别字幕，可设置 SRT/时间戳输出、每句长度和模型卸载 |
+| easy addSubtitleToVideo | 将 SRT、时间戳或括号格式的多行字幕文本规范化并烧录到视频中 |
 | easy multiTrackAddSubtitleToVideo | 将字幕轨道添加到视频轨道中 |
 | easy makeRefsCompositeBySam3 | 使用 SAM3 检测提示的主体并组合参考图到画布 |
 | easy splitImages | 将图像列表或批次拆分为多个单图像输出 |

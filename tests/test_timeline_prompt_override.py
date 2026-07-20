@@ -99,6 +99,7 @@ def _load_basic_module(monkeypatch):
     utils.load_image_tensor = lambda *args, **kwargs: None
     utils.iter_valid_audio_inputs = lambda *args, **kwargs: []
     utils.merge_audio_inputs = lambda *args, **kwargs: None
+    utils.parse_subtitle_text = lambda *args, **kwargs: []
     utils.resize_image = lambda image, *args, **kwargs: image
     utils.merge_video_track_with_ffmpeg = lambda *args, **kwargs: None
     utils.resize_video_with_ffmpeg = lambda *args, **kwargs: None

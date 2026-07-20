@@ -191,6 +191,8 @@ bun run build:release
 | easy multiTrackEditor | Multi-track editor for editing and transferring multi-track media data |
 | easy multiTrackInfoOutput | Output multi-track dimensions, duration, frame rate, and task count |
 | easy multiTrackTaskOutput | Output multi-track task segment prompts and task-ranged media |
+| easy recognizeSubtitle | Recognize subtitles with Qwen3-ASR or Whisper Large V3; configure SRT/timestamp output, sentence length, and model unloading |
+| easy addSubtitleToVideo | Normalize multiline SRT, timestamp, or bracket-formatted text and burn it into a video |
 | easy multiTrackAddSubtitleToVideo | Add subtitle track to video track |
 | easy makeRefsCompositeBySam3 | Detect subject in prompt using SAM3 and composite reference images onto canvas |
 | easy splitImages | Split an image list or batch into multiple single-image outputs |

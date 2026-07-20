@@ -185,6 +185,7 @@ def _load_basic_module():
         "iter_valid_audio_inputs",
         "merge_audio_inputs",
         "merge_video_track_with_ffmpeg",
+        "parse_subtitle_text",
         "resize_image",
         "resize_video_with_ffmpeg",
         "resolve_video_path",
@@ -438,6 +439,83 @@ def test_multitrack_add_subtitle_to_video_saves_srt_to_output_srt(monkeypatch, t
     assert calls["burn"][0] == str(source)
     assert result.values[0].source == calls["burn"][2]
     assert not calls["ass"][0].exists()
+
+
+def test_add_subtitle_to_video_schema_accepts_multiline_text():
+    module = _load_basic_module()
+    schema = module.AddSubtitleToVideo.define_schema()
+
+    assert schema.node_id == "easy addSubtitleToVideo"
+    assert [input_.name for input_ in schema.inputs] == [
+        "subtitle_text",
+        "video",
+        "srt_save",
+        "font_size",
+    ]
+    assert schema.inputs[0].kwargs["multiline"] is True
+    assert schema.inputs[3].kwargs == {"default": 16, "min": 8, "max": 96, "step": 1}
+    assert [output.name for output in schema.outputs] == ["VIDEO"]
+
+
+def test_add_subtitle_to_video_parses_text_and_uses_multitrack_burn_pipeline(monkeypatch, tmp_path):
+    module = _load_basic_module()
+    output_dir = tmp_path / "output"
+    temp_dir = tmp_path / "temp"
+    output_dir.mkdir()
+    temp_dir.mkdir()
+    module.folder_paths.get_output_directory = lambda: str(output_dir)
+    module.folder_paths.get_temp_directory = lambda: str(temp_dir)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    video = _FakeVideo(
+        _VideoComponents(torch.zeros(24, 360, 640, 3), None, Fraction(24)),
+        source=str(source),
+    )
+    segment = types.SimpleNamespace(start=0.0, end=1.0, text="hello", style={})
+    calls = {}
+
+    def fake_parse(value, style=None):
+        calls["text"] = value
+        calls["style"] = style
+        return [segment]
+
+    def fake_write_srt(segments, path):
+        calls["srt"] = (segments, path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("srt", encoding="utf-8")
+        return path
+
+    def fake_write_ass(segments, path, width, height):
+        calls["ass"] = (segments, path, width, height)
+        path.write_text("ass", encoding="utf-8")
+        return path
+
+    def fake_burn(video_path, subtitle_path, output_path):
+        calls["burn"] = (video_path, subtitle_path, output_path)
+        Path(output_path).write_bytes(b"subtitled")
+        return output_path
+
+    monkeypatch.setattr(module, "parse_subtitle_text", fake_parse)
+    monkeypatch.setattr(module, "default_subtitle_filename", lambda prefix="x": f"{prefix}_stamp")
+    monkeypatch.setattr(module, "write_srt_file", fake_write_srt)
+    monkeypatch.setattr(module, "write_ass_file", fake_write_ass)
+    monkeypatch.setattr(module, "burn_subtitles_with_ffmpeg", fake_burn)
+
+    result = module.AddSubtitleToVideo.execute(
+        "[00:00.000 --> 00:01.000] hello",
+        video,
+        "output",
+        28,
+    )
+
+    assert calls["text"] == "[00:00.000 --> 00:01.000] hello"
+    assert calls["style"] == {"font_size": 28}
+    assert calls["srt"] == ([segment], output_dir / "srt" / "source_stamp.srt")
+    assert calls["ass"][0] == [segment]
+    assert calls["ass"][2:] == (640, 360)
+    assert calls["burn"][0] == str(source)
+    assert result.values[0].source == calls["burn"][2]
+    assert not calls["ass"][1].exists()
 
 
 def test_multitrack_editor_includes_selected_dimensions_in_tracks_info():

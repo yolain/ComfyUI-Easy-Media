@@ -1,5 +1,6 @@
 import logging
 import os
+import tempfile
 import urllib.request
 from pathlib import Path
 from typing import Any, Mapping
@@ -10,6 +11,46 @@ import torch.nn.functional as F
 import folder_paths
 
 logger = logging.getLogger(__name__)
+
+
+def save_audio_to_temp_wav(audio: Mapping[str, Any]) -> Path | None:
+    """Serialize the first batch of a ComfyUI AUDIO value to a temporary WAV file."""
+    waveform = audio.get("waveform")
+    sample_rate = audio.get("sample_rate")
+    if not isinstance(waveform, torch.Tensor) or sample_rate is None:
+        return None
+    if waveform.dim() == 3:
+        waveform = waveform[0]
+    if waveform.dim() != 2:
+        return None
+
+    def temporary_path() -> Path:
+        file_descriptor, raw_path = tempfile.mkstemp(
+            prefix="easy_media_audio_",
+            suffix=".wav",
+            dir=folder_paths.get_temp_directory(),
+        )
+        os.close(file_descriptor)
+        return Path(raw_path)
+
+    output = temporary_path()
+    try:
+        import torchaudio  # type: ignore[import]
+
+        torchaudio.save(str(output), waveform.cpu().float(), int(sample_rate))
+        return output
+    except Exception:
+        output.unlink(missing_ok=True)
+
+    output = temporary_path()
+    try:
+        import soundfile as sf  # type: ignore[import]
+
+        sf.write(str(output), waveform.cpu().float().numpy().T, int(sample_rate))
+        return output
+    except Exception:
+        output.unlink(missing_ok=True)
+        return None
 
 
 def frames_to_seconds(frames: int, frame_rate: int) -> float:

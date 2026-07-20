@@ -41,8 +41,6 @@ from .utils.models import (
     download_model,
     model_payload,
     get_model_info,
-    require_qwen_asr_model_dirs,
-    require_whisper_large_v3_model_path,
 )
 from .utils.media import (
     allowed_extensions,
@@ -50,7 +48,12 @@ from .utils.media import (
     is_json_error,
     list_dir_shallow,
 )
-from .modules import qwen_asr, whisper_asr
+from .modules.subtitle_recognition import (
+    MissingSubtitleRecognitionDependenciesError,
+    recognize_audio_subtitles,
+    subtitle_recognition_options,
+    validate_subtitle_recognition_method,
+)
 from .utils.speech import generate_voxcpm2_speech
 from .utils.video import (
     download_audio_to_temp,
@@ -62,7 +65,6 @@ from .utils.video import (
 
 
 _SMART_SPLIT_LOCK = asyncio.Lock()
-_SUBTITLE_RECOGNITION_LOCK = asyncio.Lock()
 _SUBTITLE_SPEECH_LOCK = asyncio.Lock()
 
 
@@ -358,29 +360,10 @@ async def handle_subtitle_recognition(request: web.Request) -> web.Response:
         if not isinstance(fps, (int, float)) or not math.isfinite(fps) or fps <= 0:
             raise ValueError("fps must be a positive finite number")
 
-        method = data.get("method", "qwen3-asr")
-        if method not in {"qwen3-asr", "whisper-large-v3"}:
-            raise ValueError("method must be qwen3-asr or whisper-large-v3")
-
-        if method == "whisper-large-v3":
-            whisper_model_path = require_whisper_large_v3_model_path()
-            asr_model_dir = None
-            aligner_model_dir = None
-        else:
-            asr_model_dir, aligner_model_dir = require_qwen_asr_model_dirs()
-            whisper_model_path = None
-
-        missing_dependencies = (
-            whisper_asr.missing_dependencies()
-            if method == "whisper-large-v3"
-            else qwen_asr.missing_dependencies()
+        method = validate_subtitle_recognition_method(
+            str(data.get("method", "qwen3-asr"))
         )
-        if missing_dependencies:
-            packages = " ".join(missing_dependencies)
-            return web.json_response({
-                "error": f"Missing Python dependencies: {packages}. Install with: pip install {packages}",
-                "missing_dependencies": missing_dependencies,
-            }, status=424)
+        max_sentence_length, unload_model = subtitle_recognition_options(data)
         media_type = data.get("media_type")
         source_type = data.get("source_type")
         if source_type == "url":
@@ -413,21 +396,19 @@ async def handle_subtitle_recognition(request: web.Request) -> web.Response:
         else:
             audio_path = media_path
 
-        async with _SUBTITLE_RECOGNITION_LOCK:
-            if method == "whisper-large-v3":
-                segments = await asyncio.to_thread(
-                    whisper_asr.recognize_subtitle_segments,
-                    audio_path,
-                    whisper_model_path,
-                )
-            else:
-                segments = await asyncio.to_thread(
-                    qwen_asr.recognize_subtitle_segments,
-                    audio_path,
-                    asr_model_dir,
-                    aligner_model_dir,
-                )
+        segments = await asyncio.to_thread(
+            recognize_audio_subtitles,
+            audio_path,
+            method,
+            max_sentence_length,
+            unload_model,
+        )
         return web.json_response({"segments": segments})
+    except MissingSubtitleRecognitionDependenciesError as error:
+        return web.json_response({
+            "error": str(error),
+            "missing_dependencies": error.dependencies,
+        }, status=424)
     except MissingEasyMediaModelError as error:
         return web.json_response({
             "error": str(error),

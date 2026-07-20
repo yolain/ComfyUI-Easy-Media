@@ -56,6 +56,20 @@ class MultitrackSubtitleSegment:
     style: dict[str, object]
 
 
+_SUBTITLE_TIME_TOKEN = (
+    r"(?:\d{1,3}:\d{1,2}:\d{2}(?:[,.]\d{1,3})?"
+    r"|\d{1,3}:\d{2}(?:[,.]\d{1,3})?"
+    r"|\d+(?:\.\d+)?)"
+)
+_SUBTITLE_RANGE_RE = re.compile(
+    rf"^\s*[\[(【（]?\s*"
+    rf"(?P<start>{_SUBTITLE_TIME_TOKEN})\s*"
+    rf"(?:-->|->|→|至|~|～|,|\s+-\s+)\s*"
+    rf"(?P<end>{_SUBTITLE_TIME_TOKEN})\s*"
+    rf"[\])】）]?\s*(?P<text>.*)$"
+)
+
+
 def _format_srt_timestamp(seconds: float) -> str:
     total_ms = max(0, round(seconds * 1000))
     hours, remainder = divmod(total_ms, 3_600_000)
@@ -245,19 +259,324 @@ def collect_multitrack_subtitle_segments(tracks_info: dict) -> list[MultitrackSu
     return sorted(segments, key=lambda item: (item.start, item.end))
 
 
+def _parse_subtitle_timestamp(value: str) -> float:
+    parts = value.replace(",", ".").split(":")
+    try:
+        if len(parts) == 3:
+            hours, minutes, seconds = int(parts[0]), int(parts[1]), float(parts[2])
+        elif len(parts) == 2:
+            hours, minutes, seconds = 0, int(parts[0]), float(parts[1])
+        else:
+            hours, minutes, seconds = 0, 0, float(parts[0])
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"Invalid subtitle timestamp: {value}") from error
+    if hours < 0 or minutes < 0 or minutes >= 60 or seconds < 0 or seconds >= 60:
+        raise ValueError(f"Invalid subtitle timestamp: {value}")
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def parse_subtitle_text(
+    value: str,
+    style: dict[str, object] | None = None,
+) -> list[MultitrackSubtitleSegment]:
+    """Parse SRT, inline timestamp, and bracketed subtitle text into segments."""
+    text = str(value or "").replace("\ufeff", "").replace("\r\n", "\n").replace("\r", "\n")
+    if not text.strip():
+        return []
+
+    lines = text.split("\n")
+    segments: list[MultitrackSubtitleSegment] = []
+    line_index = 0
+    while line_index < len(lines):
+        current = lines[line_index].strip()
+        if not current:
+            line_index += 1
+            continue
+
+        if current.isdigit() and line_index + 1 < len(lines):
+            next_line = lines[line_index + 1].strip()
+            if _SUBTITLE_RANGE_RE.fullmatch(next_line):
+                line_index += 1
+                current = next_line
+
+        range_match = _SUBTITLE_RANGE_RE.fullmatch(current)
+        if range_match is None:
+            raise ValueError(
+                f"Expected a subtitle timestamp at line {line_index + 1}: {current}"
+            )
+
+        start = _parse_subtitle_timestamp(range_match.group("start"))
+        end = _parse_subtitle_timestamp(range_match.group("end"))
+        if end <= start:
+            raise ValueError(
+                f"Subtitle end timestamp must be later than its start at line {line_index + 1}."
+            )
+
+        caption_lines: list[str] = []
+        inline_text = range_match.group("text").lstrip(" \t:-")
+        if inline_text:
+            caption_lines.append(inline_text.rstrip())
+
+        line_index += 1
+        while line_index < len(lines):
+            candidate = lines[line_index]
+            stripped = candidate.strip()
+            if not stripped:
+                line_index += 1
+                break
+            if _SUBTITLE_RANGE_RE.fullmatch(stripped):
+                break
+            if (
+                stripped.isdigit()
+                and line_index + 1 < len(lines)
+                and _SUBTITLE_RANGE_RE.fullmatch(lines[line_index + 1].strip())
+            ):
+                break
+            caption_lines.append(candidate.rstrip())
+            line_index += 1
+
+        caption = "\n".join(caption_lines).strip()
+        if not caption:
+            raise ValueError(f"Subtitle text is missing at line {line_index + 1}.")
+        segments.append(
+            MultitrackSubtitleSegment(
+                start=start,
+                end=end,
+                text=caption,
+                style=_normalized_subtitle_style(style),
+            )
+        )
+
+    return sorted(segments, key=lambda item: (item.start, item.end))
+
+
 def write_srt_file(segments: list[MultitrackSubtitleSegment], path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(subtitle_segments_to_srt(segments), encoding="utf-8")
+    return path
+
+
+def subtitle_segments_to_srt(segments: Iterable[object]) -> str:
+    """Format timestamped subtitle segment objects or dictionaries as SRT."""
     blocks = []
     for index, segment in enumerate(segments, start=1):
+        if isinstance(segment, dict):
+            start = segment.get("start")
+            end = segment.get("end")
+            text = segment.get("text")
+        else:
+            start = getattr(segment, "start", None)
+            end = getattr(segment, "end", None)
+            text = getattr(segment, "text", None)
+        try:
+            start_seconds = float(start)
+            end_seconds = float(end)
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"Invalid subtitle timestamps at segment {index}.") from error
+        if end_seconds <= start_seconds:
+            raise ValueError(f"Subtitle end timestamp must be later than its start at segment {index}.")
+        subtitle_text = _escape_srt_text(str(text or ""))
+        if not subtitle_text:
+            raise ValueError(f"Subtitle text is missing at segment {index}.")
         blocks.append(
             "\n".join([
                 str(index),
-                f"{_format_srt_timestamp(segment.start)} --> {_format_srt_timestamp(segment.end)}",
-                _escape_srt_text(segment.text),
+                f"{_format_srt_timestamp(start_seconds)} --> {_format_srt_timestamp(end_seconds)}",
+                subtitle_text,
             ])
         )
-    path.write_text("\n\n".join(blocks) + ("\n" if blocks else ""), encoding="utf-8")
-    return path
+    return "\n\n".join(blocks) + ("\n" if blocks else "")
+
+
+def _format_decimal_seconds(seconds: float) -> str:
+    return f"{max(0.0, seconds):.3f}".rstrip("0").rstrip(".")
+
+
+def subtitle_segments_to_timestamp_text(segments: Iterable[object]) -> str:
+    """Format subtitle segments as ``(start, end) text`` lines."""
+    lines: list[str] = []
+    for index, segment in enumerate(segments, start=1):
+        if isinstance(segment, dict):
+            start = segment.get("start")
+            end = segment.get("end")
+            text = segment.get("text")
+        else:
+            start = getattr(segment, "start", None)
+            end = getattr(segment, "end", None)
+            text = getattr(segment, "text", None)
+        try:
+            start_seconds = float(start)
+            end_seconds = float(end)
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"Invalid subtitle timestamps at segment {index}.") from error
+        if end_seconds <= start_seconds:
+            raise ValueError(f"Subtitle end timestamp must be later than its start at segment {index}.")
+        subtitle_text = _escape_srt_text(str(text or ""))
+        if not subtitle_text:
+            raise ValueError(f"Subtitle text is missing at segment {index}.")
+        lines.append(
+            f"({_format_decimal_seconds(start_seconds)}, {_format_decimal_seconds(end_seconds)}) "
+            f"{subtitle_text}"
+        )
+    return "\n".join(lines)
+
+
+def limit_subtitle_segment_length(segments: Iterable[object], max_length: int) -> list[dict]:
+    """Split long subtitle text and distribute its original timing proportionally."""
+    if max_length < 1:
+        raise ValueError("max_length must be at least 1")
+    result: list[dict] = []
+    for index, segment in enumerate(segments, start=1):
+        if not isinstance(segment, dict):
+            raise ValueError(f"Invalid subtitle segment at index {index}.")
+        text = str(segment.get("text") or "").strip()
+        try:
+            start = float(segment.get("start"))
+            end = float(segment.get("end"))
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"Invalid subtitle timestamps at segment {index}.") from error
+        if not text or end <= start:
+            continue
+        if len(text) <= max_length:
+            result.append({"start": start, "end": end, "text": text})
+            continue
+
+        duration = end - start
+        text_length = len(text)
+        for offset in range(0, text_length, max_length):
+            chunk = text[offset:offset + max_length]
+            chunk_end_offset = min(text_length, offset + len(chunk))
+            result.append({
+                "start": start + duration * offset / text_length,
+                "end": start + duration * chunk_end_offset / text_length,
+                "text": chunk,
+            })
+    return result
+
+
+def _split_text_at_natural_boundaries(text: str, max_length: int) -> list[str]:
+    clauses: list[str] = []
+    current = ""
+    for char in text.strip():
+        current += char
+        if char in _PUNCTUATION_CHARS:
+            clauses.append(current.strip())
+            current = ""
+    if current.strip():
+        clauses.append(current.strip())
+
+    result: list[str] = []
+    for clause in clauses:
+        if len(clause) <= max_length:
+            result.append(clause)
+            continue
+
+        words = re.findall(r"\S+", clause)
+        if len(words) <= 1 and _is_cjk_text(clause):
+            try:
+                import jieba  # type: ignore[import-not-found]
+
+                words = [word.strip() for word in jieba.lcut(clause) if word.strip()]
+            except ImportError:
+                words = list(clause)
+        if len(words) <= 1:
+            result.append(clause)
+            continue
+
+        chunk = ""
+        for word in words:
+            joined = _join_subtitle_text(chunk, word)
+            if chunk and len(joined) > max_length:
+                result.append(chunk)
+                chunk = word
+            else:
+                chunk = joined
+        if chunk:
+            result.append(chunk)
+    return result
+
+
+def _expand_timed_subtitle_unit(unit: dict, max_length: int) -> list[dict]:
+    text = str(unit.get("text") or "").strip()
+    pieces = _split_text_at_natural_boundaries(text, max_length)
+    if len(pieces) <= 1:
+        return [{"start": float(unit["start"]), "end": float(unit["end"]), "text": text}]
+
+    start = float(unit["start"])
+    end = float(unit["end"])
+    duration = end - start
+    total_weight = sum(max(1, len(piece)) for piece in pieces)
+    offset = 0
+    expanded: list[dict] = []
+    for piece in pieces:
+        weight = max(1, len(piece))
+        piece_start = start + duration * offset / total_weight
+        offset += weight
+        piece_end = start + duration * offset / total_weight
+        expanded.append({"start": piece_start, "end": piece_end, "text": piece})
+    return expanded
+
+
+def smart_split_subtitle_segments(segments: Iterable[object], max_length: int) -> list[dict]:
+    """Build natural subtitle sentences from timed words or model segments."""
+    if max_length < 1:
+        raise ValueError("max_length must be at least 1")
+
+    units: list[dict] = []
+    for index, segment in enumerate(segments, start=1):
+        if not isinstance(segment, dict):
+            raise ValueError(f"Invalid subtitle segment at index {index}.")
+        text = str(segment.get("text") or "").strip()
+        try:
+            start = float(segment.get("start"))
+            end = float(segment.get("end"))
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"Invalid subtitle timestamps at segment {index}.") from error
+        if not text or end <= start:
+            continue
+        units.extend(_expand_timed_subtitle_unit(
+            {"start": start, "end": end, "text": text},
+            max_length,
+        ))
+
+    result: list[dict] = []
+    current: dict | None = None
+
+    def flush() -> None:
+        nonlocal current
+        if current is not None:
+            result.append(current)
+            current = None
+
+    for unit in sorted(units, key=lambda item: (item["start"], item["end"])):
+        text = str(unit["text"]).strip()
+        if text and all(_is_punctuation(char) for char in text):
+            if current is not None:
+                current["end"] = max(current["end"], unit["end"])
+                current["text"] = _join_subtitle_text(current["text"], text)
+                flush()
+            elif result:
+                result[-1]["end"] = max(result[-1]["end"], unit["end"])
+                result[-1]["text"] = _join_subtitle_text(result[-1]["text"], text)
+            continue
+
+        if current is not None:
+            gap = unit["start"] - current["end"]
+            joined = _join_subtitle_text(current["text"], text)
+            if gap > _MAX_SUBTITLE_GAP_SECONDS or len(joined) > max_length:
+                flush()
+
+        if current is None:
+            current = {"start": unit["start"], "end": unit["end"], "text": text}
+        else:
+            current["end"] = max(current["end"], unit["end"])
+            current["text"] = _join_subtitle_text(current["text"], text)
+
+        if current["text"] and _is_punctuation(current["text"][-1]):
+            flush()
+
+    flush()
+    return result
 
 
 def write_ass_file(
@@ -533,6 +852,9 @@ def _restore_subtitle_punctuation(
     segments: list[dict],
     transcript: str | None,
     language: str | None = None,
+    *,
+    add_fallback: bool = True,
+    add_final_fallback: bool = False,
 ) -> list[dict]:
     if not segments:
         return []
@@ -552,7 +874,10 @@ def _restore_subtitle_punctuation(
                 punctuation, cursor = matched
             else:
                 punctuation = ""
-            next_segment["text"] = text + (punctuation or _default_punctuation(index, len(segments), is_cjk))
+            fallback = ""
+            if add_fallback or (add_final_fallback and index == len(segments) - 1):
+                fallback = _default_punctuation(index, len(segments), is_cjk)
+            next_segment["text"] = text + (punctuation or fallback)
         restored.append(next_segment)
     return restored
 
@@ -653,3 +978,48 @@ def normalize_subtitle_segments(value: object) -> list[dict]:
             continue
         segments.append({"start": start_number, "end": end_number, "text": text_value})
     return _merge_subtitle_segments(segments)
+
+
+def normalize_subtitle_tokens(value: object) -> list[dict]:
+    """Extract the finest available timed words, characters, or subtitle segments."""
+    tokens: list[dict] = []
+
+    def collect(item: object) -> None:
+        if item is None or isinstance(item, (str, bytes)):
+            return
+        if isinstance(item, (list, tuple)):
+            for child in item:
+                collect(child)
+            return
+
+        words = _value_from(item, ("words", "characters", "tokens"))
+        word_items = _coerce_segment_items(words)
+        if word_items:
+            for child in word_items:
+                collect(child)
+            return
+
+        start = _value_from(item, _START_TIME_KEYS)
+        end = _value_from(item, _END_TIME_KEYS)
+        text = _value_from(item, (*_TEXT_KEYS, "word", "token", "character"))
+        if start is not None and end is not None and text is not None:
+            try:
+                start_number = float(start)
+                end_number = float(end)
+            except (TypeError, ValueError):
+                return
+            text_value = str(text).strip()
+            if text_value and end_number > start_number:
+                tokens.append({"start": start_number, "end": end_number, "text": text_value})
+            return
+
+        for key in _SEGMENT_CONTAINER_KEYS:
+            nested = _value_from(item, (key,))
+            nested_items = _coerce_segment_items(nested)
+            if nested_items is not None:
+                for child in nested_items:
+                    collect(child)
+                return
+
+    collect(value)
+    return sorted(tokens, key=lambda item: (item["start"], item["end"]))

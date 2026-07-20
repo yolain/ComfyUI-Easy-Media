@@ -55,6 +55,8 @@ class EasyMediaExtension(ComfyExtension):
             TimelineInfoOutput,
             MultiTrackInfoOutput,
             MultiTrackAudioOutput,
+            RecognizeSubtitle,
+            AddSubtitleToVideo,
             MultiTrackAddSubtitleToVideo,
             MultiTrackTaskOutput,
             TimelineSegmentOutput,

@@ -119,3 +119,27 @@ def test_merge_audio_inputs_after_handles_six_autogrow_slots():
     assert result["sample_rate"] == 4
     assert result["waveform"].shape == (1, 2, 6)
     assert result["waveform"][0, 0].tolist() == [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]
+
+
+def test_save_audio_to_temp_wav_serializes_first_batch(monkeypatch, tmp_path):
+    audio_utils = _load_audio_utils()
+    calls = {}
+
+    class FakeTorchaudio:
+        @staticmethod
+        def save(path, waveform, sample_rate):
+            calls["save"] = (path, waveform.clone(), sample_rate)
+            Path(path).write_bytes(b"wav")
+
+    monkeypatch.setitem(sys.modules, "torchaudio", FakeTorchaudio)
+    monkeypatch.setattr(audio_utils.folder_paths, "get_temp_directory", lambda: str(tmp_path))
+    audio = {
+        "waveform": torch.tensor([[[0.1, 0.2]], [[0.3, 0.4]]]),
+        "sample_rate": 16000,
+    }
+
+    output = audio_utils.save_audio_to_temp_wav(audio)
+
+    assert output is not None and output.is_file()
+    assert calls["save"][1].shape == (1, 2)
+    assert calls["save"][2] == 16000

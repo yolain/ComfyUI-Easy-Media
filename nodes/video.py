@@ -16,7 +16,7 @@ import torch
 from comfy_api.latest import Input, InputImpl, Types, io, ui
 from comfy.utils import ProgressBar
 
-from ..utils import merge_two_audio
+from ..utils import merge_two_audio, save_audio_to_temp_wav
 from ..utils.video import extract_merge_spec, ffmpeg_concat, ffmpeg_concat_with_fade, ffmpeg_extract_audio, ffmpeg_replace_audio, ffmpeg_supports_xfade, ffprobe_info, normalize_video_images, tensor_crossfade_audio, tensor_crossfade_images, trim_video_with_ffmpeg, validate_merge_compatibility, video_input_to_local_file
 
 logger = logging.getLogger(__name__)
@@ -219,33 +219,9 @@ class EasySaveVideo(io.ComfyNode):
         )
 
 def _save_audio_to_temp_wav(audio: dict) -> str | None:
-    """Serialize a ComfyUI audio dict to a temp WAV file.
-
-    Returns the file path on success, None if the audio cannot be serialized.
-    """
-    waveform = audio.get("waveform")
-    sample_rate = audio.get("sample_rate")
-    if waveform is None or sample_rate is None:
-        return None
-    # waveform: [batch, channels, samples] — take first batch item
-    if waveform.dim() == 3:
-        waveform = waveform[0]
-    try:
-        import torchaudio  # type: ignore[import]
-        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".wav", dir=folder_paths.get_temp_directory())
-        os.close(tmp_fd)
-        torchaudio.save(tmp_path, waveform.cpu().float(), int(sample_rate))
-        return tmp_path
-    except Exception:
-        pass
-    try:
-        import soundfile as sf  # type: ignore[import]
-        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".wav", dir=folder_paths.get_temp_directory())
-        os.close(tmp_fd)
-        sf.write(tmp_path, waveform.cpu().float().numpy().T, int(sample_rate))
-        return tmp_path
-    except Exception:
-        return None
+    """Backward-compatible wrapper for the shared AUDIO serializer."""
+    path = save_audio_to_temp_wav(audio)
+    return str(path) if path is not None else None
 
 
 def _replace_video_audio(source_video, audio: dict):
