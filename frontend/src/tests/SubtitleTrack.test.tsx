@@ -5,6 +5,50 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import type { MultiTrack } from '@/types/multitrack'
 
 describe('SubtitleTrack', () => {
+  it('adds a subtitle using the exact internal gap range', () => {
+    const track: MultiTrack = {
+      id: 'subtitle-track',
+      name: 'Subtitle 1',
+      type: 'subtitle',
+      color: '#9D4937',
+      muted: false,
+      locked: false,
+      segments: [
+        { id: 'first', start_frame: 0, end_frame: 24, color: '#9D4937', content: { media_type: 'subtitle', text: 'First' } },
+        { id: 'second', start_frame: 72, end_frame: 96, color: '#9D4937', content: { media_type: 'subtitle', text: 'Second' } },
+      ],
+    }
+    const onAddSubtitleSegment = vi.fn()
+
+    render(
+      <TooltipProvider>
+        <SubtitleTrack
+          track={track}
+          totalLength={120}
+          frameRate={24}
+          width={480}
+          canvasScale={1}
+          selectedSegmentIds={new Set()}
+          onSelectSegment={vi.fn()}
+          onAddSubtitleSegment={onAddSubtitleSegment}
+          onDeleteSegment={vi.fn()}
+          onCloneSegment={vi.fn()}
+          onDeleteTrack={vi.fn()}
+          onTrackVisibilityChange={vi.fn()}
+          onEditSubtitleSegment={vi.fn()}
+          onResizeSegment={vi.fn()}
+          onResizeSegmentPreview={vi.fn()}
+          onMoveSegment={vi.fn()}
+          onDragPreviewChange={vi.fn()}
+          onDragPreviewEnd={vi.fn()}
+        />
+      </TooltipProvider>,
+    )
+
+    fireEvent.click(screen.getByTestId('track-gap-add-24-72'))
+    expect(onAddSubtitleSegment).toHaveBeenCalledWith('subtitle-track', 24, 72)
+  })
+
   it('hides delete and keeps visibility toggle after subtitle segments', () => {
     const track: MultiTrack = {
       id: 'subtitle-track',
@@ -23,6 +67,7 @@ describe('SubtitleTrack', () => {
     }
 
     const onTrackVisibilityChange = vi.fn()
+    const onAddSubtitleSegment = vi.fn()
     const { container } = render(
       <TooltipProvider>
         <SubtitleTrack
@@ -33,7 +78,7 @@ describe('SubtitleTrack', () => {
           canvasScale={1}
           selectedSegmentIds={new Set()}
           onSelectSegment={vi.fn()}
-          onAddSubtitleSegment={vi.fn()}
+          onAddSubtitleSegment={onAddSubtitleSegment}
           onDeleteSegment={vi.fn()}
           onCloneSegment={vi.fn()}
           onDeleteTrack={vi.fn()}
@@ -48,7 +93,9 @@ describe('SubtitleTrack', () => {
       </TooltipProvider>,
     )
 
-    const addButton = screen.getByRole('button', { name: 'Add subtitle' })
+    const leadingGapButton = screen.getByTestId('track-gap-add-0-80')
+    const addButton = screen.getAllByRole('button', { name: 'Add subtitle' })
+      .find((button) => button !== leadingGapButton)!
     const visibilityButton = screen.getByRole('button', { name: 'Hide Subtitle 1' })
     const actionGroup = addButton.parentElement
 
@@ -57,6 +104,8 @@ describe('SubtitleTrack', () => {
     expect(actionGroup?.className).toContain('flex-row')
     expect(actionGroup?.style.left).toBe('206px')
     expect(container.querySelector('.lucide-eye-off')).not.toBeNull()
+    fireEvent.click(leadingGapButton)
+    expect(onAddSubtitleSegment).toHaveBeenCalledWith('subtitle-track', 0, 80)
     fireEvent.click(visibilityButton)
     expect(onTrackVisibilityChange).toHaveBeenCalledWith('subtitle-track', false)
   })

@@ -90,6 +90,74 @@ describe('MultiTrackSegmentBlock context menu', () => {
     expect(onDelete).toHaveBeenCalledWith('task-segment')
   })
 
+  it('hides the task index in marker mode and tiles images with prompt text in overview mode', () => {
+    const { container } = render(
+      <MultiTrackSegmentBlock
+        trackType="task"
+        segmentIndex={3}
+        segment={{
+          ...segment('task'),
+          content: {
+            media_type: 'none',
+            task_mode: 'default',
+            user_prompt: 'A prompt shown at the bottom',
+            images: [{ id: 'image', source_type: 'input', file_path: 'reference.png' }],
+          },
+        }}
+        totalLength={10}
+        frameRate={24}
+        areaWidth={200}
+        canvasScale={1}
+        selected={false}
+        showTaskIndex={false}
+        taskOverview
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        onResize={vi.fn()}
+        onResizePreview={vi.fn()}
+        onMove={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByText(/Task3/)).toBeNull()
+    expect(screen.getByText('A prompt shown at the bottom')).not.toBeNull()
+    expect(screen.queryByText('00:00:05')).toBeNull()
+    expect(container.querySelectorAll('img').length).toBeGreaterThan(1)
+    expect(container.querySelector('img')?.getAttribute('src')).toContain('reference.png')
+  })
+
+  it('clamps a text-only task prompt to three lines in overview mode without showing its duration', () => {
+    render(
+      <MultiTrackSegmentBlock
+        trackType="task"
+        segmentIndex={1}
+        segment={{
+          ...segment('task'),
+          content: {
+            media_type: 'none',
+            task_mode: 'default',
+            user_prompt: 'A long text-only task prompt',
+          },
+        }}
+        totalLength={10}
+        frameRate={24}
+        areaWidth={200}
+        canvasScale={1}
+        selected={false}
+        taskOverview
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        onResize={vi.fn()}
+        onResizePreview={vi.fn()}
+        onMove={vi.fn()}
+      />,
+    )
+
+    const prompt = screen.getByText('A long text-only task prompt')
+    expect(prompt.className).toContain('line-clamp-3')
+    expect(screen.queryByText('00:00:05')).toBeNull()
+  })
+
   it('offers clone and delete actions for subtitle segments', () => {
     const { onClone, onDelete } = renderBlock('subtitle')
 

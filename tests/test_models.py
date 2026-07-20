@@ -108,3 +108,69 @@ def test_require_whisper_large_v3_matches_audio_encoder_filename(monkeypatch, tm
     )
 
     assert models.require_whisper_large_v3_model_path() == model_file
+
+
+def test_require_whisper_large_v3_prefers_exact_registered_filename(monkeypatch, tmp_path):
+    audio_encoders = tmp_path / "audio_encoders"
+    partial_match = audio_encoders / "whisper_large_v3_custom.safetensors"
+    exact_match = audio_encoders / "Whisper_Large_V3_FP16.safetensors"
+    monkeypatch.setattr(
+        models.folder_paths,
+        "get_filename_list",
+        lambda category: [partial_match.name, exact_match.name]
+        if category == "audio_encoders"
+        else [],
+    )
+    monkeypatch.setattr(
+        models.folder_paths,
+        "get_full_path",
+        lambda category, filename: str(audio_encoders / filename)
+        if category == "audio_encoders"
+        else None,
+    )
+
+    assert models.require_whisper_large_v3_model_path() == exact_match
+
+
+def test_require_whisper_large_v3_prefers_exact_hyphenated_filename(monkeypatch, tmp_path):
+    audio_encoders = tmp_path / "audio_encoders"
+    partial_match = audio_encoders / "whisper_large_v3_custom.safetensors"
+    exact_match = audio_encoders / "Whisper-Large-V3.safetensors"
+    monkeypatch.setattr(
+        models.folder_paths,
+        "get_filename_list",
+        lambda category: [partial_match.name, exact_match.name]
+        if category == "audio_encoders"
+        else [],
+    )
+    monkeypatch.setattr(
+        models.folder_paths,
+        "get_full_path",
+        lambda category, filename: str(audio_encoders / filename)
+        if category == "audio_encoders"
+        else None,
+    )
+
+    assert models.require_whisper_large_v3_model_path() == exact_match
+
+
+def test_require_whisper_large_v3_excludes_encode_candidates(monkeypatch, tmp_path):
+    audio_encoders = tmp_path / "audio_encoders"
+    encode_match = audio_encoders / "whisper_large_v3_fp16_encode.safetensors"
+    valid_match = audio_encoders / "whisper_large_v3_custom.safetensors"
+    monkeypatch.setattr(
+        models.folder_paths,
+        "get_filename_list",
+        lambda category: [encode_match.name, valid_match.name]
+        if category == "audio_encoders"
+        else [],
+    )
+    monkeypatch.setattr(
+        models.folder_paths,
+        "get_full_path",
+        lambda category, filename: str(audio_encoders / filename)
+        if category == "audio_encoders"
+        else None,
+    )
+
+    assert models.require_whisper_large_v3_model_path() == valid_match

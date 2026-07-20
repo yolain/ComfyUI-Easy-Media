@@ -198,8 +198,9 @@ bun run build:release
 | easy apiWorkflowGate | Determine if the workflow is an API call and pass through preceding input items |
 | LTXVAddGuidesFromBatchIndexes | Add guide images from batch images to specified frame indexes of latent variables |
 | LTXVMakeRefVideo | Expand a reference image batch into an IC-LoRA reference video |
-| BerniniModelPatch | Add Bernini context latent support for Wan model |
-| BerniniConditioning | Bernini context conditioning for video/image condition injection |
+| easy ltxMultiTrackEncode | Build Prompt Relay conditioning and LTX video/audio latents |
+| easy ltxI2VInplaceAndUpsample | Optionally upscale an LTX video latent and apply an image guide in place |
+| easy ltxSamplerSimple | Sample combined LTX audio/video latents and crop video guides |
 | easy berniniS2VConditioning | Unified Bernini + Wan S2V conditioning: original optional single-speaker audio, spatially masked single-speaker audio, or optional sequential two-speaker audio |
 
 ## Credits

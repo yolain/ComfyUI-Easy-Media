@@ -159,10 +159,44 @@ describe('multitrack utilities', () => {
     expect(data.total_length).toBe(120)
     expect(data.muted).toBe(false)
     expect(data.volume_db).toBe(0)
+    expect(data.task_overview).toBe(false)
     expect(data.tracks.every((track) => track.solo === false && track.volume_db === 0)).toBe(true)
     expect(data.tracks.map((track) => track.type)).toEqual(['task', 'video'])
     expect(data.tracks.map((track) => track.name)).toEqual(['Task 0', 'Video 0'])
     expect(data.tracks[0].task_mode).toBe('default')
+    expect(data.task_markers).toEqual([])
+  })
+
+  it('normalizes, sorts, deduplicates, and remaps task markers', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [{
+      id: 'task',
+      start_frame: 0,
+      end_frame: 120,
+      color: data.tracks[0].color,
+      content: { media_type: 'none', task_mode: 'default' },
+    }]
+    const normalized = normalizeTrackData({
+      ...data,
+      task_markers: [
+        { id: 'late', frame: 96 },
+        { id: 'early', frame: 24 },
+        { id: 'duplicate', frame: 24 },
+        { id: 'end', frame: 120 },
+        { id: 'outside', frame: 121 },
+      ],
+    })
+
+    expect(normalized.task_markers).toEqual([
+      { id: 'early', frame: 24 },
+      { id: 'late', frame: 96 },
+      { id: 'end', frame: 120 },
+    ])
+    expect(remapTrackDataFrameRate(normalized, 48).task_markers).toEqual([
+      { id: 'early', frame: 48 },
+      { id: 'late', frame: 192 },
+      { id: 'end', frame: 240 },
+    ])
   })
 
   it('uses only volume_db and muted for normalized audio settings', () => {

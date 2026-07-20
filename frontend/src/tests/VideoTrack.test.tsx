@@ -17,8 +17,18 @@ vi.mock('@/components/ui/popover', () => ({
 }))
 
 vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
-  MediaSelector: ({ value, defaultTab }: { value: string; defaultTab: string }) => (
-    <div data-testid="media-selector" data-value={value} data-default-tab={defaultTab} />
+  MediaSelector: ({ value, defaultTab, onChange }: {
+    value: string
+    defaultTab: string
+    onChange: (value: string, source: 'input') => void
+  }) => (
+    <button
+      type="button"
+      data-testid="media-selector"
+      data-value={value}
+      data-default-tab={defaultTab}
+      onClick={() => onChange('new.mp4', 'input')}
+    />
   ),
 }))
 
@@ -57,6 +67,49 @@ function videoTrack(): MultiTrack {
 }
 
 describe('VideoTrack', () => {
+  it('adds a video using the exact internal gap range', () => {
+    const track = videoTrack()
+    track.segments = [
+      { ...track.segments[0], id: 'first', start_frame: 0, end_frame: 24 },
+      { ...track.segments[0], id: 'second', start_frame: 72, end_frame: 96 },
+    ]
+    const onAddVideo = vi.fn()
+
+    render(
+      <TooltipProvider>
+        <VideoTrack
+          track={track}
+          totalLength={120}
+          frameRate={24}
+          width={480}
+          canvasScale={1}
+          selectedSegmentIds={new Set()}
+          onAddVideo={onAddVideo}
+          onSelectSegment={vi.fn()}
+          onDeleteSegment={vi.fn()}
+          canDeleteTrack={false}
+          onDeleteTrack={vi.fn()}
+          onTrackAudioSettingsChange={vi.fn()}
+          onResizeSegment={vi.fn()}
+          onResizeSegmentPreview={vi.fn()}
+          onMoveSegment={vi.fn()}
+          onDragPreviewChange={vi.fn()}
+          onDragPreviewEnd={vi.fn()}
+          onReplaceVideo={vi.fn()}
+          onSmartSplit={vi.fn()}
+          onSmartSplitTasks={vi.fn()}
+          cutMode={false}
+          onCutSegment={vi.fn()}
+        />
+      </TooltipProvider>,
+    )
+
+    fireEvent.click(screen.getByTestId('track-gap-add-24-72'))
+    fireEvent.click(screen.getAllByTestId('media-selector')[0])
+
+    expect(onAddVideo).toHaveBeenCalledWith('video-track', 'new.mp4', 'input', 24, 72)
+  })
+
   it('preselects the current video when a segment is opened for replacement', () => {
     render(
       <TooltipProvider>

@@ -13,6 +13,7 @@ import type { MultiTrack, MultiTrackSourceType } from '@/types/multitrack'
 import { MULTITRACK_LEFT_GUTTER } from './MultiTrackRuler'
 import { MultiTrackSegmentBlock } from './MultiTrackSegmentBlock'
 import { TrackAudioControls } from './TrackAudioControls'
+import { getTrackSegmentGaps, TrackGapAddButton } from './TrackGapAddButton'
 
 interface AudioTrackProps {
   track: MultiTrack
@@ -28,6 +29,8 @@ interface AudioTrackProps {
     filePath: string,
     sourceType: MultiTrackSourceType,
     previewUrl?: string,
+    startFrame?: number,
+    endFrame?: number,
   ) => void
   onReplaceAudio: (
     trackId: string,
@@ -94,6 +97,7 @@ export function AudioTrack({
   )
   const lastEnd = track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0)
   const actionLeft = track.segments.length === 0 ? 6 : (lastEnd / Math.max(totalLength, 1)) * width + 6
+  const gaps = getTrackSegmentGaps(track.segments)
   const reselectSegment = reselectAnchor
     ? track.segments.find((segment) => segment.id === reselectAnchor.segmentId)
     : undefined
@@ -145,6 +149,38 @@ export function AudioTrack({
               })
             }}
           />
+        ))}
+        {gaps.map((gap) => (
+          <Popover key={`${gap.startFrame}-${gap.endFrame}`}>
+            <PopoverTrigger asChild>
+              <TrackGapAddButton
+                gap={gap}
+                totalLength={totalLength}
+                width={width}
+                ariaLabel={t('multitrack.addAudioSegment')}
+              />
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="center">
+              <MediaSelector
+                value=""
+                mediaType="audio"
+                defaultTab="inputs"
+                slotItems={slotItems}
+                onChange={(filePath, sourceType = 'input') => {
+                  const slotAudioName = slotItems.find((item) => item.value === filePath)?.audio_name
+                  const previewUrl = slotAudioName ? mediaPathToViewUrl(slotAudioName, 'input') : undefined
+                  onAddAudio(
+                    track.id,
+                    filePath,
+                    sourceType,
+                    previewUrl,
+                    gap.startFrame,
+                    gap.endFrame,
+                  )
+                }}
+              />
+            </PopoverContent>
+          </Popover>
         ))}
         <div className="absolute top-1/2 flex -translate-y-1/2 gap-1" style={{ left: actionLeft }}>
           <Popover open={mediaSelectorOpen} onOpenChange={setMediaSelectorOpen}>

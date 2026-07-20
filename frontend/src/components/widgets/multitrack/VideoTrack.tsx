@@ -11,6 +11,7 @@ import type { MultiTrack, MultiTrackSourceType } from '@/types/multitrack'
 import { MULTITRACK_LEFT_GUTTER } from './MultiTrackRuler'
 import { MultiTrackSegmentBlock } from './MultiTrackSegmentBlock'
 import { TrackAudioControls } from './TrackAudioControls'
+import { getTrackSegmentGaps, TrackGapAddButton } from './TrackGapAddButton'
 
 interface VideoTrackProps {
   track: MultiTrack
@@ -19,7 +20,13 @@ interface VideoTrackProps {
   width: number
   canvasScale: number
   selectedSegmentIds: Set<string>
-  onAddVideo: (trackId: string, filePath: string, sourceType: MultiTrackSourceType) => void
+  onAddVideo: (
+    trackId: string,
+    filePath: string,
+    sourceType: MultiTrackSourceType,
+    startFrame?: number,
+    endFrame?: number,
+  ) => void
   onSelectSegment: (segmentId: string, mode?: 'replace' | 'toggle' | 'add') => void
   onDeleteSegment: (segmentId: string) => void
   canDeleteTrack: boolean
@@ -84,6 +91,7 @@ export function VideoTrack({
     ?? ''
   const lastEnd = track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0)
   const addLeft = (lastEnd / Math.max(totalLength, 1)) * width
+  const gaps = getTrackSegmentGaps(track.segments)
 
   return (
     <div className="relative flex h-16 border-b border-border">
@@ -130,6 +138,29 @@ export function VideoTrack({
               })
             }}
           />
+        ))}
+
+        {gaps.map((gap) => (
+          <Popover key={`${gap.startFrame}-${gap.endFrame}`}>
+            <PopoverTrigger asChild>
+              <TrackGapAddButton
+                gap={gap}
+                totalLength={totalLength}
+                width={width}
+                ariaLabel={t('multitrack.addVideo')}
+              />
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="center">
+              <MediaSelector
+                value=""
+                mediaType="video"
+                defaultTab="inputs"
+                onChange={(filePath, sourceType = 'input') => {
+                  onAddVideo(track.id, filePath, sourceType, gap.startFrame, gap.endFrame)
+                }}
+              />
+            </PopoverContent>
+          </Popover>
         ))}
 
         <div

@@ -77,6 +77,11 @@ export interface MultiTrackSegment {
   color: string
 }
 
+export interface MultiTrackTaskMarker {
+  id: string
+  frame: number
+}
+
 export interface MultiTrack {
   id: string
   name: string
@@ -96,6 +101,8 @@ export interface TrackData {
   tracks: MultiTrack[]
   total_length: number
   frame_rate: number
+  task_markers?: MultiTrackTaskMarker[]
+  task_overview?: boolean
   muted?: boolean
   volume_db?: number
 }
@@ -117,6 +124,7 @@ export interface TracksInfoMediaItem {
 export interface TracksInfo {
   total_length: number
   frame_rate: number
+  task_markers?: MultiTrackTaskMarker[]
   muted?: boolean
   volume_db?: number
   width: number

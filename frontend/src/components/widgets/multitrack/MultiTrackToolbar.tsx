@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
-import { Magnet, Maximize2, Minimize2, Redo2, Trash2, Undo2, ZoomOut } from 'lucide-react'
+import { GalleryHorizontalEnd, Magnet, Maximize2, Minimize2, Redo2, Trash2, Undo2, ZoomOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { SplitCenterIcon, SplitLeftDotsIcon, SplitRightDotsIcon } from '@/components/ui/custom-lucide-icon'
+import { SplitCenterIcon, SplitLeftDotsIcon, SplitRightDotsIcon, TaskMarkerIcon } from '@/components/ui/custom-lucide-icon'
 import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useT } from '@/lib/i18n'
@@ -17,10 +17,14 @@ interface MultiTrackToolbarProps {
   isPlaying: boolean
   zoom: number
   snapEnabled: boolean
+  taskOverview: boolean
   timelineCollapsed: boolean
   onPlayPause: () => void
   onZoomChange: (zoom: number) => void
   onSnapEnabledChange: (enabled: boolean) => void
+  canAddTaskMarker: boolean
+  onAddTaskMarker: () => void
+  onTaskOverviewChange: (enabled: boolean) => void
   onToggleTimeline: () => void
   canDelete: boolean
   onDeleteSelected: () => void
@@ -43,10 +47,14 @@ export function MultiTrackToolbar({
   isPlaying,
   zoom,
   snapEnabled,
+  taskOverview,
   timelineCollapsed,
   onPlayPause,
   onZoomChange,
   onSnapEnabledChange,
+  canAddTaskMarker,
+  onAddTaskMarker,
+  onTaskOverviewChange,
   onToggleTimeline,
   canDelete,
   onDeleteSelected,
@@ -176,6 +184,22 @@ export function MultiTrackToolbar({
             <Trash2 className={TOOLBAR_ICON_CLASS} />
           </Button>
         ))}
+        {renderTooltip(t('multitrack.addTaskMarker'), (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className={`${TOOLBAR_ICON_BUTTON_CLASS} text-muted-foreground cursor-pointer`}
+            disabled={!canAddTaskMarker}
+            aria-label={t('multitrack.addTaskMarker')}
+            onClick={(event) => {
+              event.stopPropagation()
+              onAddTaskMarker()
+            }}
+          >
+            <TaskMarkerIcon className={TOOLBAR_ICON_CLASS} />
+          </Button>
+        ))}
       </div>
 
       <div className="flex items-center gap-2 text-muted-foreground">
@@ -217,6 +241,22 @@ export function MultiTrackToolbar({
       </div>
 
       <div className="ml-auto flex h-6 max-h-6 min-h-6 items-center gap-0.5 overflow-hidden">
+        {renderTooltip(t('multitrack.taskOverview'), (
+          <Button
+            type="button"
+            variant={taskOverview ? 'outline' : 'ghost'}
+            size="icon"
+            className={`${TOOLBAR_ICON_BUTTON_CLASS} cursor-pointer ${taskOverview ? 'text-highlight' : 'text-muted-foreground'}`}
+            aria-label={t('multitrack.taskOverview')}
+            aria-pressed={taskOverview}
+            onClick={(event) => {
+              event.stopPropagation()
+              onTaskOverviewChange(!taskOverview)
+            }}
+          >
+            <GalleryHorizontalEnd className={TOOLBAR_ICON_CLASS} />
+          </Button>
+        ))}
         {renderTooltip(t('multitrack.timelineSnap'), (
           <Button
             type="button"

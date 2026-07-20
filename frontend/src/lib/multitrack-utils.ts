@@ -4,6 +4,7 @@ import type {
   MultiTrackSegmentContent,
   MultiTrackSourceType,
   MultiTrackTaskMode,
+  MultiTrackTaskMarker,
   MultiTrackType,
   TrackData,
 } from '@/types/multitrack'
@@ -134,7 +135,7 @@ export function parseMultiTrackDurationTimecode(value: string, frameRate: number
 
 export function formatMultiTrackTime(
   frame: number,
-  options: { frameRate?: number; showFrames?: boolean } = {},
+  options: { frameRate?: number; showFrames?: boolean; showHours?: boolean } = {},
 ): string {
   const frameRate = options.frameRate && options.frameRate > 0 ? options.frameRate : 0
   const totalFrames = Math.max(0, options.showFrames ? Math.round(frame) : Math.floor(frame))
@@ -146,18 +147,19 @@ export function formatMultiTrackTime(
   const hours = Math.floor(totalSeconds / 3600)
   const minutes = Math.floor((totalSeconds % 3600) / 60)
   const wholeSeconds = totalSeconds % 60
-  const minutesLabel = minutes.toString().padStart(2, '0')
+  const displayedMinutes = options.showHours === false ? Math.floor(totalSeconds / 60) : minutes
+  const minutesLabel = displayedMinutes.toString().padStart(2, '0')
   const secondsLabel = wholeSeconds.toString().padStart(2, '0')
 
   if (options.showFrames && frameRate > 0) {
     const frameLabel = (totalFrames % frameRate).toString().padStart(2, '0')
-    if (hours > 0) {
+    if (options.showHours !== false && hours > 0) {
       return `${hours.toString().padStart(2, '0')}:${minutesLabel}:${secondsLabel}:${frameLabel}`
     }
     return `${minutesLabel}:${secondsLabel}:${frameLabel}`
   }
 
-  if (hours > 0) {
+  if (options.showHours !== false && hours > 0) {
     return `${hours.toString().padStart(2, '0')}:${minutesLabel}:${secondsLabel}`
   }
   return `${minutesLabel}:${secondsLabel}`
@@ -1131,6 +1133,10 @@ export function remapTrackDataFrameRate(data: TrackData, nextFrameRate: number):
   return {
     ...data,
     frame_rate: safeNextFrameRate,
+    task_markers: (data.task_markers ?? []).map((marker) => ({
+      ...marker,
+      frame: remapFrameToRate(marker.frame, data.frame_rate, safeNextFrameRate),
+    })),
     tracks,
     total_length: calculateTotalLength(tracks, safeNextFrameRate),
   }
@@ -1416,6 +1422,8 @@ export function createDefaultTrackData(): TrackData {
   return {
     muted: false,
     volume_db: MULTITRACK_DEFAULT_VOLUME_DB,
+    task_markers: [],
+    task_overview: false,
     tracks: [
       {
         id: uuid(),
@@ -1505,13 +1513,37 @@ export function normalizeTrackData(raw: LegacyTrackData): TrackData {
     const typeName = track.type.charAt(0).toUpperCase() + track.type.slice(1)
     return { ...track, name: `${typeName} ${index}` }
   })
+  const totalLength = normalizeTotalLength(namedTracks, frameRate)
+  const taskMarkers = normalizeTaskMarkers(raw.task_markers, totalLength)
 
   return {
     ...omitLegacyVolume(raw),
     muted: raw.muted ?? false,
     volume_db: normalizedVolumeDb(raw.volume_db),
     frame_rate: frameRate,
-    total_length: normalizeTotalLength(namedTracks, frameRate),
+    total_length: totalLength,
+    task_markers: taskMarkers,
+    task_overview: raw.task_overview === true,
     tracks: namedTracks,
   }
+}
+
+function normalizeTaskMarkers(value: unknown, totalLength: number): MultiTrackTaskMarker[] {
+  if (!Array.isArray(value)) return []
+
+  const sorted = value.flatMap((marker) => {
+    if (!marker || typeof marker !== 'object') return []
+    const candidate = marker as Partial<MultiTrackTaskMarker>
+    const frame = normalizeFrameValue(candidate.frame)
+    if (typeof candidate.id !== 'string' || candidate.id.length === 0) return []
+    if (frame === null || frame <= 0 || frame > totalLength) return []
+    return [{ id: candidate.id, frame }]
+  }).sort((left, right) => left.frame - right.frame)
+
+  const seenFrames = new Set<number>()
+  return sorted.filter((marker) => {
+    if (seenFrames.has(marker.frame)) return false
+    seenFrames.add(marker.frame)
+    return true
+  })
 }

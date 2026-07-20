@@ -33,10 +33,14 @@ function renderToolbar(
         isPlaying={false}
         zoom={1}
         snapEnabled
+        taskOverview={false}
         timelineCollapsed={timelineCollapsed}
         onPlayPause={vi.fn()}
         onZoomChange={vi.fn()}
         onSnapEnabledChange={vi.fn()}
+        onAddTaskMarker={vi.fn()}
+        canAddTaskMarker
+        onTaskOverviewChange={vi.fn()}
         onToggleTimeline={vi.fn()}
         canDelete={false}
         onDeleteSelected={vi.fn()}
@@ -75,10 +79,14 @@ describe('MultiTrackToolbar', () => {
           isPlaying={false}
           zoom={1}
           snapEnabled
+          taskOverview={false}
           timelineCollapsed={false}
           onPlayPause={vi.fn()}
           onZoomChange={vi.fn()}
           onSnapEnabledChange={vi.fn()}
+          canAddTaskMarker
+          onAddTaskMarker={vi.fn()}
+          onTaskOverviewChange={vi.fn()}
           onToggleTimeline={vi.fn()}
           canDelete={false}
           onDeleteSelected={vi.fn()}
@@ -118,10 +126,14 @@ describe('MultiTrackToolbar', () => {
           isPlaying={false}
           zoom={1}
           snapEnabled
+          taskOverview={false}
           timelineCollapsed
           onPlayPause={vi.fn()}
           onZoomChange={vi.fn()}
           onSnapEnabledChange={vi.fn()}
+          canAddTaskMarker
+          onAddTaskMarker={vi.fn()}
+          onTaskOverviewChange={vi.fn()}
           onToggleTimeline={onToggleTimeline}
           canDelete={false}
           onDeleteSelected={vi.fn()}
@@ -173,10 +185,14 @@ describe('MultiTrackToolbar', () => {
           isPlaying={false}
           zoom={1}
           snapEnabled
+          taskOverview={false}
           timelineCollapsed={false}
           onPlayPause={vi.fn()}
           onZoomChange={vi.fn()}
           onSnapEnabledChange={vi.fn()}
+          canAddTaskMarker
+          onAddTaskMarker={vi.fn()}
+          onTaskOverviewChange={vi.fn()}
           onToggleTimeline={vi.fn()}
           canDelete={false}
           onDeleteSelected={vi.fn()}
@@ -217,10 +233,14 @@ describe('MultiTrackToolbar', () => {
           isPlaying={false}
           zoom={1}
           snapEnabled={false}
+          taskOverview={false}
           timelineCollapsed={false}
           onPlayPause={vi.fn()}
           onZoomChange={vi.fn()}
           onSnapEnabledChange={onSnapEnabledChange}
+          canAddTaskMarker
+          onAddTaskMarker={vi.fn()}
+          onTaskOverviewChange={vi.fn()}
           onToggleTimeline={vi.fn()}
           canDelete={false}
           onDeleteSelected={vi.fn()}
@@ -239,5 +259,30 @@ describe('MultiTrackToolbar', () => {
     )
 
     expect(screen.getByRole('button', { name: 'multitrack.timelineSnap' }).getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('adds a task marker beside delete and toggles task overview before snapping', () => {
+    const onAddTaskMarker = vi.fn()
+    const onTaskOverviewChange = vi.fn()
+    const { container } = renderToolbar(false, {
+      taskOverview: false,
+      onAddTaskMarker,
+      onTaskOverviewChange,
+    })
+
+    const deleteButton = screen.getByRole('button', { name: 'multitrack.deleteSelectedSegment' })
+    const markerButton = screen.getByRole('button', { name: 'multitrack.addTaskMarker' })
+    expect(deleteButton.compareDocumentPosition(markerButton) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+    fireEvent.click(markerButton)
+    expect(onAddTaskMarker).toHaveBeenCalledOnce()
+    expect(container.querySelector('.lucide-task-marker-icon')).not.toBeNull()
+
+    const overviewButton = screen.getByRole('button', { name: 'multitrack.taskOverview' })
+    const snapButton = screen.getByRole('button', { name: 'multitrack.timelineSnap' })
+    expect(overviewButton.compareDocumentPosition(snapButton) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+    expect(overviewButton.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(overviewButton)
+    expect(onTaskOverviewChange).toHaveBeenCalledWith(true)
+    expect(container.querySelector('.lucide-gallery-horizontal-end')).not.toBeNull()
   })
 })

@@ -119,7 +119,6 @@ CATEGORY_MEDIA = "EasyUse/Media"
 CATEGORY_TIMELINE = "EasyUse/TimelineEditor"
 CATEGORY_MULTITRACK = "EasyUse/MultiTrackEditor"
 CATEGORY_AUDIO = "EasyUse/Audio"
-CATEGORY_BASIC = "EasyUse/Basic"
 CATEGORY_LOGIC = "EasyUse/Logic"
 PROMPT_FORMAT_OPTIONS = ["default", "promptRelay"]
 
@@ -765,6 +764,11 @@ def _build_tracks_info_and_media_outputs(
         "volume_db": global_volume_db,
         "width": width,
         "height": height,
+        "task_markers": [
+            dict(marker)
+            for marker in data.get("task_markers", [])
+            if isinstance(marker, dict)
+        ] if isinstance(data.get("task_markers", []), list) else [],
         "tracks": normalized_tracks,
     }
     return tracks_info, images_out, audio_out, video_out
@@ -1653,16 +1657,7 @@ class MultiTrackInfoOutput(io.ComfyNode):
         else:
             info = dict(tracks_info) if tracks_info else {}
 
-        tracks = info.get("tracks", [])
-        task_count = 0
-        if isinstance(tracks, list):
-            task_count = sum(
-                1
-                for track in tracks
-                if isinstance(track, dict) and track.get("type") == "task"
-                for segment in track.get("segments", [])
-                if isinstance(segment, dict)
-            )
+        task_count = len(_multitrack_task_entries(info))
 
         return io.NodeOutput(
             int(info.get("width", 544)),
@@ -1671,6 +1666,110 @@ class MultiTrackInfoOutput(io.ComfyNode):
             float(info.get("frame_rate", 24)),
             task_count,
         )
+
+
+def _multitrack_task_segments(info: dict) -> list[dict]:
+    tracks = info.get("tracks", [])
+    if not isinstance(tracks, list):
+        return []
+    return sorted(
+        [
+            segment
+            for track in tracks
+            if isinstance(track, dict) and track.get("type") == "task"
+            for segment in track.get("segments", [])
+            if isinstance(segment, dict)
+        ],
+        key=lambda segment: _multitrack_frame_value(segment.get("start_frame")),
+    )
+
+
+def _multitrack_frame_value(value: object, default: int = 0) -> int:
+    try:
+        return int(value) if value is not None else default
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _task_for_marker_range(tasks: list[dict], start_frame: int, end_frame: int) -> dict:
+    if not tasks:
+        return {}
+    return max(
+        tasks,
+        key=lambda task: max(
+            0,
+            min(end_frame, _multitrack_frame_value(task.get("end_frame"))) -
+            max(start_frame, _multitrack_frame_value(task.get("start_frame"))),
+        ),
+    )
+
+
+def _multitrack_task_entries(info: dict) -> list[dict]:
+    tasks = _multitrack_task_segments(info)
+    markers = info.get("task_markers", [])
+    if not isinstance(markers, list) or not markers:
+        return [
+            {
+                "task": task,
+                "start_frame": max(0, _multitrack_frame_value(task.get("start_frame"))),
+                "end_frame": max(
+                    max(0, _multitrack_frame_value(task.get("start_frame"))),
+                    _multitrack_frame_value(task.get("end_frame")),
+                ),
+            }
+            for task in tasks
+        ]
+
+    range_start = 0
+    total_length = max(0, _multitrack_frame_value(info.get("total_length")))
+    marker_end = max(
+        (
+            _multitrack_frame_value(marker.get("frame"))
+            for marker in markers
+            if isinstance(marker, dict)
+            and 0 < _multitrack_frame_value(marker.get("frame")) <= total_length
+        ),
+        default=0,
+    )
+    range_end = max(0, total_length - 1, marker_end)
+    if range_end <= range_start and tasks:
+        range_end = max(_multitrack_frame_value(task.get("end_frame"), range_start) for task in tasks)
+    if range_end <= range_start:
+        return []
+
+    marker_frames: set[int] = set()
+    for marker in markers:
+        if not isinstance(marker, dict):
+            continue
+        try:
+            frame = int(marker.get("frame"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if range_start < frame <= range_end:
+            marker_frames.add(frame)
+    if not marker_frames:
+        return [
+            {
+                "task": task,
+                "start_frame": max(0, _multitrack_frame_value(task.get("start_frame"))),
+                "end_frame": max(0, _multitrack_frame_value(task.get("end_frame"))),
+            }
+            for task in tasks
+        ]
+
+    boundaries = [range_start, *sorted(marker_frames)]
+    if boundaries[-1] < range_end:
+        boundaries.append(range_end)
+    return [
+        {
+            "task": _task_for_marker_range(tasks, start_frame, end_frame),
+            "start_frame": start_frame,
+            "end_frame": end_frame,
+            "marker_mode": True,
+        }
+        for start_frame, end_frame in zip(boundaries, boundaries[1:])
+        if end_frame > start_frame
+    ]
 
 
 def _audio_track_frame_range(track: object, frame_rate: float) -> tuple[int, int] | None:
@@ -1769,7 +1868,7 @@ class MultiTrackAudioOutput(io.ComfyNode):
         return io.Schema(
             node_id="easy multiTrackAudioOutput",
             display_name="MultiTrack Audio Output",
-            category=CATEGORY_BASIC,
+            category=CATEGORY_MULTITRACK,
             description="Merge all audio tracks and output the first two tracks in full or cropped for S2V.",
             is_input_list=True,
             inputs=[
@@ -1817,18 +1916,25 @@ class MultiTrackAudioOutput(io.ComfyNode):
 
         audios = iter_valid_audio_inputs(audio)
         combined_audio = merge_audio_inputs(audios, "add")
+        selected_mode = str(_unwrap_list_scalar(mode, "default"))
+        if selected_mode == "default":
+            return io.NodeOutput(
+                combined_audio,
+                audios[0] if audios else None,
+                0,
+                audios[1] if len(audios) > 1 else None,
+                0,
+            )
+
         selected_task_index = int(_unwrap_list_scalar(task_index, 0))
         if selected_task_index >= 0:
-            task_segments = [
-                segment
-                for track in tracks
-                if isinstance(track, dict) and track.get("type") == "task"
-                for segment in track.get("segments", [])
-                if isinstance(segment, dict)
-            ] if isinstance(tracks, list) else []
+            task_entries = _multitrack_task_entries(info)
             task_range = (
-                _audio_track_frame_range({"segments": [task_segments[selected_task_index]]}, frame_rate)
-                if selected_task_index < len(task_segments)
+                (
+                    int(task_entries[selected_task_index]["start_frame"]),
+                    int(task_entries[selected_task_index]["end_frame"]),
+                )
+                if selected_task_index < len(task_entries)
                 else None
             )
             first_range = _audio_track_range_within_task(
@@ -1852,16 +1958,6 @@ class MultiTrackAudioOutput(io.ComfyNode):
                 _trim_audio_to_track(second_input, second_range, frame_rate)
                 or _silent_audio_for_range(second_input, task_range, frame_rate),
                 second_range[0] - task_start if second_range is not None else -1,
-            )
-
-        selected_mode = str(_unwrap_list_scalar(mode, "default"))
-        if selected_mode == "default":
-            return io.NodeOutput(
-                combined_audio,
-                audios[0] if audios else None,
-                0,
-                audios[1] if len(audios) > 1 else None,
-                0,
             )
 
         first_range = _audio_track_frame_range(audio_tracks[0], frame_rate) if audio_tracks else None
@@ -2060,17 +2156,36 @@ def _format_multitrack_prompt_relay(
     if not prompt or end_frame <= start_frame:
         return prompt
 
-    inclusive_end = end_frame - 1
     if image_count <= 0:
-        return f"{prompt} [{start_frame}-{inclusive_end}]"
+        return f"{prompt} [{start_frame}-{end_frame}]"
 
     parts = [part.strip() for part in prompt.split("|") if part.strip()]
     frame_count = end_frame - start_frame
     formatted: list[str] = []
     for index, part in enumerate(parts[:image_count]):
         range_start = start_frame + math.ceil(index * frame_count / image_count)
-        range_end = start_frame + math.ceil((index + 1) * frame_count / image_count) - 1
+        range_end = start_frame + math.ceil((index + 1) * frame_count / image_count)
         formatted.append(f"{part} [{range_start}-{range_end}]")
+    return " | ".join(formatted)
+
+
+def _format_marker_task_prompt_relay(
+    tasks: list[dict],
+    start_frame: int,
+    end_frame: int,
+) -> str:
+    formatted: list[str] = []
+    for task in tasks:
+        task_start = max(start_frame, _multitrack_frame_value(task.get("start_frame")))
+        task_end = min(end_frame, _multitrack_frame_value(task.get("end_frame")))
+        if task_end <= task_start:
+            continue
+        content = task.get("content", {})
+        if not isinstance(content, dict):
+            continue
+        prompt = str(content.get("user_prompt") or content.get("text") or "").strip()
+        if prompt:
+            formatted.append(_format_multitrack_prompt_relay(prompt, task_start, task_end, 0))
     return " | ".join(formatted)
 
 class MultiTrackTaskOutput(io.ComfyNode):
@@ -2125,29 +2240,43 @@ class MultiTrackTaskOutput(io.ComfyNode):
         selected_prompt_format = str(_unwrap_list_scalar(prompt_format, "default"))
 
         tracks = info.get("tracks", [])
-        task_track = tracks[0] if isinstance(tracks, list) and tracks and isinstance(tracks[0], dict) else {}
-        tasks = sorted(
-            [segment for segment in task_track.get("segments", []) if isinstance(segment, dict)],
-            key=lambda segment: int(segment.get("start_frame", 0)),
-        )
-        task = tasks[min(index, len(tasks) - 1)] if tasks else {}
+        task_entries = _multitrack_task_entries(info)
+        task_entry = task_entries[min(index, len(task_entries) - 1)] if task_entries else {}
+        task = task_entry.get("task", {}) if isinstance(task_entry, dict) else {}
         content = task.get("content", {}) if isinstance(task.get("content", {}), dict) else {}
-        start_frame = max(0, int(task.get("start_frame", 0)))
-        end_frame = max(start_frame, int(task.get("end_frame", start_frame)))
+        start_frame = max(0, int(task_entry.get("start_frame", task.get("start_frame", 0))))
+        end_frame = max(start_frame, int(task_entry.get("end_frame", task.get("end_frame", start_frame))))
         duration_frames = end_frame - start_frame
-        length = duration_frames + 1 if task else 0
+        length = duration_frames + 1 if task_entry else 0
         frame_rate = float(info.get("frame_rate", 24))
 
+        task_contents = [content]
+        if task_entry.get("marker_mode"):
+            task_contents = [
+                candidate_content
+                for candidate in _multitrack_task_segments(info)
+                if _ranges_overlap(start_frame, end_frame, candidate)
+                for candidate_content in [candidate.get("content", {})]
+                if isinstance(candidate_content, dict)
+            ]
+
         selected_images: list[torch.Tensor] = []
-        for image_info in content.get("images", []):
-            if not isinstance(image_info, dict):
-                continue
-            try:
-                media_index = int(image_info.get("media_index"))
-            except (TypeError, ValueError):
-                continue
-            if 0 <= media_index < len(image_items) and isinstance(image_items[media_index], torch.Tensor):
-                selected_images.append(image_items[media_index])
+        selected_image_indexes: set[int] = set()
+        for task_content in task_contents:
+            for image_info in task_content.get("images", []):
+                if not isinstance(image_info, dict):
+                    continue
+                try:
+                    media_index = int(image_info.get("media_index"))
+                except (TypeError, ValueError):
+                    continue
+                if (
+                    media_index not in selected_image_indexes
+                    and 0 <= media_index < len(image_items)
+                    and isinstance(image_items[media_index], torch.Tensor)
+                ):
+                    selected_image_indexes.add(media_index)
+                    selected_images.append(image_items[media_index])
 
         selected_audio: list[dict] = []
         selected_video: list = []
@@ -2188,14 +2317,21 @@ class MultiTrackTaskOutput(io.ComfyNode):
         chat_system_prompt, chat_user_prompt = _build_chat_prompts(system_prompt, api_prompt, prompt)
         llm_prompt = build_llm_prompt(chat_system_prompt, chat_user_prompt, json_mode)
         if selected_prompt_format == "promptRelay":
-            user_prompt = _format_multitrack_prompt_relay(
-                chat_user_prompt,
-                start_frame,
-                end_frame,
-                len(selected_images),
-            )
+            if task_entry.get("marker_mode"):
+                user_prompt = _format_marker_task_prompt_relay(
+                    _multitrack_task_segments(info),
+                    start_frame,
+                    end_frame,
+                )
+            else:
+                user_prompt = _format_multitrack_prompt_relay(
+                    chat_user_prompt,
+                    start_frame,
+                    end_frame,
+                    len(selected_images),
+                )
         elif selected_prompt_format == "api":
-            user_prompt = api_prompt
+            user_prompt = chat_user_prompt
         elif selected_prompt_format == "llm":
             user_prompt = llm_prompt
         else:

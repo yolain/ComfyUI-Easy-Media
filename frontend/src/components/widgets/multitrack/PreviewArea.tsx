@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Captions, Clapperboard, Eye, ListTree, PanelLeft, PanelRight, Plus, Volume2, X } from 'lucide-react'
+import { ArrowLeft, Captions, Clapperboard, Eye, GalleryHorizontalEnd, ListTree, PanelLeft, PanelRight, Plus, Volume2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { TaskMarkerIcon } from '@/components/ui/custom-lucide-icon'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Textarea } from '@/components/ui/textarea'
@@ -1008,6 +1009,10 @@ export function PreviewArea({
       [Volume2, 'multitrack.emptyAudioTrack', 'multitrack.emptyAudioTrackPurpose'],
       [Captions, 'multitrack.emptySubtitleTrack', 'multitrack.emptySubtitleTrackPurpose'],
     ] as const
+    const featureGuides = [
+      [TaskMarkerIcon, 'multitrack.emptyTaskMarkers', 'multitrack.emptyTaskMarkersPurpose'],
+      [GalleryHorizontalEnd, 'multitrack.emptyTaskOverview', 'multitrack.emptyTaskOverviewPurpose'],
+    ] as const
 
     return (
       <div
@@ -1032,6 +1037,20 @@ export function PreviewArea({
             </div>
           ))}
         </dl>
+        <div
+          data-testid="multitrack-empty-preview-features"
+          className="mt-4 flex max-w-2xl items-start justify-center gap-5 border-t border-border pt-3 text-left"
+        >
+          {featureGuides.map(([Icon, titleKey, purposeKey]) => (
+            <div key={titleKey} className="flex max-w-xs items-start gap-2">
+              <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <p className="text-[11px] leading-4 text-muted-foreground">
+                <span className="font-medium text-foreground">{t(titleKey)}</span>
+                <span className="block">{t(purposeKey)}</span>
+              </p>
+            </div>
+          ))}
+        </div>
       </div>
     )
   }
@@ -1148,23 +1167,30 @@ export function PreviewArea({
         {!hasSegments ? renderEmptyPreview() : null}
         <div className={!hasSegments ? 'hidden' : previewMediaGroupClassName}>
           {usesTaskImageOnlyPreview && activeTaskImages ? (
-            <div
-              data-testid="task-preview-images"
-              data-layout="flow"
-              className="flex h-full min-h-0 w-full flex-wrap content-center items-center justify-center gap-2 overflow-y-auto bg-black p-2"
-            >
-              {activeTaskImages.images.map(({ image, url }) => (
-                renderActiveTaskImageThumbnail(
-                  image,
-                  url,
-                  image.id === activeTaskPreviewImage?.image.id,
-                  'h-32 w-fit max-w-full',
-                  true,
-                  'flow',
-                )
+            <>
+              <div
+                data-testid="task-preview-images"
+                data-layout="flow"
+                className="flex h-full min-h-0 w-full flex-wrap content-center items-center justify-center gap-2 overflow-y-auto bg-black p-2"
+              >
+                {activeTaskImages.images.map(({ image, url }) => (
+                  renderActiveTaskImageThumbnail(
+                    image,
+                    url,
+                    image.id === activeTaskPreviewImage?.image.id,
+                    'h-32 w-fit max-w-full',
+                    true,
+                    'flow',
+                  )
+                ))}
+                {renderActiveTaskImageAddSlot('h-32 w-32 aspect-square', true)}
+              </div>
+              {activeSubtitleSegments.map((segment) => (
+                <div key={segment.id}>
+                  {renderSubtitleOverlay(segment)}
+                </div>
               ))}
-              {renderActiveTaskImageAddSlot('h-32 w-32 aspect-square', true)}
-            </div>
+            </>
           ) : activeTaskImages && (
             <div
               data-testid="task-preview-images"
