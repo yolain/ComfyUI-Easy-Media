@@ -16,9 +16,9 @@ vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
       type="button"
       data-default-tab={defaultTab}
       data-slot-items={slotItems.map((item) => item.value).join(',')}
-      onClick={() => onChange(value ? 'replacement.wav' : slotItems[0]?.value ?? '', 'input')}
+      onClick={() => onChange(value ? 'replacement.wav' : slotItems[0]?.value ?? 'new.wav', 'input')}
     >
-      {value ? `replace ${value}` : slotItems.map((item) => item.value).join(',')}
+      {value ? `replace ${value}` : slotItems.map((item) => item.value).join(',') || 'new.wav'}
     </button>
   ),
 }))
@@ -70,6 +70,38 @@ function renderAudioTrack(track: MultiTrack, props?: Partial<ComponentProps<type
 }
 
 describe('AudioTrack', () => {
+  it('adds audio using the exact internal gap range', () => {
+    const track: MultiTrack = {
+      id: 'audio-track',
+      name: 'Audio 0',
+      type: 'audio',
+      color: 'var(--highlight)',
+      muted: false,
+      locked: false,
+      segments: [
+        {
+          id: 'first', start_frame: 0, end_frame: 24, color: 'var(--highlight)',
+          content: { media_type: 'audio', source_type: 'input', file_path: 'first.wav' },
+        },
+        {
+          id: 'second', start_frame: 72, end_frame: 96, color: 'var(--highlight)',
+          content: { media_type: 'audio', source_type: 'input', file_path: 'second.wav' },
+        },
+      ],
+    }
+    const onAddAudio = vi.fn()
+
+    renderAudioTrack(track, { onAddAudio })
+    const gapButton = screen.getByTestId('track-gap-add-24-72')
+    expect(gapButton.getAttribute('aria-haspopup')).toBe('dialog')
+    expect(gapButton.getAttribute('data-state')).toBe('closed')
+    fireEvent.click(gapButton)
+    expect(gapButton.getAttribute('data-state')).toBe('open')
+    fireEvent.click(screen.getByRole('button', { name: 'new.wav' }))
+
+    expect(onAddAudio).toHaveBeenCalledWith('audio-track', 'new.wav', 'input', undefined, 24, 72)
+  })
+
   it('shows connected audio inputs in the slot selector', () => {
     const track: MultiTrack = {
       id: 'audio-track',

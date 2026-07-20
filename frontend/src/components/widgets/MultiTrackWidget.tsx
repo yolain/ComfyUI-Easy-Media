@@ -67,7 +67,7 @@ import { loadBrowserAudioMetadata } from '@/lib/audio-utils'
 import { invalidateMediaListCache } from '@/stores/media-list-store'
 import { uuid } from '@/lib/uuid'
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
-import type { MultiTrack, MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSourceType, MultiTrackType, TrackData } from '@/types/multitrack'
+import type { MultiTrack, MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSourceType, MultiTrackTaskImage, MultiTrackType, TrackData } from '@/types/multitrack'
 import { MultiTrackRuler } from './multitrack/MultiTrackRuler'
 import { MultiTrackToolbar } from './multitrack/MultiTrackToolbar'
 import { PreviewArea } from './multitrack/PreviewArea'
@@ -119,6 +119,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   const committedDataKey = JSON.stringify(committedData)
   const [resizePreviewData, setResizePreviewData] = useState<TrackData | null>(null)
   const data = resizePreviewData ?? committedData
+  const taskOverview = data.task_overview === true
   const dataRef = useRef(committedData)
   dataRef.current = committedData
   const [currentTime, setCurrentTime] = useState(0)
@@ -126,6 +127,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   const [zoom, setZoom] = useState(1)
   const [snapEnabled, setSnapEnabled] = useState(true)
   const [timelineCollapsed, setTimelineCollapsed] = useState(false)
+  const [selectedTaskMarkerId, setSelectedTaskMarkerId] = useState<string | null>(null)
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null)
   const [selectedSegmentIds, setSelectedSegmentIds] = useState<Set<string>>(() => new Set())
   const [editingSubtitleSegmentId, setEditingSubtitleSegmentId] = useState<string | null>(null)
@@ -176,6 +178,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   }
 
   function handleSelectSegment(segmentId: string, mode: 'replace' | 'toggle' | 'add' = 'replace') {
+    setSelectedTaskMarkerId(null)
     setSelectedSegmentIds((current) => {
       if (mode === 'replace') {
         setSelectedSegmentId(segmentId)
@@ -194,6 +197,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   }
 
   function handleSelectSegments(segmentIds: string[]) {
+    setSelectedTaskMarkerId(null)
     const next = new Set(segmentIds)
     setSelectedSegmentIds(next)
     setSelectedSegmentId(segmentIds.at(-1) ?? null)
@@ -201,6 +205,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
 
   function handleClearSelection() {
     setSingleSelectedSegment(null)
+    setSelectedTaskMarkerId(null)
   }
 
   useEffect(() => {
@@ -211,7 +216,63 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       setSelectedSegmentId((active) => active && !validSegmentIds.has(active) ? next.values().next().value ?? null : active)
       return next
     })
+    setSelectedTaskMarkerId((markerId) => (
+      markerId && committedData.task_markers?.some((marker) => marker.id === markerId)
+        ? markerId
+        : null
+    ))
   }, [committedDataKey])
+
+  function canAddTaskMarkerAtCurrentTime(): boolean {
+    const frame = snapTimeToFrame(currentTime, data.frame_rate)
+    return frame > 0 &&
+      frame <= data.total_length &&
+      !(data.task_markers ?? []).some((marker) => marker.frame === frame)
+  }
+
+  function handleAddTaskMarker() {
+    const frame = snapTimeToFrame(currentTime, data.frame_rate)
+    if (!canAddTaskMarkerAtCurrentTime()) return
+    const marker = { id: uuid(), frame }
+    commitNormalizedTrackChange({
+      ...data,
+      task_markers: [...(data.task_markers ?? []), marker],
+    })
+    setSingleSelectedSegment(null)
+    setSelectedTaskMarkerId(marker.id)
+  }
+
+  function handleDeleteTaskMarker(markerId: string) {
+    if (!(data.task_markers ?? []).some((marker) => marker.id === markerId)) return
+    commitNormalizedTrackChange({
+      ...data,
+      task_markers: (data.task_markers ?? []).filter((marker) => marker.id !== markerId),
+    })
+    setSelectedTaskMarkerId((selected) => selected === markerId ? null : selected)
+  }
+
+  function handleMoveTaskMarker(markerId: string, frame: number) {
+    const snappedFrame = snapTimeToFrame(frame, data.frame_rate)
+    const taskMarkers = data.task_markers ?? []
+    const marker = taskMarkers.find((candidate) => candidate.id === markerId)
+    if (!marker || marker.frame === snappedFrame) return
+    if (snappedFrame <= 0 || snappedFrame > data.total_length) return
+    if (taskMarkers.some((candidate) => candidate.id !== markerId && candidate.frame === snappedFrame)) return
+
+    commitNormalizedTrackChange({
+      ...data,
+      task_markers: taskMarkers.map((candidate) => (
+        candidate.id === markerId ? { ...candidate, frame: snappedFrame } : candidate
+      )),
+    })
+  }
+
+  function handleTaskOverviewChange(enabled: boolean) {
+    commitNormalizedTrackChange({
+      ...committedData,
+      task_overview: enabled,
+    })
+  }
 
   useEffect(() => {
     currentTimeRef.current = currentTime
@@ -283,6 +344,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     filePath: string,
     sourceType: MultiTrackSourceType,
     requestedStartFrame?: number,
+    requestedEndFrame?: number,
   ) {
     const content = createMultiTrackVideoContent(filePath, sourceType)
     const src = mediaContentToViewUrl(content)
@@ -303,7 +365,9 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       const startFrame = requestedStartFrame === undefined
         ? snapTimeToFrame(track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0), latestData.frame_rate)
         : Math.max(0, Math.round(requestedStartFrame))
-      const endFrame = startFrame + Math.max(1, snapSecondsToFrame(duration, latestData.frame_rate))
+      const endFrame = requestedEndFrame === undefined
+        ? startFrame + Math.max(1, snapSecondsToFrame(duration, latestData.frame_rate))
+        : Math.max(startFrame + 1, Math.round(requestedEndFrame))
       addedVideoRange.added = true
       addedVideoRange.startFrame = startFrame
       addedVideoRange.endFrame = endFrame
@@ -345,6 +409,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     sourceType: MultiTrackSourceType,
     previewUrl?: string,
     requestedStartFrame?: number,
+    requestedEndFrame?: number,
   ) {
     const content = createMultiTrackAudioContent(filePath, sourceType)
     if (previewUrl) content.url = previewUrl
@@ -363,7 +428,9 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       const startFrame = requestedStartFrame === undefined
         ? track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0)
         : Math.max(0, Math.round(requestedStartFrame))
-      const endFrame = startFrame + Math.max(1, snapSecondsToFrame(duration, latestData.frame_rate))
+      const endFrame = requestedEndFrame === undefined
+        ? startFrame + Math.max(1, snapSecondsToFrame(duration, latestData.frame_rate))
+        : Math.max(startFrame + 1, Math.round(requestedEndFrame))
       return {
         ...track,
         segments: (() => {
@@ -554,29 +621,39 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     })
   }
 
-  function handleAddTaskSegment(trackId: string) {
+  function handleAddTaskSegment(
+    trackId: string,
+    requestedStartFrame?: number,
+    requestedEndFrame?: number,
+    images?: MultiTrackTaskImage[],
+  ) {
     const updatedTracks = data.tracks.map((track) => {
       if (track.id !== trackId || track.type !== 'task') return track
-      const startFrame = snapTimeToFrame(
-        track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0),
-        data.frame_rate,
-      )
-      const endFrame = startFrame + Math.max(1, secondsToFrame(5, data.frame_rate))
+      const startFrame = requestedStartFrame === undefined
+        ? snapTimeToFrame(
+            track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0),
+            data.frame_rate,
+          )
+        : Math.max(0, Math.round(requestedStartFrame))
+      const endFrame = requestedEndFrame === undefined
+        ? startFrame + Math.max(1, secondsToFrame(5, data.frame_rate))
+        : Math.max(startFrame + 1, Math.round(requestedEndFrame))
+      const nextSegment: MultiTrackSegment = {
+        id: uuid(),
+        start_frame: startFrame,
+        end_frame: endFrame,
+        color: track.color,
+        content: {
+          media_type: 'none' as const,
+          task_mode: track.task_mode ?? 'default',
+          images: images ?? [],
+        },
+      }
       return {
         ...track,
-        segments: [
-          ...track.segments,
-          {
-            id: uuid(),
-            start_frame: startFrame,
-            end_frame: endFrame,
-            color: track.color,
-            content: {
-              media_type: 'none' as const,
-              task_mode: track.task_mode ?? 'default',
-            },
-          },
-        ],
+        segments: requestedStartFrame === undefined
+          ? [...track.segments, nextSegment]
+          : insertSegmentAtFrame(track.segments, nextSegment),
       }
     })
 
@@ -587,31 +664,35 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     })
   }
 
-  function handleAddSubtitleSegment(trackId: string) {
+  function handleAddSubtitleSegment(trackId: string, requestedStartFrame?: number, requestedEndFrame?: number) {
     const updatedTracks = data.tracks.map((track) => {
       if (track.id !== trackId || track.type !== 'subtitle') return track
-      const startFrame = snapTimeToFrame(
-        track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0),
-        data.frame_rate,
-      )
-      const endFrame = startFrame + Math.max(1, secondsToFrame(5, data.frame_rate))
+      const startFrame = requestedStartFrame === undefined
+        ? snapTimeToFrame(
+            track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0),
+            data.frame_rate,
+          )
+        : Math.max(0, Math.round(requestedStartFrame))
+      const endFrame = requestedEndFrame === undefined
+        ? startFrame + Math.max(1, secondsToFrame(5, data.frame_rate))
+        : Math.max(startFrame + 1, Math.round(requestedEndFrame))
       const existingStyle = track.segments.find((segment) => segment.content.subtitle_style)?.content.subtitle_style
+      const nextSegment: MultiTrackSegment = {
+        id: uuid(),
+        start_frame: startFrame,
+        end_frame: endFrame,
+        color: track.color || MULTITRACK_SUBTITLE_COLOR,
+        content: {
+          media_type: 'subtitle' as const,
+          text: '默认文字',
+          subtitle_style: { ...(existingStyle ?? DEFAULT_SUBTITLE_STYLE) },
+        },
+      }
       return {
         ...track,
-        segments: [
-          ...track.segments,
-          {
-            id: uuid(),
-            start_frame: startFrame,
-            end_frame: endFrame,
-            color: track.color || MULTITRACK_SUBTITLE_COLOR,
-            content: {
-              media_type: 'subtitle' as const,
-              text: '默认文字',
-              subtitle_style: { ...(existingStyle ?? DEFAULT_SUBTITLE_STYLE) },
-            },
-          },
-        ],
+        segments: requestedStartFrame === undefined
+          ? [...track.segments, nextSegment]
+          : insertSegmentAtFrame(track.segments, nextSegment),
       }
     })
 
@@ -1151,10 +1232,14 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             isPlaying={isPlaying}
             zoom={zoom}
             snapEnabled={snapEnabled}
+            taskOverview={taskOverview}
             timelineCollapsed={timelineCollapsed}
             onPlayPause={() => setIsPlaying((value) => !value)}
             onZoomChange={setZoom}
             onSnapEnabledChange={setSnapEnabled}
+            canAddTaskMarker={canAddTaskMarkerAtCurrentTime()}
+            onAddTaskMarker={handleAddTaskMarker}
+            onTaskOverviewChange={handleTaskOverviewChange}
             onToggleTimeline={() => setTimelineCollapsed((collapsed) => !collapsed)}
             canDelete={selectedSegmentIds.size > 0}
             onDeleteSelected={() => {
@@ -1185,7 +1270,15 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     width={scaledTimelineWidth}
                     canvasScale={canvasScale}
                     currentTime={currentTime}
+                    taskMarkers={data.task_markers ?? []}
+                    selectedTaskMarkerId={selectedTaskMarkerId}
                     onSeek={(time) => setCurrentTime(snapTimeToFrame(time, data.frame_rate))}
+                    onSelectTaskMarker={(markerId) => {
+                      setSingleSelectedSegment(null)
+                      setSelectedTaskMarkerId(markerId)
+                    }}
+                    onMoveTaskMarker={handleMoveTaskMarker}
+                    onDeleteTaskMarker={handleDeleteTaskMarker}
                   />
                   <TrackArea
                     data={data}
@@ -1196,6 +1289,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     snapEnabled={snapEnabled}
                     canvasScale={canvasScale}
                     selectedSegmentIds={selectedSegmentIds}
+                    taskOverview={taskOverview}
                     onAddVideo={handleAddVideo}
                     onAddAudio={handleAddAudio}
                     onReplaceAudio={handleReplaceAudio}

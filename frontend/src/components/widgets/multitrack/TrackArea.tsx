@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useT } from '@/lib/i18n'
 import { uploadInputMediaFile } from '@/lib/media-upload'
+import { uploadTaskImageFile } from '@/lib/task-image-utils'
 import { invalidateMediaListCache } from '@/stores/media-list-store'
 import {
   getSegmentDragPlaceholder,
@@ -12,7 +13,7 @@ import {
   snapTimeToFrame,
   type SegmentDragPlaceholder,
 } from '@/lib/multitrack-utils'
-import type { MultiTrack, MultiTrackSegment, MultiTrackType } from '@/types/multitrack'
+import type { MultiTrack, MultiTrackSegment, MultiTrackTaskImage, MultiTrackType } from '@/types/multitrack'
 import type { MultiTrackSourceType, TrackData } from '@/types/multitrack'
 import { MULTITRACK_LEFT_GUTTER, MULTITRACK_RIGHT_RESERVE } from './MultiTrackRuler'
 import { MultiTrackSegmentBlock } from './MultiTrackSegmentBlock'
@@ -20,6 +21,7 @@ import { AudioTrack } from './AudioTrack'
 import { VideoTrack } from './VideoTrack'
 import { SubtitleTrack } from './SubtitleTrack'
 import type { SubtitleRecognitionMethod } from '@/lib/subtitle-recognition'
+import { getTrackSegmentGaps, TrackGapAddButton } from './TrackGapAddButton'
 
 interface TrackAreaProps {
   data: TrackData
@@ -30,13 +32,21 @@ interface TrackAreaProps {
   snapEnabled: boolean
   canvasScale: number
   selectedSegmentIds: Set<string>
-  onAddVideo: (trackId: string, filePath: string, sourceType: MultiTrackSourceType, startFrame?: number) => void
+  taskOverview?: boolean
+  onAddVideo: (
+    trackId: string,
+    filePath: string,
+    sourceType: MultiTrackSourceType,
+    startFrame?: number,
+    endFrame?: number,
+  ) => void
   onAddAudio: (
     trackId: string,
     filePath: string,
     sourceType: MultiTrackSourceType,
     previewUrl?: string,
     startFrame?: number,
+    endFrame?: number,
   ) => void
   onReplaceAudio: (
     trackId: string,
@@ -46,9 +56,14 @@ interface TrackAreaProps {
     previewUrl?: string,
   ) => void
   onAddTrack: (type: MultiTrackType) => void
-  onAddSubtitleSegment: (trackId: string) => void
+  onAddSubtitleSegment: (trackId: string, startFrame?: number, endFrame?: number) => void
   onReplaceVideo: (trackId: string, segmentId: string, filePath: string, sourceType: MultiTrackSourceType) => void
-  onAddTaskSegment: (trackId: string) => void
+  onAddTaskSegment: (
+    trackId: string,
+    startFrame?: number,
+    endFrame?: number,
+    images?: MultiTrackTaskImage[],
+  ) => void
   onSelectSegment: (segmentId: string, mode?: 'replace' | 'toggle' | 'add') => void
   onSelectSegments: (segmentIds: string[]) => void
   onClearSelection: () => void
@@ -70,8 +85,9 @@ interface TrackAreaProps {
   onCutSegment: (segmentId: string, splitFrame: number) => void
 }
 
-function trackHeight(type: string): number {
-  if (type === 'task' || type === 'subtitle') return 30
+export function getMultiTrackTrackHeight(type: string, taskOverview = false): number {
+  if (type === 'task') return taskOverview ? 64 : 30
+  if (type === 'subtitle') return 30
   return 64
 }
 
@@ -100,23 +116,28 @@ function samePlaceholder(left: SegmentDragPlaceholder | null, right: SegmentDrag
 
 const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus', 'wma'])
 const VIDEO_EXTENSIONS = new Set(['mp4', 'webm', 'mov', 'mkv', 'avi', 'm4v'])
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'avif'])
+type ExternalMediaType = 'audio' | 'video' | 'image'
 
-function externalMediaType(file: File): 'audio' | 'video' | null {
+function externalMediaType(file: File): ExternalMediaType | null {
   if (file.type.startsWith('audio/')) return 'audio'
   if (file.type.startsWith('video/')) return 'video'
+  if (file.type.startsWith('image/')) return 'image'
   const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
   if (AUDIO_EXTENSIONS.has(extension)) return 'audio'
   if (VIDEO_EXTENSIONS.has(extension)) return 'video'
+  if (IMAGE_EXTENSIONS.has(extension)) return 'image'
   return null
 }
 
-function draggedMediaType(dataTransfer: DataTransfer): 'audio' | 'video' | null {
+function draggedMediaType(dataTransfer: DataTransfer): ExternalMediaType | null {
   const file = firstDraggedFile(dataTransfer)
   if (file) return externalMediaType(file)
   for (const item of Array.from(dataTransfer.items)) {
     if (item.kind !== 'file') continue
     if (item.type.startsWith('audio/')) return 'audio'
     if (item.type.startsWith('video/')) return 'video'
+    if (item.type.startsWith('image/')) return 'image'
   }
   return null
 }
@@ -152,6 +173,7 @@ export function TrackArea({
   snapEnabled,
   canvasScale,
   selectedSegmentIds,
+  taskOverview = false,
   onAddVideo,
   onAddAudio,
   onReplaceAudio,
@@ -195,14 +217,14 @@ export function TrackArea({
   const reserveLeft = MULTITRACK_LEFT_GUTTER + playableWidth
 
   const addTrackHeight = 24
-  const tracksHeight = data.tracks.reduce((height, track) => height + trackHeight(track.type), 0)
+  const tracksHeight = data.tracks.reduce((height, track) => height + getMultiTrackTrackHeight(track.type, taskOverview), 0)
   const trackAreaHeight = tracksHeight + addTrackHeight
   const firstVideoTrackId = data.tracks.find((track) => track.type === 'video')?.id
   const audioTrackLimitReached = data.tracks.filter((track) => track.type === 'audio').length >= 2
   const subtitleTrackLimitReached = data.tracks.filter((track) => track.type === 'subtitle').length >= 2
   const trackBounds = data.tracks.reduce<Array<{ id: string, top: number, bottom: number }>>((bounds, track) => {
     const top = bounds.at(-1)?.bottom ?? 0
-    bounds.push({ id: track.id, top, bottom: top + trackHeight(track.type) })
+    bounds.push({ id: track.id, top, bottom: top + getMultiTrackTrackHeight(track.type, taskOverview) })
     return bounds
   }, [])
 
@@ -338,12 +360,13 @@ export function TrackArea({
   function externalDropTarget(
     clientX: number,
     clientY: number,
-    mediaType: 'audio' | 'video' | null,
+    mediaType: ExternalMediaType | null,
   ): ExternalDropSlot | null {
     const rect = trackAreaRef.current?.getBoundingClientRect()
     const trackId = targetTrackIdFromClientY(clientY)
     const track = data.tracks.find((item) => item.id === trackId)
-    if (!rect || !track || mediaType !== track.type) return null
+    const acceptsMedia = mediaType === 'image' ? track?.type === 'task' : mediaType === track?.type
+    if (!rect || !track || !acceptsMedia) return null
     const x = (clientX - rect.left) / Math.max(canvasScale, 0.01) - MULTITRACK_LEFT_GUTTER
     const requestedFrame = Math.round((Math.max(0, Math.min(playableWidth, x)) / playableWidth) * safeLength)
     const sortedSegments = [...track.segments].sort((left, right) => left.start_frame - right.start_frame)
@@ -373,6 +396,12 @@ export function TrackArea({
     setExternalDropSlot(null)
     if (!file || !target) return
     try {
+      if (mediaType === 'image') {
+        const image = await uploadTaskImageFile(file)
+        invalidateMediaListCache('inputs')
+        onAddTaskSegment(target.trackId, target.frame, undefined, [image])
+        return
+      }
       const filePath = await uploadInputMediaFile(file)
       invalidateMediaListCache('inputs')
       if (mediaType === 'video') {
@@ -573,7 +602,7 @@ export function TrackArea({
           <div
             key={track.id}
             className="relative flex border-b border-border"
-            style={{ height: trackHeight(track.type) }}
+            style={{ height: getMultiTrackTrackHeight(track.type, taskOverview) }}
           >
             <div
               className="flex shrink-0 items-center justify-center border-r border-border"
@@ -593,6 +622,8 @@ export function TrackArea({
                   areaWidth={playableWidth}
                   canvasScale={canvasScale}
                   selected={selectedSegmentIds.has(segment.id)}
+                  showTaskIndex={(data.task_markers ?? []).length === 0}
+                  taskOverview={track.type === 'task' && taskOverview}
                   onSelect={onSelectSegment}
                   onDelete={onDeleteSegment}
                   onDistribute={track.type === 'task' ? () => onDistributeTaskSegments(track.id) : undefined}
@@ -611,25 +642,37 @@ export function TrackArea({
                 />
               ))}
               {track.type === 'task' ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="icon"
-                  className="absolute top-1/2 h-5 w-5 cursor-pointer"
-                  style={{
-                    left: track.segments.length === 0
-                      ? 6
-                      : (track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0) / safeLength) * playableWidth + 6,
-                    transform: 'translateY(-50%)',
-                  }}
-                  aria-label={t('multitrack.addTaskSegment')}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    onAddTaskSegment(track.id)
-                  }}
-                >
-                  <Plus className="h-2.5 w-2.5" />
-                </Button>
+                <>
+                  {getTrackSegmentGaps(track.segments).map((gap) => (
+                    <TrackGapAddButton
+                      key={`${gap.startFrame}-${gap.endFrame}`}
+                      gap={gap}
+                      totalLength={data.total_length}
+                      width={playableWidth}
+                      ariaLabel={t('multitrack.addTaskSegment')}
+                      onClick={() => onAddTaskSegment(track.id, gap.startFrame, gap.endFrame)}
+                    />
+                  ))}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="icon"
+                    className="absolute top-1/2 h-5 w-5 cursor-pointer"
+                    style={{
+                      left: track.segments.length === 0
+                        ? 6
+                        : (track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0) / safeLength) * playableWidth + 6,
+                      transform: 'translateY(-50%)',
+                    }}
+                    aria-label={t('multitrack.addTaskSegment')}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onAddTaskSegment(track.id)
+                    }}
+                  >
+                    <Plus className="h-2.5 w-2.5" />
+                  </Button>
+                </>
               ) : (
                 <Tooltip>
                   <TooltipTrigger asChild>

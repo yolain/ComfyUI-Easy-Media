@@ -2,7 +2,7 @@ import { createEvent, fireEvent, render, screen } from '@testing-library/react'
 import type { MouseEvent } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { TrackArea } from '@/components/widgets/multitrack/TrackArea'
+import { getMultiTrackTrackHeight, TrackArea } from '@/components/widgets/multitrack/TrackArea'
 import { createDefaultTrackData } from '@/lib/multitrack-utils'
 
 vi.mock('@/components/widgets/multitrack/VideoTrack', () => ({
@@ -42,6 +42,62 @@ vi.mock('@/components/widgets/multitrack/MultiTrackSegmentBlock', () => ({
 }))
 
 describe('TrackArea track controls', () => {
+  it('matches the task track height to film tracks in overview mode', () => {
+    expect(getMultiTrackTrackHeight('task', true)).toBe(getMultiTrackTrackHeight('video', true))
+    expect(getMultiTrackTrackHeight('task', false)).toBeLessThan(getMultiTrackTrackHeight('video', false))
+  })
+
+  it('adds a task segment using the exact internal gap range', () => {
+    const data = createDefaultTrackData()
+    const taskTrack = data.tracks.find((track) => track.type === 'task')!
+    taskTrack.segments = [
+      { id: 'first', start_frame: 0, end_frame: 24, color: taskTrack.color, content: { media_type: 'none' } },
+      { id: 'second', start_frame: 72, end_frame: 96, color: taskTrack.color, content: { media_type: 'none' } },
+    ]
+    data.total_length = 120
+    const onAddTaskSegment = vi.fn()
+
+    render(
+      <TooltipProvider>
+        <TrackArea
+          data={data}
+          width={480}
+          currentTime={0}
+          snapEnabled
+          canvasScale={1}
+          selectedSegmentIds={new Set()}
+          node={{}}
+          app={{}}
+          onAddVideo={vi.fn()}
+          onAddAudio={vi.fn()}
+          onReplaceAudio={vi.fn()}
+          onAddTrack={vi.fn()}
+          onAddSubtitleSegment={vi.fn()}
+          onReplaceVideo={vi.fn()}
+          onAddTaskSegment={onAddTaskSegment}
+          onSelectSegment={vi.fn()}
+          onSelectSegments={vi.fn()}
+          onClearSelection={vi.fn()}
+          onDeleteSegment={vi.fn()}
+          onDeleteTrack={vi.fn()}
+          onTrackAudioSettingsChange={vi.fn()}
+          onDistributeTaskSegments={vi.fn()}
+          onCloneTaskSegment={vi.fn()}
+          onResizeSegment={vi.fn()}
+          onResizeSegmentPreview={vi.fn()}
+          onMoveSegment={vi.fn()}
+          onSmartSplit={vi.fn()}
+          onSmartSplitTasks={vi.fn()}
+          cutMode={false}
+          onCutSegment={vi.fn()}
+        />
+      </TooltipProvider>,
+    )
+
+    fireEvent.click(screen.getByTestId('track-gap-add-24-72'))
+    expect(onAddTaskSegment).toHaveBeenCalledWith(taskTrack.id, 24, 72)
+  })
+
   it('renders the add-track bar with audio and subtitle enabled', () => {
     const onAddTrack = vi.fn()
     render(
@@ -712,5 +768,103 @@ describe('TrackArea track controls', () => {
     await vi.waitFor(() => {
       expect(onAddVideo).toHaveBeenCalledWith(data.tracks[1].id, 'uploads/clip.wav', 'input', 63)
     })
+  })
+
+  it('uploads an external image and creates a task segment containing it', async () => {
+    const data = createDefaultTrackData()
+    const taskTrack = data.tracks.find((track) => track.type === 'task')!
+    taskTrack.segments = []
+    const onAddTaskSegment = vi.fn()
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ name: 'reference.png', subfolder: 'uploads' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <TooltipProvider>
+        <TrackArea
+          data={data}
+          width={480}
+          currentTime={0}
+          snapEnabled
+          canvasScale={1}
+          selectedSegmentIds={new Set()}
+          node={{}}
+          app={{}}
+          onAddVideo={vi.fn()}
+          onAddAudio={vi.fn()}
+          onReplaceAudio={vi.fn()}
+          onAddTrack={vi.fn()}
+          onAddSubtitleSegment={vi.fn()}
+          onReplaceVideo={vi.fn()}
+          onAddTaskSegment={onAddTaskSegment}
+          onSelectSegment={vi.fn()}
+          onSelectSegments={vi.fn()}
+          onClearSelection={vi.fn()}
+          onDeleteSegment={vi.fn()}
+          onDeleteTrack={vi.fn()}
+          onTrackAudioSettingsChange={vi.fn()}
+          onDistributeTaskSegments={vi.fn()}
+          onCloneTaskSegment={vi.fn()}
+          onResizeSegment={vi.fn()}
+          onResizeSegmentPreview={vi.fn()}
+          onMoveSegment={vi.fn()}
+          onSmartSplit={vi.fn()}
+          onSmartSplitTasks={vi.fn()}
+          cutMode={false}
+          onCutSegment={vi.fn()}
+        />
+      </TooltipProvider>,
+    )
+
+    const area = document.querySelector('[data-multitrack-track-area]') as HTMLDivElement
+    vi.spyOn(area, 'getBoundingClientRect').mockReturnValue({
+      left: 100,
+      top: 200,
+      width: 480,
+      height: 118,
+      right: 580,
+      bottom: 318,
+      x: 100,
+      y: 200,
+      toJSON: () => ({}),
+    })
+    const imageFile = new File(['image'], 'reference.png', { type: 'image/png' })
+    const dataTransfer = {
+      files: [imageFile],
+      items: [{ kind: 'file', type: 'image/png', getAsFile: () => imageFile }],
+      types: ['Files'],
+      dropEffect: 'none',
+    }
+    const dragOver = createEvent.dragOver(area)
+    Object.defineProperties(dragOver, {
+      clientX: { value: 220 },
+      clientY: { value: 210 },
+      dataTransfer: { value: dataTransfer },
+    })
+    fireEvent(area, dragOver)
+
+    expect(dragOver.defaultPrevented).toBe(true)
+    expect(screen.getByTestId('external-media-drop-slot')).toBeTruthy()
+
+    const drop = createEvent.drop(area)
+    Object.defineProperties(drop, {
+      clientX: { value: 220 },
+      clientY: { value: 210 },
+      dataTransfer: { value: dataTransfer },
+    })
+    fireEvent(area, drop)
+
+    await vi.waitFor(() => {
+      expect(onAddTaskSegment).toHaveBeenCalledWith(taskTrack.id, 27, undefined, [
+        expect.objectContaining({
+          source_type: 'input',
+          file_path: 'uploads/reference.png',
+          file_name: 'reference.png',
+        }),
+      ])
+    })
+    expect(fetchMock).toHaveBeenCalledWith('/upload/image', expect.objectContaining({ method: 'POST' }))
   })
 })

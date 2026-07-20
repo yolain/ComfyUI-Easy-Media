@@ -5,6 +5,7 @@ import { useT } from '@/lib/i18n'
 import type { MultiTrack } from '@/types/multitrack'
 import { MULTITRACK_LEFT_GUTTER } from './MultiTrackRuler'
 import { MultiTrackSegmentBlock } from './MultiTrackSegmentBlock'
+import { getTrackSegmentGaps, TrackGapAddButton } from './TrackGapAddButton'
 
 interface SubtitleTrackProps {
   track: MultiTrack
@@ -14,7 +15,7 @@ interface SubtitleTrackProps {
   canvasScale: number
   selectedSegmentIds: Set<string>
   onSelectSegment: (segmentId: string, mode?: 'replace' | 'toggle' | 'add') => void
-  onAddSubtitleSegment: (trackId: string) => void
+  onAddSubtitleSegment: (trackId: string, startFrame?: number, endFrame?: number) => void
   onDeleteSegment: (segmentId: string) => void
   onCloneSegment: (segmentId: string) => void
   onDeleteTrack: (trackId: string) => void
@@ -52,6 +53,7 @@ export function SubtitleTrack({
   const t = useT()
   const lastEnd = track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0)
   const actionLeft = track.segments.length === 0 ? 6 : (lastEnd / Math.max(totalLength, 1)) * width + 6
+  const gaps = getTrackSegmentGaps(track.segments)
   const visible = track.visible !== false
 
   return (
@@ -88,6 +90,16 @@ export function SubtitleTrack({
               onSelectSegment(segment.id)
               onEditSubtitleSegment(segment.id)
             }}
+          />
+        ))}
+        {gaps.map((gap) => (
+          <TrackGapAddButton
+            key={`${gap.startFrame}-${gap.endFrame}`}
+            gap={gap}
+            totalLength={totalLength}
+            width={width}
+            ariaLabel={t('multitrack.addSubtitleSegment')}
+            onClick={() => onAddSubtitleSegment(track.id, gap.startFrame, gap.endFrame)}
           />
         ))}
         <div className="absolute top-1/2 flex -translate-y-1/2 flex-row gap-1" style={{ left: actionLeft }}>

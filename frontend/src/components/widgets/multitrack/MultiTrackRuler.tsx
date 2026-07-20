@@ -1,4 +1,7 @@
+import { useRef, useState } from 'react'
 import { formatMultiTrackTime } from '@/lib/multitrack-utils'
+import type { MultiTrackTaskMarker } from '@/types/multitrack'
+import { MultiTrackTaskMarker as TaskMarker } from './MultiTrackTaskMarker'
 
 export const MULTITRACK_LEFT_GUTTER = 28
 export const MULTITRACK_RIGHT_RESERVE = 48
@@ -11,7 +14,12 @@ interface MultiTrackRulerProps {
   width: number
   canvasScale: number
   currentTime: number
+  taskMarkers: MultiTrackTaskMarker[]
+  selectedTaskMarkerId: string | null
   onSeek: (time: number) => void
+  onSelectTaskMarker: (markerId: string) => void
+  onMoveTaskMarker: (markerId: string, frame: number) => void
+  onDeleteTaskMarker: (markerId: string) => void
 }
 
 export function buildTicks(totalLength: number, frameRate: number, timelineWidth: number) {
@@ -66,8 +74,15 @@ export function MultiTrackRuler({
   width,
   canvasScale,
   currentTime,
+  taskMarkers,
+  selectedTaskMarkerId,
   onSeek,
+  onSelectTaskMarker,
+  onMoveTaskMarker,
+  onDeleteTaskMarker,
 }: Readonly<MultiTrackRulerProps>) {
+  const rulerRef = useRef<HTMLDivElement>(null)
+  const [dragPreview, setDragPreview] = useState<{ markerId: string; frame: number } | null>(null)
   const timelineWidth = Math.max(1, width - MULTITRACK_LEFT_GUTTER)
   const playableWidth = Math.max(1, timelineWidth - MULTITRACK_RIGHT_RESERVE)
   const ticks = buildTicks(totalLength, frameRate, playableWidth)
@@ -99,9 +114,43 @@ export function MultiTrackRuler({
     globalThis.addEventListener('mouseup', handleMouseUp)
   }
 
+  function handleTaskMarkerDragStart(markerId: string, clientX: number) {
+    const marker = taskMarkers.find((candidate) => candidate.id === markerId)
+    if (!marker) return
+    const rectLeft = rulerRef.current?.getBoundingClientRect().left ?? 0
+    let lastValidFrame = marker.frame
+
+    function updateDragPreview(nextClientX: number) {
+      const nextFrame = Math.max(1, timeFromClientX(nextClientX, rectLeft))
+      const occupied = taskMarkers.some((candidate) => (
+        candidate.id !== markerId && candidate.frame === nextFrame
+      ))
+      if (occupied) return
+      lastValidFrame = nextFrame
+      setDragPreview({ markerId, frame: nextFrame })
+    }
+
+    function handleMouseMove(event: MouseEvent) {
+      updateDragPreview(event.clientX)
+    }
+
+    function handleMouseUp(event: MouseEvent) {
+      updateDragPreview(event.clientX)
+      globalThis.removeEventListener('mousemove', handleMouseMove)
+      globalThis.removeEventListener('mouseup', handleMouseUp)
+      setDragPreview(null)
+      if (lastValidFrame !== marker.frame) onMoveTaskMarker(markerId, lastValidFrame)
+    }
+
+    updateDragPreview(clientX)
+    globalThis.addEventListener('mousemove', handleMouseMove)
+    globalThis.addEventListener('mouseup', handleMouseUp)
+  }
+
   return (
     <div
-      className="relative h-6 shrink-0 cursor-col-resize select-none border-b border-border"
+      ref={rulerRef}
+      className={`relative h-6 shrink-0 select-none border-b border-border ${dragPreview ? 'cursor-grabbing' : 'cursor-col-resize'}`}
       style={{ width }}
       onMouseDown={handleMouseDown}
     >
@@ -120,6 +169,26 @@ export function MultiTrackRuler({
           {tick.label && <span className="absolute left-1 top-1 text-[8px] text-muted-foreground">{tick.label}</span>}
         </div>
       ))}
+      {taskMarkers.map((marker, index) => {
+        const dragging = dragPreview?.markerId === marker.id
+        const displayMarker = dragging
+          ? { ...marker, frame: dragPreview.frame }
+          : marker
+        return (
+          <TaskMarker
+            key={displayMarker.id}
+            marker={displayMarker}
+            markerNumber={index + 1}
+            frameRate={frameRate}
+            left={MULTITRACK_LEFT_GUTTER + (displayMarker.frame / safeLength) * playableWidth}
+            selected={displayMarker.id === selectedTaskMarkerId}
+            dragging={dragging}
+            onSelect={onSelectTaskMarker}
+            onDragStart={handleTaskMarkerDragStart}
+            onDelete={onDeleteTaskMarker}
+          />
+        )
+      })}
       <div className="absolute top-0 h-full w-px bg-destructive" style={{ left: playheadLeft }} />
     </div>
   )

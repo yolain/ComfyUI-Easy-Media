@@ -127,7 +127,7 @@ def build_multitrack_data_from_prompt_override(base_data: dict, prompt_override)
     )
 
     task_segments: list[dict] = []
-    audio_segments: list[dict] = []
+    audio_segments_by_index: dict[int, list[dict]] = {}
     video_segments: list[dict] = []
     max_end_frame = 0
     max_timeline_end_frame = 0
@@ -171,10 +171,9 @@ def build_multitrack_data_from_prompt_override(base_data: dict, prompt_override)
         })
 
         audio_indices = segment.get("audio_indices", [])
-        if audio_indices:
-            audio_index = int(audio_indices[0])
-            audio_segments.append({
-                "id": f"override-audio-{index + 1}",
+        for audio_index in dict.fromkeys(int(value) for value in audio_indices):
+            audio_segments_by_index.setdefault(audio_index, []).append({
+                "id": f"override-audio-{index + 1}-{audio_index}",
                 "start_frame": start_frame,
                 "end_frame": end_frame,
                 "origin_start_frame": start_frame,
@@ -238,10 +237,10 @@ def build_multitrack_data_from_prompt_override(base_data: dict, prompt_override)
             "locked": False,
             "segments": video_segments,
         })
-    if audio_segments:
+    for audio_index, audio_segments in sorted(audio_segments_by_index.items()):
         tracks.append({
-            "id": "override-audio-track",
-            "name": "Audio",
+            "id": f"override-audio-track-{audio_index}",
+            "name": f"Audio {audio_index}",
             "type": "audio",
             "color": "var(--highlight)",
             "muted": False,

@@ -30,3 +30,10 @@ export const SplitRightDotsIcon = createLucideIcon("SplitRightDotsIcon", [
   ["path", { d: "M18 4h.01", key: "d6" }],
   ["path", { d: "M18 20h.01", key: "d8" }],
 ]);
+
+export const TaskMarkerIcon = createLucideIcon("TaskMarkerIcon", [
+  ["path", {
+    d: "M7.5 4.75h9a1 1 0 0 1 1 1v8.5L12 20l-5.5-5.75V5.75a1 1 0 0 1 1-1Z",
+    key: "task-marker",
+  }],
+]);

@@ -53,6 +53,8 @@ interface MultiTrackSegmentBlockProps {
   onDragPreviewEnd?: () => void
   onDoubleClick?: (segmentId: string, event: React.MouseEvent) => void
   dimmed?: boolean
+  showTaskIndex?: boolean
+  taskOverview?: boolean
 }
 
 function segmentRect(segment: MultiTrackSegment, totalLength: number, areaWidth: number) {
@@ -89,6 +91,8 @@ export function MultiTrackSegmentBlock({
   onDragPreviewEnd,
   onDoubleClick,
   dimmed = false,
+  showTaskIndex = true,
+  taskOverview = false,
 }: Readonly<MultiTrackSegmentBlockProps>) {
   const t = useT()
   const didDragRef = useRef(false)
@@ -136,15 +140,35 @@ export function MultiTrackSegmentBlock({
     0,
     (segment.start_frame - sourceOriginFrame) / Math.max(frameRate, 1),
   )
+  const taskModeLabel = getMultiTrackTaskModeLabel(segment.content.task_mode ?? 'default', t)
   const label = trackType === 'task'
-    ? t('multitrackSegment.taskLabel', {
-      n: segmentIndex,
-      mode: getMultiTrackTaskModeLabel(segment.content.task_mode ?? 'default', t),
-    })
+    ? showTaskIndex
+      ? t('multitrackSegment.taskLabel', {
+          n: segmentIndex,
+          mode: taskModeLabel,
+        })
+      : taskModeLabel
     : trackType === 'subtitle'
       ? segment.content.text ?? t('multitrack.subtitle')
       : segment.content.file_name ?? segment.id
   const durationLabel = formatMultiTrackTime(segmentDuration, { frameRate, showFrames: true })
+  const taskPrompt = segment.content.user_prompt?.trim() ?? ''
+  const taskImageUrls = (segment.content.images ?? []).flatMap((image) => {
+    const url = mediaContentToViewUrl({
+      source_type: image.source_type ?? 'input',
+      file_path: image.file_path,
+      local_path: image.local_path,
+      url: image.url,
+      slot_name: image.slot_name,
+    })
+    return url ? [url] : []
+  })
+  const tiledTaskImages = Array.from({ length: 24 }, (_, repeatIndex) => (
+    taskImageUrls.map((url, imageIndex) => ({
+      key: `${repeatIndex}-${imageIndex}`,
+      url,
+    }))
+  )).flat()
   const presentation = getSegmentTrackPresentation(trackType)
   const borderColor = isResizing
     ? 'var(--warning)'
@@ -377,58 +401,87 @@ export function MultiTrackSegmentBlock({
             if (event.key === 'Delete' || event.key === 'Backspace') onDelete(segment.id)
           }}
         >
-          <div className="pointer-events-none flex h-full min-w-0 flex-1 flex-col gap-0.5">
-            <div
-              className={`flex h-3.5 min-w-0 items-center gap-1 leading-none ${presentation.textClassName}`}
-              style={{ backgroundColor: presentation.titleBackgroundColor ?? undefined }}
-            >
-              <span
-                className="truncate rounded-sm px-1 font-medium"
-              >
-                {label}
-              </span>
-              <span
-                className="shrink-0 rounded-sm px-1 tabular-nums"
-              >
-                {durationLabel}
-              </span>
-            </div>
-            {presentation.showThumbnail ? (
-              <div
-                className="h-8 overflow-hidden bg-black"
-                style={{
-                  backgroundImage: posterUrl ? `url(${JSON.stringify(posterUrl)})` : undefined,
-                  backgroundPosition: 'left center',
-                  backgroundRepeat: 'repeat-x',
-                  backgroundSize: 'auto 32px',
-                }}
-              />
-            ) : null}
-            {presentation.showWaveform ? (
-              <div
-                className={trackType === 'audio'
-                  ? 'relative min-h-0 flex-1 overflow-hidden rounded-sm'
-                  : 'relative h-2.5 overflow-hidden rounded-sm'}
-                style={{ backgroundColor: presentation.backgroundColorStrong }}
-              >
-                <div className="absolute inset-x-0 top-0 z-10 h-0.5 bg-warning" />
-                <AudioWaveform
-                  content={{
-                    source_type: segment.content.source_type ?? 'input',
-                    file_path: segment.content.file_path,
-                    local_path: segment.content.local_path,
-                    url: segment.content.url,
-                    slot_name: segment.content.slot_name,
-                  }}
-                  startRatio={waveformStartRatio}
-                  endRatio={waveformEndRatio}
-                  className="h-full w-full"
-                  color={presentation.waveformColor ?? undefined}
-                />
-              </div>
-            ) : trackType !== 'audio' ? (
-              <div className="min-h-0 flex-1" />
-            ) : null}
+          <div className="pointer-events-none relative flex h-full min-w-0 flex-1 flex-col gap-0.5">
+            {trackType === 'task' && taskOverview ? (
+              <>
+                {tiledTaskImages.length > 0 ? (
+                  <div className="absolute inset-0 overflow-hidden bg-black">
+                    <div className="flex h-full w-max">
+                      {tiledTaskImages.map(({ key, url }) => (
+                        <img
+                          key={key}
+                          src={url}
+                          alt=""
+                          className="h-full w-auto max-w-none shrink-0 object-contain"
+                          draggable={false}
+                          onError={(event) => {
+                            event.currentTarget.style.display = 'none'
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                <div className={tiledTaskImages.length > 0
+                  ? 'absolute inset-x-0 bottom-0 z-10 flex items-center bg-black px-1 py-0.5 text-white'
+                  : 'absolute inset-0 flex items-center justify-center px-1 text-center'}
+                >
+                  <span className={`min-w-0 text-[9px] leading-tight ${tiledTaskImages.length > 0 ? 'truncate' : 'line-clamp-3'}`}>
+                    {taskPrompt || label}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div
+                  className={`flex h-3.5 min-w-0 items-center gap-1 leading-none ${presentation.textClassName}`}
+                  style={{ backgroundColor: presentation.titleBackgroundColor ?? undefined }}
+                >
+                  <span className="truncate rounded-sm px-1 font-medium">
+                    {label}
+                  </span>
+                  <span className="shrink-0 rounded-sm px-1 tabular-nums">
+                    {durationLabel}
+                  </span>
+                </div>
+                {presentation.showThumbnail ? (
+                  <div
+                    className="h-8 overflow-hidden bg-black"
+                    style={{
+                      backgroundImage: posterUrl ? `url(${JSON.stringify(posterUrl)})` : undefined,
+                      backgroundPosition: 'left center',
+                      backgroundRepeat: 'repeat-x',
+                      backgroundSize: 'auto 32px',
+                    }}
+                  />
+                ) : null}
+                {presentation.showWaveform ? (
+                  <div
+                    className={trackType === 'audio'
+                      ? 'relative min-h-0 flex-1 overflow-hidden rounded-sm'
+                      : 'relative h-2.5 overflow-hidden rounded-sm'}
+                    style={{ backgroundColor: presentation.backgroundColorStrong }}
+                  >
+                    <div className="absolute inset-x-0 top-0 z-10 h-0.5 bg-warning" />
+                    <AudioWaveform
+                      content={{
+                        source_type: segment.content.source_type ?? 'input',
+                        file_path: segment.content.file_path,
+                        local_path: segment.content.local_path,
+                        url: segment.content.url,
+                        slot_name: segment.content.slot_name,
+                      }}
+                      startRatio={waveformStartRatio}
+                      endRatio={waveformEndRatio}
+                      className="h-full w-full"
+                      color={presentation.waveformColor ?? undefined}
+                    />
+                  </div>
+                ) : trackType !== 'audio' ? (
+                  <div className="min-h-0 flex-1" />
+                ) : null}
+              </>
+            )}
           </div>
           <span
             className="absolute left-0 top-0 h-full w-0.5 cursor-ew-resize"

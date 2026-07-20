@@ -145,6 +145,12 @@ describe('PreviewArea', () => {
     expect(screen.getByText('Video track').closest('dt')?.querySelector('svg')).not.toBeNull()
     expect(screen.getByText('Audio track').closest('dt')?.querySelector('svg')).not.toBeNull()
     expect(screen.getByText('Subtitle track').closest('dt')?.querySelector('svg')).not.toBeNull()
+    expect(screen.getByText('Task markers')).not.toBeNull()
+    expect(screen.getByText('Markers can group multiple segments into one loop task.')).not.toBeNull()
+    expect(screen.getByText('Task track overview')).not.toBeNull()
+    expect(screen.getByText("Expand the task track to view each segment's prompt and reference images.")).not.toBeNull()
+    expect(screen.getByText('Task markers').closest('div')?.querySelector('svg')).not.toBeNull()
+    expect(screen.getByText('Task track overview').closest('div')?.querySelector('svg')).not.toBeNull()
     expect(screen.getByTestId('multitrack-video-stage').closest('.hidden')).not.toBeNull()
   })
 
@@ -432,6 +438,42 @@ describe('PreviewArea', () => {
 
     rerender(<PreviewArea {...props} currentTime={48} />)
     expect(screen.queryByTestId('task-preview-images')).toBeNull()
+  })
+
+  it('renders active subtitles over an image-only task preview', () => {
+    const { data } = trackData()
+    addActiveTaskTrack(data)
+    data.tracks.push({
+      id: 'subtitle-track',
+      name: 'Subtitle 1',
+      type: 'subtitle',
+      color: '#9D4937',
+      muted: false,
+      locked: false,
+      segments: [{
+        id: 'image-preview-subtitle',
+        start_frame: 24,
+        end_frame: 48,
+        color: '#9D4937',
+        content: { media_type: 'subtitle', text: 'Visible over images' },
+      }],
+    })
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={36}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('task-preview-images')).not.toBeNull()
+    expect(screen.getByTestId('subtitle-preview-text').textContent).toBe('Visible over images')
   })
 
   it('edits the active task user prompt inline when no segment is selected', () => {

@@ -96,25 +96,49 @@ vi.mock('@/components/widgets/multitrack/PreviewArea', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/MultiTrackRuler', () => ({
-  MultiTrackRuler: ({ onSeek }: { onSeek: (time: number) => void }) => (
-    <button type="button" data-testid="multitrack-ruler" onClick={() => onSeek(5)}>
-      seek frame 5
-    </button>
+  MultiTrackRuler: ({ totalLength, onSeek, taskMarkers, onMoveTaskMarker, onDeleteTaskMarker }: {
+    totalLength: number
+    onSeek: (time: number) => void
+    taskMarkers: TrackData['task_markers']
+    onMoveTaskMarker: (markerId: string, frame: number) => void
+    onDeleteTaskMarker: (markerId: string) => void
+  }) => (
+    <div>
+      <button type="button" data-testid="multitrack-ruler" onClick={() => onSeek(5)}>
+        seek frame 5
+      </button>
+      <button type="button" onClick={() => onSeek(totalLength)}>
+        seek timeline end
+      </button>
+      <span data-testid="task-marker-count">{taskMarkers?.length ?? 0}</span>
+      {taskMarkers?.[0] ? (
+        <>
+          <button type="button" onClick={() => onMoveTaskMarker(taskMarkers[0].id, 7)}>move first marker</button>
+          <button type="button" onClick={() => onDeleteTaskMarker(taskMarkers[0].id)}>delete first marker</button>
+        </>
+      ) : null}
+    </div>
   ),
 }))
 
 vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
-  TrackArea: ({ data, node, app, onCloneTaskSegment, onSplitTaskSegment, onAddTrack, onAddVideo, onAddAudio, onReplaceAudio, onAddSubtitleSegment, onSmartSplit, onSmartSplitTasks, onRecognizeSubtitles, onResizeSegment, onResizeSegmentPreview, onMoveSegment, onTrackAudioSettingsChange, selectedSegmentIds, onSelectSegment, onSelectSegments, cutMode }: {
+  TrackArea: ({ data, node, app, onCloneTaskSegment, onSplitTaskSegment, onAddTrack, onAddVideo, onAddAudio, onReplaceAudio, onAddTaskSegment, onAddSubtitleSegment, onSmartSplit, onSmartSplitTasks, onRecognizeSubtitles, onResizeSegment, onResizeSegmentPreview, onMoveSegment, onTrackAudioSettingsChange, selectedSegmentIds, onSelectSegment, onSelectSegments, cutMode, taskOverview }: {
     data: TrackData
     node: unknown
     app: unknown
     onCloneTaskSegment: (trackId: string, segmentId: string) => void
     onSplitTaskSegment: (segmentId: string) => void
     onAddTrack: (type: 'audio') => void
-    onAddVideo: (trackId: string, filePath: string, sourceType: 'input', startFrame?: number) => void
-    onAddAudio: (trackId: string, filePath: string, sourceType: 'input', previewUrl?: string) => void
+    onAddVideo: (trackId: string, filePath: string, sourceType: 'input', startFrame?: number, endFrame?: number) => void
+    onAddAudio: (trackId: string, filePath: string, sourceType: 'input', previewUrl?: string, startFrame?: number, endFrame?: number) => void
     onReplaceAudio: (trackId: string, segmentId: string, filePath: string, sourceType: 'input') => void
-    onAddSubtitleSegment: (trackId: string) => void
+    onAddTaskSegment: (
+      trackId: string,
+      startFrame?: number,
+      endFrame?: number,
+      images?: TrackData['tracks'][number]['segments'][number]['content']['images'],
+    ) => void
+    onAddSubtitleSegment: (trackId: string, startFrame?: number, endFrame?: number) => void
     onSmartSplit: (segmentId: string) => void
     onSmartSplitTasks: (segmentId: string) => void
     onRecognizeSubtitles: (segmentId: string, method: 'qwen3-asr' | 'whisper-large-v3') => void
@@ -126,6 +150,7 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
     onSelectSegment: (segmentId: string) => void
     onSelectSegments: (segmentIds: string[]) => void
     cutMode: boolean
+    taskOverview: boolean
   }) => {
     const taskTrack = data.tracks.find((track) => track.type === 'task')
     const audioTrack = data.tracks.find((track) => track.type === 'audio')
@@ -135,7 +160,7 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
     const subtitleTrack = data.tracks.find((track) => track.type === 'subtitle')
     const subtitleSegment = data.tracks.find((track) => track.type === 'subtitle')?.segments[0]
     return (
-      <div data-testid="multitrack-track-area" data-cut-mode={cutMode}>
+      <div data-testid="multitrack-track-area" data-cut-mode={cutMode} data-task-overview={taskOverview}>
         <div data-testid="selected-segment-count">{selectedSegmentIds.size}</div>
         <div data-testid="audio-slot-context">{node && app ? 'connected' : 'missing'}</div>
         {taskTrack && segment ? (
@@ -166,6 +191,28 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
         >
           insert video segment
         </button>
+        <button
+          type="button"
+          onClick={() => onAddVideo(data.tracks[1].id, 'gap.mp4', 'input', 24, 72)}
+        >
+          fill video gap
+        </button>
+        {taskTrack ? (
+          <button type="button" onClick={() => onAddTaskSegment(taskTrack.id, 24, 72)}>fill task gap</button>
+        ) : null}
+        {taskTrack ? (
+          <button
+            type="button"
+            onClick={() => onAddTaskSegment(taskTrack.id, 24, undefined, [{
+              id: 'dropped-image',
+              source_type: 'input',
+              file_path: 'uploads/reference.png',
+              file_name: 'reference.png',
+            }])}
+          >
+            drop task image
+          </button>
+        ) : null}
         {audioTrack ? (
           <button type="button" onClick={() => onAddAudio(audioTrack.id, 'audio.wav', 'input')}>add audio segment</button>
         ) : null}
@@ -195,6 +242,9 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
         ) : null}
         {subtitleTrack ? (
           <button type="button" onClick={() => onAddSubtitleSegment(subtitleTrack.id)}>add subtitle segment</button>
+        ) : null}
+        {subtitleTrack ? (
+          <button type="button" onClick={() => onAddSubtitleSegment(subtitleTrack.id, 24, 72)}>fill subtitle gap</button>
         ) : null}
         {videoSegment ? (
           <button
@@ -278,6 +328,10 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
 vi.mock('@/components/widgets/multitrack/MultiTrackToolbar', () => ({
   MultiTrackToolbar: ({
     onToggleTimeline,
+    onAddTaskMarker,
+    canAddTaskMarker,
+    onTaskOverviewChange,
+    taskOverview,
     canDelete,
     onDeleteSelected,
     onCutAtCurrentTime,
@@ -291,6 +345,10 @@ vi.mock('@/components/widgets/multitrack/MultiTrackToolbar', () => ({
     onRedo,
   }: {
     onToggleTimeline: () => void
+    onAddTaskMarker: () => void
+    canAddTaskMarker: boolean
+    onTaskOverviewChange: (enabled: boolean) => void
+    taskOverview: boolean
     canDelete: boolean
     onDeleteSelected: () => void
     onCutAtCurrentTime: () => void
@@ -305,6 +363,8 @@ vi.mock('@/components/widgets/multitrack/MultiTrackToolbar', () => ({
   }) => (
     <div>
       <button type="button" onClick={onToggleTimeline}>toggle timeline</button>
+      <button type="button" disabled={!canAddTaskMarker} onClick={onAddTaskMarker}>add task marker</button>
+      <button type="button" onClick={() => onTaskOverviewChange(!taskOverview)}>toggle task overview</button>
       <button type="button" disabled={!canDelete} onClick={onDeleteSelected}>delete selected</button>
       <button
         type="button"
@@ -339,6 +399,97 @@ function widgetProps(): ReactWidgetProps<TrackData> {
 describe('MultiTrackWidget', () => {
   beforeEach(() => {
     vi.mocked(loadBrowserVideoMetadata).mockResolvedValue({ duration: 1, width: 1920, height: 1080 })
+  })
+
+  it('fills a requested video gap without moving the following clip', async () => {
+    const data = createDefaultTrackData()
+    data.total_length = 120
+    data.tracks[1].segments = [
+      {
+        id: 'video-first', start_frame: 0, end_frame: 24, color: data.tracks[1].color,
+        content: { media_type: 'video', duration: 1 },
+      },
+      {
+        id: 'video-second', start_frame: 72, end_frame: 96, color: data.tracks[1].color,
+        content: { media_type: 'video', duration: 1 },
+      },
+    ]
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'fill video gap' }))
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    expect(updated.tracks[1].segments.map((segment) => [segment.start_frame, segment.end_frame])).toEqual([
+      [0, 24],
+      [24, 72],
+      [72, 96],
+    ])
+  })
+
+  it('fills requested task and subtitle gaps with their full ranges', () => {
+    const data = createDefaultTrackData()
+    data.total_length = 120
+    data.tracks[0].segments = [
+      { id: 'task-first', start_frame: 0, end_frame: 24, color: data.tracks[0].color, content: { media_type: 'none' } },
+      { id: 'task-second', start_frame: 72, end_frame: 96, color: data.tracks[0].color, content: { media_type: 'none' } },
+    ]
+    data.tracks.push({
+      id: 'subtitle-track',
+      name: 'Subtitle 1',
+      type: 'subtitle',
+      color: '#9D4937',
+      muted: false,
+      locked: false,
+      segments: [
+        { id: 'subtitle-first', start_frame: 0, end_frame: 24, color: '#9D4937', content: { media_type: 'subtitle', text: 'First' } },
+        { id: 'subtitle-second', start_frame: 72, end_frame: 96, color: '#9D4937', content: { media_type: 'subtitle', text: 'Second' } },
+      ],
+    })
+    const onChange = vi.fn()
+    const props = widgetProps()
+    const view = render(<MultiTrackWidget {...props} value={data} onChange={onChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'fill task gap' }))
+    const taskUpdated = onChange.mock.lastCall?.[0] as TrackData
+    expect(taskUpdated.tracks[0].segments.map((segment) => [segment.start_frame, segment.end_frame])).toEqual([
+      [0, 24],
+      [24, 72],
+      [72, 96],
+    ])
+
+    view.rerender(<MultiTrackWidget {...props} value={taskUpdated} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'fill subtitle gap' }))
+    const subtitleUpdated = onChange.mock.lastCall?.[0] as TrackData
+    expect(subtitleUpdated.tracks.at(-1)?.segments.map((segment) => [segment.start_frame, segment.end_frame])).toEqual([
+      [0, 24],
+      [24, 72],
+      [72, 96],
+    ])
+  })
+
+  it('creates a task segment containing a dropped image', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = []
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'drop task image' }))
+
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    expect(updated.tracks[0].segments).toHaveLength(1)
+    expect(updated.tracks[0].segments[0]).toMatchObject({
+      start_frame: 24,
+      content: {
+        media_type: 'none',
+        images: [{
+          source_type: 'input',
+          file_path: 'uploads/reference.png',
+          file_name: 'reference.png',
+        }],
+      },
+    })
   })
 
   it.each([
@@ -417,6 +568,68 @@ describe('MultiTrackWidget', () => {
 
     expect(timelinePanel.className).toContain('grid-rows-[0fr]')
     expect(timelinePanel.getAttribute('aria-hidden')).toBe('true')
+  })
+
+  it('serializes task markers at the playhead, deletes them from the ruler, and toggles overview', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [{
+      id: 'task',
+      start_frame: 0,
+      end_frame: 120,
+      color: data.tracks[0].color,
+      content: { media_type: 'none', task_mode: 'default' },
+    }]
+    const onChange = vi.fn()
+    const props = widgetProps()
+    const view = render(<MultiTrackWidget {...props} value={data} onChange={onChange} />)
+
+    fireEvent.click(screen.getByTestId('multitrack-ruler'))
+    fireEvent.click(screen.getByRole('button', { name: 'add task marker' }))
+    const marked = onChange.mock.lastCall?.[0] as TrackData
+    expect(marked.task_markers).toHaveLength(1)
+    expect(marked.task_markers?.[0]).toMatchObject({ frame: 5 })
+
+    view.rerender(<MultiTrackWidget {...props} value={marked} onChange={onChange} />)
+    expect(screen.getByTestId('task-marker-count').textContent).toBe('1')
+    fireEvent.click(screen.getByRole('button', { name: 'move first marker' }))
+    const moved = onChange.mock.lastCall?.[0] as TrackData
+    expect(moved.task_markers?.[0].frame).toBe(7)
+
+    view.rerender(<MultiTrackWidget {...props} value={moved} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'toggle task overview' }))
+
+    const overviewed = onChange.mock.lastCall?.[0] as TrackData
+    expect(overviewed.task_overview).toBe(true)
+    view.rerender(<MultiTrackWidget {...props} value={overviewed} onChange={onChange} />)
+    expect(screen.getByTestId('multitrack-track-area').getAttribute('data-task-overview')).toBe('true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'delete first marker' }))
+    const unmarked = onChange.mock.lastCall?.[0] as TrackData
+    expect(unmarked.task_markers).toEqual([])
+  })
+
+  it('restores task overview mode from serialized widget data', () => {
+    const data = createDefaultTrackData()
+    data.task_overview = true
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} />)
+
+    expect(screen.getByTestId('multitrack-track-area').getAttribute('data-task-overview')).toBe('true')
+  })
+
+  it('allows a task marker at the timeline end', () => {
+    const data = createDefaultTrackData()
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'seek timeline end' }))
+    fireEvent.click(screen.getByRole('button', { name: 'add task marker' }))
+
+    const marked = onChange.mock.lastCall?.[0] as TrackData
+    expect(marked.task_markers).toEqual([
+      expect.objectContaining({ frame: data.total_length }),
+    ])
   })
 
   it('undoes and redoes multitrack widget changes without using canvas history', () => {
