@@ -2247,6 +2247,20 @@ def _format_marker_task_prompt_relay(
             formatted.append(_format_multitrack_prompt_relay(prompt, task_start, task_end, 0))
     return " | ".join(formatted)
 
+
+def _evenly_distributed_image_indexes(image_count: int, duration_frames: int) -> str:
+    if image_count <= 0:
+        return ""
+    if image_count == 1:
+        return "0"
+    indexes = [0]
+    indexes.extend(
+        math.ceil(index * max(0, duration_frames) / (image_count - 1))
+        for index in range(1, image_count - 1)
+    )
+    indexes.append(-1)
+    return ",".join(str(index) for index in indexes)
+
 class MultiTrackTaskOutput(io.ComfyNode):
     @classmethod
     def define_schema(cls):
@@ -2277,6 +2291,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 io.Image.Output("IMAGES", is_output_list=True),
                 io.Audio.Output("AUDIO", is_output_list=True),
                 io.Video.Output("VIDEO", is_output_list=True),
+                io.String.Output("IMAGE_INDEXES"),
             ],
         )
 
@@ -2309,10 +2324,13 @@ class MultiTrackTaskOutput(io.ComfyNode):
         length = duration_frames + 1 if task_entry else 0
         frame_rate = float(info.get("frame_rate", 24))
 
-        task_contents = [content]
+        task_content_entries = [(content, start_frame)]
         if task_entry.get("marker_mode"):
-            task_contents = [
-                candidate_content
+            task_content_entries = [
+                (
+                    candidate_content,
+                    max(start_frame, _multitrack_frame_value(candidate.get("start_frame"))),
+                )
                 for candidate in _multitrack_task_segments(info)
                 if _ranges_overlap(start_frame, end_frame, candidate)
                 for candidate_content in [candidate.get("content", {})]
@@ -2321,7 +2339,8 @@ class MultiTrackTaskOutput(io.ComfyNode):
 
         selected_images: list[torch.Tensor] = []
         selected_image_indexes: set[int] = set()
-        for task_content in task_contents:
+        marker_image_frames: list[int] = []
+        for task_content, task_content_start in task_content_entries:
             for image_info in task_content.get("images", []):
                 if not isinstance(image_info, dict):
                     continue
@@ -2336,6 +2355,16 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 ):
                     selected_image_indexes.add(media_index)
                     selected_images.append(image_items[media_index])
+                    if task_entry.get("marker_mode"):
+                        marker_image_frames.append(max(0, task_content_start - start_frame))
+
+        if task_entry.get("marker_mode"):
+            image_indexes = ",".join(str(frame) for frame in marker_image_frames)
+        else:
+            image_indexes = _evenly_distributed_image_indexes(
+                len(selected_images),
+                duration_frames,
+            )
 
         selected_audio: list[dict] = []
         selected_video: list = []
@@ -2406,6 +2435,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
             selected_images,
             selected_audio,
             selected_video,
+            image_indexes,
         )
 
 TYPE_MAP = {"flf": 0, "fmlf": 1, "ref": 2}

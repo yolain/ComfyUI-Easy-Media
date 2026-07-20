@@ -1489,6 +1489,7 @@ def test_multitrack_task_output_schema_and_task_media_selection():
     ]
     assert [output.name for output in schema.outputs] == [
         "SYSTEM_PROMPT", "USER_PROMPT", "TYPE", "LENGTH", "IMAGES", "AUDIO", "VIDEO",
+        "IMAGE_INDEXES",
     ]
 
     images = [torch.zeros(1, 2, 2, 3), torch.ones(1, 2, 2, 3), torch.full((1, 2, 2, 3), 2.0)]
@@ -1525,7 +1526,16 @@ def test_multitrack_task_output_schema_and_task_media_selection():
         ["default"],
     )
 
-    system_prompt, user_prompt, task_type, length, selected_images, selected_audio, selected_video = result.values
+    (
+        system_prompt,
+        user_prompt,
+        task_type,
+        length,
+        selected_images,
+        selected_audio,
+        selected_video,
+        image_indexes,
+    ) = result.values
     assert system_prompt == ""
     assert user_prompt == "make it move"
     assert task_type == "rv2v"
@@ -1533,7 +1543,67 @@ def test_multitrack_task_output_schema_and_task_media_selection():
     assert selected_images == [images[1], images[2]]
     assert selected_audio[0]["waveform"].flatten().tolist() == list(range(4, 12))
     assert selected_video == [video_track]
+    assert image_indexes == "0,-1"
     assert video_track.trim_calls == [(1.0, 2.0, False)]
+
+
+def test_multitrack_task_output_evenly_distributes_regular_task_image_indexes():
+    module = _load_basic_module()
+    images = [torch.full((1, 2, 2, 3), float(index)) for index in range(4)]
+    tracks_info = {
+        "frame_rate": 24,
+        "tracks": [{"type": "task", "segments": [{
+            "start_frame": 10,
+            "end_frame": 22,
+            "content": {
+                "user_prompt": "four conditions",
+                "images": [{"media_index": index} for index in range(4)],
+            },
+        }]}],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [images], [], [], [0], ["default"],
+    )
+
+    assert result.values[-1] == "0,4,8,-1"
+
+
+def test_multitrack_task_output_uses_relative_segment_starts_for_marker_image_indexes():
+    module = _load_basic_module()
+    images = [torch.zeros(1, 2, 2, 3), torch.ones(1, 2, 2, 3)]
+    tracks_info = {
+        "total_length": 12,
+        "frame_rate": 24,
+        "task_markers": [
+            {"id": "middle", "frame": 6},
+            {"id": "end", "frame": 12},
+        ],
+        "tracks": [{"type": "task", "segments": [
+            {
+                "start_frame": 2,
+                "end_frame": 8,
+                "content": {"user_prompt": "first", "images": [{"media_index": 0}]},
+            },
+            {
+                "start_frame": 8,
+                "end_frame": 10,
+                "content": {"user_prompt": "no image", "images": []},
+            },
+            {
+                "start_frame": 10,
+                "end_frame": 12,
+                "content": {"user_prompt": "last", "images": [{"media_index": 1}]},
+            },
+        ]}],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [images], [], [], [1], ["default"],
+    )
+
+    assert result.values[4] == [images[0], images[1]]
+    assert result.values[-1] == "0,4"
 
 
 def test_multitrack_task_output_uses_marker_ranges_and_overlapping_task_content():
