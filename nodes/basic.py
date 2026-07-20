@@ -1861,7 +1861,7 @@ class MultiTrackAudioOutput(io.ComfyNode):
         return io.Schema(
             node_id="easy multiTrackAudioOutput",
             display_name="MultiTrack Audio Output",
-            category=CATEGORY_BASIC,
+            category=CATEGORY_MULTITRACK,
             description="Merge all audio tracks and output the first two tracks in full or cropped for S2V.",
             is_input_list=True,
             inputs=[
