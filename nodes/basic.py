@@ -119,7 +119,6 @@ CATEGORY_MEDIA = "EasyUse/Media"
 CATEGORY_TIMELINE = "EasyUse/TimelineEditor"
 CATEGORY_MULTITRACK = "EasyUse/MultiTrackEditor"
 CATEGORY_AUDIO = "EasyUse/Audio"
-CATEGORY_BASIC = "EasyUse/Basic"
 CATEGORY_LOGIC = "EasyUse/Logic"
 PROMPT_FORMAT_OPTIONS = ["default", "promptRelay"]
 
@@ -1721,12 +1720,20 @@ def _multitrack_task_entries(info: dict) -> list[dict]:
             for task in tasks
         ]
 
-    if tasks:
-        range_start = min(max(0, _multitrack_frame_value(task.get("start_frame"))) for task in tasks)
+    range_start = 0
+    total_length = max(0, _multitrack_frame_value(info.get("total_length")))
+    marker_end = max(
+        (
+            _multitrack_frame_value(marker.get("frame"))
+            for marker in markers
+            if isinstance(marker, dict)
+            and 0 < _multitrack_frame_value(marker.get("frame")) <= total_length
+        ),
+        default=0,
+    )
+    range_end = max(0, total_length - 1, marker_end)
+    if range_end <= range_start and tasks:
         range_end = max(_multitrack_frame_value(task.get("end_frame"), range_start) for task in tasks)
-    else:
-        range_start = 0
-        range_end = max(0, _multitrack_frame_value(info.get("total_length"), 1) - 1)
     if range_end <= range_start:
         return []
 
@@ -2243,16 +2250,33 @@ class MultiTrackTaskOutput(io.ComfyNode):
         length = duration_frames + 1 if task_entry else 0
         frame_rate = float(info.get("frame_rate", 24))
 
+        task_contents = [content]
+        if task_entry.get("marker_mode"):
+            task_contents = [
+                candidate_content
+                for candidate in _multitrack_task_segments(info)
+                if _ranges_overlap(start_frame, end_frame, candidate)
+                for candidate_content in [candidate.get("content", {})]
+                if isinstance(candidate_content, dict)
+            ]
+
         selected_images: list[torch.Tensor] = []
-        for image_info in content.get("images", []):
-            if not isinstance(image_info, dict):
-                continue
-            try:
-                media_index = int(image_info.get("media_index"))
-            except (TypeError, ValueError):
-                continue
-            if 0 <= media_index < len(image_items) and isinstance(image_items[media_index], torch.Tensor):
-                selected_images.append(image_items[media_index])
+        selected_image_indexes: set[int] = set()
+        for task_content in task_contents:
+            for image_info in task_content.get("images", []):
+                if not isinstance(image_info, dict):
+                    continue
+                try:
+                    media_index = int(image_info.get("media_index"))
+                except (TypeError, ValueError):
+                    continue
+                if (
+                    media_index not in selected_image_indexes
+                    and 0 <= media_index < len(image_items)
+                    and isinstance(image_items[media_index], torch.Tensor)
+                ):
+                    selected_image_indexes.add(media_index)
+                    selected_images.append(image_items[media_index])
 
         selected_audio: list[dict] = []
         selected_video: list = []
@@ -2307,7 +2331,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
                     len(selected_images),
                 )
         elif selected_prompt_format == "api":
-            user_prompt = api_prompt
+            user_prompt = chat_user_prompt
         elif selected_prompt_format == "llm":
             user_prompt = llm_prompt
         else:

@@ -1490,13 +1490,110 @@ def test_multitrack_task_output_uses_marker_ranges_and_overlapping_task_content(
     assert video_track.trim_calls == [(3.0, 2.0, False)]
 
 
+def test_multitrack_task_output_uses_task_markers_for_full_media_split_ranges():
+    module = _load_basic_module()
+    images = [torch.zeros(1, 2, 2, 3), torch.ones(1, 2, 2, 3)]
+    audio_track = {"waveform": torch.arange(12).reshape(1, 1, 12), "sample_rate": 1}
+    video_track = _FakeVideo(_VideoComponents(torch.zeros(12, 2, 2, 3), None, Fraction(1)))
+    tracks_info = {
+        "total_length": 12,
+        "frame_rate": 1,
+        "task_markers": [
+            {"id": "first-label", "frame": 4},
+            {"id": "second-label", "frame": 12},
+        ],
+        "tracks": [
+            {"type": "task", "segments": [
+                {
+                    "start_frame": 2,
+                    "end_frame": 6,
+                    "content": {"user_prompt": "first", "images": [{"media_index": 0}]},
+                },
+                {
+                    "start_frame": 6,
+                    "end_frame": 10,
+                    "content": {"user_prompt": "second", "images": [{"media_index": 1}]},
+                },
+            ]},
+            {"type": "audio", "media_index": 0, "segments": [
+                {"start_frame": 0, "end_frame": 12, "content": {"media_type": "audio"}},
+            ]},
+            {"type": "video", "media_index": 0, "segments": [
+                {"start_frame": 0, "end_frame": 12, "content": {"media_type": "video"}},
+            ]},
+        ],
+    }
+
+    first = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [images], [[audio_track]], [[video_track]], [0], ["default"],
+    )
+    second = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [images], [[audio_track]], [[video_track]], [1], ["default"],
+    )
+
+    assert first.values[3] == 5
+    assert first.values[4] == [images[0]]
+    assert first.values[5][0]["waveform"].flatten().tolist() == [0, 1, 2, 3]
+    assert second.values[3] == 9
+    assert second.values[4] == [images[0], images[1]]
+    assert second.values[5][0]["waveform"].flatten().tolist() == list(range(4, 12))
+    assert video_track.trim_calls == [(0.0, 4.0, False), (4.0, 8.0, False)]
+
+
+def test_multitrack_task_output_combines_images_from_all_segments_inside_task_label():
+    module = _load_basic_module()
+    images = [
+        torch.zeros(1, 2, 2, 3),
+        torch.ones(1, 2, 2, 3),
+        torch.full((1, 2, 2, 3), 2.0),
+    ]
+    tracks_info = {
+        "total_length": 12,
+        "frame_rate": 1,
+        "task_markers": [
+            {"id": "first-label", "frame": 8},
+            {"id": "second-label", "frame": 12},
+        ],
+        "tracks": [{
+            "type": "task",
+            "segments": [
+                {
+                    "start_frame": 0,
+                    "end_frame": 4,
+                    "content": {"user_prompt": "first", "images": [{"media_index": 0}]},
+                },
+                {
+                    "start_frame": 4,
+                    "end_frame": 8,
+                    "content": {"user_prompt": "second", "images": [{"media_index": 1}]},
+                },
+                {
+                    "start_frame": 8,
+                    "end_frame": 12,
+                    "content": {"user_prompt": "third", "images": [{"media_index": 2}]},
+                },
+            ],
+        }],
+    }
+
+    first = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [images], [], [], [0], ["default"],
+    )
+    second = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [images], [], [], [1], ["default"],
+    )
+
+    assert first.values[4] == [images[0], images[1]]
+    assert second.values[4] == [images[2]]
+
+
 def test_multitrack_audio_output_schema_is_basic_and_exposes_mode_and_two_tracks():
     module = _load_basic_module()
 
     schema = module.MultiTrackAudioOutput.define_schema()
 
     assert schema.node_id == "easy multiTrackAudioOutput"
-    assert schema.category == "EasyUse/Basic"
+    assert schema.category == "EasyUse/MultiTrackEditor"
     assert schema.is_input_list is True
     assert [input_.name for input_ in schema.inputs] == ["tracks_info", "audio", "mode", "task_index"]
     assert schema.inputs[2].kwargs["options"] == ["default", "crop"]
@@ -1746,7 +1843,7 @@ def test_multitrack_task_output_supports_prompt_formats_and_non_overlapping_rang
     assert api[0] == llm[0] == "api:first | second"
     assert default[1] == "first | second"
     assert relay[1] == "first [0-61] | second [61-121]"
-    assert api[1] == "api:first | second"
+    assert api[1] == "first | second"
     assert llm[1] == "llm:api:first | second:first | second:False"
 
 
