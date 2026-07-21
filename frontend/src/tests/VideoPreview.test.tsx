@@ -83,6 +83,26 @@ describe('VideoPreview', () => {
     expect(screen.getByTestId('multitrack-black-frame')).not.toBeNull()
   })
 
+  it('keeps the video out of layout flow so intrinsic dimensions cannot expand the stage', () => {
+    render(
+      <VideoPreview
+        activeVideo={activeVideo(0)}
+        resolution={resolution}
+        isPlaying={false}
+        muted
+        volume={1}
+      />,
+    )
+
+    const video = screen.getByTestId('multitrack-video-preview')
+    expect(video.className).toContain('absolute')
+    expect(video.className).toContain('inset-0')
+    expect(video.className).toContain('min-h-0')
+    expect(video.className).toContain('min-w-0')
+    expect(video.className).toContain('max-h-full')
+    expect(video.className).toContain('max-w-full')
+  })
+
   it('does not repeatedly seek while the preview video is already playing', () => {
     const seekTimes: number[] = []
     const currentTimes = new WeakMap<HTMLMediaElement, number>()

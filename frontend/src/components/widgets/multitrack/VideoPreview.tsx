@@ -91,7 +91,7 @@ export function VideoPreview({
         <video
           ref={videoRef}
           data-testid="multitrack-video-preview"
-          className="h-full w-full"
+          className="absolute inset-0 h-full min-h-0 w-full min-w-0 max-h-full max-w-full"
           src={videoUrl}
           muted={muted}
           playsInline
