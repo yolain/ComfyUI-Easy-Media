@@ -126,6 +126,10 @@ export function createReactWidget<T extends object | string = object>(
       },
     ) as ComfyDOMWidget<HTMLDivElement, string>
 
+    // Keep compatibility with node reloaders that only recognize string DOM
+    // widgets through the legacy inputEl field.
+    widget.inputEl = container
+
     // serializeValue is called by ComfyUI when building the API prompt payload
     widget.serializeValue = () => currentValue
     root = createRoot(container)
