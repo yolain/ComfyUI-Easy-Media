@@ -465,38 +465,52 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
 
         <div
           data-compare-video-toolbar
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-10 grid translate-y-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-t border-border bg-background/90 px-1 opacity-0 shadow-sm backdrop-blur-sm transition-[opacity,transform] duration-300 ease-out group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:opacity-100"
+          className="@container/compare-video-controls pointer-events-none absolute inset-x-0 bottom-0 z-10 grid translate-y-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-t border-border bg-background/90 px-1 opacity-0 shadow-sm backdrop-blur-sm transition-[opacity,transform] duration-300 ease-out @max-[420px]/compare-video-controls:grid-cols-[minmax(0,1fr)_auto] @max-[420px]/compare-video-controls:gap-x-1 @max-[420px]/compare-video-controls:gap-y-0 @max-[420px]/compare-video-controls:px-2 @max-[420px]/compare-video-controls:py-1 group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:opacity-100"
         >
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="cursor-pointer"
-                onClick={isPlaying ? pauseVideos : playVideos}
-                aria-label={isPlaying ? t('compareVideo.pause') : t('compareVideo.play')}
-              >
-                {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{isPlaying ? t('compareVideo.pause') : t('compareVideo.play')}</TooltipContent>
-          </Tooltip>
+          <div
+            data-compare-video-playback
+            className="@max-[420px]/compare-video-controls:col-start-1 @max-[420px]/compare-video-controls:row-start-2"
+          >
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="cursor-pointer"
+                  onClick={isPlaying ? pauseVideos : playVideos}
+                  aria-label={isPlaying ? t('compareVideo.pause') : t('compareVideo.play')}
+                >
+                  {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{isPlaying ? t('compareVideo.pause') : t('compareVideo.play')}</TooltipContent>
+            </Tooltip>
+          </div>
 
-          <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2">
+          <div
+            data-compare-video-seek
+            className="grid min-w-0 grid-cols-[auto_minmax(4rem,1fr)_auto] items-center gap-2 @max-[420px]/compare-video-controls:col-span-2 @max-[420px]/compare-video-controls:col-start-1 @max-[420px]/compare-video-controls:row-start-1 @max-[420px]/compare-video-controls:w-full @max-[420px]/compare-video-controls:px-1 @max-[420px]/compare-video-controls:py-1"
+          >
             <span className="w-10 text-right text-[11px] tabular-nums text-muted-foreground">{formatTime(currentTime)}</span>
-            <Slider
-              value={[Math.min(currentTime, duration || currentTime)]}
-              min={0}
-              max={Math.max(duration, currentTime, 0.01)}
-              step={0.01}
-              onValueChange={handleSeek}
-              aria-label={t('compareVideo.seek')}
-            />
+            <div className="min-w-0">
+              <Slider
+                className="w-full"
+                value={[Math.min(currentTime, duration || currentTime)]}
+                min={0}
+                max={Math.max(duration, currentTime, 0.01)}
+                step={0.01}
+                onValueChange={handleSeek}
+                aria-label={t('compareVideo.seek')}
+              />
+            </div>
             <span className="w-10 text-[11px] tabular-nums text-muted-foreground">{formatTime(duration)}</span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div
+            data-compare-video-actions
+            className="flex items-center gap-2 @max-[420px]/compare-video-controls:col-start-2 @max-[420px]/compare-video-controls:row-start-2 @max-[420px]/compare-video-controls:gap-1"
+          >
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -512,15 +526,18 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
               </TooltipTrigger>
               <TooltipContent>{muted ? t('compareVideo.unmute') : t('compareVideo.mute')}</TooltipContent>
             </Tooltip>
-            <Slider
-              className="w-20"
-              value={[volume]}
-              min={0}
-              max={1}
-              step={0.01}
-              onValueChange={(value) => setVolume(value[0] ?? 0)}
-              aria-label={t('compareVideo.volume')}
-            />
+            <div data-compare-video-volume>
+              <Slider
+                className="w-20"
+                value={[volume]}
+                min={0}
+                max={1}
+                step={0.01}
+                onValueChange={(value) => setVolume(value[0] ?? 0)}
+                aria-label={t('compareVideo.volume')}
+              />
+            </div>
+
             <Popover>
               <PopoverTrigger asChild>
                 <Button

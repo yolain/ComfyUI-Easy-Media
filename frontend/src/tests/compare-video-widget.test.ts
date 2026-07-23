@@ -121,6 +121,31 @@ describe('CompareVideoWidget', () => {
     expect(toolbar?.className).toContain('group-focus-within:opacity-100')
   })
 
+  it('switches from one row to two rows below 420px', () => {
+    render(createElement(CompareVideoWidget, widgetProps({
+      id: 8,
+      __easyMediaCompareVideos: { source, output, duration: 10 },
+    })))
+
+    const toolbar = document.querySelector('[data-compare-video-toolbar]')
+    const seekRow = document.querySelector('[data-compare-video-seek]')
+    const playbackControls = document.querySelector('[data-compare-video-playback]')
+    const actionsRow = document.querySelector('[data-compare-video-actions]')
+    const volumeSlider = document.querySelector('[data-compare-video-volume]')
+
+    expect(toolbar?.className).toContain('@container/compare-video-controls')
+    expect(toolbar?.className).toContain('grid-cols-[auto_minmax(0,1fr)_auto]')
+    expect(toolbar?.className).toContain('@max-[420px]/compare-video-controls:grid-cols-[minmax(0,1fr)_auto]')
+    expect(seekRow?.className).toContain('grid-cols-[auto_minmax(4rem,1fr)_auto]')
+    expect(seekRow?.className).toContain('@max-[420px]/compare-video-controls:col-span-2')
+    expect(seekRow?.className).toContain('@max-[420px]/compare-video-controls:row-start-1')
+    expect(playbackControls?.className).toContain('@max-[420px]/compare-video-controls:row-start-2')
+    expect(actionsRow?.className).toContain('@max-[420px]/compare-video-controls:row-start-2')
+    expect(volumeSlider?.className).not.toContain('@max-[420px]/compare-video-controls:hidden')
+    expect(screen.getByRole('slider', { name: 'Video time' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Mute audio' })).not.toBeNull()
+  })
+
   it('uses output metadata duration when source and output durations differ', () => {
     render(createElement(CompareVideoWidget, widgetProps({
       id: 6,
