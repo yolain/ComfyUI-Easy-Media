@@ -867,4 +867,106 @@ describe('TrackArea track controls', () => {
     })
     expect(fetchMock).toHaveBeenCalledWith('/upload/image', expect.objectContaining({ method: 'POST' }))
   })
+
+  it('reads an external SRT file dropped onto a subtitle track at the pointer frame', async () => {
+    const data = createDefaultTrackData()
+    data.total_length = 240
+    data.tracks.push({
+      id: 'subtitle-track',
+      name: 'Subtitle 1',
+      type: 'subtitle',
+      color: '#9D4937',
+      muted: false,
+      locked: false,
+      segments: [],
+    })
+    const onImportSubtitles = vi.fn()
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <TooltipProvider>
+        <TrackArea
+          data={data}
+          width={480}
+          currentTime={0}
+          snapEnabled
+          canvasScale={1}
+          selectedSegmentIds={new Set()}
+          node={{}}
+          app={{}}
+          onAddVideo={vi.fn()}
+          onAddAudio={vi.fn()}
+          onReplaceAudio={vi.fn()}
+          onAddTrack={vi.fn()}
+          onAddSubtitleSegment={vi.fn()}
+          onImportSubtitles={onImportSubtitles}
+          onReplaceVideo={vi.fn()}
+          onAddTaskSegment={vi.fn()}
+          onSelectSegment={vi.fn()}
+          onSelectSegments={vi.fn()}
+          onClearSelection={vi.fn()}
+          onDeleteSegment={vi.fn()}
+          onDeleteTrack={vi.fn()}
+          onTrackAudioSettingsChange={vi.fn()}
+          onDistributeTaskSegments={vi.fn()}
+          onCloneTaskSegment={vi.fn()}
+          onResizeSegment={vi.fn()}
+          onResizeSegmentPreview={vi.fn()}
+          onMoveSegment={vi.fn()}
+          onSmartSplit={vi.fn()}
+          onSmartSplitTasks={vi.fn()}
+          cutMode={false}
+          onCutSegment={vi.fn()}
+        />
+      </TooltipProvider>,
+    )
+
+    const area = document.querySelector('[data-multitrack-track-area]') as HTMLDivElement
+    vi.spyOn(area, 'getBoundingClientRect').mockReturnValue({
+      left: 100,
+      top: 200,
+      width: 480,
+      height: 148,
+      right: 580,
+      bottom: 348,
+      x: 100,
+      y: 200,
+      toJSON: () => ({}),
+    })
+    const srtText = '1\n00:00:01,000 --> 00:00:02,000\nHello\n'
+    const subtitleFile = Object.assign(
+      new File([srtText], 'captions.srt', { type: 'application/x-subrip' }),
+      { text: () => Promise.resolve(srtText) },
+    )
+    const dataTransfer = {
+      files: [subtitleFile],
+      items: [{ kind: 'file', type: 'application/x-subrip', getAsFile: () => subtitleFile }],
+      types: ['Files'],
+      dropEffect: 'none',
+    }
+    const dragOver = createEvent.dragOver(area)
+    Object.defineProperties(dragOver, {
+      clientX: { value: 276 },
+      clientY: { value: 300 },
+      dataTransfer: { value: dataTransfer },
+    })
+    fireEvent(area, dragOver)
+
+    expect(dragOver.defaultPrevented).toBe(true)
+    expect(screen.getByTestId('external-media-drop-slot')).toBeTruthy()
+
+    const drop = createEvent.drop(area)
+    Object.defineProperties(drop, {
+      clientX: { value: 276 },
+      clientY: { value: 300 },
+      dataTransfer: { value: dataTransfer },
+    })
+    fireEvent(area, drop)
+
+    await vi.waitFor(() => {
+      expect(onImportSubtitles).toHaveBeenCalledWith('subtitle-track', srtText, 88)
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
 })

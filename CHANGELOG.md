@@ -2,12 +2,13 @@
 
 ---
 
-## [1.1.3] - 2026-07-21
+## [1.1.3] - 2026-07-30
 
 ### ✨ Features
 
 - **MultiTrack Editor**: Add task markers, allowing multiple task segments to be used as one loop task
 - **MultiTrack Editor**: Add track overview, allowing segments to be expanded to view prompts and reference images
+- **MultiTrack Editor**: Support importing SRT files to subtitle track
 - **MultiTrack Audio Output**: Add cropped audio output mode, outputting cropped audio clips and starting frame number for easier S2V usage
 - **LTX Workflow Simplification**: Add `easy ltxMultiTrackEncode` and multiple simplified LTX workflow nodes
 
