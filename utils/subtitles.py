@@ -44,6 +44,7 @@ _DEFAULT_SUBTITLE_STYLE = {
 }
 _PREVIEW_REFERENCE_HEIGHT = 360.0
 _ASS_FONT_SCALE = 1.45
+_ASS_FONT_SIZE_OFFSET = 4.0
 _ASS_OUTLINE_SCALE = 1.25
 _ASS_BOX_PADDING_SCALE = 2.2
 
@@ -619,7 +620,10 @@ def write_ass_file(
     for segment in segments:
         style = segment.style
         preview_font_size = _clamped_float(style.get("font_size"), 12, 8, 96)
-        font_size = round(preview_font_size * preview_scale * _ASS_FONT_SCALE, 2)
+        font_size = round(
+            preview_font_size * preview_scale * _ASS_FONT_SCALE + _ASS_FONT_SIZE_OFFSET,
+            2,
+        )
         has_background = _ass_style_has_background(style)
         style_name = "Box" if has_background else "Default"
         border_size = box_padding_size if has_background else outline_size

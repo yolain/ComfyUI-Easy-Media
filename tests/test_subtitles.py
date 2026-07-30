@@ -948,7 +948,7 @@ def test_write_ass_file_scales_preview_font_to_video_height(tmp_path):
     text = output.read_text(encoding="utf-8")
 
     assert r"\pos(640,576)" in text
-    assert r"\fs34.8" in text
+    assert r"\fs38.8" in text
     assert r"\bord2.5" in text
     assert r"\3c&H000000" in text
     assert r"\3a&H00" in text
