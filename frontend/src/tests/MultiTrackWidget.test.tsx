@@ -122,7 +122,7 @@ vi.mock('@/components/widgets/multitrack/MultiTrackRuler', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
-  TrackArea: ({ data, node, app, onCloneTaskSegment, onSplitTaskSegment, onAddTrack, onAddVideo, onAddAudio, onReplaceAudio, onAddTaskSegment, onAddSubtitleSegment, onSmartSplit, onSmartSplitTasks, onRecognizeSubtitles, onResizeSegment, onResizeSegmentPreview, onMoveSegment, onTrackAudioSettingsChange, selectedSegmentIds, onSelectSegment, onSelectSegments, cutMode, taskOverview }: {
+  TrackArea: ({ data, node, app, onCloneTaskSegment, onSplitTaskSegment, onAddTrack, onAddVideo, onAddAudio, onReplaceAudio, onAddTaskSegment, onAddSubtitleSegment, onImportSubtitles, onSmartSplit, onSmartSplitTasks, onRecognizeSubtitles, onResizeSegment, onResizeSegmentPreview, onMoveSegment, onTrackAudioSettingsChange, selectedSegmentIds, onSelectSegment, onSelectSegments, cutMode, taskOverview }: {
     data: TrackData
     node: unknown
     app: unknown
@@ -139,6 +139,7 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
       images?: TrackData['tracks'][number]['segments'][number]['content']['images'],
     ) => void
     onAddSubtitleSegment: (trackId: string, startFrame?: number, endFrame?: number) => void
+    onImportSubtitles: (trackId: string, srtText: string, startFrame: number) => void
     onSmartSplit: (segmentId: string) => void
     onSmartSplitTasks: (segmentId: string) => void
     onRecognizeSubtitles: (segmentId: string, method: 'qwen3-asr' | 'whisper-large-v3') => void
@@ -245,6 +246,30 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
         ) : null}
         {subtitleTrack ? (
           <button type="button" onClick={() => onAddSubtitleSegment(subtitleTrack.id, 24, 72)}>fill subtitle gap</button>
+        ) : null}
+        {subtitleTrack ? (
+          <button
+            type="button"
+            onClick={() => onImportSubtitles(
+              subtitleTrack.id,
+              '1\n00:00:01,000 --> 00:00:02,000\nFirst imported\n\n2\n00:00:03,000 --> 00:00:04,000\nSecond imported\n',
+              48,
+            )}
+          >
+            import subtitle file
+          </button>
+        ) : null}
+        {subtitleTrack ? (
+          <button
+            type="button"
+            onClick={() => onImportSubtitles(
+              subtitleTrack.id,
+              '1\n00:00:01,000 --> 00:00:10,000\nLong imported\n\n2\n00:00:03,000 --> 00:00:04,000\nShort imported\n',
+              48,
+            )}
+          >
+            import overlapping subtitle file
+          </button>
         ) : null}
         {videoSegment ? (
           <button
@@ -1292,6 +1317,100 @@ describe('MultiTrackWidget', () => {
         },
       },
     })
+  })
+
+  it('imports SRT cues into the dropped time range and preserves subtitles outside it', () => {
+    const data = createDefaultTrackData()
+    data.total_length = 240
+    data.tracks.push({
+      id: 'subtitle-track',
+      name: 'Subtitle 1',
+      type: 'subtitle',
+      color: '#9D4937',
+      muted: false,
+      locked: false,
+      segments: [
+        {
+          id: 'subtitle-before',
+          start_frame: 0,
+          end_frame: 24,
+          color: '#9D4937',
+          content: { media_type: 'subtitle', text: 'Before' },
+        },
+        {
+          id: 'subtitle-overlap',
+          start_frame: 48,
+          end_frame: 72,
+          color: '#9D4937',
+          content: { media_type: 'subtitle', text: 'Replace me' },
+        },
+        {
+          id: 'subtitle-after',
+          start_frame: 200,
+          end_frame: 220,
+          color: '#9D4937',
+          content: { media_type: 'subtitle', text: 'After' },
+        },
+      ],
+    })
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'import subtitle file' }))
+
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    const segments = updated.tracks.find((track) => track.id === 'subtitle-track')?.segments ?? []
+    expect(segments.map((segment) => ({
+      start: segment.start_frame,
+      end: segment.end_frame,
+      text: segment.content.text,
+    }))).toEqual([
+      { start: 0, end: 24, text: 'Before' },
+      { start: 48, end: 72, text: 'First imported' },
+      { start: 96, end: 120, text: 'Second imported' },
+      { start: 200, end: 220, text: 'After' },
+    ])
+  })
+
+  it('replaces old subtitles across the full extrema of overlapping imported cues', () => {
+    const data = createDefaultTrackData()
+    data.total_length = 360
+    data.tracks.push({
+      id: 'subtitle-track',
+      name: 'Subtitle 1',
+      type: 'subtitle',
+      color: '#9D4937',
+      muted: false,
+      locked: false,
+      segments: [
+        {
+          id: 'subtitle-overlap-tail',
+          start_frame: 160,
+          end_frame: 180,
+          color: '#9D4937',
+          content: { media_type: 'subtitle', text: 'Replace tail' },
+        },
+        {
+          id: 'subtitle-after',
+          start_frame: 300,
+          end_frame: 320,
+          color: '#9D4937',
+          content: { media_type: 'subtitle', text: 'After' },
+        },
+      ],
+    })
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'import overlapping subtitle file' }))
+
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    const segments = updated.tracks.find((track) => track.id === 'subtitle-track')?.segments ?? []
+    expect(segments.map((segment) => segment.content.text)).toEqual([
+      'Long imported',
+      'Short imported',
+      'After',
+    ])
   })
 
   it('covers the whole widget while smart split is pending and clears it on success', async () => {

@@ -63,6 +63,7 @@ import {
   requestSubtitleSpeechAudio,
   type SubtitleSpeechSettings,
 } from '@/lib/subtitle-speech'
+import { createSubtitleSegmentsFromSrt } from '@/lib/subtitle-srt'
 import { loadBrowserAudioMetadata } from '@/lib/audio-utils'
 import { invalidateMediaListCache } from '@/stores/media-list-store'
 import { uuid } from '@/lib/uuid'
@@ -703,6 +704,43 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     })
   }
 
+  function handleImportSubtitles(trackId: string, srtText: string, startFrame: number) {
+    const latestData = dataRef.current
+    const updatedTracks = latestData.tracks.map((track) => {
+      if (track.id !== trackId || track.type !== 'subtitle') return track
+      const existingStyle = track.segments.find((segment) => segment.content.subtitle_style)?.content.subtitle_style
+      const importedSegments = createSubtitleSegmentsFromSrt(srtText, {
+        color: track.color || MULTITRACK_SUBTITLE_COLOR,
+        createId: () => uuid(),
+        frameRate: latestData.frame_rate,
+        startFrame: Math.max(0, Math.round(startFrame)),
+        subtitleStyle: existingStyle ?? DEFAULT_SUBTITLE_STYLE,
+      })
+      const importStart = importedSegments.reduce(
+        (minimum, segment) => Math.min(minimum, segment.start_frame),
+        importedSegments[0].start_frame,
+      )
+      const importEnd = importedSegments.reduce(
+        (maximum, segment) => Math.max(maximum, segment.end_frame),
+        importedSegments[0].end_frame,
+      )
+      const outsideImportRange = track.segments.filter((segment) => (
+        segment.end_frame <= importStart || segment.start_frame >= importEnd
+      ))
+      return {
+        ...track,
+        segments: [...outsideImportRange, ...importedSegments]
+          .sort((left, right) => left.start_frame - right.start_frame),
+      }
+    })
+
+    commitNormalizedTrackChange({
+      ...latestData,
+      tracks: updatedTracks,
+      total_length: calculateTotalLength(updatedTracks, latestData.frame_rate),
+    })
+  }
+
   function handleDeleteSegment(segmentId: string) {
     const idsToDelete = selectedSegmentIds.has(segmentId) ? selectedSegmentIds : new Set([segmentId])
     const updatedTracks = idsToDelete.size > 1
@@ -1295,6 +1333,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     onReplaceAudio={handleReplaceAudio}
                     onAddTrack={handleAddTrack}
                     onAddSubtitleSegment={handleAddSubtitleSegment}
+                    onImportSubtitles={handleImportSubtitles}
                     onReplaceVideo={handleReplaceVideo}
                     onAddTaskSegment={handleAddTaskSegment}
                     onSelectSegment={handleSelectSegment}

@@ -57,6 +57,7 @@ interface TrackAreaProps {
   ) => void
   onAddTrack: (type: MultiTrackType) => void
   onAddSubtitleSegment: (trackId: string, startFrame?: number, endFrame?: number) => void
+  onImportSubtitles?: (trackId: string, srtText: string, startFrame: number) => void
   onReplaceVideo: (trackId: string, segmentId: string, filePath: string, sourceType: MultiTrackSourceType) => void
   onAddTaskSegment: (
     trackId: string,
@@ -117,13 +118,14 @@ function samePlaceholder(left: SegmentDragPlaceholder | null, right: SegmentDrag
 const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus', 'wma'])
 const VIDEO_EXTENSIONS = new Set(['mp4', 'webm', 'mov', 'mkv', 'avi', 'm4v'])
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'avif'])
-type ExternalMediaType = 'audio' | 'video' | 'image'
+type ExternalMediaType = 'audio' | 'video' | 'image' | 'subtitle'
 
 function externalMediaType(file: File): ExternalMediaType | null {
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+  if (extension === 'srt') return 'subtitle'
   if (file.type.startsWith('audio/')) return 'audio'
   if (file.type.startsWith('video/')) return 'video'
   if (file.type.startsWith('image/')) return 'image'
-  const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
   if (AUDIO_EXTENSIONS.has(extension)) return 'audio'
   if (VIDEO_EXTENSIONS.has(extension)) return 'video'
   if (IMAGE_EXTENSIONS.has(extension)) return 'image'
@@ -135,6 +137,7 @@ function draggedMediaType(dataTransfer: DataTransfer): ExternalMediaType | null 
   if (file) return externalMediaType(file)
   for (const item of Array.from(dataTransfer.items)) {
     if (item.kind !== 'file') continue
+    if (item.type === 'application/x-subrip') return 'subtitle'
     if (item.type.startsWith('audio/')) return 'audio'
     if (item.type.startsWith('video/')) return 'video'
     if (item.type.startsWith('image/')) return 'image'
@@ -179,6 +182,7 @@ export function TrackArea({
   onReplaceAudio,
   onAddTrack,
   onAddSubtitleSegment,
+  onImportSubtitles = () => {},
   onReplaceVideo,
   onAddTaskSegment,
   onSelectSegment,
@@ -374,7 +378,10 @@ export function TrackArea({
       segment.start_frame + (segment.end_frame - segment.start_frame) / 2 < requestedFrame
     )).length
     const previousEnd = sortedSegments[insertIndex - 1]?.end_frame ?? 0
-    return { trackId: track.id, frame: Math.max(requestedFrame, previousEnd) }
+    return {
+      trackId: track.id,
+      frame: mediaType === 'subtitle' ? requestedFrame : Math.max(requestedFrame, previousEnd),
+    }
   }
 
   function handleExternalDragOver(event: React.DragEvent<HTMLDivElement>) {
@@ -396,6 +403,10 @@ export function TrackArea({
     setExternalDropSlot(null)
     if (!file || !target) return
     try {
+      if (mediaType === 'subtitle') {
+        onImportSubtitles(target.trackId, await file.text(), target.frame)
+        return
+      }
       if (mediaType === 'image') {
         const image = await uploadTaskImageFile(file)
         invalidateMediaListCache('inputs')
@@ -410,7 +421,7 @@ export function TrackArea({
         onAddAudio(target.trackId, filePath, 'input', undefined, target.frame)
       }
     } catch (error) {
-      console.error('[TrackArea] failed to upload dropped media:', error)
+      console.error('[TrackArea] failed to process dropped media:', error)
     }
   }
 
