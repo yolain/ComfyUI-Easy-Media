@@ -1045,6 +1045,42 @@ describe('multitrack utilities', () => {
     expect(updated[1].segments).toHaveLength(0)
   })
 
+  it('keeps linked tasks when another video track still covers the deleted range', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [{
+      id: 'task-linked',
+      start_frame: 24,
+      end_frame: 72,
+      color: data.tracks[0].color,
+      content: { media_type: 'none', task_mode: 'default' },
+    }]
+    data.tracks[1].segments = [{
+      id: 'video-delete',
+      start_frame: 24,
+      end_frame: 72,
+      color: data.tracks[1].color,
+      content: { media_type: 'video', duration: 2 },
+    }]
+    data.tracks.push({
+      ...data.tracks[1],
+      id: 'video-track-2',
+      name: 'Video 1',
+      segments: [{
+        id: 'video-keep',
+        start_frame: 24,
+        end_frame: 72,
+        color: data.tracks[1].color,
+        content: { media_type: 'video', duration: 2 },
+      }],
+    })
+
+    const updated = deleteSegmentWithLinkedTasks(data.tracks, 'video-delete')
+
+    expect(updated[0].segments.map((segment) => segment.id)).toEqual(['task-linked'])
+    expect(updated[1].segments).toHaveLength(0)
+    expect(updated[2].segments.map((segment) => segment.id)).toEqual(['video-keep'])
+  })
+
   it('does not delete linked tasks when deleting a non-video segment', () => {
     const data = createDefaultTrackData()
     const taskTrack = {
@@ -1119,7 +1155,7 @@ describe('multitrack utilities', () => {
     expect(updated[1].segments.map((segment) => segment.id)).toEqual(['video-keep'])
   })
 
-  it('packs later primary video segments forward after deleting selected middle clips', () => {
+  it('preserves video and linked-task gaps after deleting selected middle clips', () => {
     const data = createDefaultTrackData()
     data.tracks[0].segments = [
       {
@@ -1172,11 +1208,11 @@ describe('multitrack utilities', () => {
 
     expect(updated[1].segments.map((segment) => [segment.id, segment.start_frame, segment.end_frame])).toEqual([
       ['video-first', 0, 2],
-      ['video-last', 2, 4],
+      ['video-last', 5, 7],
     ])
     expect(updated[0].segments.map((segment) => [segment.id, segment.start_frame, segment.end_frame])).toEqual([
       ['task-first', 0, 2],
-      ['task-last', 2, 4],
+      ['task-last', 5, 7],
     ])
   })
 
@@ -1219,19 +1255,19 @@ describe('multitrack utilities', () => {
     expect(moved[1].segments).toHaveLength(0)
     expect(moved[2].segments.map((segment) => segment.id)).toEqual(['moving', 'existing'])
     expect(moved[2].segments[0]).toMatchObject({
-      start_frame: 0,
-      end_frame: 2,
+      start_frame: 4,
+      end_frame: 6,
     })
     expect(moved[2].segments[1]).toMatchObject({
-      start_frame: 2,
-      end_frame: 4,
+      start_frame: 6,
+      end_frame: 8,
     })
 
     const blocked = moveSegmentBetweenCompatibleTracks(moved, 'moving', data.tracks[0].id, 0, 24)
     expect(blocked).toBe(moved)
   })
 
-  it('repacks same-track segments from zero when their order changes', () => {
+  it('preserves leading video gaps and only shifts clips enough to prevent overlap', () => {
     const data = createDefaultTrackData()
     const firstVideoTrack = data.tracks[1]
     const moved = moveSegmentBetweenCompatibleTracks(
@@ -1266,8 +1302,8 @@ describe('multitrack utilities', () => {
 
     expect(moved[1].segments.map((segment) => segment.id)).toEqual(['second', 'first'])
     expect(moved[1].segments.map((segment) => [segment.start_frame, segment.end_frame])).toEqual([
-      [0, 3],
-      [3, 5],
+      [2, 5],
+      [5, 7],
     ])
   })
 
@@ -1480,8 +1516,8 @@ describe('multitrack utilities', () => {
     )
 
     expect(moved[0].segments.map((segment) => [segment.id, segment.start_frame, segment.end_frame])).toEqual([
-      ['task-first', 3, 5],
-      ['task-second', 0, 3],
+      ['task-first', 5, 7],
+      ['task-second', 2, 5],
     ])
   })
 
@@ -1572,8 +1608,8 @@ describe('multitrack utilities', () => {
       segmentId: 'first',
       targetTrackId: 'video1',
       insertIndex: 1,
-      start_frame: 3,
-      end_frame: 5,
+      start_frame: 5,
+      end_frame: 7,
     })
     expect(getSegmentDragPlaceholder([data.tracks[0], videoTrack], 'second', 'video1', 0, 24)).toEqual({
       segmentId: 'second',

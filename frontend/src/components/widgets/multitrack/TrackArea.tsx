@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Captions, Film, ListTree, Clapperboard, Layers2, Music2, Plus, Trash2, Volume2 } from 'lucide-react'
+import { Captions, Film, ListTree, Clapperboard, Layers2, Loader2, Music2, Plus, Trash2, Volume2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useT } from '@/lib/i18n'
@@ -9,6 +9,8 @@ import { invalidateMediaListCache } from '@/stores/media-list-store'
 import {
   getSegmentDragPlaceholder,
   getSegmentDragPreviewSegments,
+  getMultiTrackTrackHeight,
+  MULTITRACK_MEDIA_TRACK_LIMIT,
   snapMultiTrackMoveStartTime,
   snapTimeToFrame,
   type SegmentDragPlaceholder,
@@ -70,6 +72,7 @@ interface TrackAreaProps {
   onClearSelection: () => void
   onDeleteSegment: (segmentId: string) => void
   onDeleteTrack: (trackId: string) => void
+  onReorderTrack?: (sourceTrackId: string, targetTrackId: string) => void
   onTrackVisibilityChange?: (trackId: string, visible: boolean) => void
   onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo'>>) => void
   onDistributeTaskSegments: (trackId: string) => void
@@ -84,12 +87,6 @@ interface TrackAreaProps {
   onEditSubtitleSegment?: (segmentId: string) => void
   cutMode: boolean
   onCutSegment: (segmentId: string, splitFrame: number) => void
-}
-
-export function getMultiTrackTrackHeight(type: string, taskOverview = false): number {
-  if (type === 'task') return taskOverview ? 64 : 30
-  if (type === 'subtitle') return 30
-  return 64
 }
 
 function TrackTypeIcon({ type }: Readonly<{ type: string }>) {
@@ -167,6 +164,10 @@ interface ExternalDropSlot {
   frame: number
 }
 
+interface ExternalUpload extends ExternalDropSlot {
+  fileName: string
+}
+
 export function TrackArea({
   data,
   node,
@@ -190,6 +191,7 @@ export function TrackArea({
   onClearSelection,
   onDeleteSegment,
   onDeleteTrack,
+  onReorderTrack = () => {},
   onTrackVisibilityChange = () => {},
   onTrackAudioSettingsChange,
   onDistributeTaskSegments,
@@ -208,11 +210,13 @@ export function TrackArea({
   const t = useT()
   const trackAreaRef = useRef<HTMLDivElement>(null)
   const marqueeStartRef = useRef<{ x: number, y: number } | null>(null)
+  const trackDragSourceRef = useRef<string | null>(null)
   const marqueeMovedRef = useRef(false)
   const suppressNextClickRef = useRef(false)
   const suppressGlobalClickCleanupRef = useRef<(() => void) | null>(null)
   const [dragPlaceholder, setDragPlaceholder] = useState<SegmentDragPlaceholder | null>(null)
   const [externalDropSlot, setExternalDropSlot] = useState<ExternalDropSlot | null>(null)
+  const [externalUpload, setExternalUpload] = useState<ExternalUpload | null>(null)
   const [marqueeRect, setMarqueeRect] = useState<{ left: number, top: number, width: number, height: number } | null>(null)
   const safeLength = Math.max(data.total_length, 1)
   const timelineWidth = Math.max(1, width - MULTITRACK_LEFT_GUTTER)
@@ -224,8 +228,9 @@ export function TrackArea({
   const tracksHeight = data.tracks.reduce((height, track) => height + getMultiTrackTrackHeight(track.type, taskOverview), 0)
   const trackAreaHeight = tracksHeight + addTrackHeight
   const firstVideoTrackId = data.tracks.find((track) => track.type === 'video')?.id
-  const audioTrackLimitReached = data.tracks.filter((track) => track.type === 'audio').length >= 2
-  const subtitleTrackLimitReached = data.tracks.filter((track) => track.type === 'subtitle').length >= 2
+  const videoTrackLimitReached = data.tracks.filter((track) => track.type === 'video').length >= MULTITRACK_MEDIA_TRACK_LIMIT
+  const audioTrackLimitReached = data.tracks.filter((track) => track.type === 'audio').length >= MULTITRACK_MEDIA_TRACK_LIMIT
+  const subtitleTrackLimitReached = data.tracks.filter((track) => track.type === 'subtitle').length >= MULTITRACK_MEDIA_TRACK_LIMIT
   const trackBounds = data.tracks.reduce<Array<{ id: string, top: number, bottom: number }>>((bounds, track) => {
     const top = bounds.at(-1)?.bottom ?? 0
     bounds.push({ id: track.id, top, bottom: top + getMultiTrackTrackHeight(track.type, taskOverview) })
@@ -393,6 +398,41 @@ export function TrackArea({
     setExternalDropSlot(target)
   }
 
+  function trackFromDragEventTarget(target: EventTarget | null): MultiTrack | undefined {
+    if (!(target instanceof Element)) return undefined
+    const row = target.closest<HTMLElement>('[data-multitrack-track-id]')
+    return data.tracks.find((track) => track.id === row?.dataset.multitrackTrackId)
+  }
+
+  function handleTrackDragStart(event: React.DragEvent<HTMLDivElement>) {
+    if (!(event.target instanceof Element)) return
+    const handle = event.target.closest<HTMLElement>('[data-multitrack-track-drag-handle]')
+    const source = data.tracks.find((track) => track.id === handle?.dataset.multitrackTrackDragHandle)
+    if (!source || source.type === 'task') return
+    trackDragSourceRef.current = source.id
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('application/x-easy-media-track', source.id)
+  }
+
+  function handleTrackDragOver(event: React.DragEvent<HTMLDivElement>) {
+    const sourceTrackId = trackDragSourceRef.current
+    const target = trackFromDragEventTarget(event.target)
+    if (!sourceTrackId || !target || target.type === 'task' || target.id === sourceTrackId) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'move'
+  }
+
+  function handleTrackDrop(event: React.DragEvent<HTMLDivElement>) {
+    const sourceTrackId = trackDragSourceRef.current
+    const target = trackFromDragEventTarget(event.target)
+    trackDragSourceRef.current = null
+    if (!sourceTrackId || !target || target.type === 'task' || target.id === sourceTrackId) return
+    event.preventDefault()
+    event.stopPropagation()
+    onReorderTrack(sourceTrackId, target.id)
+  }
+
   async function handleExternalDrop(event: React.DragEvent<HTMLDivElement>) {
     if (!hasExternalFiles(event.dataTransfer)) return
     event.preventDefault()
@@ -402,6 +442,7 @@ export function TrackArea({
     const target = externalDropTarget(event.clientX, event.clientY, mediaType)
     setExternalDropSlot(null)
     if (!file || !target) return
+    setExternalUpload({ ...target, fileName: file.name })
     try {
       if (mediaType === 'subtitle') {
         onImportSubtitles(target.trackId, await file.text(), target.frame)
@@ -422,6 +463,8 @@ export function TrackArea({
       }
     } catch (error) {
       console.error('[TrackArea] failed to process dropped media:', error)
+    } finally {
+      setExternalUpload(null)
     }
   }
 
@@ -495,6 +538,12 @@ export function TrackArea({
         if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) setExternalDropSlot(null)
       }}
       onDropCapture={handleExternalDrop}
+      onDragStart={handleTrackDragStart}
+      onDragOver={handleTrackDragOver}
+      onDrop={handleTrackDrop}
+      onDragEnd={() => {
+        trackDragSourceRef.current = null
+      }}
       onMouseDown={handleMarqueeMouseDown}
       onClick={(event) => {
         event.stopPropagation()
@@ -612,6 +661,8 @@ export function TrackArea({
         return (
           <div
             key={track.id}
+            data-testid={`track-row-${track.id}`}
+            data-multitrack-track-id={track.id}
             className="relative flex border-b border-border"
             style={{ height: getMultiTrackTrackHeight(track.type, taskOverview) }}
           >
@@ -717,13 +768,19 @@ export function TrackArea({
         <span>{t('multitrack.addTrack')}</span>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="inline-flex">
-              <Button type="button" variant="ghost" size="icon" className="h-6 w-6" disabled aria-label={t('multitrack.addVideoTrack')}>
-                <Film className="h-3.5 w-3.5" />
-              </Button>
-            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 cursor-pointer disabled:cursor-not-allowed"
+              disabled={videoTrackLimitReached}
+              aria-label={t('multitrack.addVideoTrack')}
+              onClick={() => onAddTrack('video')}
+            >
+              <Film className="h-3.5 w-3.5" />
+            </Button>
           </TooltipTrigger>
-          <TooltipContent>{t('multitrack.notSupportedYet')}</TooltipContent>
+          <TooltipContent>{t('multitrack.addVideoTrack')}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -783,6 +840,25 @@ export function TrackArea({
               height: bounds.bottom - bounds.top - 8,
             }}
           />
+        )
+      })() : null}
+      {externalUpload ? (() => {
+        const bounds = trackBounds.find((track) => track.id === externalUpload.trackId)
+        if (!bounds) return null
+        return (
+          <div
+            role="status"
+            aria-live="polite"
+            className="pointer-events-none absolute z-40 flex max-w-48 items-center gap-1.5 rounded border border-border bg-background/95 px-2 py-1 text-[10px] text-foreground shadow-sm"
+            style={{
+              left: MULTITRACK_LEFT_GUTTER + (externalUpload.frame / safeLength) * playableWidth,
+              top: bounds.top + (bounds.bottom - bounds.top) / 2,
+              transform: 'translate(-50%, -50%)',
+            }}
+          >
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+            <span className="truncate">{t('multitrack.externalMediaUploading', { name: externalUpload.fileName })}</span>
+          </div>
         )
       })() : null}
     </div>

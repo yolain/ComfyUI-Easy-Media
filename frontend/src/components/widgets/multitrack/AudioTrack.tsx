@@ -14,6 +14,7 @@ import { MULTITRACK_LEFT_GUTTER } from './MultiTrackRuler'
 import { MultiTrackSegmentBlock } from './MultiTrackSegmentBlock'
 import { TrackAudioControls } from './TrackAudioControls'
 import { getTrackSegmentGaps, TrackGapAddButton } from './TrackGapAddButton'
+import { TrackReorderHandle } from './TrackReorderHandle'
 
 interface AudioTrackProps {
   track: MultiTrack
@@ -107,11 +108,18 @@ export function AudioTrack({
     ?? (reselectSegment?.content.slot_name ? `__slot__:${reselectSegment.content.slot_name}` : '')
 
   return (
-    <div className="relative flex h-16 border-b border-border">
+    <div
+      className="relative flex h-16 border-b border-border"
+      data-multitrack-track-id={track.id}
+    >
       <div className="shrink-0 border-r border-border" style={{ width: MULTITRACK_LEFT_GUTTER }}>
         <TrackAudioControls
           track={track}
-          icon={<Music2 className="h-3.5 w-3.5 text-muted-foreground" />}
+          icon={(
+            <TrackReorderHandle track={track}>
+              <Music2 className="h-3.5 w-3.5 text-muted-foreground" />
+            </TrackReorderHandle>
+          )}
           preserveSelection={track.segments.some((segment) => selectedSegmentIds.has(segment.id))}
           onChange={(patch) => onTrackAudioSettingsChange(track.id, patch)}
         />

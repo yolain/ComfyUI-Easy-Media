@@ -6,6 +6,7 @@ import type { MultiTrack } from '@/types/multitrack'
 import { MULTITRACK_LEFT_GUTTER } from './MultiTrackRuler'
 import { MultiTrackSegmentBlock } from './MultiTrackSegmentBlock'
 import { getTrackSegmentGaps, TrackGapAddButton } from './TrackGapAddButton'
+import { TrackReorderHandle } from './TrackReorderHandle'
 
 interface SubtitleTrackProps {
   track: MultiTrack
@@ -57,12 +58,17 @@ export function SubtitleTrack({
   const visible = track.visible !== false
 
   return (
-    <div className="relative flex h-[30px] border-b border-border">
+    <div
+      className="relative flex h-[30px] border-b border-border"
+      data-multitrack-track-id={track.id}
+    >
       <div
         className="flex shrink-0 items-center justify-center border-r border-border"
         style={{ width: MULTITRACK_LEFT_GUTTER }}
       >
-        <Captions className="h-3.5 w-3.5 text-muted-foreground" />
+        <TrackReorderHandle track={track}>
+          <Captions className="h-3.5 w-3.5 text-muted-foreground" />
+        </TrackReorderHandle>
       </div>
       <div className="relative min-w-0 flex-1">
         {track.segments.map((segment, index) => (
