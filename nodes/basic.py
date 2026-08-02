@@ -26,6 +26,7 @@ from ..utils import (
     load_image_tensor,
     iter_valid_audio_inputs,
     merge_audio_inputs,
+    split_list_outputs,
     merge_video_track_with_ffmpeg,
     parse_subtitle_text,
     parse_override_segments,
@@ -57,6 +58,7 @@ BASE_RESOLUTIONS = [
     [576, 1024, "9:16"],
     [720, 1280, "9:16"],
     [768, 1024, "3:4"],
+    [768, 1344, "9:16"],
     [816, 1456, "9:16"],
     [817, 1920, "1:2.35"],
     [864, 1536, "9:16"],
@@ -65,6 +67,7 @@ BASE_RESOLUTIONS = [
     [1920, 817, "2.35:1"],
     [1536, 864, "16:9"],
     [1456, 816, "16:9"],
+    [1344, 768, "16:9"],
     [1280, 720, "16:9"],
     [1024, 768, "4:3"],
     [1024, 576, "16:9"],
@@ -79,6 +82,7 @@ VIDEO_FORMATS = {
     'Hunyuan': {'target_rate': 24, 'dim': (16,0,848,480), 'frames':(4,1)},
     'Cosmos': {'target_rate': 24, 'dim': (16,0,1280,704), 'frames':(8,1)},
     'Wan': {'target_rate': 16, 'dim': (8,0,832,480), 'frames':(4,1)},
+    'MiniMax': {'target_rate': 24, 'dim': (32,0,1344,768), 'frames':(17,5)},
 }
 
 resolution_strings = [f"{w} x {h} ({r})" for w, h, r in BASE_RESOLUTIONS]
@@ -123,6 +127,45 @@ CATEGORY_AUDIO = "EasyUse/Audio"
 CATEGORY_LOGIC = "EasyUse/Logic"
 CATEGORY_VIDEO = "EasyUse/Video"
 PROMPT_FORMAT_OPTIONS = ["default", "promptRelay"]
+
+
+def _align_video_frame_count(frame_count: int, format_name: str) -> int:
+    frame_grid = VIDEO_FORMATS.get(format_name, {}).get("frames")
+    if not frame_grid:
+        return frame_count
+    step, remainder = (int(value) for value in frame_grid)
+    if step <= 0:
+        return frame_count
+    return frame_count + (remainder - frame_count) % step
+
+
+def _nearest_video_frame_count(frame_count: int | float, format_name: str) -> int:
+    frame_grid = VIDEO_FORMATS.get(format_name, {}).get("frames")
+    if not frame_grid:
+        return max(0, math.floor(float(frame_count) + 0.5))
+    step, remainder = (int(value) for value in frame_grid)
+    if step <= 0:
+        return max(0, math.floor(float(frame_count) + 0.5))
+    normalized_count = max(float(remainder), float(frame_count))
+    grid_index = math.floor((normalized_count - remainder) / step + 0.5)
+    return remainder + grid_index * step
+
+
+def _video_frame_count_from_duration(
+    duration_frames: int | float,
+    source_frame_rate: int | float,
+    format_name: str,
+) -> int:
+    format_info = VIDEO_FORMATS.get(format_name, {})
+    target_frame_rate = float(format_info.get("target_rate", source_frame_rate))
+    safe_source_rate = float(source_frame_rate)
+    if safe_source_rate <= 0 or target_frame_rate <= 0:
+        target_frames = max(0.0, float(duration_frames))
+    else:
+        target_frames = max(0.0, float(duration_frames)) * target_frame_rate / safe_source_rate
+    if format_name == "MiniMax":
+        return _nearest_video_frame_count(target_frames, format_name)
+    return _align_video_frame_count(math.ceil(target_frames), format_name)
 
 
 def _contains_workflow_metadata(value: object) -> bool:
@@ -583,7 +626,47 @@ def _build_tracks_info_and_media_outputs(
         raise ValueError("TRACK_DATA.tracks must be a list.")
 
     frame_rate = float(data.get("frame_rate", 24.0))
+    total_length_is_final = data.get("_total_length_is_final") is True
     total_length = int(data.get("total_length", 0))
+    segment_timeline_end = max(
+        (
+            max(0, int(segment.get("end_frame", 0)))
+            for track in tracks
+            if isinstance(track, dict)
+            for segment in track.get("segments", [])
+            if isinstance(segment, dict)
+        ),
+        default=0,
+    )
+    task_duration_length = sum(
+        max(
+            0,
+            int(segment.get("end_frame", 0)) - int(segment.get("start_frame", 0)),
+        )
+        for track in tracks
+        if isinstance(track, dict) and track.get("type") == "task"
+        for segment in track.get("segments", [])
+        if isinstance(segment, dict)
+    )
+    if segment_timeline_end > 0:
+        timeline_total_length = segment_timeline_end
+    elif format_name == "MiniMax":
+        timeline_total_length = (
+            max(0, total_length - 1) if total_length_is_final else total_length
+        )
+    else:
+        timeline_total_length = total_length
+    effective_total_length = task_duration_length or timeline_total_length
+    if format_name == "MiniMax":
+        output_total_length = _video_frame_count_from_duration(
+            effective_total_length,
+            frame_rate,
+            format_name,
+        )
+    elif task_duration_length > 0 or segment_timeline_end > 0:
+        output_total_length = effective_total_length + 1
+    else:
+        output_total_length = total_length if total_length_is_final else total_length + 1
     global_volume_db = audio_volume_db(data)
     global_muted = audio_is_muted(data)
     has_solo_track = any(
@@ -723,7 +806,7 @@ def _build_tracks_info_and_media_outputs(
             media_index = len(audio_out)
             audio_out.append(_merge_audio_track(
                 track_audio_segments,
-                total_length,
+                timeline_total_length,
                 frame_rate,
                 track_volume_db,
                 track_muted,
@@ -738,7 +821,7 @@ def _build_tracks_info_and_media_outputs(
             video_out.append(
                 _merge_video_track(
                     track_video_segments,
-                    total_length,
+                    timeline_total_length,
                     frame_rate,
                     width,
                     height,
@@ -756,12 +839,15 @@ def _build_tracks_info_and_media_outputs(
     if progress is not None and progress_value < progress.total:
         progress.update_absolute(progress.total)
 
-    output_total_length = total_length if data.get("_total_length_is_final") is True else total_length + 1
     tracks_info = {
         # UI track data stores an exclusive timeline end, while prompt_override
         # data has already normalized total_length to the final output value.
         "total_length": output_total_length,
+        "timeline_total_length": timeline_total_length,
         "frame_rate": frame_rate,
+        "target_frame_rate": float(VIDEO_FORMATS[format_name]["target_rate"])
+        if format_name == "MiniMax" else frame_rate,
+        "format": format_name,
         "muted": global_muted,
         "volume_db": global_volume_db,
         "width": width,
@@ -1088,6 +1174,15 @@ class TimelineEditor(io.ComfyNode):
                         "images": _sort_timeline_images(content.get("images", [])),  # list of ImageItem dicts
                         "type": content.get("type", "flf"),
                     })
+
+        if format == "MiniMax":
+            output_total_length = _video_frame_count_from_duration(
+                max(0, total_length - 1),
+                frame_rate,
+                format,
+            )
+        else:
+            output_total_length = _align_video_frame_count(total_length, format)
 
         # Flat list of all image items from maintain segments, in order
         all_image_items = _collect_timeline_image_items(maintain_segs)
@@ -1468,8 +1563,12 @@ class TimelineEditor(io.ComfyNode):
         # timeline_info output
         # =========================================================
         timeline_info = {
-            "total_length": total_length,
+            "total_length": output_total_length,
+            "timeline_total_length": total_length,
             "frame_rate": frame_rate,
+            "target_frame_rate": float(VIDEO_FORMATS[format]["target_rate"])
+            if format == "MiniMax" else frame_rate,
+            "format": format,
             "width": target_w,
             "height": target_h,
             "segments": seg_infos,
@@ -1591,7 +1690,7 @@ class TimelineInfoOutput(io.ComfyNode):
             info = dict(timeline_info) if timeline_info else {}
 
         total_length: int = info.get("total_length", 121)
-        frame_rate: int = info.get("frame_rate", 24)
+        frame_rate: int = info.get("target_frame_rate", info.get("frame_rate", 24))
         width: int = info.get("width", 544)
         height: int = info.get("height", 960)
         segments: list[dict] = info.get("segments", [])
@@ -1665,7 +1764,7 @@ class MultiTrackInfoOutput(io.ComfyNode):
             int(info.get("width", 544)),
             int(info.get("height", 960)),
             int(info.get("total_length", 121)),
-            float(info.get("frame_rate", 24)),
+            float(info.get("target_frame_rate", info.get("frame_rate", 24))),
             task_count,
         )
 
@@ -1723,7 +1822,9 @@ def _multitrack_task_entries(info: dict) -> list[dict]:
         ]
 
     range_start = 0
-    total_length = max(0, _multitrack_frame_value(info.get("total_length")))
+    total_length = max(0, _multitrack_frame_value(
+        info.get("timeline_total_length", info.get("total_length")),
+    ))
     marker_end = max(
         (
             _multitrack_frame_value(marker.get("frame"))
@@ -2147,6 +2248,19 @@ def _track_output_index(track: dict) -> 'int | None':
         return None
 
 
+def _track_media_end_frame(track: dict) -> 'int | None':
+    track_type = track.get("type")
+    ends = [
+        _multitrack_frame_value(segment.get("end_frame"), -1)
+        for segment in track.get("segments", [])
+        if isinstance(segment, dict)
+        and isinstance(segment.get("content"), dict)
+        and segment["content"].get("media_type") == track_type
+    ]
+    valid_ends = [end for end in ends if end >= 0]
+    return max(valid_ends) if valid_ends else None
+
+
 def _ranges_overlap(start: int, end: int, segment: dict) -> bool:
     return int(segment.get("start_frame", 0)) < end and int(segment.get("end_frame", 0)) > start
 
@@ -2164,13 +2278,22 @@ def _multitrack_task_type(task: dict, image_count: int, has_video: bool) -> str:
     return "i2v" if image_count > 0 else "t2v"
 
 
-def _trim_track_audio(audio: dict, start_frame: int, length: int, frame_rate: float) -> dict:
+def _trim_track_audio(
+    audio: dict,
+    start_frame: int,
+    length: int | None,
+    frame_rate: float,
+) -> dict:
     waveform = audio.get("waveform")
     sample_rate = int(audio.get("sample_rate", 44100))
     if not isinstance(waveform, torch.Tensor):
         return {"waveform": torch.zeros(1, 1, 1), "sample_rate": sample_rate}
     start_sample = max(0, round(start_frame * sample_rate / frame_rate))
-    sample_count = max(1, round(length * sample_rate / frame_rate))
+    sample_count = (
+        max(1, waveform.shape[-1] - start_sample)
+        if length is None
+        else max(1, round(length * sample_rate / frame_rate))
+    )
     end_sample = min(waveform.shape[-1], start_sample + sample_count)
     trimmed = waveform[..., start_sample:end_sample]
     if trimmed.shape[-1] < sample_count:
@@ -2315,14 +2438,30 @@ class MultiTrackTaskOutput(io.ComfyNode):
 
         tracks = info.get("tracks", [])
         task_entries = _multitrack_task_entries(info)
-        task_entry = task_entries[min(index, len(task_entries) - 1)] if task_entries else {}
+        task_entry_index = min(index, len(task_entries) - 1) if task_entries else -1
+        task_entry = task_entries[task_entry_index] if task_entry_index >= 0 else {}
         task = task_entry.get("task", {}) if isinstance(task_entry, dict) else {}
         content = task.get("content", {}) if isinstance(task.get("content", {}), dict) else {}
         start_frame = max(0, int(task_entry.get("start_frame", task.get("start_frame", 0))))
         end_frame = max(start_frame, int(task_entry.get("end_frame", task.get("end_frame", start_frame))))
         duration_frames = end_frame - start_frame
-        length = duration_frames + 1 if task_entry else 0
         frame_rate = float(info.get("frame_rate", 24))
+        is_minimax = info.get("format") == "MiniMax"
+        next_task_start = None
+        if is_minimax and task_entry_index + 1 < len(task_entries):
+            next_task_start = max(
+                start_frame,
+                _multitrack_frame_value(task_entries[task_entry_index + 1].get("start_frame")),
+            )
+        media_duration_frames = (
+            next_task_start - start_frame if next_task_start is not None else None
+        )
+        if not task_entry:
+            length = 0
+        elif is_minimax:
+            length = _video_frame_count_from_duration(duration_frames, frame_rate, "MiniMax")
+        else:
+            length = duration_frames + 1
 
         task_content_entries = [(content, start_frame)]
         if task_entry.get("marker_mode"):
@@ -2373,15 +2512,41 @@ class MultiTrackTaskOutput(io.ComfyNode):
             if not isinstance(track, dict):
                 continue
             media_index = _track_output_index(track)
+            track_media_duration_frames = media_duration_frames
+            if is_minimax:
+                track_media_end = _track_media_end_frame(track)
+                if track_media_end is not None:
+                    available_frames = max(0, track_media_end - start_frame)
+                    track_media_duration_frames = (
+                        min(track_media_duration_frames, available_frames)
+                        if track_media_duration_frames is not None
+                        else available_frames
+                    )
+                if track_media_duration_frames is not None and track_media_duration_frames <= 0:
+                    continue
             if track.get("type") == "audio" and media_index is not None and 0 <= media_index < len(audio_items):
                 track_audio = audio_items[media_index]
                 if isinstance(track_audio, dict):
-                    selected_audio.append(_trim_track_audio(track_audio, start_frame, duration_frames, frame_rate))
+                    selected_audio.append(
+                        _trim_track_audio(
+                            track_audio,
+                            start_frame,
+                            track_media_duration_frames if is_minimax else duration_frames,
+                            frame_rate,
+                        )
+                    )
             elif track.get("type") == "video" and media_index is not None and 0 <= media_index < len(video_items):
                 track_video = video_items[media_index]
+                video_duration = duration_frames / frame_rate
+                if is_minimax:
+                    video_duration = (
+                        track_media_duration_frames / frame_rate
+                        if track_media_duration_frames is not None
+                        else 0.0
+                    )
                 trimmed = track_video.as_trimmed(
                     start_time=start_frame / frame_rate,
-                    duration=duration_frames / frame_rate,
+                    duration=video_duration,
                     strict_duration=False,
                 )
                 if trimmed is not None:
@@ -2524,11 +2689,23 @@ class TimelineSegmentOutput(io.ComfyNode):
 
         # Calculate segment length (frame count)
         if seg_images:
-            segment_length = end_frame - start_frame + 1
+            duration_frames = max(0, end_frame - start_frame)
+            segment_length = duration_frames + 1
         elif segment_index < len(audio_segments):
-            segment_length = int(audio_segments[segment_index].get("duration", 0.0) * frame_rate)
+            duration_frames = max(
+                0.0,
+                float(audio_segments[segment_index].get("duration", 0.0)) * frame_rate,
+            )
+            segment_length = int(duration_frames)
         else:
+            duration_frames = None
             segment_length = 0
+        if info.get("format") == "MiniMax" and duration_frames is not None:
+            segment_length = _video_frame_count_from_duration(
+                duration_frames,
+                frame_rate,
+                "MiniMax",
+            )
 
         # Output images from segment (based on images array in segment)
         num_seg_images = len(seg_images)
@@ -2648,6 +2825,34 @@ class MakeAudioList(io.ComfyNode):
                 audios.append({"waveform": empty, "sample_rate": 16000})
 
         return io.NodeOutput(audios)
+
+
+class SplitAudios(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy splitAudios",
+            display_name="Split Audios",
+            category=CATEGORY_AUDIO,
+            description="Split an audio list into 10 single-audio outputs.",
+            is_input_list=True,
+            inputs=[
+                io.Audio.Input("audios"),
+            ],
+            outputs=[
+                io.Audio.Output(f"AUDIO{i}") for i in range(0, 10)
+            ],
+        )
+
+    @classmethod
+    def execute(cls, audios: list[dict[str, object]]) -> io.NodeOutput:
+        if not audios:
+            raise ValueError("audios must contain at least one audio.")
+        if not all(isinstance(audio, dict) for audio in audios):
+            raise TypeError("audios must contain only audio dictionaries.")
+
+        return io.NodeOutput(*split_list_outputs(audios))
+
 
 class MatchLine(io.ComfyNode):
     @classmethod

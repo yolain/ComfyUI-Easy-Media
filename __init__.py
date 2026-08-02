@@ -65,11 +65,15 @@ class EasyMediaExtension(ComfyExtension):
             ImageIndexesToIntList,
             MatchLine,
             SplitImages,
+            SplitAudios,
+            SplitVideos,
             MakeImageList,
             MakeAudioList,
             MakeVideoList,
             EasyAudioMerge,
             APIWorkflowGate,
+            # MiniMax
+            EasyMiniMaxH3ToVideo,
             # Wan
             BerniniModelPatch,
             EasyBerniniS2VConditioning,

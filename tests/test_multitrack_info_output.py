@@ -5,6 +5,7 @@ import types
 from fractions import Fraction
 from pathlib import Path
 
+import pytest
 import torch
 
 
@@ -190,6 +191,7 @@ def _load_basic_module():
         "resize_video_with_ffmpeg",
         "resolve_video_path",
         "silence",
+        "split_list_outputs",
         "trim_audio",
         "video_input_to_local_file",
         "write_ass_file",
@@ -202,6 +204,9 @@ def _load_basic_module():
     utils_module.default_subtitle_filename = lambda prefix="easy_multitrack_subtitles": f"{prefix}_20260704_120000"
     utils_module.silence = lambda sample_rate, duration, channels=2: torch.zeros(
         1, channels, max(1, int(sample_rate * duration)),
+    )
+    utils_module.split_list_outputs = lambda values, output_count=10: (
+        list(values[:output_count]) + [None] * max(0, output_count - len(values))
     )
     def trim_audio(audio, start_index, duration):
         sample_rate = audio["sample_rate"]
@@ -532,6 +537,193 @@ def test_multitrack_editor_includes_selected_dimensions_in_tracks_info():
     assert tracks_info["height"] == 720
 
 
+def test_timeline_editor_aligns_minimax_total_frames_to_model_grid():
+    module = _load_basic_module()
+
+    result = module.TimelineEditor.execute(
+        {"resolution": "1344 x 768 (16:9)"},
+        "MiniMax",
+        {"total_length": 121, "frame_rate": 24, "tracks": []},
+    )
+
+    assert result.values[0]["total_length"] == 124
+    assert result.values[0]["format"] == "MiniMax"
+
+
+def test_multitrack_editor_aligns_minimax_output_frames_to_model_grid():
+    module = _load_basic_module()
+
+    result = module.MultiTrackEditor.execute(
+        {"resolution": "1344 x 768 (16:9)"},
+        "MiniMax",
+        {"total_length": 120, "frame_rate": 24, "tracks": []},
+    )
+
+    assert result.values[0]["total_length"] == 124
+    assert result.values[0]["format"] == "MiniMax"
+
+
+@pytest.mark.parametrize(
+    ("format_name", "expected_total_length"),
+    [("MiniMax", 56), ("Wan", 49)],
+)
+def test_multitrack_editor_uses_short_segment_range_instead_of_stale_default_length(
+    format_name,
+    expected_total_length,
+):
+    module = _load_basic_module()
+    track_data = {
+        "total_length": 120,
+        "frame_rate": 24,
+        "tracks": [{
+            "id": "task-track",
+            "type": "task",
+            "segments": [{
+                "id": "short-task",
+                "start_frame": 0,
+                "end_frame": 48,
+                "content": {"media_type": "none"},
+            }],
+        }],
+    }
+
+    result = module.MultiTrackEditor.execute(
+        {"resolution": "1344 x 768 (16:9)"},
+        format_name,
+        track_data,
+    )
+
+    tracks_info = result.values[0]
+    assert tracks_info["total_length"] == expected_total_length
+    assert tracks_info["timeline_total_length"] == 48
+
+
+def test_timeline_editor_converts_source_fps_before_selecting_nearest_minimax_frames():
+    module = _load_basic_module()
+
+    result = module.TimelineEditor.execute(
+        {"resolution": "1344 x 768 (16:9)"},
+        "MiniMax",
+        {"total_length": 65, "frame_rate": 16, "tracks": []},
+    )
+
+    timeline_info = result.values[0]
+    assert timeline_info["total_length"] == 90
+    assert timeline_info["frame_rate"] == 16
+    assert module.TimelineInfoOutput.execute(timeline_info, "default").values[4] == 24.0
+
+
+def test_timeline_editor_keeps_source_duration_when_aligning_minimax_output():
+    module = _load_basic_module()
+    audio = {"waveform": torch.ones(1, 1, 200), "sample_rate": 16}
+
+    result = module.TimelineEditor.execute(
+        {"resolution": "1344 x 768 (16:9)"},
+        "MiniMax",
+        {"total_length": 65, "frame_rate": 16, "tracks": []},
+        prompt_override="four seconds",
+        audio=audio,
+    )
+
+    assert result.values[0]["total_length"] == 90
+    assert result.values[2]["waveform"].shape[-1] == 64
+
+
+def test_multitrack_editor_does_not_add_one_before_minimax_alignment():
+    module = _load_basic_module()
+
+    result = module.MultiTrackEditor.execute(
+        {"resolution": "1344 x 768 (16:9)"},
+        "MiniMax",
+        {"total_length": 107, "frame_rate": 24, "tracks": []},
+    )
+
+    assert result.values[0]["total_length"] == 107
+
+
+def test_multitrack_editor_converts_four_seconds_to_minimax_frames():
+    module = _load_basic_module()
+
+    result = module.MultiTrackEditor.execute(
+        {"resolution": "1344 x 768 (16:9)"},
+        "MiniMax",
+        {"total_length": 64, "frame_rate": 16, "tracks": []},
+    )
+
+    tracks_info = result.values[0]
+    assert tracks_info["total_length"] == 90
+    assert tracks_info["frame_rate"] == 16.0
+    assert module.MultiTrackInfoOutput.execute(tracks_info).values[3] == 24.0
+
+
+def test_multitrack_editor_minimax_prompt_override_does_not_add_a_timeline_frame():
+    module = _load_basic_module()
+    audio = {"waveform": torch.ones(1, 1, 120), "sample_rate": 24}
+
+    result = module.MultiTrackEditor.execute(
+        {"resolution": "1344 x 768 (16:9)"},
+        "MiniMax",
+        {"total_length": 120, "frame_rate": 24, "tracks": []},
+        prompt_override="@音频1 four seconds [0-4s]",
+        audio=[audio],
+    )
+
+    tracks_info, _images, audio_out, _videos = result.values
+    assert tracks_info["total_length"] == 90
+    assert tracks_info["timeline_total_length"] == 96
+    assert audio_out[0]["waveform"].shape[-1] == 96
+
+
+def test_multitrack_editor_converts_four_and_a_half_seconds_to_minimax_frames():
+    module = _load_basic_module()
+
+    result = module.MultiTrackEditor.execute(
+        {"resolution": "1344 x 768 (16:9)"},
+        "MiniMax",
+        {"total_length": 108, "frame_rate": 24, "tracks": []},
+    )
+
+    assert result.values[0]["total_length"] == 107
+
+
+def test_multitrack_editor_converts_six_seconds_to_nearest_minimax_frames():
+    module = _load_basic_module()
+
+    result = module.MultiTrackEditor.execute(
+        {"resolution": "1344 x 768 (16:9)"},
+        "MiniMax",
+        {"total_length": 144, "frame_rate": 24, "tracks": []},
+    )
+
+    assert result.values[0]["total_length"] == 141
+
+
+def test_multitrack_editor_minimax_total_length_sums_task_durations_and_skips_gaps():
+    module = _load_basic_module()
+    track_data = {
+        "total_length": 144,
+        "frame_rate": 24,
+        "tracks": [{
+            "id": "task-track",
+            "type": "task",
+            "segments": [
+                {"id": "task-0", "start_frame": 0, "end_frame": 48, "content": {"media_type": "none"}},
+                {"id": "task-1", "start_frame": 96, "end_frame": 144, "content": {"media_type": "none"}},
+            ],
+        }],
+    }
+
+    result = module.MultiTrackEditor.execute(
+        {"resolution": "1344 x 768 (16:9)"},
+        "MiniMax",
+        track_data,
+    )
+
+    tracks_info = result.values[0]
+    assert tracks_info["timeline_total_length"] == 144
+    assert tracks_info["total_length"] == 90
+
+
 def test_multitrack_editor_removes_legacy_volume_fields():
     module = _load_basic_module()
     track_data = {
@@ -791,7 +983,7 @@ def test_multitrack_editor_prompt_override_builds_slot_audio_and_video_tracks():
     audio_track = tracks_info["tracks"][2]
     assert audio_track["segments"][0]["content"]["slot_name"] == "audio2"
     assert len(audio) == 1
-    assert audio[0]["waveform"].flatten().tolist() == [2.0, 2.0, 0.0, 0.0, 0.0]
+    assert audio[0]["waveform"].flatten().tolist() == [2.0, 2.0, 0.0, 0.0]
 
 
 def test_multitrack_editor_prompt_override_outputs_each_audio_slot_as_a_separate_track():
@@ -812,8 +1004,8 @@ def test_multitrack_editor_prompt_override_outputs_each_audio_slot_as_a_separate
 
     assert len(audio_tracks) == 2
     assert len(audio) == 2
-    assert audio[0]["waveform"].flatten().tolist() == [1.0, 1.0, 0.0, 0.0, 0.0]
-    assert audio[1]["waveform"].flatten().tolist() == [0.0, 0.0, 2.0, 2.0, 0.0]
+    assert audio[0]["waveform"].flatten().tolist() == [1.0, 1.0, 0.0, 0.0]
+    assert audio[1]["waveform"].flatten().tolist() == [0.0, 0.0, 2.0, 2.0]
 
 
 def test_multitrack_editor_prompt_override_ranges_do_not_extend_total_length():
@@ -1474,7 +1666,7 @@ def test_multitrack_editor_merges_audio_segments_per_track_with_silence():
 
     tracks_info, _images, audio, _videos = result.values
     assert len(audio) == 1
-    assert audio[0]["waveform"].flatten().tolist() == [0, 0, 1, 1, 1, 1, 0, 0, 2, 2, 0, 0]
+    assert audio[0]["waveform"].flatten().tolist() == [0, 0, 1, 1, 1, 1, 0, 0, 2, 2]
     audio_track = tracks_info["tracks"][1]
     assert audio_track["media_index"] == 0
     assert [segment["content"]["media_index"] for segment in audio_track["segments"]] == [0, 0]
@@ -1545,6 +1737,136 @@ def test_multitrack_task_output_schema_and_task_media_selection():
     assert selected_video == [video_track]
     assert image_indexes == "0,-1"
     assert video_track.trim_calls == [(1.0, 2.0, False)]
+
+
+def test_multitrack_task_output_aligns_each_minimax_segment_without_plus_one():
+    module = _load_basic_module()
+    tracks_info = {
+        "format": "MiniMax",
+        "frame_rate": 24,
+        "tracks": [{"type": "task", "segments": [{
+            "start_frame": 0,
+            "end_frame": 107,
+            "content": {"user_prompt": "already aligned", "images": []},
+        }]}],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [], [], [], [0], ["default"],
+    )
+
+    assert result.values[3] == 107
+
+
+def test_multitrack_task_output_minimax_crops_media_at_next_task_start_across_a_gap():
+    module = _load_basic_module()
+    audio_track = {"waveform": torch.arange(15).reshape(1, 1, 15), "sample_rate": 1}
+    video_track = _FakeVideo(_VideoComponents(torch.zeros(15, 2, 2, 3), None, Fraction(1)))
+    tracks_info = {
+        "format": "MiniMax",
+        "frame_rate": 1,
+        "tracks": [
+            {"type": "task", "segments": [
+                {"start_frame": 0, "end_frame": 5, "content": {"user_prompt": "first"}},
+                {"start_frame": 10, "end_frame": 12, "content": {"user_prompt": "second"}},
+            ]},
+            {"type": "audio", "media_index": 0, "segments": [
+                {"start_frame": 0, "end_frame": 15, "content": {"media_type": "audio"}},
+            ]},
+            {"type": "video", "media_index": 0, "segments": [
+                {"start_frame": 0, "end_frame": 15, "content": {"media_type": "video"}},
+            ]},
+        ],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [], [[audio_track]], [[video_track]], [0], ["default"],
+    )
+
+    assert result.values[5][0]["waveform"].flatten().tolist() == list(range(10))
+    assert result.values[6] == [video_track]
+    assert video_track.trim_calls == [(0.0, 10.0, False)]
+
+
+def test_multitrack_task_output_minimax_trims_the_last_task_from_its_start_to_media_end():
+    module = _load_basic_module()
+    audio_track = {"waveform": torch.arange(15).reshape(1, 1, 15), "sample_rate": 1}
+    video_track = _FakeVideo(_VideoComponents(torch.zeros(15, 2, 2, 3), None, Fraction(1)))
+    tracks_info = {
+        "format": "MiniMax",
+        "frame_rate": 1,
+        "tracks": [
+            {"type": "task", "segments": [
+                {"start_frame": 0, "end_frame": 5, "content": {"user_prompt": "first"}},
+                {"start_frame": 10, "end_frame": 15, "content": {"user_prompt": "last"}},
+            ]},
+            {"type": "audio", "media_index": 0, "segments": [
+                {"start_frame": 0, "end_frame": 15, "content": {"media_type": "audio"}},
+            ]},
+            {"type": "video", "media_index": 0, "segments": [
+                {"start_frame": 0, "end_frame": 15, "content": {"media_type": "video"}},
+            ]},
+        ],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [], [[audio_track]], [[video_track]], [1], ["default"],
+    )
+
+    assert result.values[5][0]["waveform"].flatten().tolist() == list(range(10, 15))
+    assert result.values[6] == [video_track]
+    assert video_track.trim_calls == [(10.0, 5.0, False)]
+
+
+def test_multitrack_task_output_minimax_stops_at_each_track_last_trimmed_segment():
+    module = _load_basic_module()
+    audio_track = {"waveform": torch.arange(15).reshape(1, 1, 15), "sample_rate": 1}
+    video_track = _FakeVideo(_VideoComponents(torch.zeros(15, 2, 2, 3), None, Fraction(1)))
+    tracks_info = {
+        "format": "MiniMax",
+        "frame_rate": 1,
+        "tracks": [
+            {"type": "task", "segments": [
+                {"start_frame": 10, "end_frame": 15, "content": {"user_prompt": "last"}},
+            ]},
+            {"type": "audio", "media_index": 0, "segments": [
+                {"start_frame": 0, "end_frame": 12, "content": {"media_type": "audio"}},
+            ]},
+            {"type": "video", "media_index": 0, "segments": [
+                {"start_frame": 0, "end_frame": 13, "content": {"media_type": "video"}},
+            ]},
+        ],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [], [[audio_track]], [[video_track]], [0], ["default"],
+    )
+
+    assert result.values[5][0]["waveform"].flatten().tolist() == [10, 11]
+    assert result.values[6] == [video_track]
+    assert video_track.trim_calls == [(10.0, 3.0, False)]
+
+
+def test_timeline_segment_output_selects_nearest_frames_for_four_second_minimax_segment():
+    module = _load_basic_module()
+    timeline_info = {
+        "format": "MiniMax",
+        "frame_rate": 24,
+        "segments": [{
+            "start_frame": 0,
+            "end_frame": 96,
+            "prompt": "four seconds",
+            "images": [{}],
+        }],
+    }
+
+    result = module.TimelineSegmentOutput.execute(
+        timeline_info,
+        "default",
+        0,
+    )
+
+    assert result.values[4] == 90
 
 
 def test_multitrack_task_output_evenly_distributes_regular_task_image_indexes():
@@ -2179,3 +2501,26 @@ def test_split_images_has_chinese_localization():
     assert translation["display_name"] == "图像拆分V2"
     assert set(translation["inputs"]) == {"images"}
     assert set(translation["outputs"]) == {str(index) for index in range(10)}
+
+
+def test_split_audios_expands_a_list_into_ten_independent_outputs():
+    module = _load_basic_module()
+    audios = [
+        {"waveform": torch.full((1, 1, 4), value), "sample_rate": 16000}
+        for value in (1.0, 2.0)
+    ]
+
+    schema = module.SplitAudios.define_schema()
+    result = module.SplitAudios.execute(audios)
+
+    assert schema.is_input_list is True
+    assert len(schema.outputs) == 10
+    assert result.values[:2] == tuple(audios)
+    assert result.values[2:] == (None,) * 8
+
+
+def test_split_audios_rejects_an_empty_list():
+    module = _load_basic_module()
+
+    with pytest.raises(ValueError, match="at least one audio"):
+        module.SplitAudios.execute([])

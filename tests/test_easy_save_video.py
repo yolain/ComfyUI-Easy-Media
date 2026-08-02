@@ -7,6 +7,8 @@ import types
 from fractions import Fraction
 from pathlib import Path
 
+import pytest
+
 
 class _NodeOutput:
     def __init__(self, *values, ui=None):
@@ -249,6 +251,9 @@ def _install_comfy_stubs(monkeypatch, tmp_path: Path):
     easy_media_utils = types.ModuleType("easy_media.utils")
     easy_media_utils.merge_two_audio = lambda first, second, method: (first, second, method)
     easy_media_utils.save_audio_to_temp_wav = lambda audio: None
+    easy_media_utils.split_list_outputs = lambda values, output_count=10: (
+        list(values[:output_count]) + [None] * max(0, output_count - len(values))
+    )
     monkeypatch.setitem(sys.modules, "easy_media.utils", easy_media_utils)
     monkeypatch.setitem(sys.modules, "easy_media.utils.video", utils_video)
 
@@ -420,6 +425,26 @@ def test_make_video_list_fills_missing_inputs_with_empty_video(monkeypatch, tmp_
     assert videos[0] is source_video
     assert videos[1].images.shape == (1, 2, 2, 3)
     assert videos[1].audio is None
+
+
+def test_split_videos_expands_a_list_into_ten_independent_outputs(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    videos = [object(), object()]
+
+    schema = video_module.SplitVideos.define_schema()
+    result = video_module.SplitVideos.execute(videos)
+
+    assert schema.is_input_list is True
+    assert len(schema.outputs) == 10
+    assert result.values[:2] == tuple(videos)
+    assert result.values[2:] == (None,) * 8
+
+
+def test_split_videos_rejects_an_empty_list(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+
+    with pytest.raises(ValueError, match="at least one video"):
+        video_module.SplitVideos.execute([])
 
 
 def test_video_to_audio_prefers_ffmpeg_extraction(monkeypatch, tmp_path):

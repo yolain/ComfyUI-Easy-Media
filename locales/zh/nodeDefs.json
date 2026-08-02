@@ -468,6 +468,25 @@
       }
     }
   },
+  "easy splitAudios": {
+    "display_name": "音频拆分",
+    "description": "将音频列表拆分为最多 10 个独立音频输出。",
+    "inputs": {
+      "audios": { "name": "音频列表" }
+    },
+    "outputs": {
+      "0": { "name": "音频 0" },
+      "1": { "name": "音频 1" },
+      "2": { "name": "音频 2" },
+      "3": { "name": "音频 3" },
+      "4": { "name": "音频 4" },
+      "5": { "name": "音频 5" },
+      "6": { "name": "音频 6" },
+      "7": { "name": "音频 7" },
+      "8": { "name": "音频 8" },
+      "9": { "name": "音频 9" }
+    }
+  },
   "easy audioMerge": {
     "display_name": "合并音频",
     "description": "合并或拼接最多 6 个音频输入，可展开音频列表并自动忽略空项。",
@@ -521,6 +540,25 @@
       "0": {
         "name": "视频"
       }
+    }
+  },
+  "easy splitVideos": {
+    "display_name": "视频拆分",
+    "description": "将视频列表拆分为最多 10 个独立视频输出。",
+    "inputs": {
+      "videos": { "name": "视频列表" }
+    },
+    "outputs": {
+      "0": { "name": "视频 0" },
+      "1": { "name": "视频 1" },
+      "2": { "name": "视频 2" },
+      "3": { "name": "视频 3" },
+      "4": { "name": "视频 4" },
+      "5": { "name": "视频 5" },
+      "6": { "name": "视频 6" },
+      "7": { "name": "视频 7" },
+      "8": { "name": "视频 8" },
+      "9": { "name": "视频 9" }
     }
   },
   "LTXVAddGuidesFromBatchIndexes": {
@@ -982,6 +1020,72 @@
       "0": { "name": "正向条件" },
       "1": { "name": "负向条件" },
       "2": { "name": "潜空间" }
+    }
+  },
+  "easy minimaxH3ToVideo": {
+    "display_name": "简易 MiniMax H3 视频生成",
+    "description": "统一生成 MiniMax H3 文生视频、参考生视频和首尾帧生视频条件。支持图像批次及图像、视频、音频列表；参考视频会自动拆分为 24fps 图像序列和音频。",
+    "inputs": {
+      "clip": {
+        "name": "CLIP",
+        "tooltip": "用于编码提示词和视觉参考的 MiniMax H3 CLIP。"
+      },
+      "vae": {
+        "name": "VAE",
+        "tooltip": "用于编码参考图像和视频帧的 MiniMax H3 视频 VAE。"
+      },
+      "audio_vae": {
+        "name": "音频 VAE",
+        "tooltip": "可选。参考视频包含音频或连接独立参考音频时必需。"
+      },
+      "images": {
+        "name": "图像",
+        "tooltip": "支持单张图像、图像批次或图像列表。参考模式使用全部图像；首尾帧模式仅使用展开后的第一张和最后一张图像。"
+      },
+      "videos": {
+        "name": "视频",
+        "tooltip": "参考视频或视频列表。参考模式下会自动提取帧和内含音频，并将帧重采样为 24fps。"
+      },
+      "audios": {
+        "name": "音频",
+        "tooltip": "独立参考音频或音频列表，仅在参考模式下使用。"
+      },
+      "prompt": {
+        "name": "提示词",
+        "tooltip": "生成视频的文本描述。参考模式可使用 <Picture i>、<Video i> 和 <Audio i> 标签引用输入媒体。"
+      },
+      "mode": {
+        "name": "生成模式",
+        "tooltip": "选择参考生视频或首尾帧生视频。所有媒体输入均为空时，两种模式都会执行文生视频。",
+        "options": {
+          "reference": "参考生视频",
+          "multi_frames": "首尾帧生视频"
+        }
+      },
+      "width": {
+        "name": "宽度",
+        "tooltip": "生成视频的画布宽度。"
+      },
+      "height": {
+        "name": "高度",
+        "tooltip": "生成视频的画布高度。"
+      },
+      "length": {
+        "name": "视频帧数",
+        "tooltip": "24fps 下的视频帧数；会自动向上对齐到 MiniMax H3 的 17k+5 帧网格。"
+      },
+      "ref_image_size": {
+        "name": "参考图像尺寸",
+        "tooltip": "参考图像尺寸调整。“match”会将每张参考图像缩放（仅缩小，保持宽高比）至生成图像的像素区域；“max”则采用参考管道中较短边为2048像素的尺寸，以实现最佳的身份保真度。参考令牌会贯穿每个采样步骤，因此“max”的运行速度可能慢几倍。。",
+        "options": {
+          "match": "匹配生成尺寸",
+          "max": "最大参考尺寸"
+        }
+      }
+    },
+    "outputs": {
+      "0": { "name": "正向条件" },
+      "1": { "name": "潜空间" }
     }
   }
 }

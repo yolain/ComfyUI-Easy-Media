@@ -105,6 +105,9 @@ def _load_basic_module(monkeypatch):
     utils.resize_video_with_ffmpeg = lambda *args, **kwargs: None
     utils.resolve_video_path = lambda *args, **kwargs: None
     utils.silence = lambda *args, **kwargs: None
+    utils.split_list_outputs = lambda values, output_count=10: (
+        list(values[:output_count]) + [None] * max(0, output_count - len(values))
+    )
     utils.trim_audio = lambda audio, *args, **kwargs: audio
     utils.video_input_to_local_file = lambda *args, **kwargs: ("", [])
     utils.write_ass_file = lambda *args, **kwargs: None

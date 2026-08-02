@@ -16,7 +16,7 @@ import torch
 from comfy_api.latest import Input, InputImpl, Types, io, ui
 from comfy.utils import ProgressBar
 
-from ..utils import merge_two_audio, save_audio_to_temp_wav
+from ..utils import merge_two_audio, save_audio_to_temp_wav, split_list_outputs
 from ..utils.video import extract_merge_spec, ffmpeg_concat, ffmpeg_concat_with_fade, ffmpeg_extract_audio, ffmpeg_replace_audio, ffmpeg_supports_xfade, ffprobe_info, normalize_video_images, tensor_crossfade_audio, tensor_crossfade_images, trim_video_with_ffmpeg, validate_merge_compatibility, video_input_to_local_file
 
 logger = logging.getLogger(__name__)
@@ -97,6 +97,33 @@ class MakeVideoList(io.ComfyNode):
                 videos.append(_empty_video())
 
         return io.NodeOutput(videos)
+
+
+class SplitVideos(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy splitVideos",
+            display_name="Split Videos",
+            category=CATEGORY_VIDEO,
+            description="Split a video list into 10 single-video outputs.",
+            is_input_list=True,
+            inputs=[
+                io.Video.Input("videos"),
+            ],
+            outputs=[
+                io.Video.Output(f"VIDEO{i}") for i in range(0, 10)
+            ],
+        )
+
+    @classmethod
+    def execute(cls, videos: list[Input.Video]) -> io.NodeOutput:
+        if not videos:
+            raise ValueError("videos must contain at least one video.")
+        if any(video is None for video in videos):
+            raise TypeError("videos must contain only video values.")
+
+        return io.NodeOutput(*split_list_outputs(videos))
 
 
 def _empty_video() -> InputImpl.VideoFromComponents:  # type: ignore[return-value]
