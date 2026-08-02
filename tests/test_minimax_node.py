@@ -57,6 +57,18 @@ class _NestedTensor:
         self.values = values
 
 
+class _ProgressBar:
+    instances = []
+
+    def __init__(self, total):
+        self.total = total
+        self.updates = []
+        self.instances.append(self)
+
+    def update_absolute(self, value, total=None, preview=None):
+        self.updates.append((value, total))
+
+
 class _Clip:
     def __init__(self):
         self.tokenize_calls = []
@@ -116,6 +128,7 @@ def _load_minimax_node(monkeypatch):
 
     core_nodes = types.ModuleType("nodes")
     core_nodes.MAX_RESOLUTION = 16384
+    core_nodes.NODE_CLASS_MAPPINGS = {}
     comfy = types.ModuleType("comfy")
     comfy.__path__ = []
     model_management = types.ModuleType("comfy.model_management")
@@ -128,6 +141,8 @@ def _load_minimax_node(monkeypatch):
             samples, size=(height, width), mode="nearest"
         )
     )
+    _ProgressBar.instances.clear()
+    comfy_utils.ProgressBar = _ProgressBar
     comfy.model_management = model_management
     comfy.nested_tensor = nested_tensor
     comfy.utils = comfy_utils
@@ -249,6 +264,41 @@ def test_missing_native_conditioning_nodes_are_selected_for_registration(monkeyp
     ]
 
 
+def test_reference_mode_routes_to_native_node_when_available(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+    module.comfy_nodes.NODE_CLASS_MAPPINGS.update(
+        {
+            "MiniMaxH3ImageToVideo": object,
+            "MiniMaxH3ReferenceToVideo": object,
+        }
+    )
+
+    output = module.EasyMiniMaxH3ToVideo.execute(
+        **_base_inputs(mode=["reference"], images=[_image_values(1)])
+    )
+
+    assert module.get_minimax_h3_fallback_nodes() == []
+    assert _graph_node(output, module.REFERENCE_BRIDGE_NODE_ID)
+
+
+def test_missing_native_reference_registers_fallback_and_routes_through_bridge(
+    monkeypatch,
+):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+    module.comfy_nodes.NODE_CLASS_MAPPINGS["MiniMaxH3ImageToVideo"] = object
+
+    output = module.EasyMiniMaxH3ToVideo.execute(
+        **_base_inputs(mode=["reference"], images=[_image_values(1)])
+    )
+
+    assert module.get_minimax_h3_fallback_nodes() == [
+        module.MiniMaxH3ReferenceToVideoFallback,
+    ]
+    assert _graph_node(output, module.REFERENCE_BRIDGE_NODE_ID)
+
+
 def test_schema_exposes_list_media_inputs_without_image_position(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
@@ -278,7 +328,24 @@ def test_schema_exposes_list_media_inputs_without_image_position(monkeypatch):
     assert [output.name for output in schema.outputs] == ["positive", "latent"]
 
 
-def test_multi_frames_routes_first_and_last_expanded_images_to_native_node(monkeypatch):
+def test_reference_bridge_uses_fixed_inputs_instead_of_autogrow(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+
+    schema = module.EasyMiniMaxH3ReferenceToVideoBridge.define_schema()
+    input_names = [port.name for port in schema.inputs]
+
+    assert schema.node_id == module.REFERENCE_BRIDGE_NODE_ID
+    assert "ref_images" not in input_names
+    assert input_names[-18:] == [
+        *[f"ref_image_{index}" for index in range(9)],
+        *[f"ref_video_{index}" for index in range(3)],
+        *[f"ref_video_audio_{index}" for index in range(3)],
+        *[f"ref_audio_{index}" for index in range(3)],
+    ]
+
+
+def test_multi_frames_routes_first_and_last_expanded_images(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
     clip = _Clip()
@@ -311,7 +378,7 @@ def test_multi_frames_with_one_image_routes_only_first_frame(monkeypatch):
 
 
 @pytest.mark.parametrize("mode", ["reference", "multi_frames"])
-def test_empty_media_routes_to_native_text_to_video_for_every_mode(monkeypatch, mode):
+def test_empty_media_routes_to_text_to_video_for_every_mode(monkeypatch, mode):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
     clip = _Clip()
@@ -363,7 +430,7 @@ def test_reference_video_extraction_is_deferred_to_a_cacheable_subnode(monkeypat
     assert output.expand is not None
     nodes_by_type = {node["class_type"]: node for node in output.expand.values()}
     components = nodes_by_type["GetVideoComponents"]
-    conditioning = nodes_by_type["MiniMaxH3ReferenceToVideo"]
+    conditioning = nodes_by_type[module.REFERENCE_BRIDGE_NODE_ID]
     components_id = next(
         node_id
         for node_id, node in output.expand.items()
@@ -373,6 +440,60 @@ def test_reference_video_extraction_is_deferred_to_a_cacheable_subnode(monkeypat
     assert "easy minimaxH3ResampleVideoFrames" not in nodes_by_type
     assert conditioning["inputs"]["ref_video_0"] == [components_id, 0]
     assert conditioning["inputs"]["ref_video_audio_0"] == [components_id, 1]
+
+
+def test_easy_node_reports_progress_for_each_media_input(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+    audio = {"waveform": torch.ones(1, 1, 4), "sample_rate": 32000}
+
+    module.EasyMiniMaxH3ToVideo.execute(
+        **_base_inputs(
+            mode=["reference"],
+            audio_vae=[_AudioVae()],
+            images=[_image_values(1, 2)],
+            videos=[object(), object()],
+            audios=[audio],
+        )
+    )
+
+    progress = _ProgressBar.instances[-1]
+    assert progress.total == 6
+    assert progress.updates == [
+        (1, 6),
+        (2, 6),
+        (3, 6),
+        (4, 6),
+        (5, 6),
+        (6, 6),
+    ]
+
+
+def test_easy_node_reports_complete_progress_for_empty_inputs(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+
+    module.EasyMiniMaxH3ToVideo.execute(**_base_inputs(mode=["reference"]))
+
+    progress = _ProgressBar.instances[-1]
+    assert progress.total == 1
+    assert progress.updates == [(1, 1)]
+
+
+def test_multi_frames_reports_progress_for_each_expanded_image(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+
+    module.EasyMiniMaxH3ToVideo.execute(
+        **_base_inputs(
+            mode=["multi_frames"],
+            images=[_image_values(1, 2, 3)],
+        )
+    )
+
+    progress = _ProgressBar.instances[-1]
+    assert progress.total == 4
+    assert progress.updates == [(1, 4), (2, 4), (3, 4), (4, 4)]
 
 
 def test_reference_encodes_images_video_audio_and_standalone_audio(monkeypatch):
@@ -404,7 +525,7 @@ def test_reference_encodes_images_video_audio_and_standalone_audio(monkeypatch):
         )
     )
 
-    conditioning = _graph_node(output, "MiniMaxH3ReferenceToVideo")
+    conditioning = _graph_node(output, module.REFERENCE_BRIDGE_NODE_ID)
     components = _Video().get_components()
     fallback_output = module.MiniMaxH3ReferenceToVideoFallback.execute(
         clip=clip,
@@ -439,6 +560,61 @@ def test_reference_encodes_images_video_audio_and_standalone_audio(monkeypatch):
     assert conditioning["inputs"]["ref_video_0"][1] == 0
 
 
+def test_reference_bridge_groups_fixed_inputs_before_direct_execute(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+    calls = []
+
+    class _NativeReferenceNode:
+        @classmethod
+        def execute(cls, **kwargs):
+            calls.append(kwargs)
+            return _NodeOutput("conditioning", "latent")
+
+    module.comfy_nodes.NODE_CLASS_MAPPINGS[
+        "MiniMaxH3ReferenceToVideo"
+    ] = _NativeReferenceNode
+    audio = {"waveform": torch.ones(1, 1, 8), "sample_rate": 32000}
+
+    output = module.EasyMiniMaxH3ReferenceToVideoBridge.execute(
+        clip=_Clip(),
+        vae=_Vae(),
+        audio_vae=_AudioVae(),
+        prompt="prompt",
+        width=32,
+        height=32,
+        length=5,
+        ref_image_0=_image_values(9),
+        ref_video_0=_image_values(0, 1, 2, 3, 4),
+        ref_video_audio_0=audio,
+        ref_audio_0=audio,
+    )
+
+    assert output.values == ("conditioning", "latent")
+    assert list(calls[0]["ref_images"]) == ["ref_image_0"]
+    assert list(calls[0]["ref_videos"]) == ["ref_video_0"]
+    assert list(calls[0]["ref_video_audios"]) == ["ref_video_audio_0"]
+    assert list(calls[0]["ref_audios"]) == ["ref_audio_0"]
+
+
+def test_reference_bridge_directly_executes_fallback_when_native_is_missing(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+
+    output = module.EasyMiniMaxH3ReferenceToVideoBridge.execute(
+        clip=_Clip(),
+        vae=_Vae(),
+        prompt="prompt",
+        width=32,
+        height=32,
+        length=5,
+        ref_image_0=_image_values(9),
+    )
+
+    refs = output.values[0][0][1]["minimax_refs"]
+    assert [ref["kind"] for ref in refs] == ["image"]
+
+
 def test_reference_audio_requires_audio_vae(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
@@ -458,7 +634,7 @@ def test_silent_reference_video_does_not_require_audio_vae(monkeypatch):
         **_base_inputs(mode=["reference"], videos=[object()])
     )
 
-    conditioning = _graph_node(output, "MiniMaxH3ReferenceToVideo")
+    conditioning = _graph_node(output, module.REFERENCE_BRIDGE_NODE_ID)
     assert conditioning["inputs"]["audio_vae"] is None
 
 

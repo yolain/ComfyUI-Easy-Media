@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import math
 from typing import Any
 
@@ -25,6 +24,7 @@ AUDIO_LATENT_FPS = 40
 MAX_REF_IMAGES = 9
 MAX_REF_VIDEOS = 3
 MAX_REF_AUDIOS = 3
+REFERENCE_BRIDGE_NODE_ID = "easy MiniMaxH3ReferenceToVideoBridge"
 
 
 def _align_frame_count(frame_count: int) -> int:
@@ -458,20 +458,124 @@ class MiniMaxH3ReferenceToVideoFallback(io.ComfyNode):
         return io.NodeOutput(conditioning, latent)
 
 
+class EasyMiniMaxH3ReferenceToVideoBridge(io.ComfyNode):
+    """Call H3 reference conditioning without putting Autogrow in an expanded graph."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id=REFERENCE_BRIDGE_NODE_ID,
+            display_name="Easy MiniMax H3 Reference Bridge",
+            category=CATEGORY_MINIMAX,
+            is_dev_only=True,
+            inputs=[
+                io.Clip.Input("clip"),
+                io.Vae.Input("vae"),
+                io.Vae.Input("audio_vae", optional=True),
+                io.String.Input("prompt", multiline=True, dynamic_prompts=True),
+                io.Int.Input(
+                    "width",
+                    default=1344,
+                    min=32,
+                    max=comfy_nodes.MAX_RESOLUTION,
+                    step=32,
+                ),
+                io.Int.Input(
+                    "height",
+                    default=768,
+                    min=32,
+                    max=comfy_nodes.MAX_RESOLUTION,
+                    step=32,
+                ),
+                io.Int.Input("length", default=124, min=5, max=3600, step=17),
+                io.Combo.Input(
+                    "ref_image_size",
+                    options=["match", "max"],
+                    default="match",
+                ),
+                *[
+                    io.Image.Input(f"ref_image_{index}", optional=True)
+                    for index in range(MAX_REF_IMAGES)
+                ],
+                *[
+                    io.Image.Input(f"ref_video_{index}", optional=True)
+                    for index in range(MAX_REF_VIDEOS)
+                ],
+                *[
+                    io.Audio.Input(f"ref_video_audio_{index}", optional=True)
+                    for index in range(MAX_REF_VIDEOS)
+                ],
+                *[
+                    io.Audio.Input(f"ref_audio_{index}", optional=True)
+                    for index in range(MAX_REF_AUDIOS)
+                ],
+            ],
+            outputs=[
+                io.Conditioning.Output("positive"),
+                io.Latent.Output("latent"),
+            ],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        clip: Any,
+        vae: Any,
+        prompt: str,
+        width: int,
+        height: int,
+        length: int,
+        audio_vae: Any | None = None,
+        ref_image_size: str = "match",
+        **reference_inputs: Any,
+    ) -> io.NodeOutput:
+        grouped_inputs: dict[str, dict[str, Any]] = {
+            "ref_images": {},
+            "ref_videos": {},
+            "ref_video_audios": {},
+            "ref_audios": {},
+        }
+        prefixes = (
+            ("ref_image_", "ref_images"),
+            ("ref_video_audio_", "ref_video_audios"),
+            ("ref_video_", "ref_videos"),
+            ("ref_audio_", "ref_audios"),
+        )
+        for name, value in reference_inputs.items():
+            if value is None:
+                continue
+            destination = next(
+                (group for prefix, group in prefixes if name.startswith(prefix)),
+                None,
+            )
+            if destination is None:
+                raise TypeError(f"Unexpected MiniMax H3 reference input: {name}")
+            grouped_inputs[destination][name] = value
+
+        target = getattr(comfy_nodes, "NODE_CLASS_MAPPINGS", {}).get(
+            "MiniMaxH3ReferenceToVideo",
+            MiniMaxH3ReferenceToVideoFallback,
+        )
+        return target.execute(
+            clip=clip,
+            vae=vae,
+            audio_vae=audio_vae,
+            prompt=prompt,
+            width=width,
+            height=height,
+            length=length,
+            ref_image_size=ref_image_size,
+            **grouped_inputs,
+        )
+
+
 def get_minimax_h3_fallback_nodes() -> list[type[io.ComfyNode]]:
     """Return only the compatibility nodes missing from this ComfyUI build."""
-    try:
-        native_nodes = importlib.import_module("comfy_extras.nodes_minimax_h3")
-    except ImportError:
-        return [
-            MiniMaxH3ImageToVideoFallback,
-            MiniMaxH3ReferenceToVideoFallback,
-        ]
-
     fallbacks: list[type[io.ComfyNode]] = []
-    if not hasattr(native_nodes, "MiniMaxH3ImageToVideo"):
+    node_mappings = getattr(comfy_nodes, "NODE_CLASS_MAPPINGS", {})
+    if "MiniMaxH3ImageToVideo" not in node_mappings:
         fallbacks.append(MiniMaxH3ImageToVideoFallback)
-    if not hasattr(native_nodes, "MiniMaxH3ReferenceToVideo"):
+    if "MiniMaxH3ReferenceToVideo" not in node_mappings:
         fallbacks.append(MiniMaxH3ReferenceToVideoFallback)
     return fallbacks
 
@@ -570,6 +674,21 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
         video_inputs = flatten_media_inputs(videos)
         standalone_audios = _audio_inputs(audios)
         graph = GraphBuilder()
+        try:
+            import comfy.utils
+        except ImportError as error:
+            raise RuntimeError("ComfyUI progress utilities are unavailable") from error
+        progress_total = max(
+            1,
+            len(expanded_images) + len(video_inputs) + len(standalone_audios) + 1,
+        )
+        progress = comfy.utils.ProgressBar(progress_total)
+        progress_value = 0
+
+        def advance_progress(count: int = 1) -> None:
+            nonlocal progress_value
+            progress_value = min(progress_total, progress_value + count)
+            progress.update_absolute(progress_value, progress_total)
 
         if selected_mode == "multi_frames" and (video_inputs or standalone_audios):
             raise ValueError("videos and audios are only supported in reference mode")
@@ -589,6 +708,8 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
                 node_inputs["first_frame"] = expanded_images[0]
             if len(expanded_images) > 1:
                 node_inputs["last_frame"] = expanded_images[-1]
+            for _ in expanded_images:
+                advance_progress()
             conditioning = graph.node(
                 "MiniMaxH3ImageToVideo",
                 id="conditioning",
@@ -622,6 +743,7 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
             }
             for index, image in enumerate(expanded_images):
                 node_inputs[f"ref_image_{index}"] = image
+                advance_progress()
             for index, video in enumerate(video_inputs):
                 components = graph.node(
                     "GetVideoComponents",
@@ -630,14 +752,17 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
                 )
                 node_inputs[f"ref_video_{index}"] = components.out(0)
                 node_inputs[f"ref_video_audio_{index}"] = components.out(1)
+                advance_progress()
             for index, audio in enumerate(standalone_audios):
                 node_inputs[f"ref_audio_{index}"] = audio
+                advance_progress()
             conditioning = graph.node(
-                "MiniMaxH3ReferenceToVideo",
+                REFERENCE_BRIDGE_NODE_ID,
                 id="conditioning",
                 **node_inputs,
             )
 
+        advance_progress()
         return io.NodeOutput(
             conditioning.out(0),
             conditioning.out(1),

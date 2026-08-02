@@ -74,6 +74,7 @@ class EasyMediaExtension(ComfyExtension):
             APIWorkflowGate,
             # MiniMax
             EasyMiniMaxH3ToVideo,
+            EasyMiniMaxH3ReferenceToVideoBridge,
             # Wan
             BerniniModelPatch,
             EasyBerniniS2VConditioning,
