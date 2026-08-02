@@ -910,9 +910,9 @@ describe('MultiTrackWidget', () => {
 
   it.each([
     {
-      name: 'keeps the five-second minimum when cloned tasks still fit',
+      name: 'uses the latest segment end when cloned tasks remain short',
       taskRanges: [[0, 2], [2, 4]],
-      expectedTotalLength: 120,
+      expectedTotalLength: 10,
     },
     {
       name: 'extends the total length when cloned tasks exceed five seconds',

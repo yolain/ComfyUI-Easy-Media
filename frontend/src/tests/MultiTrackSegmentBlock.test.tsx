@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MultiTrackSegmentBlock } from '@/components/widgets/multitrack/MultiTrackSegmentBlock'
 import type { MultiTrackSegment, MultiTrackType } from '@/types/multitrack'
@@ -222,6 +222,82 @@ describe('MultiTrackSegmentBlock context menu', () => {
 
     expect(block.style.cursor).toBe('text')
     expect(onCut).toHaveBeenCalledWith('video-segment', 3)
+  })
+
+  it('maps right-edge trimming to the pointer timeline position regardless of grab offset', () => {
+    const onResize = vi.fn()
+    const { container } = render(
+      <MultiTrackSegmentBlock
+        trackType="video"
+        segmentIndex={0}
+        segment={{
+          ...segment('video'),
+          end_frame: 360,
+          content: { media_type: 'video', duration: 15 },
+        }}
+        totalLength={360}
+        frameRate={24}
+        areaWidth={480}
+        canvasScale={1}
+        selected={false}
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        onResize={onResize}
+        onResizePreview={vi.fn()}
+        onMove={vi.fn()}
+      />,
+    )
+    const block = container.querySelector('[role="button"]') as HTMLElement
+    vi.spyOn(block, 'getBoundingClientRect').mockReturnValue({
+      left: 0, right: 480, top: 0, bottom: 50, width: 480, height: 50, x: 0, y: 0,
+      toJSON: () => ({}),
+    })
+
+    fireEvent.mouseDown(block, { button: 0, clientX: 474, clientY: 25 })
+    act(() => {
+      window.dispatchEvent(new MouseEvent('mousemove', { clientX: 320, clientY: 25 }))
+      window.dispatchEvent(new MouseEvent('mouseup', { clientX: 320, clientY: 25 }))
+    })
+
+    expect(onResize).toHaveBeenCalledWith('video-segment', 'end', 240, expect.any(Number))
+  })
+
+  it('trims a video to 12 seconds when task gaps extend the timeline to 20 seconds', () => {
+    const onResize = vi.fn()
+    const { container } = render(
+      <MultiTrackSegmentBlock
+        trackType="video"
+        segmentIndex={0}
+        segment={{
+          ...segment('video'),
+          end_frame: 360,
+          content: { media_type: 'video', duration: 15 },
+        }}
+        totalLength={480}
+        frameRate={24}
+        areaWidth={480}
+        canvasScale={0.5}
+        selected={false}
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        onResize={onResize}
+        onResizePreview={vi.fn()}
+        onMove={vi.fn()}
+      />,
+    )
+    const block = container.querySelector('[role="button"]') as HTMLElement
+    vi.spyOn(block, 'getBoundingClientRect').mockReturnValue({
+      left: 0, right: 360, top: 0, bottom: 50, width: 360, height: 50, x: 0, y: 0,
+      toJSON: () => ({}),
+    })
+
+    fireEvent.mouseDown(block, { button: 0, clientX: 358, clientY: 25 })
+    act(() => {
+      window.dispatchEvent(new MouseEvent('mousemove', { clientX: 288, clientY: 25 }))
+      window.dispatchEvent(new MouseEvent('mouseup', { clientX: 288, clientY: 25 }))
+    })
+
+    expect(onResize).toHaveBeenCalledWith('video-segment', 'end', 288, expect.any(Number))
   })
 
   it('does not open the video replacement action when double-clicking in cut mode', () => {

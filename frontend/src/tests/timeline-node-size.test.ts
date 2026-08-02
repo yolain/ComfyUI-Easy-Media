@@ -90,6 +90,69 @@ describe('preserveTimelineEditorNodeHeight', () => {
     expect(node.properties.easyMediaTimelineHeight).toBe(764)
     vi.useRealTimers()
   })
+
+  it('does not rewrite timeline duration when the format changes to MiniMax', () => {
+    vi.useFakeTimers()
+    const NodeType = installTimelineHeightHooks()
+    const timelineWidget = {
+      name: 'timeline_data',
+      value: JSON.stringify({ total_length: 121, frame_rate: 24, tracks: [] }),
+    }
+    const node = new NodeType() as InstanceType<typeof NodeType> & {
+      widgets: Array<{ name: string, value: string }>
+      onWidgetChanged?: (name: string, value: unknown, oldValue: unknown, widget: unknown) => void
+    }
+    node.widgets = [timelineWidget]
+
+    node.onWidgetChanged?.('format', 'MiniMax', 'Wan', {})
+
+    expect(JSON.parse(timelineWidget.value).total_length).toBe(121)
+    vi.runAllTimers()
+    vi.useRealTimers()
+  })
+
+  it('does not rewrite multitrack duration when the format changes to MiniMax', () => {
+    vi.useFakeTimers()
+    const NodeType = installTimelineHeightHooks('easy multiTrackEditor')
+    const trackDataWidget = {
+      name: 'track_data',
+      value: JSON.stringify({ total_length: 120, frame_rate: 24, tracks: [] }),
+    }
+    const node = new NodeType() as InstanceType<typeof NodeType> & {
+      widgets: Array<{ name: string, value: string }>
+      onWidgetChanged?: (name: string, value: unknown, oldValue: unknown, widget: unknown) => void
+    }
+    node.widgets = [trackDataWidget]
+
+    node.onWidgetChanged?.('format', 'MiniMax', 'Wan', {})
+
+    expect(JSON.parse(trackDataWidget.value).total_length).toBe(120)
+    vi.runAllTimers()
+    vi.useRealTimers()
+  })
+
+  it('does not rewrite timeline duration when loading a MiniMax workflow', () => {
+    vi.useFakeTimers()
+    const NodeType = installTimelineHeightHooks()
+    const timelineWidget = {
+      name: 'timeline_data',
+      value: JSON.stringify({ total_length: 121, frame_rate: 24, tracks: [] }),
+    }
+    const node = new NodeType() as InstanceType<typeof NodeType> & {
+      widgets: Array<{ name: string, value: string }>
+      onConfigure?: (serialisedNode: unknown) => void
+    }
+    node.widgets = [
+      { name: 'format', value: 'MiniMax' },
+      timelineWidget,
+    ]
+
+    node.onConfigure?.({ size: [520, 430], properties: {} })
+
+    expect(JSON.parse(timelineWidget.value).total_length).toBe(121)
+    vi.runAllTimers()
+    vi.useRealTimers()
+  })
 })
 
 describe('scaleImageItemsToDuration', () => {

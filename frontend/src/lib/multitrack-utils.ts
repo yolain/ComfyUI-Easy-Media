@@ -288,7 +288,7 @@ export function calculateTotalLength(
   const safeFrameRate = Math.max(1, Math.round(frameRate))
   const minimumLength = MULTITRACK_MIN_DURATION_SECONDS * safeFrameRate
   const maxEnd = calculateMaxSegmentEnd(tracks)
-  return Math.max(minimumLength, maxEnd)
+  return maxEnd > 0 ? maxEnd : minimumLength
 }
 
 export const calculateTotalDuration = calculateTotalLength
@@ -393,7 +393,7 @@ function arrangeNonOverlappingDrop(
 }
 
 function isFreeTimedTrack(type: MultiTrack['type']): boolean {
-  return type === 'video' || type === 'audio' || type === 'subtitle'
+  return type === 'task' || type === 'video' || type === 'audio' || type === 'subtitle'
 }
 
 export function syncMatchingTasksToPrimaryVideoTrack(

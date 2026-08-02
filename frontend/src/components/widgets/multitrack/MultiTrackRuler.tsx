@@ -90,8 +90,15 @@ export function MultiTrackRuler({
   const playheadLeft = MULTITRACK_LEFT_GUTTER + (currentTime / safeLength) * playableWidth
   const reserveLeft = MULTITRACK_LEFT_GUTTER + playableWidth
 
-  function timeFromClientX(clientX: number, rectLeft: number): number {
-    const x = Math.max(0, (clientX - rectLeft) / canvasScale - MULTITRACK_LEFT_GUTTER)
+  function renderedCoordinateScale(rectWidth: number): number {
+    const measuredScale = rectWidth / Math.max(width, 1)
+    return Number.isFinite(measuredScale) && measuredScale > 0.01
+      ? measuredScale
+      : Math.max(canvasScale, 0.01)
+  }
+
+  function timeFromClientX(clientX: number, rectLeft: number, coordinateScale: number): number {
+    const x = Math.max(0, (clientX - rectLeft) / coordinateScale - MULTITRACK_LEFT_GUTTER)
     const ratio = x / playableWidth
     return Math.max(0, Math.min(totalLength, Math.round(ratio * totalLength)))
   }
@@ -99,10 +106,11 @@ export function MultiTrackRuler({
   function handleMouseDown(event: React.MouseEvent<HTMLDivElement>) {
     event.preventDefault()
     const rect = event.currentTarget.getBoundingClientRect()
-    onSeek(timeFromClientX(event.clientX, rect.left))
+    const coordinateScale = renderedCoordinateScale(rect.width)
+    onSeek(timeFromClientX(event.clientX, rect.left, coordinateScale))
 
     function handleMouseMove(moveEvent: MouseEvent) {
-      onSeek(timeFromClientX(moveEvent.clientX, rect.left))
+      onSeek(timeFromClientX(moveEvent.clientX, rect.left, coordinateScale))
     }
 
     function handleMouseUp() {
@@ -117,11 +125,13 @@ export function MultiTrackRuler({
   function handleTaskMarkerDragStart(markerId: string, clientX: number) {
     const marker = taskMarkers.find((candidate) => candidate.id === markerId)
     if (!marker) return
-    const rectLeft = rulerRef.current?.getBoundingClientRect().left ?? 0
+    const rulerRect = rulerRef.current?.getBoundingClientRect()
+    const rectLeft = rulerRect?.left ?? 0
+    const coordinateScale = renderedCoordinateScale(rulerRect?.width ?? 0)
     let lastValidFrame = marker.frame
 
     function updateDragPreview(nextClientX: number) {
-      const nextFrame = Math.max(1, timeFromClientX(nextClientX, rectLeft))
+      const nextFrame = Math.max(1, timeFromClientX(nextClientX, rectLeft, coordinateScale))
       const occupied = taskMarkers.some((candidate) => (
         candidate.id !== markerId && candidate.frame === nextFrame
       ))

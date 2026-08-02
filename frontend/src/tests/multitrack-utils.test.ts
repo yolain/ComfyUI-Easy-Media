@@ -38,6 +38,23 @@ import {
 } from '@/lib/multitrack-utils'
 
 describe('multitrack utilities', () => {
+  it('uses a short segment range instead of padding the timeline to five seconds', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [{
+      id: 'short-task',
+      start_frame: 0,
+      end_frame: 48,
+      color: data.tracks[0].color,
+      content: { media_type: 'none', task_mode: 'default' },
+    }]
+
+    expect(calculateTotalLength(data.tracks, 24)).toBe(48)
+  })
+
+  it('keeps the five-second default for an empty timeline', () => {
+    expect(calculateTotalLength(createDefaultTrackData().tracks, 24)).toBe(120)
+  })
+
   it('crops a longer replacement audio to the current clip duration', () => {
     expect(calculateReplacementAudioEndFrame({ start_frame: 24, end_frame: 120 }, 10, 24)).toBe(120)
   })
@@ -329,7 +346,7 @@ describe('multitrack utilities', () => {
       frame_rate: 24,
     } as unknown as Parameters<typeof normalizeTrackData>[0])
 
-    expect(normalized.total_length).toBe(120)
+    expect(normalized.total_length).toBe(1)
     expect(normalized.tracks[0].segments[0]).toMatchObject({
       start_frame: 0,
       end_frame: 1,
@@ -665,7 +682,7 @@ describe('multitrack utilities', () => {
       { id: 'task-matching', start_frame: 24, end_frame: 73 },
       { id: 'task-overlapping', start_frame: 24, end_frame: 36 },
     ])
-    expect(updated.total_length).toBe(120)
+    expect(updated.total_length).toBe(73)
   })
 
   it('keeps duration edits from overlapping the next segment', () => {
@@ -920,7 +937,7 @@ describe('multitrack utilities', () => {
     const updated = remapTrackDataFrameRate(trackData, 30)
 
     expect(updated.frame_rate).toBe(30)
-    expect(updated.total_length).toBe(150)
+    expect(updated.total_length).toBe(60)
     expect(updated.tracks[1].segments[0]).toMatchObject({
       start_frame: 30,
       end_frame: 60,
@@ -959,7 +976,7 @@ describe('multitrack utilities', () => {
     expect(calculateTotalLength(data.tracks)).toBe(205)
   })
 
-  it('uses five seconds at the current frame rate as the timeline minimum', () => {
+  it('uses the latest segment end regardless of the current frame rate', () => {
     const data = createDefaultTrackData()
     data.tracks[1].segments = [{
       id: 'short',
@@ -970,7 +987,7 @@ describe('multitrack utilities', () => {
     }]
 
     expect(calculateTotalLength(data.tracks, 16)).toBe(86)
-    expect(calculateTotalLength(data.tracks, 20)).toBe(100)
+    expect(calculateTotalLength(data.tracks, 20)).toBe(86)
   })
 
   it('adds a default task segment when a video range has no task coverage', () => {
@@ -1423,6 +1440,39 @@ describe('multitrack utilities', () => {
     expect(moved[2].segments.map((segment) => [segment.id, segment.start_frame, segment.end_frame])).toEqual([
       ['subtitle-first', 4, 6],
       ['subtitle-second', 6, 8],
+    ])
+  })
+
+  it('moves task segments to arbitrary free ranges without packing existing gaps', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [
+      {
+        id: 'task-moving',
+        start_frame: 0,
+        end_frame: 24,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+      {
+        id: 'task-existing',
+        start_frame: 72,
+        end_frame: 96,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+    ]
+
+    const moved = moveSegmentBetweenCompatibleTracks(
+      data.tracks,
+      'task-moving',
+      data.tracks[0].id,
+      120,
+      data.frame_rate,
+    )
+
+    expect(moved[0].segments.map((segment) => [segment.id, segment.start_frame, segment.end_frame])).toEqual([
+      ['task-existing', 72, 96],
+      ['task-moving', 120, 144],
     ])
   })
 
