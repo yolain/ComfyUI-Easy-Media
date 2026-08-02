@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+import importlib
 import math
 from typing import Any
 
 import nodes as comfy_nodes
 import torch
 from comfy_api.latest import io
+from comfy_execution.graph_utils import GraphBuilder
 
 from ..utils.minimax import (
     expand_image_inputs,
     flatten_media_inputs,
-    resample_video_frames,
 )
 
 
@@ -43,7 +44,9 @@ def _temporal_shape(length: int) -> tuple[int, int, int]:
     )
 
 
-def _empty_av_latent(width: int, height: int, length: int) -> tuple[dict[str, Any], int]:
+def _empty_av_latent(
+    width: int, height: int, length: int
+) -> tuple[dict[str, Any], int]:
     try:
         import comfy.model_management
         import comfy.nested_tensor
@@ -59,16 +62,16 @@ def _empty_av_latent(width: int, height: int, length: int) -> tuple[dict[str, An
         device=device,
     )
     audio = torch.zeros([1, 32, 2, audio_length], device=device)
-    return {
-        "samples": comfy.nested_tensor.NestedTensor((video, audio))
-    }, frame_count
+    return {"samples": comfy.nested_tensor.NestedTensor((video, audio))}, frame_count
 
 
 def _resize(image: torch.Tensor, width: int, height: int, crop: str) -> torch.Tensor:
     try:
         import comfy.utils
     except ImportError as error:
-        raise RuntimeError("MiniMax H3 requires ComfyUI image resize utilities") from error
+        raise RuntimeError(
+            "MiniMax H3 requires ComfyUI image resize utilities"
+        ) from error
 
     samples = image[..., :3].movedim(-1, 1)
     samples = comfy.utils.common_upscale(samples, width, height, "lanczos", crop)
@@ -98,7 +101,9 @@ def _set_conditioning_values(
     try:
         import node_helpers
     except ImportError as error:
-        raise RuntimeError("MiniMax H3 requires ComfyUI conditioning helpers") from error
+        raise RuntimeError(
+            "MiniMax H3 requires ComfyUI conditioning helpers"
+        ) from error
     return node_helpers.conditioning_set_values(conditioning, values)
 
 
@@ -113,13 +118,19 @@ def _first_input(value: Any, default: Any = None) -> Any:
 def _audio_inputs(value: Any) -> list[dict[str, Any]]:
     audios: list[dict[str, Any]] = []
     for audio in flatten_media_inputs(value):
-        if not isinstance(audio, dict) or "waveform" not in audio or "sample_rate" not in audio:
+        if (
+            not isinstance(audio, dict)
+            or "waveform" not in audio
+            or "sample_rate" not in audio
+        ):
             raise TypeError("audios must contain AUDIO values")
         audios.append(audio)
     return audios
 
 
-def _encode_ref_audio(audio_vae: Any, audio: dict[str, Any]) -> tuple[torch.Tensor, int]:
+def _encode_ref_audio(
+    audio_vae: Any, audio: dict[str, Any]
+) -> tuple[torch.Tensor, int]:
     waveform = audio["waveform"]
     sample_rate = audio["sample_rate"]
     vae_sample_rate = getattr(audio_vae, "audio_sample_rate", 32000)
@@ -139,14 +150,319 @@ def _encode_ref_audio(audio_vae: Any, audio: dict[str, Any]) -> tuple[torch.Tens
     return latent, latent.shape[-1]
 
 
-def _encode_text_to_video(
-    clip: Any,
-    prompt: str,
-    latent: dict[str, Any],
-) -> io.NodeOutput:
-    tokens = clip.tokenize(prompt, images=[])
-    conditioning = clip.encode_from_tokens_scheduled(tokens)
-    return io.NodeOutput(conditioning, latent)
+class MiniMaxH3ImageToVideoFallback(io.ComfyNode):
+    """Compatibility copy used when ComfyUI does not ship the native H3 node."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="MiniMaxH3ImageToVideo",
+            display_name="MiniMax H3 Image to Video",
+            category="model/conditioning/minimax",
+            inputs=[
+                io.Clip.Input("clip"),
+                io.Vae.Input("vae"),
+                io.String.Input("prompt", multiline=True, dynamic_prompts=True),
+                io.Int.Input(
+                    "width",
+                    default=1344,
+                    min=32,
+                    max=comfy_nodes.MAX_RESOLUTION,
+                    step=32,
+                ),
+                io.Int.Input(
+                    "height",
+                    default=768,
+                    min=32,
+                    max=comfy_nodes.MAX_RESOLUTION,
+                    step=32,
+                ),
+                io.Int.Input("length", default=124, min=5, max=3600, step=17),
+                io.Image.Input("first_frame", optional=True),
+                io.Image.Input("last_frame", optional=True),
+            ],
+            outputs=[
+                io.Conditioning.Output(display_name="positive"),
+                io.Latent.Output(),
+            ],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        clip: Any,
+        vae: Any,
+        prompt: str,
+        width: int,
+        height: int,
+        length: int,
+        first_frame: torch.Tensor | None = None,
+        last_frame: torch.Tensor | None = None,
+    ) -> io.NodeOutput:
+        latent, frame_count = _empty_av_latent(width, height, length)
+        token_images: list[torch.Tensor] = []
+        keyframes: list[dict[str, Any]] = []
+        if first_frame is not None:
+            image = _resize(first_frame[:1], width, height, "disabled")
+            token_images.append(image)
+            keyframes.append({"resolved_frame_index": 0, "image": image})
+        if last_frame is not None:
+            image = _resize(last_frame[:1], width, height, "center")
+            token_images.append(image)
+            keyframes.append({"resolved_frame_index": frame_count - 1, "image": image})
+
+        tokens = clip.tokenize(prompt, images=token_images)
+        conditioning = clip.encode_from_tokens_scheduled(tokens)
+        for keyframe in keyframes:
+            keyframe["latent"] = vae.encode(keyframe.pop("image"))
+        if keyframes:
+            conditioning = _set_conditioning_values(
+                conditioning,
+                {
+                    "minimax_keyframes": keyframes,
+                    "minimax_frame_count": frame_count,
+                },
+            )
+        return io.NodeOutput(conditioning, latent)
+
+
+class MiniMaxH3ReferenceToVideoFallback(io.ComfyNode):
+    """Compatibility copy used when ComfyUI does not ship the native H3 node."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="MiniMaxH3ReferenceToVideo",
+            display_name="MiniMax H3 Reference to Video",
+            category="model/conditioning/minimax",
+            inputs=[
+                io.Clip.Input("clip"),
+                io.Vae.Input("vae"),
+                io.Vae.Input("audio_vae"),
+                io.String.Input("prompt", multiline=True, dynamic_prompts=True),
+                io.Int.Input(
+                    "width",
+                    default=1344,
+                    min=32,
+                    max=comfy_nodes.MAX_RESOLUTION,
+                    step=32,
+                ),
+                io.Int.Input(
+                    "height",
+                    default=768,
+                    min=32,
+                    max=comfy_nodes.MAX_RESOLUTION,
+                    step=32,
+                ),
+                io.Int.Input("length", default=124, min=5, max=3600, step=17),
+                io.Combo.Input(
+                    "ref_image_size",
+                    options=["match", "max"],
+                    default="match",
+                ),
+                io.Autogrow.Input(
+                    "ref_images",
+                    optional=True,
+                    template=io.Autogrow.TemplatePrefix(
+                        input=io.Image.Input("ref_image"),
+                        prefix="ref_image_",
+                        min=0,
+                        max=9,
+                    ),
+                ),
+                io.Autogrow.Input(
+                    "ref_videos",
+                    optional=True,
+                    template=io.Autogrow.TemplatePrefix(
+                        input=io.Image.Input("ref_video"),
+                        prefix="ref_video_",
+                        min=0,
+                        max=3,
+                    ),
+                ),
+                io.Autogrow.Input(
+                    "ref_video_audios",
+                    optional=True,
+                    template=io.Autogrow.TemplatePrefix(
+                        input=io.Audio.Input("ref_video_audio"),
+                        prefix="ref_video_audio_",
+                        min=0,
+                        max=3,
+                    ),
+                ),
+                io.Autogrow.Input(
+                    "ref_audios",
+                    optional=True,
+                    template=io.Autogrow.TemplatePrefix(
+                        input=io.Audio.Input("ref_audio"),
+                        prefix="ref_audio_",
+                        min=0,
+                        max=3,
+                    ),
+                ),
+            ],
+            outputs=[
+                io.Conditioning.Output(display_name="positive"),
+                io.Latent.Output(),
+            ],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        clip: Any,
+        vae: Any,
+        audio_vae: Any,
+        prompt: str,
+        width: int,
+        height: int,
+        length: int,
+        ref_image_size: str = "match",
+        ref_images: dict[str, torch.Tensor] | None = None,
+        ref_videos: dict[str, torch.Tensor] | None = None,
+        ref_video_audios: dict[str, dict[str, Any] | None] | None = None,
+        ref_audios: dict[str, dict[str, Any]] | None = None,
+    ) -> io.NodeOutput:
+        latent, frame_count = _empty_av_latent(width, height, length)
+        reference_items: list[dict[str, Any]] = []
+        reference_blocks: list[dict[str, Any]] = []
+
+        for image in (ref_images or {}).values():
+            if image is None:
+                continue
+            image_height, image_width = image.shape[1], image.shape[2]
+            if ref_image_size == "match":
+                scale = min(
+                    1.0,
+                    math.sqrt((width * height) / (image_width * image_height)),
+                )
+            elif ref_image_size == "max":
+                scale = min(
+                    1.0,
+                    REF_IMAGE_SHORT_EDGE / min(image_width, image_height),
+                )
+            else:
+                raise ValueError("ref_image_size must be either 'match' or 'max'")
+            resized_width = max(
+                CANVAS_MULTIPLE,
+                round(image_width * scale / CANVAS_MULTIPLE) * CANVAS_MULTIPLE,
+            )
+            resized_height = max(
+                CANVAS_MULTIPLE,
+                round(image_height * scale / CANVAS_MULTIPLE) * CANVAS_MULTIPLE,
+            )
+            resized = _resize(image[:1], resized_width, resized_height, "disabled")
+            reference_items.append({"type": "image", "data": resized})
+            reference_blocks.append(
+                {
+                    "kind": "image",
+                    "latent_h": resized_height // 16,
+                    "latent_w": resized_width // 16,
+                    "latent": vae.encode(resized),
+                }
+            )
+
+        video_audios = ref_video_audios or {}
+        for name, frames in (ref_videos or {}).items():
+            if frames is None:
+                continue
+            soundtrack = video_audios.get("ref_video_audio_" + name.rsplit("_", 1)[-1])
+            video_height, video_width = frames.shape[1], frames.shape[2]
+            canvas_width, canvas_height = _adapt_canvas(video_width, video_height)
+            if video_width * video_height < canvas_width * canvas_height:
+                canvas_width = max(
+                    CANVAS_MULTIPLE,
+                    round(video_width / CANVAS_MULTIPLE) * CANVAS_MULTIPLE,
+                )
+                canvas_height = max(
+                    CANVAS_MULTIPLE,
+                    round(video_height / CANVAS_MULTIPLE) * CANVAS_MULTIPLE,
+                )
+            frames = _resize(frames, canvas_width, canvas_height, "disabled")
+            frames = frames[:frame_count]
+            aligned_count = frames.shape[0]
+            if aligned_count < 5:
+                raise ValueError(
+                    "MiniMax H3 reference videos need at least 5 frames (~0.2s at 24 fps)"
+                )
+            while aligned_count % 17 != 5:
+                aligned_count -= 1
+            frames = frames[:aligned_count]
+            video_latent = vae.encode(frames)
+            audio_latent = None
+            reference_audio_length = 0
+            if soundtrack is not None:
+                if audio_vae is None:
+                    raise ValueError(
+                        "audio_vae is required when reference audio is provided"
+                    )
+                audio_latent, reference_audio_length = _encode_ref_audio(
+                    audio_vae, soundtrack
+                )
+                reference_items.append({"type": "audio"})
+
+            sample_indexes = list(range(0, frames.shape[0], FPS // 2))
+            reference_items.append(
+                {
+                    "type": "video",
+                    "data": frames[sample_indexes],
+                    "timestamps": [index / 2.0 for index in range(len(sample_indexes))],
+                }
+            )
+            reference_blocks.append(
+                {
+                    "kind": "video_audio" if reference_audio_length else "video",
+                    "latent_t": video_latent.shape[2],
+                    "latent_h": canvas_height // 16,
+                    "latent_w": canvas_width // 16,
+                    "ref_audio_t": reference_audio_length,
+                    "latent": video_latent,
+                    "audio_latent": audio_latent,
+                }
+            )
+
+        for audio in (ref_audios or {}).values():
+            if audio is None:
+                continue
+            if audio_vae is None:
+                raise ValueError(
+                    "audio_vae is required when reference audio is provided"
+                )
+            audio_latent, reference_audio_length = _encode_ref_audio(audio_vae, audio)
+            reference_items.append({"type": "audio"})
+            reference_blocks.append(
+                {
+                    "kind": "audio",
+                    "ref_audio_t": reference_audio_length,
+                    "audio_latent": audio_latent,
+                }
+            )
+
+        tokens = clip.tokenize(prompt, minimax_ref_items=reference_items)
+        conditioning = clip.encode_from_tokens_scheduled(tokens)
+        if reference_blocks:
+            conditioning = _set_conditioning_values(
+                conditioning, {"minimax_refs": reference_blocks}
+            )
+        return io.NodeOutput(conditioning, latent)
+
+
+def get_minimax_h3_fallback_nodes() -> list[type[io.ComfyNode]]:
+    """Return only the compatibility nodes missing from this ComfyUI build."""
+    try:
+        native_nodes = importlib.import_module("comfy_extras.nodes_minimax_h3")
+    except ImportError:
+        return [
+            MiniMaxH3ImageToVideoFallback,
+            MiniMaxH3ReferenceToVideoFallback,
+        ]
+
+    fallbacks: list[type[io.ComfyNode]] = []
+    if not hasattr(native_nodes, "MiniMaxH3ImageToVideo"):
+        fallbacks.append(MiniMaxH3ImageToVideoFallback)
+    if not hasattr(native_nodes, "MiniMaxH3ReferenceToVideo"):
+        fallbacks.append(MiniMaxH3ReferenceToVideoFallback)
+    return fallbacks
 
 
 class EasyMiniMaxH3ToVideo(io.ComfyNode):
@@ -161,6 +477,7 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
                 "IMAGE batches and media lists are expanded automatically."
             ),
             is_input_list=True,
+            enable_expand=True,
             inputs=[
                 io.Clip.Input("clip"),
                 io.Vae.Input("vae"),
@@ -168,7 +485,9 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
                 io.Image.Input("images", optional=True),
                 io.Audio.Input("audios", optional=True),
                 io.Video.Input("videos", optional=True),
-                io.String.Input("prompt", default="", multiline=True, dynamic_prompts=True),
+                io.String.Input(
+                    "prompt", default="", multiline=True, dynamic_prompts=True
+                ),
                 io.Combo.Input(
                     "mode",
                     options=["reference", "multi_frames"],
@@ -231,6 +550,7 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
 
         selected_clip = _first_input(clip)
         selected_vae = _first_input(vae)
+        selected_audio_vae = _first_input(audio_vae)
         prompt_text = str(_first_input(prompt, ""))
         target_width = int(_first_input(width, 1344))
         target_height = int(_first_input(height, 768))
@@ -238,204 +558,66 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
         expanded_images = expand_image_inputs(images)
         video_inputs = flatten_media_inputs(videos)
         standalone_audios = _audio_inputs(audios)
-        latent, frame_count = _empty_av_latent(
-            target_width,
-            target_height,
-            target_length,
-        )
+        graph = GraphBuilder()
 
-        if not expanded_images and not video_inputs and not standalone_audios:
-            return _encode_text_to_video(selected_clip, prompt_text, latent)
+        if selected_mode == "multi_frames" and (video_inputs or standalone_audios):
+            raise ValueError("videos and audios are only supported in reference mode")
 
-        if selected_mode == "multi_frames":
-            if video_inputs or standalone_audios:
-                raise ValueError(
-                    "videos and audios are only supported in reference mode"
-                )
-            if not expanded_images:
-                return _encode_text_to_video(selected_clip, prompt_text, latent)
-
-            token_images: list[torch.Tensor] = []
-            keyframes: list[dict[str, Any]] = []
-            first_frame = _resize(
-                expanded_images[0],
-                target_width,
-                target_height,
-                "disabled",
-            )
-            token_images.append(first_frame)
-            keyframes.append({"resolved_frame_index": 0, "image": first_frame})
+        if selected_mode == "multi_frames" or not (
+            expanded_images or video_inputs or standalone_audios
+        ):
+            node_inputs: dict[str, Any] = {
+                "clip": selected_clip,
+                "vae": selected_vae,
+                "prompt": prompt_text,
+                "width": target_width,
+                "height": target_height,
+                "length": target_length,
+            }
+            if expanded_images:
+                node_inputs["first_frame"] = expanded_images[0]
             if len(expanded_images) > 1:
-                last_frame = _resize(
-                    expanded_images[-1],
-                    target_width,
-                    target_height,
-                    "center",
-                )
-                token_images.append(last_frame)
-                keyframes.append(
-                    {"resolved_frame_index": frame_count - 1, "image": last_frame}
-                )
-
-            tokens = selected_clip.tokenize(prompt_text, images=token_images)
-            conditioning = selected_clip.encode_from_tokens_scheduled(tokens)
-            for keyframe in keyframes:
-                keyframe["latent"] = selected_vae.encode(keyframe.pop("image"))
-            conditioning = _set_conditioning_values(
-                conditioning,
-                {
-                    "minimax_keyframes": keyframes,
-                    "minimax_frame_count": frame_count,
-                },
+                node_inputs["last_frame"] = expanded_images[-1]
+            conditioning = graph.node(
+                "MiniMaxH3ImageToVideo",
+                id="conditioning",
+                **node_inputs,
             )
-            return io.NodeOutput(conditioning, latent)
-
-        reference_items: list[dict[str, Any]] = []
-        reference_blocks: list[dict[str, Any]] = []
-        image_size_mode = str(_first_input(ref_image_size, "match"))
-        for image in expanded_images:
-            image_height, image_width = image.shape[1], image.shape[2]
-            if image_size_mode == "match":
-                scale = min(
-                    1.0,
-                    math.sqrt(
-                        (target_width * target_height) / (image_width * image_height)
-                    ),
-                )
-            elif image_size_mode == "max":
-                scale = min(
-                    1.0,
-                    REF_IMAGE_SHORT_EDGE / min(image_width, image_height),
-                )
-            else:
-                raise ValueError("ref_image_size must be either 'match' or 'max'")
-            resized_width = max(
-                CANVAS_MULTIPLE,
-                round(image_width * scale / CANVAS_MULTIPLE) * CANVAS_MULTIPLE,
-            )
-            resized_height = max(
-                CANVAS_MULTIPLE,
-                round(image_height * scale / CANVAS_MULTIPLE) * CANVAS_MULTIPLE,
-            )
-            resized = _resize(
-                image[:1],
-                resized_width,
-                resized_height,
-                "disabled",
-            )
-            image_latent = selected_vae.encode(resized)
-            reference_items.append({"type": "image", "data": resized})
-            reference_blocks.append(
-                {
-                    "kind": "image",
-                    "latent_h": resized_height // 16,
-                    "latent_w": resized_width // 16,
-                    "latent": image_latent,
-                }
-            )
-
-        selected_audio_vae = _first_input(audio_vae)
-        extracted_videos: list[tuple[torch.Tensor, dict[str, Any] | None]] = []
-        for index, video in enumerate(video_inputs):
-            try:
-                components = video.get_components()
-            except (AttributeError, RuntimeError, TypeError, ValueError) as error:
-                raise RuntimeError(f"Failed to split reference video {index}") from error
-            frames = resample_video_frames(
-                components.images,
-                float(components.frame_rate),
-                24.0,
-            )
-            extracted_videos.append((frames, components.audio))
-
-        if (
-            any(soundtrack is not None for _, soundtrack in extracted_videos)
-            or standalone_audios
-        ) and selected_audio_vae is None:
-            raise ValueError("audio_vae is required when reference audio is provided")
-
-        for frames, soundtrack in extracted_videos:
-            video_height, video_width = frames.shape[1], frames.shape[2]
-            canvas_width, canvas_height = _adapt_canvas(video_width, video_height)
-            if video_width * video_height < canvas_width * canvas_height:
-                canvas_width = max(
-                    CANVAS_MULTIPLE,
-                    round(video_width / CANVAS_MULTIPLE) * CANVAS_MULTIPLE,
-                )
-                canvas_height = max(
-                    CANVAS_MULTIPLE,
-                    round(video_height / CANVAS_MULTIPLE) * CANVAS_MULTIPLE,
-                )
-            frames = _resize(
-                frames,
-                canvas_width,
-                canvas_height,
-                "disabled",
-            )
-            if frames.shape[0] > frame_count:
-                frames = frames[:frame_count]
-            aligned_count = frames.shape[0]
-            if aligned_count < 5:
+        else:
+            if (video_inputs or standalone_audios) and selected_audio_vae is None:
                 raise ValueError(
-                    "MiniMax H3 reference videos need at least 5 frames (~0.2s at 24 fps)"
+                    "audio_vae is required when reference audio is provided"
                 )
-            while aligned_count % 17 != 5:
-                aligned_count -= 1
-            frames = frames[:aligned_count]
-            video_latent = selected_vae.encode(frames)
-            audio_latent = None
-            reference_audio_length = 0
-            if soundtrack is not None:
-                audio_latent, reference_audio_length = _encode_ref_audio(
-                    selected_audio_vae,
-                    soundtrack,
+            node_inputs = {
+                "clip": selected_clip,
+                "vae": selected_vae,
+                "audio_vae": selected_audio_vae,
+                "prompt": prompt_text,
+                "width": target_width,
+                "height": target_height,
+                "length": target_length,
+                "ref_image_size": str(_first_input(ref_image_size, "match")),
+            }
+            for index, image in enumerate(expanded_images):
+                node_inputs[f"ref_image_{index}"] = image
+            for index, video in enumerate(video_inputs):
+                components = graph.node(
+                    "GetVideoComponents",
+                    id=f"video_components_{index}",
+                    video=video,
                 )
-                reference_items.append({"type": "audio"})
-
-            sample_indexes = list(range(0, frames.shape[0], FPS // 2))
-            reference_items.append(
-                {
-                    "type": "video",
-                    "data": frames[sample_indexes],
-                    "timestamps": [
-                        index / 2.0 for index in range(len(sample_indexes))
-                    ],
-                }
-            )
-            reference_blocks.append(
-                {
-                    "kind": "video_audio" if reference_audio_length else "video",
-                    "latent_t": video_latent.shape[2],
-                    "latent_h": canvas_height // 16,
-                    "latent_w": canvas_width // 16,
-                    "ref_audio_t": reference_audio_length,
-                    "latent": video_latent,
-                    "audio_latent": audio_latent,
-                }
+                node_inputs[f"ref_video_{index}"] = components.out(0)
+                node_inputs[f"ref_video_audio_{index}"] = components.out(1)
+            for index, audio in enumerate(standalone_audios):
+                node_inputs[f"ref_audio_{index}"] = audio
+            conditioning = graph.node(
+                "MiniMaxH3ReferenceToVideo",
+                id="conditioning",
+                **node_inputs,
             )
 
-        for audio in standalone_audios:
-            audio_latent, reference_audio_length = _encode_ref_audio(
-                selected_audio_vae,
-                audio,
-            )
-            reference_items.append({"type": "audio"})
-            reference_blocks.append(
-                {
-                    "kind": "audio",
-                    "ref_audio_t": reference_audio_length,
-                    "audio_latent": audio_latent,
-                }
-            )
-
-        tokens = selected_clip.tokenize(
-            prompt_text,
-            minimax_ref_items=reference_items,
+        return io.NodeOutput(
+            conditioning.out(0),
+            conditioning.out(1),
+            expand=graph.finalize(),
         )
-        conditioning = selected_clip.encode_from_tokens_scheduled(tokens)
-        if reference_blocks:
-            conditioning = _set_conditioning_values(
-                conditioning,
-                {"minimax_refs": reference_blocks},
-            )
-        return io.NodeOutput(conditioning, latent)

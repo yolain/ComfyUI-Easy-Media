@@ -26,9 +26,25 @@ class _PortType:
         return _Port(name, **kwargs)
 
 
+class _Autogrow:
+    Type = dict
+
+    class TemplatePrefix:
+        def __init__(self, input, prefix, min=1, max=10):
+            self.input = input
+            self.prefix = prefix
+            self.min = min
+            self.max = max
+
+    @staticmethod
+    def Input(name, **kwargs):
+        return _Port(name, **kwargs)
+
+
 class _NodeOutput:
-    def __init__(self, *values):
+    def __init__(self, *values, expand=None, **kwargs):
         self.values = values
+        self.expand = expand
 
 
 class _Schema:
@@ -78,10 +94,12 @@ class _AudioVae:
 def _load_minimax_node(monkeypatch):
     io = types.SimpleNamespace(
         Audio=_PortType,
+        Autogrow=_Autogrow,
         Clip=_PortType,
         Combo=_PortType,
         ComfyNode=object,
         Conditioning=_PortType,
+        Float=_PortType,
         Image=_PortType,
         Int=_PortType,
         Latent=_PortType,
@@ -122,7 +140,9 @@ def _load_minimax_node(monkeypatch):
     node_helpers.conditioning_set_values = conditioning_set_values
 
     torchaudio = types.ModuleType("torchaudio")
-    torchaudio.functional = types.SimpleNamespace(resample=lambda waveform, source, target: waveform)
+    torchaudio.functional = types.SimpleNamespace(
+        resample=lambda waveform, source, target: waveform
+    )
 
     package = types.ModuleType("easy_media")
     package.__path__ = []
@@ -193,10 +213,40 @@ def _base_inputs(**overrides):
     return inputs
 
 
+def _graph_node(output, class_type):
+    return next(
+        node for node in output.expand.values() if node["class_type"] == class_type
+    )
+
+
 def test_module_loads_without_native_minimax_nodes(monkeypatch):
     module = _load_minimax_node(monkeypatch)
 
     assert module is not None
+
+
+def test_fallback_conditioning_nodes_use_native_node_ids(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+
+    assert (
+        module.MiniMaxH3ImageToVideoFallback.define_schema().node_id
+        == "MiniMaxH3ImageToVideo"
+    )
+    assert (
+        module.MiniMaxH3ReferenceToVideoFallback.define_schema().node_id
+        == "MiniMaxH3ReferenceToVideo"
+    )
+
+
+def test_missing_native_conditioning_nodes_are_selected_for_registration(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+
+    assert module.get_minimax_h3_fallback_nodes() == [
+        module.MiniMaxH3ImageToVideoFallback,
+        module.MiniMaxH3ReferenceToVideoFallback,
+    ]
 
 
 def test_schema_exposes_list_media_inputs_without_image_position(monkeypatch):
@@ -208,16 +258,27 @@ def test_schema_exposes_list_media_inputs_without_image_position(monkeypatch):
 
     assert schema.node_id == "easy minimaxH3ToVideo"
     assert schema.is_input_list is True
+    assert schema.enable_expand is True
     assert list(inputs) == [
-        "clip", "vae", "audio_vae", "images", "audios", "videos", "prompt",
-        "mode", "width", "height", "length", "ref_image_size",
+        "clip",
+        "vae",
+        "audio_vae",
+        "images",
+        "audios",
+        "videos",
+        "prompt",
+        "mode",
+        "width",
+        "height",
+        "length",
+        "ref_image_size",
     ]
     assert inputs["audio_vae"].kwargs["optional"] is True
     assert inputs["mode"].kwargs["options"] == ["reference", "multi_frames"]
     assert [output.name for output in schema.outputs] == ["positive", "latent"]
 
 
-def test_multi_frames_encodes_first_and_last_expanded_images(monkeypatch):
+def test_multi_frames_routes_first_and_last_expanded_images_to_native_node(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
     clip = _Clip()
@@ -231,17 +292,12 @@ def test_multi_frames_encodes_first_and_last_expanded_images(monkeypatch):
         )
     )
 
-    assert output.values[1]["samples"].values[0].shape == (1, 24, 2, 2, 2)
-    assert [
-        image[0, 0, 0, 0].item()
-        for image in clip.tokenize_calls[0]["kwargs"]["images"]
-    ] == [0, 2]
-    keyframes = output.values[0][0][1]["minimax_keyframes"]
-    assert [keyframe["resolved_frame_index"] for keyframe in keyframes] == [0, 4]
-    assert len(vae.encoded) == 2
+    conditioning = _graph_node(output, "MiniMaxH3ImageToVideo")
+    assert conditioning["inputs"]["first_frame"][0, 0, 0, 0].item() == 0
+    assert conditioning["inputs"]["last_frame"][0, 0, 0, 0].item() == 2
 
 
-def test_multi_frames_with_one_image_sets_only_first_keyframe(monkeypatch):
+def test_multi_frames_with_one_image_routes_only_first_frame(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
 
@@ -249,12 +305,13 @@ def test_multi_frames_with_one_image_sets_only_first_keyframe(monkeypatch):
         **_base_inputs(images=[_image_values(7)])
     )
 
-    keyframes = output.values[0][0][1]["minimax_keyframes"]
-    assert [keyframe["resolved_frame_index"] for keyframe in keyframes] == [0]
+    conditioning = _graph_node(output, "MiniMaxH3ImageToVideo")
+    assert "first_frame" in conditioning["inputs"]
+    assert "last_frame" not in conditioning["inputs"]
 
 
 @pytest.mark.parametrize("mode", ["reference", "multi_frames"])
-def test_empty_media_uses_text_to_video_for_every_mode(monkeypatch, mode):
+def test_empty_media_routes_to_native_text_to_video_for_every_mode(monkeypatch, mode):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
     clip = _Clip()
@@ -263,10 +320,10 @@ def test_empty_media_uses_text_to_video_for_every_mode(monkeypatch, mode):
         **_base_inputs(clip=[clip], mode=[mode])
     )
 
-    metadata = output.values[0][0][1]
-    assert clip.tokenize_calls == [{"prompt": "prompt", "kwargs": {"images": []}}]
-    assert "minimax_keyframes" not in metadata
-    assert "minimax_refs" not in metadata
+    conditioning = _graph_node(output, "MiniMaxH3ImageToVideo")
+    assert conditioning["inputs"]["prompt"] == "prompt"
+    assert "first_frame" not in conditioning["inputs"]
+    assert "last_frame" not in conditioning["inputs"]
 
 
 @pytest.mark.parametrize(
@@ -290,6 +347,34 @@ def test_multi_frames_rejects_video_and_audio_inputs(monkeypatch, videos, audios
         )
 
 
+def test_reference_video_extraction_is_deferred_to_a_cacheable_subnode(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+    video = object()
+
+    output = module.EasyMiniMaxH3ToVideo.execute(
+        **_base_inputs(
+            mode=["reference"],
+            audio_vae=[_AudioVae()],
+            videos=[video],
+        )
+    )
+
+    assert output.expand is not None
+    nodes_by_type = {node["class_type"]: node for node in output.expand.values()}
+    components = nodes_by_type["GetVideoComponents"]
+    conditioning = nodes_by_type["MiniMaxH3ReferenceToVideo"]
+    components_id = next(
+        node_id
+        for node_id, node in output.expand.items()
+        if node["class_type"] == "GetVideoComponents"
+    )
+    assert components["inputs"] == {"video": video}
+    assert "easy minimaxH3ResampleVideoFrames" not in nodes_by_type
+    assert conditioning["inputs"]["ref_video_0"] == [components_id, 0]
+    assert conditioning["inputs"]["ref_video_audio_0"] == [components_id, 1]
+
+
 def test_reference_encodes_images_video_audio_and_standalone_audio(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
@@ -301,7 +386,7 @@ def test_reference_encodes_images_video_audio_and_standalone_audio(monkeypatch):
     class _Video:
         def get_components(self):
             return types.SimpleNamespace(
-                images=_image_values(0, 1, 2, 3),
+                images=_image_values(0, 1, 2, 3, 4),
                 audio=video_audio,
                 frame_rate=Fraction(12),
             )
@@ -319,13 +404,39 @@ def test_reference_encodes_images_video_audio_and_standalone_audio(monkeypatch):
         )
     )
 
-    refs = output.values[0][0][1]["minimax_refs"]
+    conditioning = _graph_node(output, "MiniMaxH3ReferenceToVideo")
+    components = _Video().get_components()
+    fallback_output = module.MiniMaxH3ReferenceToVideoFallback.execute(
+        clip=clip,
+        vae=vae,
+        audio_vae=audio_vae,
+        prompt="prompt",
+        width=32,
+        height=32,
+        length=5,
+        ref_images={
+            "ref_image_0": _image_values(9),
+            "ref_image_1": _image_values(10),
+        },
+        ref_videos={"ref_video_0": components.images},
+        ref_video_audios={"ref_video_audio_0": components.audio},
+        ref_audios={"ref_audio_0": standalone_audio},
+    )
+
+    refs = fallback_output.values[0][0][1]["minimax_refs"]
     assert [ref["kind"] for ref in refs] == ["image", "image", "video_audio", "audio"]
-    assert [item["type"] for item in clip.tokenize_calls[0]["kwargs"]["minimax_ref_items"]] == [
-        "image", "image", "audio", "video", "audio",
+    assert [
+        item["type"] for item in clip.tokenize_calls[0]["kwargs"]["minimax_ref_items"]
+    ] == [
+        "image",
+        "image",
+        "audio",
+        "video",
+        "audio",
     ]
     assert vae.encoded[-1].shape[0] == 5
     assert len(audio_vae.encoded) == 2
+    assert conditioning["inputs"]["ref_video_0"][1] == 0
 
 
 def test_reference_audio_requires_audio_vae(monkeypatch):
@@ -347,8 +458,18 @@ def test_minimax_node_has_complete_chinese_localization():
 
     assert translation["display_name"] == "简易 MiniMax H3 视频生成"
     assert set(translation["inputs"]) == {
-        "clip", "vae", "audio_vae", "images", "videos", "audios", "prompt",
-        "mode", "width", "height", "length", "ref_image_size",
+        "clip",
+        "vae",
+        "audio_vae",
+        "images",
+        "videos",
+        "audios",
+        "prompt",
+        "mode",
+        "width",
+        "height",
+        "length",
+        "ref_image_size",
     }
     assert translation["inputs"]["mode"]["options"] == {
         "reference": "参考生视频",
