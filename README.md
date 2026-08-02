@@ -64,7 +64,7 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 
 | Scenario | Description | Requirements |
 |----------|-------------|-------------|
-| Video Generation | wan/bernini/ltx t2v, i2v, r2v | Task track segments only |
+| Video Generation | minimaxH3/wan/bernini/ltx t2v, i2v, r2v | Task track segments only |
 | Video Editing | bernini v2v, bernini vi2v, wan animate, ltx video replace, ltx iclora edit/inpaint/outpaint | Video track segments + task track segments |
 | Video Reference | wan scail2, wan animate, ltx iclora guide | Video track segments + task track segments |
 | Video Dubbing | wan infinititalk, longcat avatar, ltx ai2v | Task track segments + audio track segments |
@@ -180,8 +180,10 @@ bun run build:release
 | easy timelineSegmentCount | Output the total number of segments in the timeline |
 | easy makeImageList | Combine multiple image inputs into an image list |
 | easy makeAudioList | Combine multiple audio inputs into an audio list |
+| easy splitAudios | Split an audio list into multiple single-audio outputs |
 | easy audioMerge | Merge or concatenate up to six audio inputs |
 | easy makeVideoList | Combine multiple video inputs into a video list |
+| easy splitVideos | Split a video list into multiple single-video outputs |
 | easy compareVideos | Preview source and output VIDEO inputs side by side with an interactive comparison slider |
 | easy imageIndexesToIntList | Convert comma-separated image index string to integer list |
 | easy saveVideo | Save images and optional audio as video file |
@@ -198,6 +200,7 @@ bun run build:release
 | easy splitImages | Split an image list or batch into multiple single-image outputs |
 | easy matchLine | Return zero-based index of the first line containing matching text |
 | easy apiWorkflowGate | Determine if the workflow is an API call and pass through preceding input items |
+| easy minimaxH3ToVideo | Build MiniMax H3 text-to-video, reference-to-video, or first/last-frame conditioning and latent inputs |
 | LTXVAddGuidesFromBatchIndexes | Add guide images from batch images to specified frame indexes of latent variables |
 | LTXVMakeRefVideo | Expand a reference image batch into an IC-LoRA reference video |
 | easy ltxMultiTrackEncode | Build Prompt Relay conditioning and LTX video/audio latents |
