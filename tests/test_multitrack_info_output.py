@@ -598,7 +598,7 @@ def test_multitrack_editor_uses_short_segment_range_instead_of_stale_default_len
     assert tracks_info["timeline_total_length"] == 48
 
 
-def test_timeline_editor_converts_source_fps_before_selecting_nearest_minimax_frames():
+def test_timeline_editor_aligns_minimax_frames_at_the_timeline_frame_rate():
     module = _load_basic_module()
 
     result = module.TimelineEditor.execute(
@@ -608,9 +608,9 @@ def test_timeline_editor_converts_source_fps_before_selecting_nearest_minimax_fr
     )
 
     timeline_info = result.values[0]
-    assert timeline_info["total_length"] == 90
+    assert timeline_info["total_length"] == 56
     assert timeline_info["frame_rate"] == 16
-    assert module.TimelineInfoOutput.execute(timeline_info, "default").values[4] == 24.0
+    assert module.TimelineInfoOutput.execute(timeline_info, "default").values[4] == 16.0
 
 
 def test_timeline_editor_keeps_source_duration_when_aligning_minimax_output():
@@ -625,7 +625,7 @@ def test_timeline_editor_keeps_source_duration_when_aligning_minimax_output():
         audio=audio,
     )
 
-    assert result.values[0]["total_length"] == 90
+    assert result.values[0]["total_length"] == 56
     assert result.values[2]["waveform"].shape[-1] == 64
 
 
@@ -641,19 +641,27 @@ def test_multitrack_editor_does_not_add_one_before_minimax_alignment():
     assert result.values[0]["total_length"] == 107
 
 
-def test_multitrack_editor_converts_four_seconds_to_minimax_frames():
+@pytest.mark.parametrize(
+    ("frame_rate", "total_length", "expected_total_length"),
+    [(16, 64, 56), (20, 80, 73), (24, 96, 90)],
+)
+def test_multitrack_editor_aligns_minimax_frames_at_the_timeline_frame_rate(
+    frame_rate,
+    total_length,
+    expected_total_length,
+):
     module = _load_basic_module()
 
     result = module.MultiTrackEditor.execute(
         {"resolution": "1344 x 768 (16:9)"},
         "MiniMax",
-        {"total_length": 64, "frame_rate": 16, "tracks": []},
+        {"total_length": total_length, "frame_rate": frame_rate, "tracks": []},
     )
 
     tracks_info = result.values[0]
-    assert tracks_info["total_length"] == 90
-    assert tracks_info["frame_rate"] == 16.0
-    assert module.MultiTrackInfoOutput.execute(tracks_info).values[3] == 24.0
+    assert tracks_info["total_length"] == expected_total_length
+    assert tracks_info["frame_rate"] == float(frame_rate)
+    assert module.MultiTrackInfoOutput.execute(tracks_info).values[3] == float(frame_rate)
 
 
 def test_multitrack_editor_minimax_prompt_override_does_not_add_a_timeline_frame():

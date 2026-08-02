@@ -156,6 +156,10 @@ def _video_frame_count_from_duration(
     source_frame_rate: int | float,
     format_name: str,
 ) -> int:
+    if format_name == "MiniMax":
+        # Keep the timeline's native FPS; only snap its frame count to 17k+5.
+        return _nearest_video_frame_count(duration_frames, format_name)
+
     format_info = VIDEO_FORMATS.get(format_name, {})
     target_frame_rate = float(format_info.get("target_rate", source_frame_rate))
     safe_source_rate = float(source_frame_rate)
@@ -163,8 +167,6 @@ def _video_frame_count_from_duration(
         target_frames = max(0.0, float(duration_frames))
     else:
         target_frames = max(0.0, float(duration_frames)) * target_frame_rate / safe_source_rate
-    if format_name == "MiniMax":
-        return _nearest_video_frame_count(target_frames, format_name)
     return _align_video_frame_count(math.ceil(target_frames), format_name)
 
 
@@ -845,8 +847,7 @@ def _build_tracks_info_and_media_outputs(
         "total_length": output_total_length,
         "timeline_total_length": timeline_total_length,
         "frame_rate": frame_rate,
-        "target_frame_rate": float(VIDEO_FORMATS[format_name]["target_rate"])
-        if format_name == "MiniMax" else frame_rate,
+        "target_frame_rate": frame_rate,
         "format": format_name,
         "muted": global_muted,
         "volume_db": global_volume_db,
@@ -1566,8 +1567,7 @@ class TimelineEditor(io.ComfyNode):
             "total_length": output_total_length,
             "timeline_total_length": total_length,
             "frame_rate": frame_rate,
-            "target_frame_rate": float(VIDEO_FORMATS[format]["target_rate"])
-            if format == "MiniMax" else frame_rate,
+            "target_frame_rate": frame_rate,
             "format": format,
             "width": target_w,
             "height": target_h,
