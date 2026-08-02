@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Download, ExternalLink, Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -18,8 +18,10 @@ import {
   deleteSegmentsWithLinkedTasks,
   deleteSegmentWithLinkedTasks,
   distributeMultiTrackSegmentsEvenly,
+  getMultiTrackTrackHeight,
   getSelectedMultiTrackSegment,
   MULTITRACK_DEFAULT_VOLUME_DB,
+  MULTITRACK_MEDIA_TRACK_LIMIT,
   MULTITRACK_TRACK_COLORS,
   moveSelectedSegments,
   moveSegmentBetweenCompatibleTracks,
@@ -68,6 +70,7 @@ import { loadBrowserAudioMetadata } from '@/lib/audio-utils'
 import { invalidateMediaListCache } from '@/stores/media-list-store'
 import { uuid } from '@/lib/uuid'
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
+import { adjustMultiTrackEditorNodeHeight } from '@/lib/timeline-node-size'
 import type { MultiTrack, MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSourceType, MultiTrackTaskImage, MultiTrackType, TrackData } from '@/types/multitrack'
 import { MultiTrackRuler } from './multitrack/MultiTrackRuler'
 import { MultiTrackToolbar } from './multitrack/MultiTrackToolbar'
@@ -115,6 +118,14 @@ function insertSegmentAtFrame(
   return [...before, inserted, ...after]
 }
 
+function getTrackLayoutHeight(data: TrackData): number {
+  const taskOverview = data.task_overview === true
+  return data.tracks.reduce(
+    (height, track) => height + getMultiTrackTrackHeight(track.type, taskOverview),
+    0,
+  )
+}
+
 export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactWidgetProps<TrackData>>) {
   const committedData = ensureTrackData(value)
   const committedDataKey = JSON.stringify(committedData)
@@ -158,13 +169,19 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         .find((track) => track.type === 'task' && track.segments.some((segment) => segment.id === splittingTaskSegmentId))
         ?.segments.find((segment) => segment.id === splittingTaskSegmentId) ?? null
     : null
+  const handleTrackDataChange = useCallback((nextData: TrackData) => {
+    const heightDelta = getTrackLayoutHeight(nextData) - getTrackLayoutHeight(dataRef.current)
+    adjustMultiTrackEditorNodeHeight(node, heightDelta)
+    dataRef.current = nextData
+    onChange(nextData)
+  }, [node, onChange])
   const {
     canUndo,
     canRedo,
     commitChange: commitTrackChange,
     undo: undoTrackChange,
     redo: redoTrackChange,
-  } = useMultiTrackHistory(committedData, onChange)
+  } = useMultiTrackHistory(committedData, handleTrackDataChange)
   const locale = app?.ui?.settings?.settingsValues?.['Comfy.Locale']
   const t = (path: string, params?: Record<string, string | number>) => translate(locale, path, params)
   const missingModelDirectoryName = missingModel?.directory.split(/[\\/]/).filter(Boolean).at(-1) ?? ''
@@ -502,17 +519,18 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   }
 
   function handleAddTrack(type: MultiTrackType) {
-    if (type !== 'audio' && type !== 'subtitle') return
+    if (type !== 'video' && type !== 'audio' && type !== 'subtitle') return
     const trackNumber = data.tracks.filter((track) => track.type === type).length
-    if ((type === 'audio' || type === 'subtitle') && trackNumber >= 2) return
+    if (trackNumber >= MULTITRACK_MEDIA_TRACK_LIMIT) return
+    const hasAudioControls = type === 'video' || type === 'audio'
     const track: MultiTrack = {
       id: uuid(),
-      name: `${type === 'audio' ? 'Audio' : 'Subtitle'} ${trackNumber}`,
+      name: `${type === 'video' ? 'Video' : type === 'audio' ? 'Audio' : 'Subtitle'} ${trackNumber}`,
       type,
-      color: type === 'subtitle' ? '#9D4937' : MULTITRACK_TRACK_COLORS.audio,
+      color: type === 'subtitle' ? MULTITRACK_SUBTITLE_COLOR : MULTITRACK_TRACK_COLORS[type],
       muted: false,
-      solo: type === 'audio' ? false : undefined,
-      volume_db: type === 'audio' ? MULTITRACK_DEFAULT_VOLUME_DB : undefined,
+      solo: hasAudioControls ? false : undefined,
+      volume_db: hasAudioControls ? MULTITRACK_DEFAULT_VOLUME_DB : undefined,
       locked: false,
       segments: [],
     }
@@ -531,6 +549,25 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       setSelectedSegmentId((active) => active && segmentIds.has(active) ? next.values().next().value ?? null : active)
       return next
     })
+  }
+
+  function handleReorderTrack(sourceTrackId: string, targetTrackId: string) {
+    const sourceIndex = data.tracks.findIndex((track) => track.id === sourceTrackId)
+    const targetIndex = data.tracks.findIndex((track) => track.id === targetTrackId)
+    const sourceTrack = data.tracks[sourceIndex]
+    const targetTrack = data.tracks[targetIndex]
+    if (
+      sourceIndex < 0 ||
+      targetIndex < 0 ||
+      sourceIndex === targetIndex ||
+      sourceTrack?.type === 'task' ||
+      targetTrack?.type === 'task'
+    ) return
+
+    const tracks = [...data.tracks]
+    tracks[sourceIndex] = targetTrack
+    tracks[targetIndex] = sourceTrack
+    commitNormalizedTrackChange({ ...data, tracks })
   }
 
   function handleTrackAudioSettingsChange(
@@ -1341,6 +1378,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     onClearSelection={handleClearSelection}
                     onDeleteSegment={handleDeleteSegment}
                     onDeleteTrack={handleDeleteTrack}
+                    onReorderTrack={handleReorderTrack}
                     onTrackVisibilityChange={handleTrackVisibilityChange}
                     onTrackAudioSettingsChange={handleTrackAudioSettingsChange}
                     onDistributeTaskSegments={handleDistributeTaskSegments}

@@ -18,7 +18,14 @@ export const MULTITRACK_DEFAULT_TASK_MODE: MultiTrackTaskMode = 'default'
 export const MULTITRACK_DEFAULT_VOLUME_DB = 0
 export const MULTITRACK_MIN_VOLUME_DB = -20
 export const MULTITRACK_MAX_VOLUME_DB = 6
+export const MULTITRACK_MEDIA_TRACK_LIMIT = 3
 export const MULTITRACK_FRAME_RATE_OPTIONS = [16, 20, 24, 25, 30, 50, 60] as const
+
+export function getMultiTrackTrackHeight(type: string, taskOverview = false): number {
+  if (type === 'task') return taskOverview ? 64 : 30
+  if (type === 'subtitle') return 30
+  return 64
+}
 
 export function createMultiTrackVideoContent(
   filePath: string,
@@ -281,7 +288,7 @@ export function calculateTotalLength(
   const safeFrameRate = Math.max(1, Math.round(frameRate))
   const minimumLength = MULTITRACK_MIN_DURATION_SECONDS * safeFrameRate
   const maxEnd = calculateMaxSegmentEnd(tracks)
-  return Math.max(minimumLength, maxEnd)
+  return maxEnd > 0 ? maxEnd : minimumLength
 }
 
 export const calculateTotalDuration = calculateTotalLength
@@ -350,7 +357,7 @@ function packSegmentsFromZero(segments: MultiTrackSegment[], frameRate: number):
   })
 }
 
-function arrangeAudioDrop(
+function arrangeNonOverlappingDrop(
   targetSegments: MultiTrackSegment[],
   movingSegment: MultiTrackSegment,
   nextStartTime: number,
@@ -386,7 +393,7 @@ function arrangeAudioDrop(
 }
 
 function isFreeTimedTrack(type: MultiTrack['type']): boolean {
-  return type === 'audio' || type === 'subtitle'
+  return type === 'task' || type === 'video' || type === 'audio' || type === 'subtitle'
 }
 
 export function syncMatchingTasksToPrimaryVideoTrack(
@@ -622,40 +629,39 @@ export function deleteSegmentsWithLinkedTasks(
   segmentIds: Iterable<string>,
   frameRate = MULTITRACK_DEFAULT_FRAME_RATE,
 ): MultiTrack[] {
+  void frameRate
   const ids = new Set(segmentIds)
   if (ids.size === 0) return tracks
 
-  const deletedVideoTrackIds = new Set<string>()
   const deletedVideoRanges = tracks.flatMap((track) => {
     if (track.type !== 'video') return []
-    const ranges = track.segments
+    return track.segments
       .filter((segment) => ids.has(segment.id))
       .map((segment) => ({ start: segment.start_frame, end: segment.end_frame }))
-    if (ranges.length > 0) deletedVideoTrackIds.add(track.id)
-    return ranges
   })
+  const remainingVideoRanges = tracks.flatMap((track) => (
+    track.type === 'video'
+      ? track.segments
+          .filter((segment) => !ids.has(segment.id))
+          .map((segment) => ({ start: segment.start_frame, end: segment.end_frame }))
+      : []
+  ))
 
   const updatedTracks = tracks.map((track) => {
     const remainingSegments = track.segments.filter((segment) => {
       if (ids.has(segment.id)) return false
       if (track.type !== 'task') return true
       return !deletedVideoRanges.some((range) => (
-        rangesOverlap(segment.start_frame, segment.end_frame, range.start, range.end)
+        rangesOverlap(segment.start_frame, segment.end_frame, range.start, range.end) &&
+        !remainingVideoRanges.some((remainingRange) => (
+          rangesOverlap(remainingRange.start, remainingRange.end, range.start, range.end)
+        ))
       ))
     })
-
-    if (track.type === 'video' && deletedVideoTrackIds.has(track.id)) {
-      return {
-        ...track,
-        segments: packSegmentsFromZero(remainingSegments.sort((a, b) => a.start_frame - b.start_frame), frameRate),
-      }
-    }
     return { ...track, segments: remainingSegments }
   })
 
-  return deletedVideoRanges.length > 0
-    ? syncMatchingTasksToPrimaryVideoTrack(tracks, updatedTracks)
-    : updatedTracks
+  return updatedTracks
 }
 
 export function moveSegmentBetweenCompatibleTracks(
@@ -680,8 +686,8 @@ export function moveSegmentBetweenCompatibleTracks(
   const insertIndex = insertIndexForTrack(targetSegments, nextStartTime, frameRate)
 
   if (isFreeTimedTrack(targetTrack.type)) {
-    const arranged = arrangeAudioDrop(targetSegments, movingSegment, nextStartTime, frameRate)
-    return tracks.map((track) => {
+    const arranged = arrangeNonOverlappingDrop(targetSegments, movingSegment, nextStartTime, frameRate)
+    const movedTracks = tracks.map((track) => {
       if (track.id === sourceTrack.id && track.id !== targetTrack.id) {
         return {
           ...track,
@@ -691,6 +697,9 @@ export function moveSegmentBetweenCompatibleTracks(
       if (track.id !== targetTrack.id) return track
       return { ...track, segments: arranged.segments }
     })
+    return targetTrack.type === 'video'
+      ? syncMatchingTasksToPrimaryVideoTrack(tracks, movedTracks)
+      : movedTracks
   }
 
   const nextTargetSegments = packSegmentsFromZero([
@@ -826,7 +835,7 @@ export function getSegmentDragPlaceholder(
     .sort((a, b) => a.start_frame - b.start_frame)
   const insertIndex = insertIndexForTrack(targetSegments, nextStartTime, frameRate)
   if (isFreeTimedTrack(targetTrack.type)) {
-    const arranged = arrangeAudioDrop(targetSegments, movingSegment, nextStartTime, frameRate)
+    const arranged = arrangeNonOverlappingDrop(targetSegments, movingSegment, nextStartTime, frameRate)
     const placeholder = arranged.segments[arranged.insertIndex]
     return {
       segmentId,
@@ -870,19 +879,21 @@ export function getSegmentDragPreviewSegments(
   const targetSegments = targetTrack.segments
     .filter((segment) => segment.id !== placeholder.segmentId)
     .sort((a, b) => a.start_frame - b.start_frame)
-  if (isFreeTimedTrack(targetTrack.type)) {
-    return arrangeAudioDrop(
-      targetSegments,
+  const nextTargetSegments = isFreeTimedTrack(targetTrack.type)
+    ? arrangeNonOverlappingDrop(
+        targetSegments,
+        movingSegment,
+        placeholder.start_frame,
+        frameRate,
+      ).segments
+    : packSegmentsFromZero([
+      ...targetSegments.slice(0, placeholder.insertIndex),
       movingSegment,
-      placeholder.start_frame,
-      frameRate,
-    ).segments.filter((segment) => segment.id !== placeholder.segmentId)
-  }
-  const nextTargetSegments = packSegmentsFromZero([
-    ...targetSegments.slice(0, placeholder.insertIndex),
-    movingSegment,
-    ...targetSegments.slice(placeholder.insertIndex),
-  ], frameRate)
+      ...targetSegments.slice(placeholder.insertIndex),
+    ], frameRate)
+  const changedTargetSegments = nextTargetSegments.filter((segment) => segment.id !== placeholder.segmentId)
+  if (targetTrack.type !== 'video') return changedTargetSegments
+
   const previewTracks = tracks.map((track) => (
     track.id === targetTrack.id ? { ...track, segments: nextTargetSegments } : track
   ))
@@ -904,7 +915,7 @@ export function getSegmentDragPreviewSegments(
       )
     })
   return [
-    ...nextTargetSegments.filter((segment) => segment.id !== placeholder.segmentId),
+    ...changedTargetSegments,
     ...changedTaskSegments,
   ]
 }

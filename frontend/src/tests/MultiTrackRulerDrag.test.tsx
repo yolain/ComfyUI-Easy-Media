@@ -48,8 +48,8 @@ describe('MultiTrackRuler task marker dragging', () => {
     fireEvent.mouseDown(marker, { clientX: 84 })
     expect(marker.className).toContain('cursor-grabbing')
     expect(ruler?.className).toContain('cursor-grabbing')
-    fireEvent.mouseMove(globalThis, { clientX: 196 })
-    fireEvent.mouseUp(globalThis, { clientX: 196 })
+    fireEvent.mouseMove(window, { clientX: 196 })
+    fireEvent.mouseUp(window, { clientX: 196 })
 
     expect(onMoveTaskMarker).toHaveBeenCalledWith('marker-1', 72)
     expect(ruler?.className).toContain('cursor-col-resize')
@@ -61,9 +61,38 @@ describe('MultiTrackRuler task marker dragging', () => {
 
     const marker = screen.getByRole('button', { name: 'Task marker at frame 24' })
     fireEvent.mouseDown(marker, { clientX: 84 })
-    fireEvent.mouseMove(globalThis, { clientX: 140 })
-    fireEvent.mouseUp(globalThis, { clientX: 140 })
+    fireEvent.mouseMove(window, { clientX: 140 })
+    fireEvent.mouseUp(window, { clientX: 140 })
 
     expect(onMoveTaskMarker).not.toHaveBeenCalled()
+  })
+
+  it('seeks to 12 seconds on a 20-second timeline using the rendered ruler width', () => {
+    const onSeek = vi.fn()
+    const view = render(
+      <MultiTrackRuler
+        totalLength={480}
+        frameRate={24}
+        width={480}
+        canvasScale={1.25}
+        currentTime={0}
+        taskMarkers={[]}
+        selectedTaskMarkerId={null}
+        onSeek={onSeek}
+        onSelectTaskMarker={vi.fn()}
+        onMoveTaskMarker={vi.fn()}
+        onDeleteTaskMarker={vi.fn()}
+      />,
+    )
+    const ruler = view.container.firstElementChild as HTMLDivElement
+    vi.spyOn(ruler, 'getBoundingClientRect').mockReturnValue({
+      left: 0, right: 480, top: 0, bottom: 24, width: 480, height: 24, x: 0, y: 0,
+      toJSON: () => ({}),
+    })
+
+    fireEvent.mouseDown(ruler, { clientX: 270.4 })
+    fireEvent.mouseUp(window, { clientX: 270.4 })
+
+    expect(onSeek).toHaveBeenCalledWith(288)
   })
 })

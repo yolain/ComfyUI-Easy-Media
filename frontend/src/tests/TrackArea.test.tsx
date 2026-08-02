@@ -1,15 +1,22 @@
-import { createEvent, fireEvent, render, screen } from '@testing-library/react'
+import { act, createEvent, fireEvent, render, screen } from '@testing-library/react'
 import type { MouseEvent } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { getMultiTrackTrackHeight, TrackArea } from '@/components/widgets/multitrack/TrackArea'
-import { createDefaultTrackData } from '@/lib/multitrack-utils'
+import { TrackArea } from '@/components/widgets/multitrack/TrackArea'
+import { createDefaultTrackData, getMultiTrackTrackHeight } from '@/lib/multitrack-utils'
 
 vi.mock('@/components/widgets/multitrack/VideoTrack', () => ({
-  VideoTrack: ({ onDragPreviewChange }: {
+  VideoTrack: ({ track, onDragPreviewChange }: {
+    track: { id: string; name: string }
     onDragPreviewChange: (segmentId: string, nextStartTime: number, clientY: number) => void
   }) => (
-    <div data-testid="video-track">
+    <div data-testid="video-track" data-multitrack-track-id={track.id}>
+      <button
+        type="button"
+        draggable
+        data-multitrack-track-drag-handle={track.id}
+        aria-label={`Reorder ${track.name}`}
+      />
       <button
         data-testid="preview-video-drag"
         onClick={() => onDragPreviewChange('video-first', 4, 50)}
@@ -19,8 +26,20 @@ vi.mock('@/components/widgets/multitrack/VideoTrack', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/AudioTrack', () => ({
-  AudioTrack: ({ node, app }: { node: unknown; app: unknown }) => (
-    <div data-testid="audio-track">{node && app ? 'connected' : 'missing'}</div>
+  AudioTrack: ({ track, node, app }: {
+    track: { id: string; name: string }
+    node: unknown
+    app: unknown
+  }) => (
+    <div data-testid="audio-track" data-multitrack-track-id={track.id}>
+      <button
+        type="button"
+        draggable
+        data-multitrack-track-drag-handle={track.id}
+        aria-label={`Reorder ${track.name}`}
+      />
+      {node && app ? 'connected' : 'missing'}
+    </div>
   ),
 }))
 
@@ -45,6 +64,80 @@ describe('TrackArea track controls', () => {
   it('matches the task track height to film tracks in overview mode', () => {
     expect(getMultiTrackTrackHeight('task', true)).toBe(getMultiTrackTrackHeight('video', true))
     expect(getMultiTrackTrackHeight('task', false)).toBeLessThan(getMultiTrackTrackHeight('video', false))
+  })
+
+  it('swaps non-task tracks by dragging their left-side handles', () => {
+    const data = createDefaultTrackData()
+    const videoTrack = data.tracks.find((track) => track.type === 'video')!
+    const audioTrack = {
+      ...videoTrack,
+      id: 'audio-track',
+      name: 'Audio 0',
+      type: 'audio' as const,
+      segments: [],
+    }
+    data.tracks.push(audioTrack)
+    const onReorderTrack = vi.fn()
+    const transferData = new Map<string, string>()
+    const dataTransfer = {
+      files: [],
+      items: [],
+      types: [],
+      effectAllowed: 'none',
+      dropEffect: 'none',
+      setData: (type: string, value: string) => transferData.set(type, value),
+      getData: (type: string) => transferData.get(type) ?? '',
+    }
+
+    render(
+      <TooltipProvider>
+        <TrackArea
+          data={data}
+          width={480}
+          currentTime={0}
+          snapEnabled
+          canvasScale={1}
+          selectedSegmentIds={new Set()}
+          node={{}}
+          app={{}}
+          onAddVideo={vi.fn()}
+          onAddAudio={vi.fn()}
+          onReplaceAudio={vi.fn()}
+          onAddTrack={vi.fn()}
+          onAddSubtitleSegment={vi.fn()}
+          onReplaceVideo={vi.fn()}
+          onAddTaskSegment={vi.fn()}
+          onSelectSegment={vi.fn()}
+          onSelectSegments={vi.fn()}
+          onClearSelection={vi.fn()}
+          onDeleteSegment={vi.fn()}
+          onDeleteTrack={vi.fn()}
+          onReorderTrack={onReorderTrack}
+          onTrackAudioSettingsChange={vi.fn()}
+          onDistributeTaskSegments={vi.fn()}
+          onCloneTaskSegment={vi.fn()}
+          onResizeSegment={vi.fn()}
+          onResizeSegmentPreview={vi.fn()}
+          onMoveSegment={vi.fn()}
+          onSmartSplit={vi.fn()}
+          onSmartSplitTasks={vi.fn()}
+          cutMode={false}
+          onCutSegment={vi.fn()}
+        />
+      </TooltipProvider>,
+    )
+
+    fireEvent.dragStart(screen.getByRole('button', { name: `Reorder ${videoTrack.name}` }), { dataTransfer })
+    fireEvent.dragOver(screen.getByTestId('audio-track'), { dataTransfer })
+    fireEvent.drop(screen.getByTestId('audio-track'), { dataTransfer })
+
+    expect(onReorderTrack).toHaveBeenCalledWith(videoTrack.id, audioTrack.id)
+
+    fireEvent.dragStart(screen.getByRole('button', { name: `Reorder ${audioTrack.name}` }), { dataTransfer })
+    fireEvent.dragOver(screen.getByTestId(`track-row-${data.tracks[0].id}`), { dataTransfer })
+    fireEvent.drop(screen.getByTestId(`track-row-${data.tracks[0].id}`), { dataTransfer })
+
+    expect(onReorderTrack).toHaveBeenCalledTimes(1)
   })
 
   it('adds a task segment using the exact internal gap range', () => {
@@ -98,7 +191,7 @@ describe('TrackArea track controls', () => {
     expect(onAddTaskSegment).toHaveBeenCalledWith(taskTrack.id, 24, 72)
   })
 
-  it('renders the add-track bar with audio and subtitle enabled', () => {
+  it('renders the add-track bar with video, audio, and subtitle enabled below their limits', () => {
     const onAddTrack = vi.fn()
     render(
       <TooltipProvider>
@@ -139,17 +232,37 @@ describe('TrackArea track controls', () => {
 
     const addTrackLabel = screen.getByText('Add track:')
     expect(addTrackLabel.parentElement?.className).toContain('border-b')
-    expect((screen.getByRole('button', { name: 'Add video track' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Add video track' }) as HTMLButtonElement).disabled).toBe(false)
     expect((screen.getByRole('button', { name: 'Add subtitle track' }) as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Add video track' }))
+    expect(onAddTrack).toHaveBeenCalledWith('video')
     fireEvent.click(screen.getByRole('button', { name: 'Add audio track' }))
     expect(onAddTrack).toHaveBeenCalledWith('audio')
     fireEvent.click(screen.getByRole('button', { name: 'Add subtitle track' }))
     expect(onAddTrack).toHaveBeenCalledWith('subtitle')
   })
 
-  it('disables audio and subtitle track creation after two tracks of each type', () => {
+  it('disables video, audio, and subtitle track creation after three tracks of each type', () => {
     const data = createDefaultTrackData()
     data.tracks.push(
+      {
+        id: 'video-b',
+        name: 'Video 1',
+        type: 'video',
+        color: 'var(--highlight)',
+        muted: false,
+        locked: false,
+        segments: [],
+      },
+      {
+        id: 'video-c',
+        name: 'Video 2',
+        type: 'video',
+        color: 'var(--highlight)',
+        muted: false,
+        locked: false,
+        segments: [],
+      },
       {
         id: 'audio-a',
         name: 'Audio 0',
@@ -169,6 +282,15 @@ describe('TrackArea track controls', () => {
         segments: [],
       },
       {
+        id: 'audio-c',
+        name: 'Audio 2',
+        type: 'audio',
+        color: 'var(--highlight)',
+        muted: false,
+        locked: false,
+        segments: [],
+      },
+      {
         id: 'subtitle-a',
         name: 'Subtitle 1',
         type: 'subtitle',
@@ -180,6 +302,15 @@ describe('TrackArea track controls', () => {
       {
         id: 'subtitle-b',
         name: 'Subtitle 2',
+        type: 'subtitle',
+        color: '#9D4937',
+        muted: false,
+        locked: false,
+        segments: [],
+      },
+      {
+        id: 'subtitle-c',
+        name: 'Subtitle 3',
         type: 'subtitle',
         color: '#9D4937',
         muted: false,
@@ -226,8 +357,10 @@ describe('TrackArea track controls', () => {
       </TooltipProvider>,
     )
 
+    expect((screen.getByRole('button', { name: 'Add video track' }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: 'Add audio track' }) as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByRole('button', { name: 'Add subtitle track' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Add video track' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add audio track' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add subtitle track' }))
     expect(onAddTrack).not.toHaveBeenCalled()
@@ -496,8 +629,8 @@ describe('TrackArea track controls', () => {
 
     fireEvent.click(screen.getByTestId('preview-video-drag'))
 
-    expect(screen.getByTestId('segment-task-first').getAttribute('data-start-frame')).toBe('3')
-    expect(screen.getByTestId('segment-task-second').getAttribute('data-end-frame')).toBe('3')
+    expect(screen.getByTestId('segment-task-first').getAttribute('data-start-frame')).toBe('5')
+    expect(screen.getByTestId('segment-task-second').getAttribute('data-end-frame')).toBe('5')
   })
 
   it('selects segments across tracks with a marquee drag', () => {
@@ -652,6 +785,103 @@ describe('TrackArea track controls', () => {
     expect(onClearSelection).not.toHaveBeenCalled()
   })
 
+  it('shows a loading state while an external file is uploading', async () => {
+    const data = createDefaultTrackData()
+    const onAddVideo = vi.fn()
+    let resolveUpload!: (response: {
+      ok: boolean
+      json: () => Promise<{ name: string; subfolder: string }>
+    }) => void
+    const upload = new Promise<{
+      ok: boolean
+      json: () => Promise<{ name: string; subfolder: string }>
+    }>((resolve) => {
+      resolveUpload = resolve
+    })
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(upload))
+
+    render(
+      <TooltipProvider>
+        <TrackArea
+          data={data}
+          width={480}
+          currentTime={0}
+          snapEnabled
+          canvasScale={1}
+          selectedSegmentIds={new Set()}
+          node={{}}
+          app={{}}
+          onAddVideo={onAddVideo}
+          onAddAudio={vi.fn()}
+          onReplaceAudio={vi.fn()}
+          onAddTrack={vi.fn()}
+          onReplaceVideo={vi.fn()}
+          onAddTaskSegment={vi.fn()}
+          onAddSubtitleSegment={vi.fn()}
+          onSelectSegment={vi.fn()}
+          onSelectSegments={vi.fn()}
+          onClearSelection={vi.fn()}
+          onDeleteSegment={vi.fn()}
+          onDeleteTrack={vi.fn()}
+          onTrackAudioSettingsChange={vi.fn()}
+          onDistributeTaskSegments={vi.fn()}
+          onCloneTaskSegment={vi.fn()}
+          onResizeSegment={vi.fn()}
+          onResizeSegmentPreview={vi.fn()}
+          onMoveSegment={vi.fn()}
+          onSmartSplit={vi.fn()}
+          onSmartSplitTasks={vi.fn()}
+          cutMode={false}
+          onCutSegment={vi.fn()}
+        />
+      </TooltipProvider>,
+    )
+
+    const area = document.querySelector('[data-multitrack-track-area]') as HTMLDivElement
+    vi.spyOn(area, 'getBoundingClientRect').mockReturnValue({
+      left: 100,
+      top: 200,
+      width: 480,
+      height: 118,
+      right: 580,
+      bottom: 318,
+      x: 100,
+      y: 200,
+      toJSON: () => ({}),
+    })
+    const file = new File(['video'], 'clip.mp4', { type: 'video/mp4' })
+    const dataTransfer = {
+      files: [file],
+      items: [{ kind: 'file', type: 'video/mp4', getAsFile: () => file }],
+      types: ['Files'],
+      dropEffect: 'none',
+    }
+    const drop = createEvent.drop(area)
+    Object.defineProperties(drop, {
+      clientX: { value: 220 },
+      clientY: { value: 245 },
+      dataTransfer: { value: dataTransfer },
+    })
+
+    fireEvent(area, drop)
+
+    expect(screen.getByText('Uploading clip.mp4...')).toBeTruthy()
+    expect(onAddVideo).not.toHaveBeenCalled()
+
+    await act(async () => {
+      resolveUpload({
+        ok: true,
+        json: () => Promise.resolve({ name: 'clip.mp4', subfolder: 'uploads' }),
+      })
+      await upload
+    })
+
+    await vi.waitFor(() => {
+      expect(screen.queryByText('Uploading clip.mp4...')).toBeNull()
+      expect(onAddVideo).toHaveBeenCalledWith(data.tracks[1].id, 'uploads/clip.mp4', 'input', 27)
+    })
+  })
+
   it('uploads external audio and video files at canvas-scaled pointer positions', async () => {
     const data = createDefaultTrackData()
     data.tracks.push({
@@ -744,7 +974,9 @@ describe('TrackArea track controls', () => {
       clientY: { value: 250 },
       dataTransfer: { value: dataTransfer },
     })
-    fireEvent(area, drop)
+    await act(async () => {
+      fireEvent(area, drop)
+    })
 
     await vi.waitFor(() => {
       expect(onAddAudio).toHaveBeenCalledWith('audio-track', 'uploads/clip.wav', 'input', undefined, 63)
@@ -763,7 +995,9 @@ describe('TrackArea track controls', () => {
       clientY: { value: 225 },
       dataTransfer: { value: videoDataTransfer },
     })
-    fireEvent(area, videoDrop)
+    await act(async () => {
+      fireEvent(area, videoDrop)
+    })
 
     await vi.waitFor(() => {
       expect(onAddVideo).toHaveBeenCalledWith(data.tracks[1].id, 'uploads/clip.wav', 'input', 63)
@@ -854,7 +1088,9 @@ describe('TrackArea track controls', () => {
       clientY: { value: 210 },
       dataTransfer: { value: dataTransfer },
     })
-    fireEvent(area, drop)
+    await act(async () => {
+      fireEvent(area, drop)
+    })
 
     await vi.waitFor(() => {
       expect(onAddTaskSegment).toHaveBeenCalledWith(taskTrack.id, 27, undefined, [
@@ -962,7 +1198,9 @@ describe('TrackArea track controls', () => {
       clientY: { value: 300 },
       dataTransfer: { value: dataTransfer },
     })
-    fireEvent(area, drop)
+    await act(async () => {
+      fireEvent(area, drop)
+    })
 
     await vi.waitFor(() => {
       expect(onImportSubtitles).toHaveBeenCalledWith('subtitle-track', srtText, 88)

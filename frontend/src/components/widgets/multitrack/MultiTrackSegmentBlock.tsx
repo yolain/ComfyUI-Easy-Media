@@ -246,8 +246,15 @@ export function MultiTrackSegmentBlock({
     return selected ? RESIZE_ZONE_SELECTED : RESIZE_ZONE_DEFAULT
   }
 
-  function resizeDeltaFromClientX(clientX: number, startX: number): number {
-    const adjustedDelta = (clientX - startX) / Math.max(canvasScale, 0.01)
+  function renderedCoordinateScale(rectWidth: number): number {
+    const measuredScale = rectWidth / Math.max(width, 1)
+    return Number.isFinite(measuredScale) && measuredScale > 0.01
+      ? measuredScale
+      : Math.max(canvasScale, 0.01)
+  }
+
+  function resizeDeltaFromClientX(clientX: number, startX: number, coordinateScale: number): number {
+    const adjustedDelta = (clientX - startX) / coordinateScale
     return (adjustedDelta / Math.max(areaWidth, 1)) * Math.max(totalLength, 1)
   }
 
@@ -258,9 +265,10 @@ export function MultiTrackSegmentBlock({
   function handleMouseMove(event: React.MouseEvent) {
     if (cutMode) return
     const rect = event.currentTarget.getBoundingClientRect()
-    const relX = (event.clientX - rect.left) / Math.max(canvasScale, 0.01)
+    const coordinateScale = renderedCoordinateScale(rect.width)
+    const relX = (event.clientX - rect.left) / coordinateScale
     const zone = resizeZone()
-    setCursorStyle(relX <= zone || relX >= rect.width / Math.max(canvasScale, 0.01) - zone ? 'ew-resize' : 'grab')
+    setCursorStyle(relX <= zone || relX >= rect.width / coordinateScale - zone ? 'ew-resize' : 'grab')
   }
 
   function handleMouseDown(event: React.MouseEvent) {
@@ -273,8 +281,9 @@ export function MultiTrackSegmentBlock({
     onSelect(segment.id, event.metaKey || event.ctrlKey ? 'toggle' : event.shiftKey || selected ? 'add' : 'replace')
 
     const rect = event.currentTarget.getBoundingClientRect()
-    const relX = (event.clientX - rect.left) / Math.max(canvasScale, 0.01)
-    const visualWidth = rect.width / Math.max(canvasScale, 0.01)
+    const coordinateScale = renderedCoordinateScale(rect.width)
+    const relX = (event.clientX - rect.left) / coordinateScale
+    const visualWidth = rect.width / coordinateScale
     const zone = resizeZone()
     const edge = relX <= zone ? 'start' : relX >= visualWidth - zone ? 'end' : null
 
@@ -285,13 +294,13 @@ export function MultiTrackSegmentBlock({
       const startRect = event.currentTarget.getBoundingClientRect()
       const currentTarget = event.currentTarget as HTMLElement
       const containerRect = currentTarget.offsetParent?.getBoundingClientRect()
-      const scale = Math.max(canvasScale, 0.01)
+      const scale = coordinateScale
       const pointerOffsetY = (event.clientY - startRect.top) / scale
       const previewWidth = startRect.width / scale
       const previewHeight = startRect.height / scale
 
       function handleMove(moveEvent: MouseEvent) {
-        const deltaFrames = resizeDeltaFromClientX(moveEvent.clientX, startX)
+        const deltaFrames = resizeDeltaFromClientX(moveEvent.clientX, startX, coordinateScale)
         const distance = Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY)
         if (distance < DRAG_START_DISTANCE) return
         if (!containerRect) return
@@ -337,17 +346,18 @@ export function MultiTrackSegmentBlock({
 
     const resizeEdge = edge
     const originalTime = resizeEdge === 'start' ? segment.start_frame : segment.end_frame
+    const resizeAnchorX = resizeEdge === 'start' ? rect.left : rect.right
     const brakeDistanceFrames = resizeSnapBrakeDistanceFrames()
     setIsResizing(true)
 
     function handleMove(moveEvent: MouseEvent) {
-      const deltaFrames = resizeDeltaFromClientX(moveEvent.clientX, startX)
+      const deltaFrames = resizeDeltaFromClientX(moveEvent.clientX, resizeAnchorX, coordinateScale)
       if (Math.abs(deltaFrames) > 0) didDragRef.current = true
       onResizePreview(segment.id, resizeEdge, originalTime + deltaFrames, brakeDistanceFrames)
     }
 
     function handleUp(upEvent: MouseEvent) {
-      const deltaFrames = resizeDeltaFromClientX(upEvent.clientX, startX)
+      const deltaFrames = resizeDeltaFromClientX(upEvent.clientX, resizeAnchorX, coordinateScale)
       if (didDragRef.current) onResize(segment.id, resizeEdge, originalTime + deltaFrames, brakeDistanceFrames)
       setIsResizing(false)
       globalThis.removeEventListener('mousemove', handleMove)

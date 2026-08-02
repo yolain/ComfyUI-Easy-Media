@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDefaultTrackData } from '@/lib/multitrack-utils'
 import type { ReactWidgetProps } from '@/lib/create-react-widget'
-import type { TrackData } from '@/types/multitrack'
+import type { MultiTrackType, TrackData } from '@/types/multitrack'
 import { MultiTrackWidget } from '@/components/widgets/MultiTrackWidget'
 import { loadBrowserAudioMetadata } from '@/lib/audio-utils'
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
@@ -122,13 +122,15 @@ vi.mock('@/components/widgets/multitrack/MultiTrackRuler', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
-  TrackArea: ({ data, node, app, onCloneTaskSegment, onSplitTaskSegment, onAddTrack, onAddVideo, onAddAudio, onReplaceAudio, onAddTaskSegment, onAddSubtitleSegment, onImportSubtitles, onSmartSplit, onSmartSplitTasks, onRecognizeSubtitles, onResizeSegment, onResizeSegmentPreview, onMoveSegment, onTrackAudioSettingsChange, selectedSegmentIds, onSelectSegment, onSelectSegments, cutMode, taskOverview }: {
+  TrackArea: ({ data, node, app, onCloneTaskSegment, onSplitTaskSegment, onAddTrack, onDeleteTrack, onReorderTrack = () => {}, onAddVideo, onAddAudio, onReplaceAudio, onAddTaskSegment, onAddSubtitleSegment, onImportSubtitles, onSmartSplit, onSmartSplitTasks, onRecognizeSubtitles, onResizeSegment, onResizeSegmentPreview, onMoveSegment, onTrackAudioSettingsChange, selectedSegmentIds, onSelectSegment, onSelectSegments, cutMode, taskOverview }: {
     data: TrackData
     node: unknown
     app: unknown
     onCloneTaskSegment: (trackId: string, segmentId: string) => void
     onSplitTaskSegment: (segmentId: string) => void
-    onAddTrack: (type: 'audio') => void
+    onAddTrack: (type: MultiTrackType) => void
+    onDeleteTrack: (trackId: string) => void
+    onReorderTrack?: (sourceTrackId: string, targetTrackId: string) => void
     onAddVideo: (trackId: string, filePath: string, sourceType: 'input', startFrame?: number, endFrame?: number) => void
     onAddAudio: (trackId: string, filePath: string, sourceType: 'input', previewUrl?: string, startFrame?: number, endFrame?: number) => void
     onReplaceAudio: (trackId: string, segmentId: string, filePath: string, sourceType: 'input') => void
@@ -158,6 +160,7 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
     const segment = taskTrack?.segments[0]
     const videoSegment = data.tracks.find((track) => track.type === 'video')?.segments[0]
     const firstVideoTrack = data.tracks.find((track) => track.type === 'video')
+    const deletableTrack = data.tracks.find((track) => track.type !== 'task' && track.id !== firstVideoTrack?.id)
     const subtitleTrack = data.tracks.find((track) => track.type === 'subtitle')
     const subtitleSegment = data.tracks.find((track) => track.type === 'subtitle')?.segments[0]
     return (
@@ -185,7 +188,23 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
             select task segment
           </button>
         ) : null}
+        <button type="button" onClick={() => onAddTrack('video')}>add video track</button>
         <button type="button" onClick={() => onAddTrack('audio')}>add audio track</button>
+        <button type="button" onClick={() => onAddTrack('subtitle')}>add subtitle track</button>
+        {data.tracks.filter((track) => track.type !== 'task').length >= 2 ? (
+          <button
+            type="button"
+            onClick={() => {
+              const reorderableTracks = data.tracks.filter((track) => track.type !== 'task')
+              onReorderTrack(reorderableTracks[0].id, reorderableTracks[1].id)
+            }}
+          >
+            swap first two media tracks
+          </button>
+        ) : null}
+        {deletableTrack ? (
+          <button type="button" onClick={() => onDeleteTrack(deletableTrack.id)}>delete extra track</button>
+        ) : null}
         <button
           type="button"
           onClick={() => onAddVideo(data.tracks[1].id, 'inserted.mp4', 'input', 0)}
@@ -419,6 +438,18 @@ function widgetProps(): ReactWidgetProps<TrackData> {
       ui: { settings: { settingsValues: {} } },
     } as ReactWidgetProps<TrackData>['app'],
   }
+}
+
+function resizableNode(initialHeight: number) {
+  const node = {
+    size: [800, initialHeight] as [number, number],
+    properties: {} as Record<string, unknown>,
+    setDirtyCanvas: vi.fn(),
+    setSize: vi.fn((size: [number, number]) => {
+      node.size = size
+    }),
+  }
+  return node
 }
 
 describe('MultiTrackWidget', () => {
@@ -879,9 +910,9 @@ describe('MultiTrackWidget', () => {
 
   it.each([
     {
-      name: 'keeps the five-second minimum when cloned tasks still fit',
+      name: 'uses the latest segment end when cloned tasks remain short',
       taskRanges: [[0, 2], [2, 4]],
-      expectedTotalLength: 120,
+      expectedTotalLength: 10,
     },
     {
       name: 'extends the total length when cloned tasks exceed five seconds',
@@ -933,6 +964,97 @@ describe('MultiTrackWidget', () => {
       end_frame: 48,
       content: { media_type: 'audio', file_path: 'audio.wav', duration: 2, volume_db: 0 },
     })
+  })
+
+  it.each(['video', 'audio', 'subtitle'] as const)('adds a %s track below the three-track limit', (type) => {
+    const data = createDefaultTrackData()
+    const initialCount = data.tracks.filter((track) => track.type === type).length
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: `add ${type} track` }))
+
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    expect(updated.tracks.filter((track) => track.type === type)).toHaveLength(initialCount + 1)
+  })
+
+  it('persists media track swaps while keeping the task track fixed', () => {
+    const data = createDefaultTrackData()
+    data.tracks.push({
+      id: 'audio-track',
+      name: 'Audio 0',
+      type: 'audio',
+      color: 'test-color',
+      muted: false,
+      locked: false,
+      segments: [],
+    })
+    const originalIds = data.tracks.map((track) => track.id)
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'swap first two media tracks' }))
+
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    expect(updated.tracks.map((track) => track.id)).toEqual([
+      originalIds[0],
+      originalIds[2],
+      originalIds[1],
+    ])
+  })
+
+  it.each([
+    ['video', 764],
+    ['audio', 764],
+    ['subtitle', 730],
+  ] as const)('grows the node when adding a %s track', (type, expectedHeight) => {
+    const node = resizableNode(700)
+
+    render(<MultiTrackWidget {...widgetProps()} node={node} />)
+    fireEvent.click(screen.getByRole('button', { name: `add ${type} track` }))
+
+    expect(node.setSize).toHaveBeenLastCalledWith([800, expectedHeight])
+  })
+
+  it('shrinks the node when deleting an extra media track', () => {
+    const data = createDefaultTrackData()
+    data.tracks.push({
+      id: 'audio-extra',
+      name: 'Audio 0',
+      type: 'audio',
+      color: 'test-color',
+      muted: false,
+      locked: false,
+      segments: [],
+    })
+    const node = resizableNode(764)
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} node={node} />)
+    fireEvent.click(screen.getByRole('button', { name: 'delete extra track' }))
+
+    expect(node.setSize).toHaveBeenLastCalledWith([800, 700])
+  })
+
+  it.each(['video', 'audio', 'subtitle'] as const)('rejects a fourth %s track', (type) => {
+    const data = createDefaultTrackData()
+    const existingCount = data.tracks.filter((track) => track.type === type).length
+    for (let index = existingCount; index < 3; index += 1) {
+      data.tracks.push({
+        id: `${type}-${index}`,
+        name: `${type} ${index}`,
+        type,
+        color: 'test-color',
+        muted: false,
+        locked: false,
+        segments: [],
+      })
+    }
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: `add ${type} track` }))
+
+    expect(onChange).not.toHaveBeenCalled()
   })
 
   it('replaces audio without extending its existing timeline range', async () => {

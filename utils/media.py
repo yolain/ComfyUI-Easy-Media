@@ -5,7 +5,9 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence, TypeVar
+
+T = TypeVar("T")
 
 try:
     from PIL import Image as PILImage
@@ -40,6 +42,13 @@ _TYPE_MAP: dict[str, set[str]] = {
     "video": VIDEO_EXTENSIONS,
     "all":   ALL_EXTENSIONS,
 }
+
+
+def split_list_outputs(values: Sequence[T], output_count: int = 10) -> list[T | None]:
+    """Truncate a media list and pad the remaining node outputs with ``None``."""
+    outputs: list[T | None] = list(values[:output_count])
+    outputs.extend(None for _ in range(output_count - len(outputs)))
+    return outputs
 
 
 def allowed_extensions(media_type: str) -> set[str]:

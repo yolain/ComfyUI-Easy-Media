@@ -65,11 +65,16 @@ class EasyMediaExtension(ComfyExtension):
             ImageIndexesToIntList,
             MatchLine,
             SplitImages,
+            SplitAudios,
+            SplitVideos,
             MakeImageList,
             MakeAudioList,
             MakeVideoList,
             EasyAudioMerge,
             APIWorkflowGate,
+            # MiniMax
+            EasyMiniMaxH3ToVideo,
+            EasyMiniMaxH3ReferenceToVideoBridge,
             # Wan
             BerniniModelPatch,
             EasyBerniniS2VConditioning,
@@ -90,6 +95,7 @@ class EasyMediaExtension(ComfyExtension):
             from comfy_extras.nodes_bernini import BerniniConditioning as CoreBerniniConditioning
         except ImportError:
             nodes.extend([BerniniConditioning])
+        nodes.extend(get_minimax_h3_fallback_nodes())
         return nodes
 async def comfy_entrypoint() -> EasyMediaExtension:
     return EasyMediaExtension()

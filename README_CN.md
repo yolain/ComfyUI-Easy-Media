@@ -64,7 +64,7 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 | 场景 | 描述 | 条件 
 |------|------|------|
-| 视频生成 | wan/bernini/ltx t2v、i2v、r2v | 任务轨道有片段即可 
+| 视频生成 | MiniMax H3/wan/bernini/ltx t2v、i2v、r2v | 任务轨道有片段即可
 | 视频编辑 | bernini v2v、bernini vi2v、wan animate、ltx video replace、ltx iclora edit/inpaint/outpaint | 视频轨道片段及任务轨道片段必要
 | 视频参考 | wan scail2、wan animate、ltx iclora guide | 视频轨道片段及任务轨道片段必要
 | 视频配音 | wan infinititalk、longcat avatar、ltx ai2v | 任务轨道片段和音频轨道片段必要
@@ -185,8 +185,10 @@ bun run build:release
 | easy timelineSegmentCount | 输出时间线中的片段总数 |
 | easy makeImageList | 将多个图片输入组合成图片列表 |
 | easy makeAudioList | 将多个音频输入组合成音频列表 |
+| easy splitAudios | 将音频列表拆分为多个独立音频输出 |
 | easy audioMerge | 合并或拼接最多 6 个音频输入 |
 | easy makeVideoList | 将多个视频输入组合成视频列表 |
+| easy splitVideos | 将视频列表拆分为多个独立视频输出 |
 | easy imageIndexesToIntList | 将逗号分隔的图片索引字符串转换为整数列表 |
 | easy saveVideo | 将图片和可选音频保存为视频文件 |
 | easy getAudioFromVideo | 从 VIDEO 输入中提取音频 |
@@ -202,6 +204,7 @@ bun run build:release
 | easy splitImages | 将图像列表或批次拆分为多个单图像输出 |
 | easy matchLine | 返回包含匹配文本的第一行的零基索引 |
 | easy apiWorkflowGate | 判断是否为 API 调用的工作流，透传前面输入项 |
+| easy minimaxH3ToVideo | 构建 MiniMax H3 文生视频、参考生视频或首尾帧生视频的条件与潜空间输入 |
 | LTXVAddGuidesFromBatchIndexes | 从批量图像添加引导图到潜在变量的指定帧索引 |
 | LTXVMakeRefVideo | 将参考图像批次扩展为 IC-LoRA 参考视频 |
 | easy ltxMultiTrackEncode | 构建 Prompt Relay 条件并生成 LTX 视频/音频潜变量 |

@@ -2,6 +2,25 @@
 
 ---
 
+## [1.1.4] - 2026-08-02
+
+### ✨ Features
+
+- **MultiTrack Editor**: Add `MiniMax` video format
+- **MiniMax H3**: Add `easy minimaxH3ToVideo` for text-to-video, reference-to-video, and first/last-frame conditioning
+- **Media List Utilities**: Add `easy splitAudios` and `easy splitVideos` to split media lists into independent outputs
+- **MultiTrack Editor**: Video, audio, and subtitle tracks support dragging the left-side icon to adjust sorting; each track type is limited to a maximum of 3 tracks
+
+### 🐛 Bug Fixes
+
+- **MultiTrack Editor**: Fix `TRACK_INFO` output when duration is less than 5 seconds — total duration should be the actual total duration of task segments, not the default 5 seconds
+- **MultiTrack Editor**: Task track segments support free placement while preserving gaps; new task segments can be added directly between segments to fill gaps
+- **MultiTrack Editor**: Fix issue where dragging to trim from segment edge hot zone caused the trim frame to shift based on mouse position or canvas zoom level
+- **MultiTrack Editor**: Fix incorrect time ruler click position calculation after canvas zoom, causing playhead positioning and toolbar left/right trim time offset issues
+- **MultiTrack Task Output**: `MiniMax` format trims audio/video from the next task segment's start point to the media track segment's actual end; the last task trims from its own start to the media's effective end, without outputting trailing black frames or silent audio
+- **MultiTrack Info Output**: Total duration is calculated as the sum of task segment durations, automatically skipping gaps between task segments
+- **MultiTrack Editor**: Fix node height recalculation when adding or removing tracks — should recalculate node height instead of adapting to the preview area height
+
 ## [1.1.3] - 2026-07-30
 
 ### ✨ Features
