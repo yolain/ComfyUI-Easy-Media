@@ -450,6 +450,48 @@ def test_reference_audio_requires_audio_vae(monkeypatch):
         )
 
 
+def test_silent_reference_video_does_not_require_audio_vae(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+
+    output = module.EasyMiniMaxH3ToVideo.execute(
+        **_base_inputs(mode=["reference"], videos=[object()])
+    )
+
+    conditioning = _graph_node(output, "MiniMaxH3ReferenceToVideo")
+    assert conditioning["inputs"]["audio_vae"] is None
+
+
+@pytest.mark.parametrize(
+    ("overrides", "media_name", "limit"),
+    [
+        ({"images": [_image_values(*range(10))]}, "images", 9),
+        ({"videos": [object()] * 4, "audio_vae": [_AudioVae()]}, "videos", 3),
+        (
+            {
+                "audios": [{"waveform": torch.ones(1, 1, 4), "sample_rate": 32000}] * 4,
+                "audio_vae": [_AudioVae()],
+            },
+            "audios",
+            3,
+        ),
+    ],
+)
+def test_reference_media_over_native_limits_is_rejected(
+    monkeypatch, overrides, media_name, limit
+):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+
+    with pytest.raises(
+        ValueError,
+        match=rf"reference mode supports at most {limit} {media_name}",
+    ):
+        module.EasyMiniMaxH3ToVideo.execute(
+            **_base_inputs(mode=["reference"], **overrides)
+        )
+
+
 def test_minimax_node_has_complete_chinese_localization():
     locale_path = Path(__file__).parents[1] / "locales" / "zh" / "nodeDefs.json"
     node_defs = json.loads(locale_path.read_text(encoding="utf-8"))
@@ -483,3 +525,17 @@ def test_minimax_node_has_complete_chinese_localization():
         "0": {"name": "正向条件"},
         "1": {"name": "潜空间"},
     }
+    assert "重采样" not in translation["description"]
+    assert "重采样" not in translation["inputs"]["videos"]["tooltip"]
+    assert "任何参考视频" in translation["inputs"]["audio_vae"]["tooltip"]
+    assert "仅缩小，不放大" in translation["inputs"]["ref_image_size"]["tooltip"]
+
+    for node_id in ["MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo"]:
+        fallback_translation = node_defs[node_id]
+        assert fallback_translation["display_name"]
+        assert fallback_translation["description"]
+        assert fallback_translation["inputs"]
+        assert fallback_translation["outputs"] == {
+            "0": {"name": "正向条件"},
+            "1": {"name": "潜空间"},
+        }

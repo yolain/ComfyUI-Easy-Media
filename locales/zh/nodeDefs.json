@@ -1022,9 +1022,55 @@
       "2": { "name": "潜空间" }
     }
   },
+  "MiniMaxH3ImageToVideo": {
+    "display_name": "MiniMax H3 图像生成视频",
+    "description": "创建 MiniMax H3 文生视频或首尾帧生视频条件，并生成联合音视频潜空间。",
+    "inputs": {
+      "clip": { "name": "CLIP" },
+      "vae": { "name": "VAE" },
+      "prompt": { "name": "提示词" },
+      "width": { "name": "宽度" },
+      "height": { "name": "高度" },
+      "length": { "name": "视频帧数" },
+      "first_frame": { "name": "首帧" },
+      "last_frame": { "name": "尾帧" }
+    },
+    "outputs": {
+      "0": { "name": "正向条件" },
+      "1": { "name": "潜空间" }
+    }
+  },
+  "MiniMaxH3ReferenceToVideo": {
+    "display_name": "MiniMax H3 参考生成视频",
+    "description": "使用图像、视频和音频创建 MiniMax H3 参考条件；提示词可通过 <Picture i>、<Video i> 和 <Audio i> 标签引用媒体。",
+    "inputs": {
+      "clip": { "name": "CLIP" },
+      "vae": { "name": "VAE" },
+      "audio_vae": { "name": "音频 VAE" },
+      "prompt": { "name": "提示词" },
+      "width": { "name": "宽度" },
+      "height": { "name": "高度" },
+      "length": { "name": "视频帧数" },
+      "ref_image_size": {
+        "name": "参考图像尺寸",
+        "options": {
+          "match": "匹配生成尺寸",
+          "max": "最大参考尺寸"
+        }
+      },
+      "ref_images": { "name": "参考图像" },
+      "ref_videos": { "name": "参考视频帧" },
+      "ref_video_audios": { "name": "参考视频音频" },
+      "ref_audios": { "name": "独立参考音频" }
+    },
+    "outputs": {
+      "0": { "name": "正向条件" },
+      "1": { "name": "潜空间" }
+    }
+  },
   "easy minimaxH3ToVideo": {
     "display_name": "简易 MiniMax H3 视频生成",
-    "description": "统一生成 MiniMax H3 文生视频、参考生视频和首尾帧生视频条件。支持图像批次及图像、视频、音频列表；参考视频会自动拆分为 24fps 图像序列和音频。",
+    "description": "统一生成 MiniMax H3 文生视频、参考生视频和首尾帧生视频条件。支持图像批次及图像、视频、音频列表；参考视频会自动拆分为图像序列和音频。",
     "inputs": {
       "clip": {
         "name": "CLIP",
@@ -1036,7 +1082,7 @@
       },
       "audio_vae": {
         "name": "音频 VAE",
-        "tooltip": "可选。参考视频包含音频或连接独立参考音频时必需。"
+        "tooltip": "可选。连接任何参考视频或独立参考音频时建议提供；存在参考音频时必需。"
       },
       "images": {
         "name": "图像",
@@ -1044,7 +1090,7 @@
       },
       "videos": {
         "name": "视频",
-        "tooltip": "参考视频或视频列表。参考模式下会自动提取帧和内含音频，并将帧重采样为 24fps。"
+        "tooltip": "参考视频或视频列表。参考模式下会自动提取原始帧和内含音频。"
       },
       "audios": {
         "name": "音频",
@@ -1076,7 +1122,7 @@
       },
       "ref_image_size": {
         "name": "参考图像尺寸",
-        "tooltip": "参考图像尺寸调整。“match”会将每张参考图像缩放（仅缩小，保持宽高比）至生成图像的像素区域；“max”则采用参考管道中较短边为2048像素的尺寸，以实现最佳的身份保真度。参考令牌会贯穿每个采样步骤，因此“max”的运行速度可能慢几倍。",
+        "tooltip": "参考图像尺寸调整。“match”会将每张参考图像缩放（仅缩小，保持宽高比）至生成图像的像素区域；“max”的短边上限为 2048 像素（仅缩小，不放大），以实现最佳的身份保真度。参考令牌会贯穿每个采样步骤，因此“max”的运行速度可能慢几倍。",
         "options": {
           "match": "匹配生成尺寸",
           "max": "最大参考尺寸"

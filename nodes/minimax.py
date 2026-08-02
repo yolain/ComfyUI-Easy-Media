@@ -22,6 +22,9 @@ MAX_PIXELS = 768 * 1344
 REF_IMAGE_SHORT_EDGE = 2048
 FPS = 24
 AUDIO_LATENT_FPS = 40
+MAX_REF_IMAGES = 9
+MAX_REF_VIDEOS = 3
+MAX_REF_AUDIOS = 3
 
 
 def _align_frame_count(frame_count: int) -> int:
@@ -159,6 +162,10 @@ class MiniMaxH3ImageToVideoFallback(io.ComfyNode):
             node_id="MiniMaxH3ImageToVideo",
             display_name="MiniMax H3 Image to Video",
             category="model/conditioning/minimax",
+            description=(
+                "Create MiniMax H3 text-to-video or first/last-frame "
+                "conditioning with a joint audio-video latent."
+            ),
             inputs=[
                 io.Clip.Input("clip"),
                 io.Vae.Input("vae"),
@@ -235,6 +242,10 @@ class MiniMaxH3ReferenceToVideoFallback(io.ComfyNode):
             node_id="MiniMaxH3ReferenceToVideo",
             display_name="MiniMax H3 Reference to Video",
             category="model/conditioning/minimax",
+            description=(
+                "Create MiniMax H3 reference conditioning from images, videos, "
+                "and audio using <Picture i>, <Video i>, and <Audio i> tags."
+            ),
             inputs=[
                 io.Clip.Input("clip"),
                 io.Vae.Input("vae"),
@@ -267,7 +278,7 @@ class MiniMaxH3ReferenceToVideoFallback(io.ComfyNode):
                         input=io.Image.Input("ref_image"),
                         prefix="ref_image_",
                         min=0,
-                        max=9,
+                        max=MAX_REF_IMAGES,
                     ),
                 ),
                 io.Autogrow.Input(
@@ -277,7 +288,7 @@ class MiniMaxH3ReferenceToVideoFallback(io.ComfyNode):
                         input=io.Image.Input("ref_video"),
                         prefix="ref_video_",
                         min=0,
-                        max=3,
+                        max=MAX_REF_VIDEOS,
                     ),
                 ),
                 io.Autogrow.Input(
@@ -287,7 +298,7 @@ class MiniMaxH3ReferenceToVideoFallback(io.ComfyNode):
                         input=io.Audio.Input("ref_video_audio"),
                         prefix="ref_video_audio_",
                         min=0,
-                        max=3,
+                        max=MAX_REF_VIDEOS,
                     ),
                 ),
                 io.Autogrow.Input(
@@ -297,7 +308,7 @@ class MiniMaxH3ReferenceToVideoFallback(io.ComfyNode):
                         input=io.Audio.Input("ref_audio"),
                         prefix="ref_audio_",
                         min=0,
-                        max=3,
+                        max=MAX_REF_AUDIOS,
                     ),
                 ),
             ],
@@ -584,7 +595,18 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
                 **node_inputs,
             )
         else:
-            if (video_inputs or standalone_audios) and selected_audio_vae is None:
+            media_limits = (
+                ("images", len(expanded_images), MAX_REF_IMAGES),
+                ("videos", len(video_inputs), MAX_REF_VIDEOS),
+                ("audios", len(standalone_audios), MAX_REF_AUDIOS),
+            )
+            for media_name, media_count, media_limit in media_limits:
+                if media_count > media_limit:
+                    raise ValueError(
+                        f"reference mode supports at most {media_limit} {media_name}"
+                    )
+
+            if standalone_audios and selected_audio_vae is None:
                 raise ValueError(
                     "audio_vae is required when reference audio is provided"
                 )
