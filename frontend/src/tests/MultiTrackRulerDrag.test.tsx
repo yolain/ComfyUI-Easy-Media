@@ -48,8 +48,8 @@ describe('MultiTrackRuler task marker dragging', () => {
     fireEvent.mouseDown(marker, { clientX: 84 })
     expect(marker.className).toContain('cursor-grabbing')
     expect(ruler?.className).toContain('cursor-grabbing')
-    fireEvent.mouseMove(globalThis, { clientX: 196 })
-    fireEvent.mouseUp(globalThis, { clientX: 196 })
+    fireEvent.mouseMove(window, { clientX: 196 })
+    fireEvent.mouseUp(window, { clientX: 196 })
 
     expect(onMoveTaskMarker).toHaveBeenCalledWith('marker-1', 72)
     expect(ruler?.className).toContain('cursor-col-resize')
@@ -61,8 +61,8 @@ describe('MultiTrackRuler task marker dragging', () => {
 
     const marker = screen.getByRole('button', { name: 'Task marker at frame 24' })
     fireEvent.mouseDown(marker, { clientX: 84 })
-    fireEvent.mouseMove(globalThis, { clientX: 140 })
-    fireEvent.mouseUp(globalThis, { clientX: 140 })
+    fireEvent.mouseMove(window, { clientX: 140 })
+    fireEvent.mouseUp(window, { clientX: 140 })
 
     expect(onMoveTaskMarker).not.toHaveBeenCalled()
   })
@@ -91,7 +91,7 @@ describe('MultiTrackRuler task marker dragging', () => {
     })
 
     fireEvent.mouseDown(ruler, { clientX: 270.4 })
-    fireEvent.mouseUp(globalThis, { clientX: 270.4 })
+    fireEvent.mouseUp(window, { clientX: 270.4 })
 
     expect(onSeek).toHaveBeenCalledWith(288)
   })

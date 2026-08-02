@@ -128,7 +128,8 @@ export function MultiTrackRuler({
     const rulerRect = rulerRef.current?.getBoundingClientRect()
     const rectLeft = rulerRect?.left ?? 0
     const coordinateScale = renderedCoordinateScale(rulerRect?.width ?? 0)
-    let lastValidFrame = marker.frame
+    const originalFrame = marker.frame
+    let lastValidFrame = originalFrame
 
     function updateDragPreview(nextClientX: number) {
       const nextFrame = Math.max(1, timeFromClientX(nextClientX, rectLeft, coordinateScale))
@@ -149,7 +150,7 @@ export function MultiTrackRuler({
       globalThis.removeEventListener('mousemove', handleMouseMove)
       globalThis.removeEventListener('mouseup', handleMouseUp)
       setDragPreview(null)
-      if (lastValidFrame !== marker.frame) onMoveTaskMarker(markerId, lastValidFrame)
+      if (lastValidFrame !== originalFrame) onMoveTaskMarker(markerId, lastValidFrame)
     }
 
     updateDragPreview(clientX)

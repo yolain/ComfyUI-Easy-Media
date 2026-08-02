@@ -64,7 +64,7 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 | 场景 | 描述 | 条件 
 |------|------|------|
-| 视频生成 | minimaxH3/wan/bernini/ltx t2v、i2v、r2v | 任务轨道有片段即可
+| 视频生成 | MiniMax H3/wan/bernini/ltx t2v、i2v、r2v | 任务轨道有片段即可
 | 视频编辑 | bernini v2v、bernini vi2v、wan animate、ltx video replace、ltx iclora edit/inpaint/outpaint | 视频轨道片段及任务轨道片段必要
 | 视频参考 | wan scail2、wan animate、ltx iclora guide | 视频轨道片段及任务轨道片段必要
 | 视频配音 | wan infinititalk、longcat avatar、ltx ai2v | 任务轨道片段和音频轨道片段必要

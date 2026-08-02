@@ -2,11 +2,13 @@
 
 ---
 
-## [1.1.4] - pre-release
+## [1.1.4] - 2026-08-02
 
 ### ✨ Features
 
 - **MultiTrack Editor**: Add `MiniMax` video format
+- **MiniMax H3**: Add `easy minimaxH3ToVideo` for text-to-video, reference-to-video, and first/last-frame conditioning
+- **Media List Utilities**: Add `easy splitAudios` and `easy splitVideos` to split media lists into independent outputs
 - **MultiTrack Editor**: Video, audio, and subtitle tracks support dragging the left-side icon to adjust sorting; each track type is limited to a maximum of 3 tracks
 
 ### 🐛 Bug Fixes

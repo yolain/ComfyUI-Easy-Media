@@ -269,6 +269,27 @@ def test_empty_media_uses_text_to_video_for_every_mode(monkeypatch, mode):
     assert "minimax_refs" not in metadata
 
 
+@pytest.mark.parametrize(
+    ("videos", "audios"),
+    [
+        ([object()], []),
+        ([], [{"waveform": torch.ones(1, 1, 4), "sample_rate": 32000}]),
+        ([object()], [{"waveform": torch.ones(1, 1, 4), "sample_rate": 32000}]),
+    ],
+)
+def test_multi_frames_rejects_video_and_audio_inputs(monkeypatch, videos, audios):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+
+    with pytest.raises(
+        ValueError,
+        match="videos and audios are only supported in reference mode",
+    ):
+        module.EasyMiniMaxH3ToVideo.execute(
+            **_base_inputs(videos=videos, audios=audios)
+        )
+
+
 def test_reference_encodes_images_video_audio_and_standalone_audio(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     assert module is not None

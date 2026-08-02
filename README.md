@@ -64,7 +64,7 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 
 | Scenario | Description | Requirements |
 |----------|-------------|-------------|
-| Video Generation | minimaxH3/wan/bernini/ltx t2v, i2v, r2v | Task track segments only |
+| Video Generation | MiniMax H3/wan/bernini/ltx t2v, i2v, r2v | Task track segments only |
 | Video Editing | bernini v2v, bernini vi2v, wan animate, ltx video replace, ltx iclora edit/inpaint/outpaint | Video track segments + task track segments |
 | Video Reference | wan scail2, wan animate, ltx iclora guide | Video track segments + task track segments |
 | Video Dubbing | wan infinititalk, longcat avatar, ltx ai2v | Task track segments + audio track segments |

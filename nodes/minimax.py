@@ -248,6 +248,10 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
             return _encode_text_to_video(selected_clip, prompt_text, latent)
 
         if selected_mode == "multi_frames":
+            if video_inputs or standalone_audios:
+                raise ValueError(
+                    "videos and audios are only supported in reference mode"
+                )
             if not expanded_images:
                 return _encode_text_to_video(selected_clip, prompt_text, latent)
 
