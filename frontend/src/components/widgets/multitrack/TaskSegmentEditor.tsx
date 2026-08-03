@@ -457,7 +457,7 @@ export function TaskSegmentEditor({
                           <img
                             src={imageUrl}
                             alt={imageDisplayName(image)}
-                            className="block h-full w-full object-contain"
+                            className="absolute inset-0 h-full w-full object-contain"
                             draggable={false}
                           />
                         ) : (
