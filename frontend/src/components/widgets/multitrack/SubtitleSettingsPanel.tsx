@@ -230,6 +230,7 @@ export function SubtitleSettingsPanel({
   return (
     <aside
       data-testid="subtitle-settings-panel"
+      data-capture-wheel="true"
       className="flex h-full min-h-0 w-[35%] min-w-72 shrink-0 flex-col overflow-hidden border-l border-border bg-muted/30 text-card-foreground shadow-lg"
       aria-label={t('multitrack.subtitleTextSettings')}
     >

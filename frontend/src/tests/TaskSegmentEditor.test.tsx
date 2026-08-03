@@ -83,6 +83,28 @@ describe('TaskSegmentEditor', () => {
     expect(onContentChange).toHaveBeenCalledWith({ user_prompt: 'New prompt' })
   })
 
+  it('keeps task prompt wheel scrolling inside the editor', () => {
+    const onCanvasWheel = vi.fn()
+    render(
+      <div
+        onWheelCapture={(event) => {
+          const target = event.target as HTMLElement
+          const captureElement = target.closest('[data-capture-wheel="true"]')
+          if (!captureElement?.contains(document.activeElement)) onCanvasWheel()
+        }}
+      >
+        <TaskSegmentEditor segment={taskSegment()} onContentChange={vi.fn()} />
+      </div>,
+    )
+
+    const prompt = screen.getByRole('textbox', { name: 'Prompt' })
+    prompt.focus()
+    const keepsNativeScroll = fireEvent.wheel(prompt, { deltaY: 100 })
+
+    expect(keepsNativeScroll).toBe(true)
+    expect(onCanvasWheel).not.toHaveBeenCalled()
+  })
+
   it('uses rv2v for reference mode when a non-preset video overlaps the task range', () => {
     render(
       <TaskSegmentEditor

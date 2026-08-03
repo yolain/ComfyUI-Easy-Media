@@ -1208,10 +1208,15 @@ export function PreviewArea({
             </div>
           )}
           {!usesTaskImageOnlyPreview ? (
-            <div className={selectedSubtitleStyle
-              ? 'min-w-0 h-full flex-1 flex-col items-center justify-center flex'
-              : `min-w-0 transition-all duration-300 ease-in-out ${activeTaskImages ? activeTaskVideoPanelClassName : 'h-full flex-[1_1_100%]'}`
-            }>
+            <div
+              className={selectedSubtitleStyle
+                ? 'relative flex h-auto min-h-0 min-w-0 max-h-full flex-1 self-center flex-col items-center justify-center overflow-hidden'
+                : `min-w-0 transition-all duration-300 ease-in-out ${activeTaskImages ? activeTaskVideoPanelClassName : 'h-full flex-[1_1_100%]'}`
+              }
+              style={selectedSubtitleStyle
+                ? { aspectRatio: `${resolution.width} / ${resolution.height}` }
+                : undefined}
+            >
               <VideoPreview
                 activeVideo={activeVideo}
                 resolution={resolution}
@@ -1219,6 +1224,7 @@ export function PreviewArea({
                 playbackNonce={playbackNonce}
                 muted
                 volume={0}
+                className={selectedSubtitleStyle ? 'absolute inset-0 h-full w-full' : undefined}
               >
                 {activeSubtitleSegments.map((segment) => (
                   <div key={segment.id}>

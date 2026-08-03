@@ -312,6 +312,14 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
             select subtitle segment
           </button>
         ) : null}
+        {subtitleSegment ? (
+          <button
+            type="button"
+            onMouseDown={() => onSelectSegment(subtitleSegment.id)}
+          >
+            select subtitle segment before click
+          </button>
+        ) : null}
         {subtitleTrack && subtitleSegment ? (
           <button type="button" onClick={() => onCloneTaskSegment(subtitleTrack.id, subtitleSegment.id)}>
             clone subtitle
@@ -2000,5 +2008,31 @@ describe('MultiTrackWidget', () => {
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'delete selected' }).disabled).toBe(true)
     const updated = onChange.mock.lastCall?.[0] as TrackData
     expect(updated.tracks.flatMap((track) => track.segments.map((segment) => segment.id))).not.toContain('video-active')
+  })
+
+  it('keeps a subtitle selected when its layout changes before the click event', () => {
+    const data = createDefaultTrackData()
+    data.tracks.push({
+      id: 'subtitle-track',
+      type: 'subtitle',
+      name: 'Subtitle',
+      color: '#ffffff',
+      segments: [{
+        id: 'subtitle-active',
+        start_frame: 0,
+        end_frame: 10,
+        color: '#ffffff',
+        content: { media_type: 'subtitle', text: 'Hello' },
+      }],
+    })
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} />)
+    const segment = screen.getByRole('button', { name: 'select subtitle segment before click' })
+
+    fireEvent.mouseDown(segment, { button: 0 })
+    expect(screen.getByTestId('selected-segment-count').textContent).toBe('1')
+    fireEvent.click(segment)
+
+    expect(screen.getByTestId('selected-segment-count').textContent).toBe('1')
   })
 })

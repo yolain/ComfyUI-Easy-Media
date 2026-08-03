@@ -69,6 +69,33 @@ describe('SubtitleSettingsPanel', () => {
     expect(screen.queryByText('Background color')).toBeNull()
   })
 
+  it('keeps subtitle textarea wheel scrolling inside the settings panel', () => {
+    const onCanvasWheel = vi.fn()
+    render(
+      <div
+        onWheelCapture={(event) => {
+          const target = event.target as HTMLElement
+          const captureElement = target.closest('[data-capture-wheel="true"]')
+          if (!captureElement?.contains(document.activeElement)) onCanvasWheel()
+        }}
+      >
+        <SubtitleSettingsPanel
+          text={'Line 1\nLine 2\nLine 3\nLine 4\nLine 5'}
+          style={baseStyle}
+          onTextChange={vi.fn()}
+          onStyleChange={vi.fn()}
+        />
+      </div>,
+    )
+
+    const textarea = screen.getByRole('textbox', { name: 'Subtitle text' })
+    textarea.focus()
+    const keepsNativeScroll = fireEvent.wheel(textarea, { deltaY: 100 })
+
+    expect(keepsNativeScroll).toBe(true)
+    expect(onCanvasWheel).not.toHaveBeenCalled()
+  })
+
   it('disables background opacity without a background and updates it for background presets', () => {
     const onStyleChange = vi.fn()
     const { rerender } = render(

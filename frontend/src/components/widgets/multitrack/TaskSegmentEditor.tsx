@@ -372,7 +372,10 @@ export function TaskSegmentEditor({
   const imagePickerSurfaceClass = isImageDragOver ? 'border-primary bg-accent/20' : 'border-border bg-muted/20'
 
   return (
-    <div className="flex h-full min-h-24 w-full flex-col overflow-hidden rounded-sm bg-background text-foreground">
+    <div
+      data-capture-wheel="true"
+      className="flex h-full min-h-24 w-full flex-col overflow-hidden rounded-sm bg-background text-foreground"
+    >
       <div className="flex min-h-0 flex-1 gap-4 p-4">
         {editMode === 'individual' && (
           <div

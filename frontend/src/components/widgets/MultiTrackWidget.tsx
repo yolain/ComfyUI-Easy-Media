@@ -1278,9 +1278,6 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         <div
           className="relative flex h-full w-full flex-col overflow-hidden rounded text-foreground font-sans text-xs select-none"
           aria-busy={isSmartSplitting || isRecognizingSubtitles}
-          onClick={() => {
-            handleClearSelection()
-          }}
         >
           <PreviewArea
             data={data}
