@@ -225,6 +225,28 @@
   .__CUSTOM_NODE_CLASS__ .task-image-grid-add {
     transition: opacity 180ms ease;
   }
+
+  .__CUSTOM_NODE_CLASS__ .task-segment-editor {
+    container-type: inline-size;
+  }
+
+  @container (max-width: 40rem) {
+    .__CUSTOM_NODE_CLASS__ .task-segment-editor .task-image-drop-zone {
+      aspect-ratio: auto;
+      width: clamp(10rem, 40%, 20rem);
+    }
+
+    .__CUSTOM_NODE_CLASS__ .task-segment-editor .task-image-picker-empty {
+      aspect-ratio: auto;
+      width: 100%;
+      min-width: 0;
+      padding-inline: 0.5rem;
+    }
+
+    .__CUSTOM_NODE_CLASS__ .task-segment-editor .task-image-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
 }
 
 /* ── Overlay management ─────────────────────────────────────────────────────

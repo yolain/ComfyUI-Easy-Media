@@ -551,6 +551,29 @@ describe('multitrack utilities', () => {
     })
   })
 
+  it('collects and parses megapixel resolution values on the video format grid', () => {
+    const input = collectMultiTrackPreviewResolutionInput({
+      widgets: [
+        { name: 'resolution', value: ['width x height (megapixels)'] },
+        { name: 'resolution.aspect_ratio', value: ['16:9 (Widescreen)'] },
+        { name: 'resolution.megapixels', value: [1] },
+        { name: 'format', value: ['Wan'] },
+      ],
+    })
+
+    expect(input).toEqual({
+      resolution: 'width x height (megapixels)',
+      aspect_ratio: '16:9 (Widescreen)',
+      megapixels: 1,
+      format: 'Wan',
+    })
+    expect(parseMultiTrackPreviewResolution(input, null)).toMatchObject({
+      width: 1368,
+      height: 768,
+      mode: 'megapixels',
+    })
+  })
+
   it('uses backend-style shortest and longest resolution inference from first video metadata', () => {
     expect(parseMultiTrackPreviewResolution({
       resolution: 'width x height (shortest)',

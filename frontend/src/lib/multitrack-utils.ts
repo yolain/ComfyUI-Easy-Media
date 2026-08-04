@@ -1167,7 +1167,7 @@ export interface MultiTrackPreviewResolution {
   width: number
   height: number
   resizeMethod: MultiTrackPreviewResizeMethod
-  mode: 'fixed' | 'custom' | 'auto' | 'longest' | 'shortest'
+  mode: 'fixed' | 'custom' | 'auto' | 'longest' | 'shortest' | 'megapixels'
 }
 
 export interface MultiTrackVideoMetadata {
@@ -1207,6 +1207,9 @@ export interface MultiTrackPreviewResolutionInput {
   resize_to_pixel?: number
   width?: number
   height?: number
+  aspect_ratio?: string
+  megapixels?: number
+  format?: string
 }
 
 interface NodeResolutionWidget {
@@ -1255,6 +1258,9 @@ export function collectMultiTrackPreviewResolutionInput(node: unknown): MultiTra
     if (width !== null) collected.width = width
     const height = positiveNumber(value.height)
     if (height !== null) collected.height = height
+    if (typeof value.aspect_ratio === 'string') collected.aspect_ratio = value.aspect_ratio
+    const megapixels = positiveNumber(value.megapixels)
+    if (megapixels !== null) collected.megapixels = megapixels
   }
 
   const resizeMethodValue = readWidgetValue(widgetByName.get('resolution.resize_method'))
@@ -1265,6 +1271,12 @@ export function collectMultiTrackPreviewResolutionInput(node: unknown): MultiTra
   if (width !== null) collected.width = width
   const height = positiveNumber(readWidgetValue(widgetByName.get('resolution.height')))
   if (height !== null) collected.height = height
+  const aspectRatio = readWidgetValue(widgetByName.get('resolution.aspect_ratio'))
+  if (typeof aspectRatio === 'string') collected.aspect_ratio = aspectRatio
+  const megapixels = positiveNumber(readWidgetValue(widgetByName.get('resolution.megapixels')))
+  if (megapixels !== null) collected.megapixels = megapixels
+  const format = readWidgetValue(widgetByName.get('format'))
+  if (typeof format === 'string') collected.format = format
 
   return collected
 }
@@ -1302,6 +1314,32 @@ export function parseMultiTrackPreviewResolution(
   const normalizedLabel = resolutionLabel.toLowerCase()
   const resizeMethod = parseResizeMethod(values.resize_method)
   const fixedMatch = resolutionLabel.match(/(\d+)\s*x\s*(\d+)/i)
+
+  if (normalizedLabel.includes('megapixels')) {
+    const aspectRatioMatch = typeof values.aspect_ratio === 'string'
+      ? values.aspect_ratio.match(/(\d+)\s*:\s*(\d+)/)
+      : null
+    const widthRatio = positiveNumber(aspectRatioMatch?.[1]) ?? 1
+    const heightRatio = positiveNumber(aspectRatioMatch?.[2]) ?? 1
+    const megapixels = positiveNumber(values.megapixels) ?? 1
+    const formatMultiples: Record<string, number> = {
+      AnimateDiff: 8,
+      Mochi: 16,
+      LTXV: 32,
+      Hunyuan: 16,
+      Cosmos: 16,
+      Wan: 8,
+      MiniMax: 32,
+    }
+    const multiple = typeof values.format === 'string' ? formatMultiples[values.format] ?? 1 : 1
+    const scale = Math.sqrt(megapixels * 1024 * 1024 / (widthRatio * heightRatio))
+    return {
+      width: Math.round(widthRatio * scale / multiple) * multiple,
+      height: Math.round(heightRatio * scale / multiple) * multiple,
+      resizeMethod,
+      mode: 'megapixels',
+    }
+  }
 
   if (normalizedLabel.includes('custom')) {
     return {

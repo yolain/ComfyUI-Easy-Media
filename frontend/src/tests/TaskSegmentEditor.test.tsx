@@ -241,6 +241,21 @@ describe('TaskSegmentEditor', () => {
     })
   })
 
+  it('preserves the default image grid while exposing a container for narrow layouts', () => {
+    render(<TaskSegmentEditor segment={taskSegment()} onContentChange={vi.fn()} />)
+
+    const dropZone = screen.getByTestId('task-image-drop-zone')
+    const grid = screen.getByTestId('task-image-grid')
+    expect(dropZone.closest('.task-segment-editor')).not.toBeNull()
+    expect(dropZone.className).toContain('aspect-square')
+    expect(grid.className).toContain('grid-cols-2')
+    expect(screen.getByTestId('task-image-a').className).toContain('w-full')
+    expect(screen.getByTestId('task-image-a').className).toContain('self-start')
+    expect(screen.getByRole('button', { name: 'Select image' }).className).toContain('w-full')
+    expect(screen.getByRole('button', { name: 'Select image' }).className).toContain('self-start')
+    expect(screen.getByTestId('task-prompt-panel').className).toContain('min-w-0')
+  })
+
   it('renders saved panorama framing without showing a panorama action icon', () => {
     const segment = taskSegment()
     segment.content.images![0].panorama_view = {
@@ -578,7 +593,7 @@ describe('TaskSegmentEditor', () => {
     expect(onDurationChange).toHaveBeenCalledTimes(1)
   })
 
-  it('uses compact preview editor sizing without rendering the empty image picker as a button element', () => {
+  it('uses responsive preview editor sizing without rendering the empty image picker as a button element', () => {
     const emptyImageSegment = {
       ...taskSegment(),
       content: {

@@ -398,6 +398,68 @@ describe('PreviewArea', () => {
     expect(previewFrame.style.aspectRatio).toBe('576 / 1024')
   })
 
+  it('shows the megapixel resolution badge only when no segment is selected', () => {
+    const { data, selectedSegment } = trackData()
+    const props = {
+      data,
+      currentTime: 1,
+      isPlaying: false,
+      node: {
+        widgets: [
+          { name: 'resolution', value: ['width x height (megapixels)'] },
+          { name: 'resolution.aspect_ratio', value: ['16:9 (Widescreen)'] },
+          { name: 'resolution.megapixels', value: [1] },
+          { name: 'format', value: ['Wan'] },
+        ],
+      },
+      onGlobalSettingsChange: vi.fn(),
+      onSelectedSegmentContentChange: vi.fn(),
+      onSelectedSegmentDurationChange: vi.fn(),
+    }
+    const { rerender } = render(<PreviewArea {...props} selectedSegment={null} />)
+
+    const badge = screen.getByTestId('multitrack-preview-resolution-badge')
+    expect(badge.textContent).toContain('Current resolution')
+    expect(badge.textContent).toContain('1368 × 768')
+
+    rerender(<PreviewArea {...props} selectedSegment={selectedSegment} />)
+    expect(screen.queryByTestId('multitrack-preview-resolution-badge')).toBeNull()
+  })
+
+  it('updates the global megapixel resolution badge while its widget values change', () => {
+    const { data } = trackData()
+    const megapixelsWidget = { name: 'resolution.megapixels', value: [1] }
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={1}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{
+          widgets: [
+            { name: 'resolution', value: ['width x height (megapixels)'] },
+            { name: 'resolution.aspect_ratio', value: ['16:9 (Widescreen)'] },
+            megapixelsWidget,
+            { name: 'format', value: ['Wan'] },
+          ],
+        }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('multitrack-preview-resolution-badge').textContent).toContain('1368 × 768')
+
+    megapixelsWidget.value = [0.5]
+    act(() => {
+      vi.advanceTimersByTime(300)
+    })
+
+    expect(screen.getByTestId('multitrack-preview-resolution-badge').textContent).toContain('968 × 544')
+  })
+
   it('shows images from the task segment at the current time when no segment is selected', () => {
     const { data } = trackData()
     addActiveTaskTrack(data)
@@ -423,8 +485,8 @@ describe('PreviewArea', () => {
     )
     expect(screen.getAllByRole('img').map((image) => image.getAttribute('src'))).toContain('https://example.com/second.png')
     expect(screen.getByRole('img', { name: 'second.png' }).className).toContain('w-auto')
-    expect(screen.getByTestId('task-preview-image-first').className).toContain('h-32')
-    expect(screen.getByTestId('task-preview-image-second').className).toContain('h-32')
+    expect(screen.getByTestId('task-preview-image-first').className).toContain('h-40')
+    expect(screen.getByTestId('task-preview-image-second').className).toContain('h-40')
     expect(screen.getByTestId('panorama-image-preview-first').className).toContain('aspect-video')
     expect(screen.queryByLabelText('720° panorama preview')).toBeNull()
 
@@ -432,8 +494,8 @@ describe('PreviewArea', () => {
     expect(screen.getByTestId('task-preview-image-second').className).toContain('border-primary')
 
     const addImage = screen.getByTestId('task-preview-add-image')
-    expect(addImage.className).toContain('h-32')
-    expect(addImage.className).toContain('w-32')
+    expect(addImage.className).toContain('h-40')
+    expect(addImage.className).toContain('w-40')
     expect(imageArea.lastElementChild).toBe(addImage)
 
     rerender(<PreviewArea {...props} currentTime={48} />)

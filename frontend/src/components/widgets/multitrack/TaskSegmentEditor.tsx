@@ -374,7 +374,7 @@ export function TaskSegmentEditor({
   return (
     <div
       data-capture-wheel="true"
-      className="flex h-full min-h-24 w-full flex-col overflow-hidden rounded-sm bg-background text-foreground"
+      className="task-segment-editor flex h-full min-h-24 w-full flex-col overflow-hidden rounded-sm bg-background text-foreground"
     >
       <div className="flex min-h-0 flex-1 gap-4 p-4">
         {editMode === 'individual' && (
@@ -382,7 +382,7 @@ export function TaskSegmentEditor({
             data-testid="task-image-drop-zone"
             aria-label={t('multitrack.taskImageDropZone')}
             className={cn(
-              'flex aspect-square h-full min-h-0 shrink-0 items-center justify-center rounded-md border border-dashed transition-colors',
+              'task-image-drop-zone flex aspect-square h-full min-h-0 shrink-0 items-center justify-center rounded-md border border-dashed transition-colors',
               isImageDragOver ? 'border-primary bg-accent/20' : 'border-border bg-muted/30',
             )}
             onDragEnter={handleImageDragEnter}
@@ -397,7 +397,7 @@ export function TaskSegmentEditor({
                     role="button"
                     tabIndex={0}
                     className={cn(
-                      'flex aspect-square h-full max-h-full min-h-24 min-w-24 max-w-full cursor-pointer flex-col items-center justify-center gap-1 rounded-md px-4 py-2 text-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                      'task-image-picker-empty flex aspect-square h-full max-h-full min-h-24 min-w-24 max-w-full cursor-pointer flex-col items-center justify-center gap-1 rounded-md px-4 py-2 text-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
                       imagePickerSurfaceClass,
                     )}
                     aria-label={t('multitrack.taskImageDropZone')}
@@ -436,7 +436,7 @@ export function TaskSegmentEditor({
                         key={image.id}
                         draggable
                         data-testid={`task-image-${image.id}`}
-                        className="task-image-grid-item group relative flex aspect-square cursor-pointer items-center justify-center overflow-hidden rounded-md border border-border bg-black"
+                        className="task-image-grid-item group relative flex aspect-square w-full self-start cursor-pointer items-center justify-center overflow-hidden rounded-md border border-border bg-black"
                         onDragStart={() => {
                           draggedImageIdRef.current = image.id
                         }}
@@ -511,7 +511,7 @@ export function TaskSegmentEditor({
                       <Button
                         type="button"
                         variant="outline"
-                        className="task-image-grid-add aspect-square h-auto border-dashed text-muted-foreground"
+                        className="task-image-grid-add aspect-square h-auto w-full self-start border-dashed text-muted-foreground"
                         aria-label={t('multitrack.selectImage')}
                       >
                         <Plus className="h-7 w-7" />

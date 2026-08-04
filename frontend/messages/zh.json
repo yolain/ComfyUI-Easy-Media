@@ -56,6 +56,7 @@
     "unmute": "取消静音",
     "volume": "音量",
     "frameRate": "帧率",
+    "currentResolution": "当前分辨率",
     "fps": "帧/秒",
     "duration": "时长",
     "editTaskDuration": "编辑任务时长",

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Captions, Clapperboard, Eye, GalleryHorizontalEnd, ListTree, PanelLeft, PanelRight, Plus, Volume2, X } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TaskMarkerIcon } from '@/components/ui/custom-lucide-icon'
 import { Input } from '@/components/ui/input'
@@ -1163,6 +1164,20 @@ export function PreviewArea({
       {expandedTaskImage && expandedTaskImageTarget?.source === 'active'
         ? renderExpandedTaskImage(expandedTaskImage)
         : null}
+      {selectedSegment === null && resolution.mode === 'megapixels' ? (
+        <Badge
+          data-testid="multitrack-preview-resolution-badge"
+          variant="outline"
+          className="pointer-events-none absolute right-2 top-2 z-30 flex items-baseline gap-1.5 border-border bg-background/90 px-2 py-1 text-foreground shadow-sm backdrop-blur"
+        >
+          <span className="text-[9px] font-normal text-muted-foreground">
+            {t('multitrack.currentResolution')}
+          </span>
+          <span className="text-[11px] font-semibold tabular-nums">
+            {resolution.width} × {resolution.height}
+          </span>
+        </Badge>
+      ) : null}
       <div className="flex h-full min-h-24 w-full flex-col items-center justify-center gap-0.5">
         {!hasSegments ? renderEmptyPreview() : null}
         <div className={!hasSegments ? 'hidden' : previewMediaGroupClassName}>
@@ -1178,12 +1193,12 @@ export function PreviewArea({
                     image,
                     url,
                     image.id === activeTaskPreviewImage?.image.id,
-                    'h-32 w-fit max-w-full',
+                    'h-40 w-fit max-w-full',
                     true,
                     'flow',
                   )
                 ))}
-                {renderActiveTaskImageAddSlot('h-32 w-32 aspect-square', true)}
+                {renderActiveTaskImageAddSlot('h-40 w-40 aspect-square', true)}
               </div>
               {activeSubtitleSegments.map((segment) => (
                 <div key={segment.id}>
