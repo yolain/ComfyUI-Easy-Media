@@ -3,6 +3,7 @@ import math
 import os
 import re
 import tempfile
+from enum import Enum
 from pathlib import Path
 
 import folder_paths
@@ -47,12 +48,34 @@ from ..utils.prompt_builder import build_llm_prompt, build_prompt_request
 # ---------------------------------------------------------------------------
 # Resolution combo setup
 # ---------------------------------------------------------------------------
+class AspectRatio(str, Enum):
+    SQUARE = "1:1 (Square)"
+    PHOTO_V = "2:3 (Portrait Photo)"
+    PHOTO_H = "3:2 (Photo)"
+    STANDARD_V = "3:4 (Portrait Standard)"
+    STANDARD_H = "4:3 (Standard)"
+    WIDESCREEN_V = "9:16 (Portrait Widescreen)"
+    WIDESCREEN_H = "16:9 (Widescreen)"
+    ULTRAWIDE_H = "21:9 (Ultrawide)"
+
+
+ASPECT_RATIOS: dict[AspectRatio, tuple[int, int]] = {
+    AspectRatio.SQUARE: (1, 1),
+    AspectRatio.PHOTO_V: (2, 3),
+    AspectRatio.PHOTO_H: (3, 2),
+    AspectRatio.STANDARD_V: (3, 4),
+    AspectRatio.STANDARD_H: (4, 3),
+    AspectRatio.WIDESCREEN_V: (9, 16),
+    AspectRatio.WIDESCREEN_H: (16, 9),
+    AspectRatio.ULTRAWIDE_H: (21, 9),
+}
 
 BASE_RESOLUTIONS = [
     ["width", "height", "auto"],
     ["width", "height", "shortest"],
     ["width", "height", "longest"],
     ["width", "height", "custom"],
+    ["width", "height", "megapixels"],
     [480, 832, "9:16"],
     [544, 960, "9:16"],
     [576, 1024, "9:16"],
@@ -91,6 +114,22 @@ resize_method_input = io.Combo.Input(
     default="stretch",
     options=["stretch", "resize", "pad", "pad (white)", "pad_edge", "pad_edge_pixel", "crop", "pillarbox_blur"],
 )
+megapixels_input = [
+    io.Combo.Input(
+        "aspect_ratio",
+        options=AspectRatio,
+        default=AspectRatio.SQUARE,
+        tooltip="The aspect ratio for the output dimensions.",
+    ),
+    io.Float.Input(
+        "megapixels",
+        default=1.0,
+        min=0.1,
+        max=16.0,
+        step=0.1,
+        tooltip="Target total megapixels. 1.0 MP ≈ 1024x1024 for square.",
+    ),
+]
 resolution_combo_options = [
     io.DynamicCombo.Option(
         s,
@@ -106,7 +145,10 @@ resolution_combo_options = [
                 resize_method_input
             ]
             if "shortest" in s or "longest" in s
-            else [resize_method_input]
+            else (
+                megapixels_input if "megapixels" in s
+                else [resize_method_input]
+            )
         ),
     )
     for s in resolution_strings
@@ -260,11 +302,15 @@ def _resolve_configured_dimensions(
         width_value = resolution.get("width")
         height_value = resolution.get("height")
         resize_to_pixel_value = resolution.get("resize_to_pixel")
+        aspect_ratio_value = resolution.get("aspect_ratio")
+        megapixels_value = resolution.get("megapixels")
     else:
         resolution_label = resolution
         width_value = None
         height_value = None
         resize_to_pixel_value = None
+        aspect_ratio_value = None
+        megapixels_value = None
 
     if isinstance(resolution_label, list):
         resolution_label = resolution_label[0] if resolution_label else ""
@@ -274,10 +320,21 @@ def _resolve_configured_dimensions(
         height_value = height_value[0] if height_value else None
     if isinstance(resize_to_pixel_value, list):
         resize_to_pixel_value = resize_to_pixel_value[0] if resize_to_pixel_value else None
+    if isinstance(aspect_ratio_value, list):
+        aspect_ratio_value = aspect_ratio_value[0] if aspect_ratio_value else None
+    if isinstance(megapixels_value, list):
+        megapixels_value = megapixels_value[0] if megapixels_value else None
 
     resolution_text = str(resolution_label)
     normalized_resolution = resolution_text.lower()
-    if "custom" in normalized_resolution:
+    divisor = _video_format_dimension_multiple(format_name)
+    if "megapixels" in normalized_resolution:
+        width, height = _resolve_megapixel_dimensions(
+            aspect_ratio_value,
+            megapixels_value,
+            divisor,
+        )
+    elif "custom" in normalized_resolution:
         width = int(width_value) if width_value else 544
         height = int(height_value) if height_value else 960
     elif ("shortest" in normalized_resolution or "longest" in normalized_resolution) and source_dimensions:
@@ -303,11 +360,31 @@ def _resolve_configured_dimensions(
         else:
             width, height = 544, 960
 
-    format_info = VIDEO_FORMATS.get(format_name, {})
-    divisor = int(format_info.get("dim", [1])[0]) if format_info else 1
-    if divisor > 1:
+    if divisor > 1 and "megapixels" not in normalized_resolution:
         width = max(divisor, ((width + divisor - 1) // divisor) * divisor)
         height = max(divisor, ((height + divisor - 1) // divisor) * divisor)
+    return width, height
+
+
+def _video_format_dimension_multiple(format_name: str) -> int:
+    format_info = VIDEO_FORMATS.get(format_name, {})
+    return max(1, int(format_info.get("dim", [1])[0]) if format_info else 1)
+
+
+def _resolve_megapixel_dimensions(
+    aspect_ratio: object,
+    megapixels: object,
+    multiple: int,
+) -> tuple[int, int]:
+    ratio = ASPECT_RATIOS.get(
+        str(aspect_ratio or AspectRatio.SQUARE.value),
+        ASPECT_RATIOS[AspectRatio.SQUARE],
+    )
+    megapixel_value = float(megapixels) if megapixels else 1.0
+    total_pixels = megapixel_value * 1024 * 1024
+    scale = math.sqrt(total_pixels / (ratio[0] * ratio[1]))
+    width = round(ratio[0] * scale / multiple) * multiple
+    height = round(ratio[1] * scale / multiple) * multiple
     return width, height
 
 
@@ -1202,6 +1279,8 @@ class TimelineEditor(io.ComfyNode):
         resize_to_pixel: int | None = _unwrap(resolution.get("resize_to_pixel"), None)
         width_custom: int | None = _unwrap(resolution.get("width"), None)
         height_custom: int | None = _unwrap(resolution.get("height"), None)
+        aspect_ratio: str = str(_unwrap(resolution.get("aspect_ratio"), AspectRatio.SQUARE.value))
+        megapixels: float = float(_unwrap(resolution.get("megapixels"), 1.0))
 
         # Detect mode from resolution string
         if "auto" in _resolution:
@@ -1212,6 +1291,8 @@ class TimelineEditor(io.ComfyNode):
             mode = "shortest"
         elif "custom" in _resolution:
             mode = "custom"
+        elif "megapixels" in _resolution:
+            mode = "megapixels"
         else:
             mode = "preset"
 
@@ -1234,7 +1315,11 @@ class TimelineEditor(io.ComfyNode):
         target_w: int
         target_h: int
 
-        if mode == "preset":
+        div = _video_format_dimension_multiple(format)
+
+        if mode == "megapixels":
+            target_w, target_h = _resolve_megapixel_dimensions(aspect_ratio, megapixels, div)
+        elif mode == "preset":
             target_w, target_h = 544, 960
             for entry in BASE_RESOLUTIONS:
                 w, h = entry[0], entry[1]
@@ -1274,9 +1359,7 @@ class TimelineEditor(io.ComfyNode):
             target_h = int(height_custom) if height_custom else 960
 
         # Apply format divisibility to finalise target dimensions
-        fmt_info = VIDEO_FORMATS.get(format, {})
-        div: int = int(fmt_info.get("dim", [1])[0]) if fmt_info else 1
-        if div > 1:
+        if div > 1 and mode != "megapixels":
             target_w = max(div, ((target_w + div - 1) // div) * div)
             target_h = max(div, ((target_h + div - 1) // div) * div)
 

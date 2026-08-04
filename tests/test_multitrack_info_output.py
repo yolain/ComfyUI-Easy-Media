@@ -537,6 +537,40 @@ def test_multitrack_editor_includes_selected_dimensions_in_tracks_info():
     assert tracks_info["height"] == 720
 
 
+def test_multitrack_editor_calculates_megapixel_dimensions_on_the_format_grid():
+    module = _load_basic_module()
+
+    result = module.MultiTrackEditor.execute(
+        {
+            "resolution": "width x height (megapixels)",
+            "aspect_ratio": "16:9 (Widescreen)",
+            "megapixels": 1.0,
+        },
+        "Wan",
+        {"total_length": 81, "frame_rate": 16, "tracks": []},
+    )
+
+    tracks_info = result.values[0]
+    assert (tracks_info["width"], tracks_info["height"]) == (1368, 768)
+
+
+def test_timeline_editor_calculates_megapixel_dimensions_on_the_format_grid():
+    module = _load_basic_module()
+
+    result = module.TimelineEditor.execute(
+        {
+            "resolution": "width x height (megapixels)",
+            "aspect_ratio": "16:9 (Widescreen)",
+            "megapixels": 1.0,
+        },
+        "MiniMax",
+        {"total_length": 121, "frame_rate": 24, "tracks": []},
+    )
+
+    timeline_info = result.values[0]
+    assert (timeline_info["width"], timeline_info["height"]) == (1376, 768)
+
+
 def test_timeline_editor_aligns_minimax_total_frames_to_model_grid():
     module = _load_basic_module()
 
