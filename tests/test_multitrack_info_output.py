@@ -597,6 +597,28 @@ def test_multitrack_editor_aligns_minimax_output_frames_to_model_grid():
     assert result.values[0]["format"] == "MiniMax"
 
 
+def test_multitrack_editor_outputs_none_for_empty_minimax_media_tracks():
+    module = _load_basic_module()
+    track_data = {
+        "total_length": 120,
+        "frame_rate": 24,
+        "tracks": [
+            {"id": "task-track", "type": "task", "segments": []},
+            {"id": "video-track", "type": "video", "segments": []},
+            {"id": "audio-track", "type": "audio", "segments": []},
+        ],
+    }
+
+    result = module.MultiTrackEditor.execute(
+        {"resolution": "1344 x 768 (16:9)"},
+        "MiniMax",
+        track_data,
+    )
+
+    assert result.values[2] == [None]
+    assert result.values[3] == [None]
+
+
 @pytest.mark.parametrize(
     ("format_name", "expected_total_length"),
     [("MiniMax", 56), ("Wan", 49)],
@@ -710,10 +732,11 @@ def test_multitrack_editor_minimax_prompt_override_does_not_add_a_timeline_frame
         audio=[audio],
     )
 
-    tracks_info, _images, audio_out, _videos = result.values
+    tracks_info, _images, audio_out, video_out = result.values
     assert tracks_info["total_length"] == 90
     assert tracks_info["timeline_total_length"] == 96
     assert audio_out[0]["waveform"].shape[-1] == 96
+    assert video_out == [None]
 
 
 def test_multitrack_editor_converts_four_and_a_half_seconds_to_minimax_frames():
@@ -1714,6 +1737,61 @@ def test_multitrack_editor_merges_audio_segments_per_track_with_silence():
     assert [segment["content"]["media_index"] for segment in audio_track["segments"]] == [0, 0]
 
 
+def test_multitrack_editor_minimax_stops_media_at_each_track_last_segment():
+    module = _load_basic_module()
+    module.resize_image = lambda images, width, height, _method: torch.ones(
+        images.shape[0], height, width, images.shape[-1]
+    )
+    video = _FakeVideo(
+        _VideoComponents(torch.ones(5, 2, 2, 3), None, Fraction(2))
+    )
+    audio = {"waveform": torch.ones(1, 1, 7), "sample_rate": 2}
+    track_data = {
+        "total_length": 12,
+        "frame_rate": 2,
+        "tracks": [
+            {"id": "task", "type": "task", "segments": [{
+                "id": "task-1",
+                "start_frame": 0,
+                "end_frame": 12,
+                "content": {"media_type": "none"},
+            }]},
+            {"id": "video-track", "type": "video", "segments": [{
+                "id": "video-1",
+                "start_frame": 1,
+                "end_frame": 5,
+                "content": {
+                    "media_type": "video",
+                    "source_type": "slot",
+                    "slot_name": "video1",
+                },
+            }]},
+            {"id": "audio-track", "type": "audio", "segments": [{
+                "id": "audio-1",
+                "start_frame": 1,
+                "end_frame": 7,
+                "content": {
+                    "media_type": "audio",
+                    "source_type": "slot",
+                    "slot_name": "audio1",
+                },
+            }]},
+        ],
+    }
+
+    result = module.MultiTrackEditor.execute(
+        {"resolution": "32 x 32 (1:1)"},
+        "MiniMax",
+        track_data,
+        audio=[audio],
+        video=[video],
+    )
+
+    _tracks_info, _images, audio_out, video_out = result.values
+    assert video_out[0].get_components().images.shape[0] == 5
+    assert audio_out[0]["waveform"].shape[-1] == 7
+
+
 def test_multitrack_task_output_schema_and_task_media_selection():
     module = _load_basic_module()
     schema = module.MultiTrackTaskOutput.define_schema()
@@ -1798,6 +1876,92 @@ def test_multitrack_task_output_aligns_each_minimax_segment_without_plus_one():
     )
 
     assert result.values[3] == 107
+
+
+def test_multitrack_task_output_outputs_none_for_empty_minimax_media_tracks():
+    module = _load_basic_module()
+    tracks_info = {
+        "format": "MiniMax",
+        "frame_rate": 24,
+        "tracks": [
+            {"type": "task", "segments": [{
+                "start_frame": 0,
+                "end_frame": 120,
+                "content": {"user_prompt": "empty media", "images": []},
+            }]},
+            {"type": "video", "segments": []},
+            {"type": "audio", "segments": []},
+        ],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [], [], [], [0], ["default"],
+    )
+
+    assert result.values[5] == [None]
+    assert result.values[6] == [None]
+
+
+def test_multitrack_task_output_keeps_minimax_audio_when_video_track_is_empty():
+    module = _load_basic_module()
+    audio_track = {"waveform": torch.arange(120).reshape(1, 1, 120), "sample_rate": 24}
+    tracks_info = {
+        "format": "MiniMax",
+        "frame_rate": 24,
+        "tracks": [
+            {"type": "task", "segments": [{
+                "start_frame": 0,
+                "end_frame": 120,
+                "content": {"user_prompt": "audio only", "images": []},
+            }]},
+            {"type": "audio", "media_index": 0, "segments": [{
+                "start_frame": 0,
+                "end_frame": 120,
+                "content": {"media_type": "audio", "media_index": 0},
+            }]},
+            {"type": "video", "segments": []},
+        ],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [], [[audio_track]], [], [0], ["default"],
+    )
+
+    assert result.values[5][0]["waveform"].shape[-1] == 120
+    assert result.values[6] == [None]
+
+
+def test_multitrack_task_output_minimax_stops_audio_at_current_task_last_segment():
+    module = _load_basic_module()
+    audio_track = {"waveform": torch.arange(7).reshape(1, 1, 7), "sample_rate": 1}
+    tracks_info = {
+        "format": "MiniMax",
+        "frame_rate": 1,
+        "tracks": [
+            {"type": "task", "segments": [
+                {"start_frame": 0, "end_frame": 5, "content": {"user_prompt": "first"}},
+                {"start_frame": 5, "end_frame": 10, "content": {"user_prompt": "second"}},
+            ]},
+            {"type": "audio", "media_index": 0, "segments": [
+                {
+                    "start_frame": 0,
+                    "end_frame": 2,
+                    "content": {"media_type": "audio", "media_index": 0},
+                },
+                {
+                    "start_frame": 5,
+                    "end_frame": 7,
+                    "content": {"media_type": "audio", "media_index": 0},
+                },
+            ]},
+        ],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [], [[audio_track]], [], [0], ["default"],
+    )
+
+    assert result.values[5][0]["waveform"].flatten().tolist() == [0, 1]
 
 
 def test_multitrack_task_output_minimax_crops_media_at_next_task_start_across_a_gap():

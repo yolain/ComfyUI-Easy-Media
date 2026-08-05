@@ -881,11 +881,16 @@ def _build_tracks_info_and_media_outputs(
         normalized_track = dict(track)
         normalized_track.pop("volume", None)
         normalized_track["segments"] = normalized_segments
-        if track_type == "audio":
+        track_total_length = timeline_total_length
+        if format_name == "MiniMax" and track_type in ("audio", "video"):
+            track_end_frame = _track_media_end_frame(normalized_track)
+            if track_end_frame is not None:
+                track_total_length = max(0, track_end_frame)
+        if track_type == "audio" and (format_name != "MiniMax" or track_audio_segments):
             media_index = len(audio_out)
             audio_out.append(_merge_audio_track(
                 track_audio_segments,
-                timeline_total_length,
+                track_total_length,
                 frame_rate,
                 track_volume_db,
                 track_muted,
@@ -895,12 +900,12 @@ def _build_tracks_info_and_media_outputs(
                 content = normalized_segment.get("content", {})
                 if content.get("media_type") == "audio":
                     content["media_index"] = media_index
-        elif track_type == "video":
+        elif track_type == "video" and (format_name != "MiniMax" or track_video_segments):
             media_index = len(video_out)
             video_out.append(
                 _merge_video_track(
                     track_video_segments,
-                    timeline_total_length,
+                    track_total_length,
                     frame_rate,
                     width,
                     height,
@@ -937,7 +942,14 @@ def _build_tracks_info_and_media_outputs(
         ] if isinstance(data.get("task_markers", []), list) else [],
         "tracks": normalized_tracks,
     }
-    return tracks_info, images_out, audio_out, video_out
+    audio_result = (audio_out or [None]) if format_name == "MiniMax" else audio_out
+    video_result = (video_out or [None]) if format_name == "MiniMax" else video_out
+    return (
+        tracks_info,
+        images_out,
+        audio_result,
+        video_result,
+    )
 
 
 def _index_slot_image(image_input, slot_name: str | None) -> 'torch.Tensor | None':
@@ -2331,16 +2343,28 @@ def _track_output_index(track: dict) -> 'int | None':
         return None
 
 
-def _track_media_end_frame(track: dict) -> 'int | None':
+def _track_media_end_frame(
+    track: dict,
+    start_frame: int | None = None,
+    end_frame: int | None = None,
+) -> 'int | None':
     track_type = track.get("type")
-    ends = [
-        _multitrack_frame_value(segment.get("end_frame"), -1)
-        for segment in track.get("segments", [])
-        if isinstance(segment, dict)
-        and isinstance(segment.get("content"), dict)
-        and segment["content"].get("media_type") == track_type
-    ]
-    valid_ends = [end for end in ends if end >= 0]
+    valid_ends: list[int] = []
+    for segment in track.get("segments", []):
+        if not isinstance(segment, dict):
+            continue
+        content = segment.get("content")
+        if not isinstance(content, dict) or content.get("media_type") != track_type:
+            continue
+        segment_start = _multitrack_frame_value(segment.get("start_frame"))
+        segment_end = _multitrack_frame_value(segment.get("end_frame"), -1)
+        if segment_end < 0:
+            continue
+        if start_frame is not None and segment_end <= start_frame:
+            continue
+        if end_frame is not None and segment_start >= end_frame:
+            continue
+        valid_ends.append(min(segment_end, end_frame) if end_frame is not None else segment_end)
     return max(valid_ends) if valid_ends else None
 
 
@@ -2597,7 +2621,11 @@ class MultiTrackTaskOutput(io.ComfyNode):
             media_index = _track_output_index(track)
             track_media_duration_frames = media_duration_frames
             if is_minimax:
-                track_media_end = _track_media_end_frame(track)
+                track_media_end = _track_media_end_frame(
+                    track,
+                    start_frame,
+                    next_task_start,
+                )
                 if track_media_end is not None:
                     available_frames = max(0, track_media_end - start_frame)
                     track_media_duration_frames = (
@@ -2681,8 +2709,8 @@ class MultiTrackTaskOutput(io.ComfyNode):
             task_type,
             length,
             selected_images,
-            selected_audio,
-            selected_video,
+            (selected_audio or [None]) if is_minimax else selected_audio,
+            (selected_video or [None]) if is_minimax else selected_video,
             image_indexes,
         )
 
