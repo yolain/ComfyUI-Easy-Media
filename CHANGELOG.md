@@ -2,7 +2,7 @@
 
 ---
 
-## [1.1.4] - 2026-08-02
+## [1.1.4] - 2026-08-05
 
 ### ✨ Features
 
@@ -13,6 +13,7 @@
 
 ### 🐛 Bug Fixes
 
+- **Multitrack Editor**: Fixed an issue where, in `MiniMax` format, the `Multitrack Editor` and `Multitrack Task Output` would output empty clips when neither the video track nor the audio track contained any clips.
 - **MultiTrack Editor**: Fix `TRACK_INFO` output when duration is less than 5 seconds — total duration should be the actual total duration of task segments, not the default 5 seconds
 - **MultiTrack Editor**: Task track segments support free placement while preserving gaps; new task segments can be added directly between segments to fill gaps
 - **MultiTrack Editor**: Fix issue where dragging to trim from segment edge hot zone caused the trim frame to shift based on mouse position or canvas zoom level
