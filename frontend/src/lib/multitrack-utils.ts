@@ -633,35 +633,10 @@ export function deleteSegmentsWithLinkedTasks(
   const ids = new Set(segmentIds)
   if (ids.size === 0) return tracks
 
-  const deletedVideoRanges = tracks.flatMap((track) => {
-    if (track.type !== 'video') return []
-    return track.segments
-      .filter((segment) => ids.has(segment.id))
-      .map((segment) => ({ start: segment.start_frame, end: segment.end_frame }))
-  })
-  const remainingVideoRanges = tracks.flatMap((track) => (
-    track.type === 'video'
-      ? track.segments
-          .filter((segment) => !ids.has(segment.id))
-          .map((segment) => ({ start: segment.start_frame, end: segment.end_frame }))
-      : []
-  ))
-
-  const updatedTracks = tracks.map((track) => {
-    const remainingSegments = track.segments.filter((segment) => {
-      if (ids.has(segment.id)) return false
-      if (track.type !== 'task') return true
-      return !deletedVideoRanges.some((range) => (
-        rangesOverlap(segment.start_frame, segment.end_frame, range.start, range.end) &&
-        !remainingVideoRanges.some((remainingRange) => (
-          rangesOverlap(remainingRange.start, remainingRange.end, range.start, range.end)
-        ))
-      ))
-    })
-    return { ...track, segments: remainingSegments }
-  })
-
-  return updatedTracks
+  return tracks.map((track) => ({
+    ...track,
+    segments: track.segments.filter((segment) => !ids.has(segment.id)),
+  }))
 }
 
 export function moveSegmentBetweenCompatibleTracks(

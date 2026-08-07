@@ -6,6 +6,7 @@ import os
 import re
 from pathlib import Path
 from typing import Any, Sequence, TypeVar
+from urllib.parse import quote
 
 T = TypeVar("T")
 
@@ -64,7 +65,12 @@ def file_entry(abs_path: str, rel_path: str, source: str) -> dict[str, Any]:
         source_param = "input" if source == "inputs" else "output"
         filename = os.path.basename(abs_path)
         subfolder = os.path.dirname(rel_path)
-        url = f"/view?filename={filename}&type={source_param}&subfolder={subfolder}"
+        encoded_filename = quote(filename, safe="-_.!~*'()")
+        encoded_subfolder = quote(subfolder, safe="-_.!~*'()")
+        url = (
+            f"/view?filename={encoded_filename}"
+            f"&type={source_param}&subfolder={encoded_subfolder}"
+        )
     else:
         url = ""
     entry: dict[str, Any] = {

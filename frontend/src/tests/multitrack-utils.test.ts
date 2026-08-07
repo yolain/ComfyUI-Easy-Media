@@ -1038,7 +1038,7 @@ describe('multitrack utilities', () => {
     expect(updated[0].segments).toHaveLength(1)
   })
 
-  it('deletes overlapping task segments when deleting a video segment', () => {
+  it('keeps task segments when deleting an overlapping video segment', () => {
     const data = createDefaultTrackData()
     const taskTrack = {
       ...data.tracks[0],
@@ -1081,7 +1081,11 @@ describe('multitrack utilities', () => {
 
     const updated = deleteSegmentWithLinkedTasks([taskTrack, videoTrack], 'video-delete')
 
-    expect(updated[0].segments.map((segment) => segment.id)).toEqual(['task-before', 'task-after'])
+    expect(updated[0].segments.map((segment) => segment.id)).toEqual([
+      'task-before',
+      'task-linked',
+      'task-after',
+    ])
     expect(updated[1].segments).toHaveLength(0)
   })
 
@@ -1154,7 +1158,7 @@ describe('multitrack utilities', () => {
     expect(updated[1].segments.map((segment) => segment.id)).toEqual(['video-keep'])
   })
 
-  it('deletes multiple selected segments through the same linked-task rules', () => {
+  it('deletes only explicitly selected segments in a multi-selection', () => {
     const data = createDefaultTrackData()
     data.tracks[0].segments = [
       {
@@ -1191,11 +1195,11 @@ describe('multitrack utilities', () => {
 
     const updated = deleteSegmentsWithLinkedTasks(data.tracks, ['video-selected', 'task-selected'])
 
-    expect(updated[0].segments).toHaveLength(0)
+    expect(updated[0].segments.map((segment) => segment.id)).toEqual(['task-linked'])
     expect(updated[1].segments.map((segment) => segment.id)).toEqual(['video-keep'])
   })
 
-  it('preserves video and linked-task gaps after deleting selected middle clips', () => {
+  it('preserves every task segment after deleting a middle video clip', () => {
     const data = createDefaultTrackData()
     data.tracks[0].segments = [
       {
@@ -1252,6 +1256,7 @@ describe('multitrack utilities', () => {
     ])
     expect(updated[0].segments.map((segment) => [segment.id, segment.start_frame, segment.end_frame])).toEqual([
       ['task-first', 0, 2],
+      ['task-middle', 2, 5],
       ['task-last', 5, 7],
     ])
   })
