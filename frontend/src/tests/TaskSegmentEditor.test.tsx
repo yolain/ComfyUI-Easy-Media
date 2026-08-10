@@ -241,6 +241,19 @@ describe('TaskSegmentEditor', () => {
     })
   })
 
+  it('supports one-based image item numbering', () => {
+    render(
+      <TaskSegmentEditor
+        segment={taskSegment()}
+        imageIndexOffset={1}
+        onContentChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('task-image-index-a').textContent).toBe('1')
+    expect(screen.getByTestId('task-image-index-b').textContent).toBe('2')
+  })
+
   it('preserves the default image grid while exposing a container for narrow layouts', () => {
     render(<TaskSegmentEditor segment={taskSegment()} onContentChange={vi.fn()} />)
 

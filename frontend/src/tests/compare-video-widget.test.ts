@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { CompareVideoWidget, parseCompareVideoPayload } from '@/components/widgets/compareVideoWidget'
+import { suppressCompareVideoDefaultPreview } from '@/lib/compare-video-node'
 
 const source = { filename: 'source.mp4', type: 'temp' as const }
 const output = { filename: 'output.mp4', type: 'temp' as const }
@@ -30,6 +31,41 @@ describe('compare video payload parsing', () => {
     expect(parseCompareVideoPayload({
       output: { compare_videos: [{ source, output }] },
     })).toMatchObject({ source, output })
+  })
+})
+
+describe('compare video node preview', () => {
+  it('hides only the default ComfyUI output preview', () => {
+    const originalDraw = vi.fn()
+    const compareNodeType = { prototype: { onDrawBackground: originalDraw } }
+    const otherNodeType = { prototype: {} }
+
+    suppressCompareVideoDefaultPreview(compareNodeType, { name: 'easy compareVideos' })
+    suppressCompareVideoDefaultPreview(otherNodeType, { name: 'easy saveVideo' })
+
+    expect(compareNodeType.prototype).toMatchObject({ hideOutputImages: true })
+    expect(otherNodeType.prototype).not.toHaveProperty('hideOutputImages')
+
+    const defaultPreview = { name: 'video-preview' }
+    const compareWidget = { name: 'compare_video' }
+    const videoContainer = document.createElement('div')
+    videoContainer.append(document.createElement('video'))
+    const node = Object.assign(Object.create(compareNodeType.prototype), {
+      widgets: [compareWidget, defaultPreview],
+      videoContainer,
+      imgs: [document.createElement('video')],
+      removeWidget(widget: { name?: string }) {
+        this.widgets = this.widgets.filter((item: { name?: string }) => item !== widget)
+      },
+    })
+
+    node.onDrawBackground()
+
+    expect(originalDraw).not.toHaveBeenCalled()
+    expect(node.widgets).toEqual([compareWidget])
+    expect(videoContainer.childElementCount).toBe(0)
+    expect(node.videoContainer).toBeUndefined()
+    expect(node.imgs).toBeUndefined()
   })
 })
 

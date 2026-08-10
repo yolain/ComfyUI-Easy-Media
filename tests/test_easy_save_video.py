@@ -137,8 +137,15 @@ class _FakeVideo:
 def _install_comfy_stubs(monkeypatch, tmp_path: Path):
     fake_io = _FakeIO()
 
+    class _FakePreviewVideo:
+        def __init__(self, results):
+            self.results = results
+
+        def as_dict(self):
+            return {"images": self.results, "animated": (True,)}
+
     fake_ui = types.SimpleNamespace(
-        PreviewVideo=lambda results: {"preview": results},
+        PreviewVideo=_FakePreviewVideo,
         SavedResult=lambda file, subfolder, folder_type: {
             "file": file,
             "subfolder": subfolder,
@@ -317,6 +324,8 @@ def test_compare_videos_saves_single_source_preview(monkeypatch, tmp_path):
     assert payload["output"] is None
     assert payload["frame_count"] == 48
     assert payload["fps"] == 24.0
+    assert result.ui["images"] == [payload["source"]]
+    assert result.ui["animated"] == (True,)
     assert source_video.saved == []
     assert source_video.component_reads == 0
 
@@ -369,6 +378,8 @@ def test_compare_videos_optionally_saves_output_with_prefix(monkeypatch, tmp_pat
         "subfolder": "",
         "type": "output",
     }
+    assert result.ui["images"] == [payload["output"]]
+    assert result.ui["animated"] == (True,)
     assert (tmp_path / "output" / "compare_00001_.mp4").read_bytes() == b"video"
     assert [path.name for path in (tmp_path / "output").iterdir()] == ["compare_00001_.mp4"]
 

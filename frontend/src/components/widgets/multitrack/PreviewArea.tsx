@@ -1140,6 +1140,7 @@ export function PreviewArea({
             videoSegments={videoSegments}
             frameRate={data.frame_rate}
             totalFrames={data.total_length}
+            imageIndexOffset={resolutionInput.format === 'MiniMax' ? 1 : 0}
             onContentChange={onSelectedSegmentContentChange}
             onTrackSegmentsContentChange={onTrackSegmentsContentChange}
             onTrackSegmentsChange={onTaskTrackSegmentsChange}

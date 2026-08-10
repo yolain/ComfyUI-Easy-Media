@@ -5,6 +5,7 @@ import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 import type { TimelineData } from '@/types/timeline'
 import type { TrackData } from '@/types/multitrack'
 import type { CompareVideoSettings } from '@/components/widgets/compareVideoWidget'
+import { suppressCompareVideoDefaultPreview } from '@/lib/compare-video-node'
 
 declare const __COMFY_EASY_MEDIA_GLOBAL_CSS__: string;
 
@@ -42,6 +43,7 @@ globalThis.comfyAPI!.app.app.registerExtension({
   beforeRegisterNodeDef(nodeType, nodeData) {
     preserveTimelineEditorNodeSize(nodeType, nodeData)
     installEasyMediaSyncPlay(nodeType, nodeData)
+    suppressCompareVideoDefaultPreview(nodeType, nodeData)
   },
 
   getCustomWidgets() {

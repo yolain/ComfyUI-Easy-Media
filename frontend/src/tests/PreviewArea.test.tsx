@@ -502,6 +502,29 @@ describe('PreviewArea', () => {
     expect(screen.queryByTestId('task-preview-images')).toBeNull()
   })
 
+  it('shows MiniMax task image item numbering from one', () => {
+    const { data } = trackData()
+    addActiveTaskTrack(data)
+    const taskTrack = data.tracks.find((track) => track.type === 'task')!
+    const selectedTask = taskTrack.segments[1]
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={36}
+        selectedSegment={{ trackId: taskTrack.id, trackType: 'task', segment: selectedTask }}
+        isPlaying={false}
+        node={{ widgets: [{ name: 'format', value: ['MiniMax'] }] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('task-image-index-first').textContent).toBe('1')
+    expect(screen.getByTestId('task-image-index-second').textContent).toBe('2')
+  })
+
   it('renders active subtitles over an image-only task preview', () => {
     const { data } = trackData()
     addActiveTaskTrack(data)

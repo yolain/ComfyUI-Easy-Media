@@ -670,7 +670,14 @@ class EasyCompareVideos(io.ComfyNode):
             for _path, temp_files, _metadata in prepared.values():
                 _cleanup_compare_temp_files(temp_files)
 
-        return io.NodeOutput(ui={"compare_videos": [payload]})
+        standard_preview = payload["output"] or payload["source"]
+        preview_ui = (
+            ui.PreviewVideo([standard_preview]).as_dict()
+            if standard_preview is not None
+            else {}
+        )
+        preview_ui["compare_videos"] = [payload]
+        return io.NodeOutput(ui=preview_ui)
 
 
 class EasyMergeVideos(io.ComfyNode):

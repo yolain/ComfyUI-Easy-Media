@@ -50,6 +50,7 @@ interface TaskSegmentEditorProps {
   videoSegments?: MultiTrackSegment[]
   frameRate?: number
   totalFrames?: number
+  imageIndexOffset?: number
   onContentChange: (patch: Partial<MultiTrackSegmentContent>) => void
   onTrackSegmentsContentChange?: (updates: TrackSegmentContentUpdate[]) => void
   onTrackSegmentsChange?: (segments: MultiTrackSegment[]) => void
@@ -161,6 +162,7 @@ export function TaskSegmentEditor({
   videoSegments = [],
   frameRate = MULTITRACK_DEFAULT_FRAME_RATE,
   totalFrames,
+  imageIndexOffset = 0,
   onContentChange,
   onTrackSegmentsContentChange,
   onTrackSegmentsChange,
@@ -501,7 +503,7 @@ export function TaskSegmentEditor({
                           data-testid={`task-image-index-${image.id}`}
                           className="absolute bottom-0 left-0 z-10 min-w-5 rounded-sm bg-black/50 px-1.5 py-0.5 text-center text-[9px] font-semibold leading-none text-white"
                         >
-                          {index}
+                          {index + imageIndexOffset}
                         </span>
                       </div>
                     )
