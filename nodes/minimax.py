@@ -588,7 +588,8 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
             display_name="MiniMax H3 To Video",
             category=CATEGORY_MINIMAX,
             description=(
-                "Create MiniMax H3 reference or first/last-frame video conditioning. "
+                "Create MiniMax H3 reference, first/last-frame, or last-frame-only "
+                "video conditioning. "
                 "IMAGE batches and media lists are expanded automatically."
             ),
             is_input_list=True,
@@ -605,7 +606,7 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
                 ),
                 io.Combo.Input(
                     "mode",
-                    options=["reference", "multi_frames"],
+                    options=["reference", "multi_frames", "last_frame"],
                     default="reference",
                 ),
                 io.Int.Input(
@@ -660,8 +661,11 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
         ref_image_size: list[str] | str = "match",
     ) -> io.NodeOutput:
         selected_mode = str(_first_input(mode, "reference"))
-        if selected_mode not in {"reference", "multi_frames"}:
-            raise ValueError("mode must be either 'reference' or 'multi_frames'")
+        frame_modes = {"multi_frames", "last_frame"}
+        if selected_mode not in {"reference", *frame_modes}:
+            raise ValueError(
+                "mode must be 'reference', 'multi_frames', or 'last_frame'"
+            )
 
         selected_clip = _first_input(clip)
         selected_vae = _first_input(vae)
@@ -690,10 +694,10 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
             progress_value = min(progress_total, progress_value + count)
             progress.update_absolute(progress_value, progress_total)
 
-        if selected_mode == "multi_frames" and (video_inputs or standalone_audios):
+        if selected_mode in frame_modes and (video_inputs or standalone_audios):
             raise ValueError("videos and audios are only supported in reference mode")
 
-        if selected_mode == "multi_frames" or not (
+        if selected_mode in frame_modes or not (
             expanded_images or video_inputs or standalone_audios
         ):
             node_inputs: dict[str, Any] = {
@@ -704,9 +708,11 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
                 "height": target_height,
                 "length": target_length,
             }
-            if expanded_images:
+            if selected_mode == "multi_frames" and expanded_images:
                 node_inputs["first_frame"] = expanded_images[0]
-            if len(expanded_images) > 1:
+            if selected_mode == "last_frame" and expanded_images:
+                node_inputs["last_frame"] = expanded_images[-1]
+            elif len(expanded_images) > 1:
                 node_inputs["last_frame"] = expanded_images[-1]
             for _ in expanded_images:
                 advance_progress()

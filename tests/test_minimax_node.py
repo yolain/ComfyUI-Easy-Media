@@ -324,7 +324,11 @@ def test_schema_exposes_list_media_inputs_without_image_position(monkeypatch):
         "ref_image_size",
     ]
     assert inputs["audio_vae"].kwargs["optional"] is True
-    assert inputs["mode"].kwargs["options"] == ["reference", "multi_frames"]
+    assert inputs["mode"].kwargs["options"] == [
+        "reference",
+        "multi_frames",
+        "last_frame",
+    ]
     assert [output.name for output in schema.outputs] == ["positive", "latent"]
 
 
@@ -377,7 +381,37 @@ def test_multi_frames_with_one_image_routes_only_first_frame(monkeypatch):
     assert "last_frame" not in conditioning["inputs"]
 
 
-@pytest.mark.parametrize("mode", ["reference", "multi_frames"])
+def test_last_frame_routes_only_last_expanded_image(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+
+    output = module.EasyMiniMaxH3ToVideo.execute(
+        **_base_inputs(
+            mode=["last_frame"],
+            images=[[_image_values(0, 1)], _image_values(2)],
+        )
+    )
+
+    conditioning = _graph_node(output, "MiniMaxH3ImageToVideo")
+    assert "first_frame" not in conditioning["inputs"]
+    assert conditioning["inputs"]["last_frame"][0, 0, 0, 0].item() == 2
+
+
+def test_last_frame_with_one_image_routes_only_last_frame(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+
+    output = module.EasyMiniMaxH3ToVideo.execute(
+        **_base_inputs(mode=["last_frame"], images=[_image_values(7)])
+    )
+
+    conditioning = _graph_node(output, "MiniMaxH3ImageToVideo")
+    assert "first_frame" not in conditioning["inputs"]
+    assert conditioning["inputs"]["last_frame"].shape == (1, 1, 1, 1)
+    assert conditioning["inputs"]["last_frame"].item() == 7
+
+
+@pytest.mark.parametrize("mode", ["reference", "multi_frames", "last_frame"])
 def test_empty_media_routes_to_text_to_video_for_every_mode(monkeypatch, mode):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
@@ -394,14 +428,28 @@ def test_empty_media_routes_to_text_to_video_for_every_mode(monkeypatch, mode):
 
 
 @pytest.mark.parametrize(
-    ("videos", "audios"),
+    ("mode", "videos", "audios"),
     [
-        ([object()], []),
-        ([], [{"waveform": torch.ones(1, 1, 4), "sample_rate": 32000}]),
-        ([object()], [{"waveform": torch.ones(1, 1, 4), "sample_rate": 32000}]),
+        ("multi_frames", [object()], []),
+        (
+            "multi_frames",
+            [],
+            [{"waveform": torch.ones(1, 1, 4), "sample_rate": 32000}],
+        ),
+        (
+            "multi_frames",
+            [object()],
+            [{"waveform": torch.ones(1, 1, 4), "sample_rate": 32000}],
+        ),
+        ("last_frame", [object()], []),
+        (
+            "last_frame",
+            [],
+            [{"waveform": torch.ones(1, 1, 4), "sample_rate": 32000}],
+        ),
     ],
 )
-def test_multi_frames_rejects_video_and_audio_inputs(monkeypatch, videos, audios):
+def test_frame_modes_reject_video_and_audio_inputs(monkeypatch, mode, videos, audios):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
 
@@ -410,7 +458,7 @@ def test_multi_frames_rejects_video_and_audio_inputs(monkeypatch, videos, audios
         match="videos and audios are only supported in reference mode",
     ):
         module.EasyMiniMaxH3ToVideo.execute(
-            **_base_inputs(videos=videos, audios=audios)
+            **_base_inputs(mode=[mode], videos=videos, audios=audios)
         )
 
 
@@ -692,6 +740,7 @@ def test_minimax_node_has_complete_chinese_localization():
     assert translation["inputs"]["mode"]["options"] == {
         "reference": "参考生视频",
         "multi_frames": "首尾帧生视频",
+        "last_frame": "尾帧生视频",
     }
     assert translation["inputs"]["ref_image_size"]["options"] == {
         "match": "匹配生成尺寸",
