@@ -2988,7 +2988,8 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
             if isinstance(model_config, dict)
             else str(model_config or MINIMAX_MODEL)
         )
-        if selected_model == LLAMACPP_MODEL and llama_model is None:
+        resolved_llama_model = _unwrap_singleton_container(llama_model, None)
+        if selected_model == LLAMACPP_MODEL and resolved_llama_model is None:
             if LLAMA_CPP_INSTRUCT_NODE_ID not in getattr(
                 comfy_nodes, "NODE_CLASS_MAPPINGS", {}
             ):

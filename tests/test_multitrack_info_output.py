@@ -2828,6 +2828,14 @@ def test_multitrack_prompt_enhancer_only_requests_llama_model_for_local_model():
     ) == ["llama_model"]
     assert module.MultiTrackPromptEnhancer.check_lazy_status(
         model=[{"model": module.LLAMACPP_MODEL}],
+        llama_model=(None,),
+    ) == ["llama_model"]
+    assert module.MultiTrackPromptEnhancer.check_lazy_status(
+        model=[{"model": module.LLAMACPP_MODEL}],
+        llama_model=[(None,)],
+    ) == ["llama_model"]
+    assert module.MultiTrackPromptEnhancer.check_lazy_status(
+        model=[{"model": module.LLAMACPP_MODEL}],
         llama_model=[object()],
     ) == []
 
