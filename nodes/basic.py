@@ -2940,6 +2940,14 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                     control_after_generate=True,
                     tooltip="ComfyUI generation seed; used by compatible third-party LLM APIs.",
                 ),
+                io.Boolean.Input(
+                    "enabled",
+                    default=True,
+                    tooltip=(
+                        "Enhance the prompt when enabled. When disabled, return "
+                        "user_prompt unchanged without calling the selected model."
+                    ),
+                ),
             ],
             outputs=[
                 io.String.Output("PROMPT", tooltip="Enhanced video prompt."),
@@ -2955,8 +2963,11 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
         cls,
         model: list[str] | str | dict | None = None,
         llama_model: list | object | None = None,
+        enabled: list[bool] | bool | None = None,
         **_kwargs: object,
     ) -> list[str]:
+        if not bool(_unwrap_list_scalar(enabled, True)):
+            return []
         model_config = _unwrap_list_scalar(model, {})
         selected_model = (
             str(_unwrap_list_scalar(model_config.get("model"), MINIMAX_MODEL))
@@ -2985,7 +2996,13 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
         llama_model: list | object | None = None,
         model: list[dict] | dict | None = None,
         seed: list[int] | int | None = None,
+        enabled: list[bool] | bool | None = None,
     ) -> io.NodeOutput:
+        system_text = str(_unwrap_list_scalar(system_prompt, ""))
+        user_text = str(_unwrap_list_scalar(user_prompt, ""))
+        if not bool(_unwrap_list_scalar(enabled, True)):
+            return io.NodeOutput(user_text, "")
+
         model_config = _unwrap_list_scalar(model, {})
         if not isinstance(model_config, dict):
             raise TypeError("model must be a DynamicCombo configuration dictionary.")
@@ -3006,8 +3023,6 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
         process_bar = ProgressBar(progress_total)
         process_bar.update_absolute(0, progress_total)
 
-        system_text = str(_unwrap_list_scalar(system_prompt, ""))
-        user_text = str(_unwrap_list_scalar(user_prompt, ""))
         selected_seed = int(_unwrap_list_scalar(seed, 0))
 
         if selected_model == LLAMACPP_MODEL:
@@ -3151,6 +3166,7 @@ class MultiTrackPromptEnhancerImageListBridge(io.ComfyNode):
                 "Internal bridge that preserves list-style image inputs for the local "
                 "llama.cpp expansion graph."
             ),
+            is_dev_only=True,
             inputs=[
                 io.AnyType.Input(
                     "images",

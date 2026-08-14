@@ -2751,6 +2751,7 @@ def test_multitrack_prompt_enhancer_schema_exposes_requested_inputs_and_outputs(
     assert schema.is_input_list is True
     assert schema.not_idempotent is True
     assert schema.enable_expand is True
+    assert inputs["enabled"].kwargs["default"] is True
     assert inputs["system_prompt"].kwargs["force_input"] is True
     assert inputs["user_prompt"].kwargs["force_input"] is True
     assert inputs["llama_model"].kwargs["lazy"] is True
@@ -2786,12 +2787,38 @@ def test_multitrack_prompt_enhancer_schema_exposes_requested_inputs_and_outputs(
     })
 
 
+def test_multitrack_prompt_enhancer_returns_user_prompt_unchanged_when_disabled(
+    monkeypatch,
+):
+    module = _load_basic_module()
+
+    monkeypatch.setattr(
+        module,
+        "PromptEnhancerClient",
+        lambda *_args, **_kwargs: pytest.fail("disabled enhancer must not create a client"),
+    )
+
+    output = module.MultiTrackPromptEnhancer.execute(
+        system_prompt=["System"],
+        user_prompt=["Keep this prompt unchanged"],
+        model=["invalid model configuration is intentionally ignored"],
+        enabled=[False],
+    )
+
+    assert output.values == ("Keep this prompt unchanged", "")
+    assert output.expand is None
+
+
 def test_multitrack_prompt_enhancer_only_requests_llama_model_for_local_model():
     module = _load_basic_module()
     module.comfy_nodes.NODE_CLASS_MAPPINGS[module.LLAMA_CPP_INSTRUCT_NODE_ID] = object
 
     assert module.MultiTrackPromptEnhancer.check_lazy_status(
         model=[{"model": module.MINIMAX_MODEL}],
+    ) == []
+    assert module.MultiTrackPromptEnhancer.check_lazy_status(
+        model=[{"model": module.LLAMACPP_MODEL}],
+        enabled=[False],
     ) == []
     assert module.MultiTrackPromptEnhancer.check_lazy_status(
         model=[{"model": "third-party", "apikey": "secret"}],
@@ -3058,6 +3085,7 @@ def test_multitrack_prompt_enhancer_has_complete_chinese_localization():
         "apikey",
         "max_tokens",
         "seed",
+        "enabled",
     }
     assert all("tooltip" in input_translation for input_translation in translation["inputs"].values())
     assert module.LLAMA_CPP_INSTALL_URL in translation["inputs"]["llama_model"]["tooltip"]
@@ -3073,6 +3101,7 @@ def test_multitrack_prompt_enhancer_has_complete_chinese_localization():
         module.LLAMA_CPP_IMAGE_LIST_BRIDGE_NODE_ID
     ]
     bridge_schema = module.MultiTrackPromptEnhancerImageListBridge.define_schema()
+    assert bridge_schema.is_dev_only is True
     assert bridge_translation["inputs"]["images"]["tooltip"]
     assert bridge_translation["outputs"]["0"]["tooltip"]
     assert all(port.kwargs.get("tooltip") for port in bridge_schema.inputs)
