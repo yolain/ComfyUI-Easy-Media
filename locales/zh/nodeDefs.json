@@ -776,6 +776,43 @@
       "7": { "name": "图像索引" }
     }
   },
+  "easy multiTrackPromptEnhancer": {
+    "display_name": "多轨提示词增强器",
+    "description": "调用 MiniMax H3-Context-IR、第三方多模态大模型或本地 llama.cpp 模型，根据多轨任务提示词和参考媒体反推并增强视频提示词。",
+    "inputs": {
+      "system_prompt": { "name": "系统提示词", "tooltip": "可选的系统指令输入。" },
+      "user_prompt": { "name": "用户提示词", "tooltip": "可选的用户提示词输入。系统提示词与用户提示词不能同时为空。" },
+      "type": { "name": "类型", "tooltip": "用于选择 H3 的 t2va、i2va 或 r2va 请求格式，并拼接各服务的媒体角色。" },
+      "length": { "name": "帧数", "tooltip": "MiniMax 对齐帧数，将按最近整数换算为 4–15 秒。" },
+      "images": { "name": "图像", "tooltip": "支持单张图像、图像批次或列表。H3 会逐张上传；第三方模型输入会限制在 200 万像素以内。" },
+      "video": { "name": "视频", "tooltip": "支持视频或视频列表。厂商支持当前来源时优先传入公网视频 URL 或本地视频数据；不支持时才对每个视频最多均匀抽取 24 帧。原生视频上传最多保留 15 秒，RunningHub 视频还会限制为 10MB。" },
+      "audio": { "name": "音频", "tooltip": "用于 H3 r2va 的音频或音频列表，逐个上传至 MiniMax；第三方模型不会传入音频。" },
+      "files": { "name": "文件", "tooltip": "预留文件输入口，等待后续服务接入。" },
+      "llama_model": { "name": "llama.cpp 模型", "tooltip": "本地 llama.cpp 模型输入，仅选择本地模型时才会加载。需要安装 ComfyUI-llama-cpp_vlm 提供的 llama_cpp_instruct_adv 节点：https://github.com/lihaoyun6/ComfyUI-llama-cpp_vlm" },
+      "model": { "name": "模型", "tooltip": "选择用于增强提示词的服务厂商与模型。" },
+      "inference_mode": { "name": "推理模式", "tooltip": "one by one：逐项处理输入列表，同一项内的多图批次会一起推理；images：把所有列表项中的全部图片合并到一次提示中；video：把每个图片列表项分别视为一个视频片段。" },
+      "force_offload": { "name": "强制卸载", "tooltip": "推理完成后卸载本地 llama.cpp 模型以释放内存。" },
+      "ratio": { "name": "宽高比", "tooltip": "海螺官方接口；纯文本 adaptive 请求使用 16:9。" },
+      "return_async": { "name": "异步返回", "tooltip": "当前仅在 h3-context-ir 有效；开启时不进行任务查询。" },
+      "apikey": { "name": "API 密钥", "tooltip": "服务 API 密钥。留空时从 config.yaml 或环境变量读取对应厂商的密钥。" },
+      "max_tokens": { "name": "最大词元数 / 尺寸", "tooltip": "API 模型使用最大输出词元数；本地 llama.cpp 模型会将其作为 max_size，限制 images 和 video 模式的输入图片尺寸。" },
+      "seed": { "name": "随机种", "tooltip": "ComfyUI 常规随机种，由兼容的第三方大模型接口使用。" }
+    },
+    "outputs": {
+      "0": { "name": "提示词", "tooltip": "增强后的视频提示词。" },
+      "1": { "name": "任务 ID", "tooltip": "MiniMax 任务 ID；其他厂商返回空字符串。" }
+    }
+  },
+  "easy multiTrackPromptEnhancerImageListBridge": {
+    "display_name": "多轨提示词增强器图片列表桥接",
+    "description": "内部节点，用于在本地 llama.cpp 展开子图中保持图片列表语义。",
+    "inputs": {
+      "images": { "name": "图像", "tooltip": "由多轨提示词增强器转发的图片数据。" }
+    },
+    "outputs": {
+      "0": { "name": "图像", "tooltip": "以 ComfyUI 输出列表形式转发的图片。" }
+    }
+  },
   "LTXVMakeRefVideo": {
     "display_name": "LTXV 制作参考视频",
     "description": "将批次参考图像扩展为用于 IC-LoRA 的参考视频。",

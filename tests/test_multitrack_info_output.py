@@ -1,4 +1,5 @@
 import importlib.util
+import inspect
 import json
 import sys
 import types
@@ -39,6 +40,34 @@ class _NodeOutput:
     def __init__(self, *values, **kwargs):
         self.values = values
         self.kwargs = kwargs
+        self.expand = kwargs.get("expand")
+
+
+class _GraphNode:
+    def __init__(self, class_type, node_id, inputs):
+        self.class_type = class_type
+        self.node_id = node_id
+        self.inputs = inputs
+
+    def out(self, index):
+        return [self.node_id, index]
+
+
+class _GraphBuilder:
+    def __init__(self):
+        self.nodes = {}
+
+    def node(self, class_type, id=None, **inputs):
+        node_id = id or str(len(self.nodes))
+        node = _GraphNode(class_type, node_id, inputs)
+        self.nodes[node_id] = node
+        return node
+
+    def finalize(self):
+        return {
+            node_id: {"class_type": node.class_type, "inputs": node.inputs}
+            for node_id, node in self.nodes.items()
+        }
 
 
 class _Schema:
@@ -164,6 +193,13 @@ def _load_basic_module():
     comfy_utils.ProgressBar = _ProgressBar
     comfy.utils = comfy_utils
 
+    core_nodes = types.ModuleType("nodes")
+    core_nodes.NODE_CLASS_MAPPINGS = {}
+    comfy_execution = types.ModuleType("comfy_execution")
+    graph_utils = types.ModuleType("comfy_execution.graph_utils")
+    graph_utils.GraphBuilder = _GraphBuilder
+    comfy_execution.graph_utils = graph_utils
+
     package = types.ModuleType("easy_media")
     package.__path__ = []
     nodes_package = types.ModuleType("easy_media.nodes")
@@ -226,6 +262,33 @@ def _load_basic_module():
 
     utils_module.iter_valid_audio_inputs = iter_valid_audio_inputs
     utils_module.video_input_to_local_file = lambda video, **kwargs: (video.get_stream_source(), [])
+    utils_module.log_node_info = lambda *args, **kwargs: None
+    utils_module.audio_data_uris = lambda values: []
+    utils_module.image_tensor_data_uris = lambda values, **kwargs: []
+    utils_module.video_data_uris = lambda values: []
+    utils_module.video_frame_data_uris = lambda values, **kwargs: []
+    utils_module.LLAMACPP_MODEL = "llama.cpp (本地)"
+    utils_module.MINIMAX_MODEL = "h3-context-ir (海螺官方)"
+    utils_module.PROMPT_ENHANCER_MODELS = [
+        utils_module.MINIMAX_MODEL,
+        "doubao (火山引擎)",
+        "glm (智谱)",
+        "doubao (RunningHub)",
+        "glm (RunningHub)",
+        utils_module.LLAMACPP_MODEL,
+    ]
+    utils_module.PROMPT_ENHANCER_MAX_TOKENS = {
+        "doubao (火山引擎)": (4096, 131072),
+        "glm (智谱)": (65536, 131072),
+        "doubao (RunningHub)": (4096, 131072),
+        "glm (RunningHub)": (65536, 131072),
+        utils_module.LLAMACPP_MODEL: (512, 8192),
+    }
+    utils_module.PromptEnhancerApiError = RuntimeError
+    utils_module.PromptEnhancerClient = object
+    utils_module.prompt_enhancer_supports_video_url = lambda model: False
+    utils_module.prompt_enhancer_video_inputs = lambda model, values: []
+    utils_module.minimax_length_to_seconds = lambda length: 5
     folder_paths = types.ModuleType("folder_paths")
     folder_paths.get_temp_directory = lambda: "/tmp"
     folder_paths.get_output_directory = lambda: "/tmp"
@@ -258,6 +321,9 @@ def _load_basic_module():
         "comfy_api.latest": comfy_api_latest,
         "comfy": comfy,
         "comfy.utils": comfy_utils,
+        "comfy_execution": comfy_execution,
+        "comfy_execution.graph_utils": graph_utils,
+        "nodes": core_nodes,
         "easy_media": package,
         "easy_media.nodes": nodes_package,
         "easy_media.utils": utils_module,
@@ -1859,6 +1925,42 @@ def test_multitrack_task_output_schema_and_task_media_selection():
     assert video_track.trim_calls == [(1.0, 2.0, False)]
 
 
+def test_multitrack_task_output_uses_selected_user_prompt_variant():
+    module = _load_basic_module()
+    tracks_info = {
+        "total_length": 4,
+        "frame_rate": 1,
+        "tracks": [{
+            "type": "task",
+            "segments": [{
+                "start_frame": 0,
+                "end_frame": 4,
+                "content": {
+                    "user_prompt": "original A prompt",
+                    "user_prompt_b": "reverse-engineered B prompt",
+                    "user_prompt_variant": "b",
+                    "images": [],
+                },
+            }],
+        }],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [], [], [], [0], ["default"],
+    )
+
+    assert result.values[1] == "reverse-engineered B prompt"
+
+
+def test_multitrack_task_output_defaults_existing_user_prompt_to_variant_a():
+    module = _load_basic_module()
+
+    assert module._selected_multitrack_user_prompt({
+        "user_prompt": "existing prompt",
+        "user_prompt_b": "unused B prompt",
+    }) == "existing prompt"
+
+
 def test_multitrack_task_output_aligns_each_minimax_segment_without_plus_one():
     module = _load_basic_module()
     tracks_info = {
@@ -2541,6 +2643,32 @@ def test_multitrack_task_output_prompt_relay_uses_task_range_without_images():
     assert result.values[1] == "single prompt [5-10]"
 
 
+def test_multitrack_task_output_filters_at_signs_from_prompt_outputs():
+    module = _load_basic_module()
+    prompt_builder_stub = sys.modules["easy_media.utils.prompt_builder"]
+    tracks_info = {
+        "frame_rate": 24,
+        "tracks": [{"type": "task", "segments": [{
+            "start_frame": 0,
+            "end_frame": 12,
+            "content": {
+                "task_mode": "default",
+                "user_prompt": "Use @图片1 and <Picture 1>",
+                "system_prompt": "Keep @resource references",
+                "images": [],
+            },
+        }]}],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [], [], [], [0], ["api"],
+    )
+
+    assert result.values[1] == "Use 图片1 and <Picture 1>"
+    assert prompt_builder_stub.calls[-1][1] == "Use 图片1 and <Picture 1>"
+    assert prompt_builder_stub.calls[-1][2]["custom_system_prompt"] == "Keep resource references"
+
+
 def test_multitrack_task_output_prompt_relay_joins_task_fragments_inside_marker_ranges():
     module = _load_basic_module()
     tracks_info = {
@@ -2583,6 +2711,372 @@ def test_prompt_builder_supports_t2v_and_i2v_tasks():
     assert i2v_system == module.SYSTEM_PROMPTS["default"]
     assert "a person walks" in i2v_user
     assert "1 reference image(s)" in i2v_user
+
+
+def test_multitrack_task_output_uses_l2v_and_minimax_base_system_prompt():
+    module = _load_basic_module()
+    prompt_builder_stub = sys.modules["easy_media.utils.prompt_builder"]
+    tracks_info = {
+        "format": "MiniMax",
+        "frame_rate": 24,
+        "tracks": [{"type": "task", "segments": [{
+            "start_frame": 0,
+            "end_frame": 120,
+            "content": {
+                "task_mode": "l2v",
+                "user_prompt": "finish on this frame",
+                "images": [],
+            },
+        }]}],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [], [], [], [0], ["api"],
+    )
+
+    assert result.values[0] == "api:finish on this frame"
+    assert result.values[1] == "finish on this frame"
+    assert result.values[2] == "l2v"
+    assert prompt_builder_stub.calls[-1][2]["video_format"] == "MiniMax"
+    assert prompt_builder_stub.calls[-1][2]["task_mode"] == "l2v"
+
+
+def test_multitrack_prompt_enhancer_schema_exposes_requested_inputs_and_outputs():
+    module = _load_basic_module()
+
+    schema = module.MultiTrackPromptEnhancer.define_schema()
+    inputs = {input_port.name: input_port for input_port in schema.inputs}
+
+    assert schema.node_id == "easy multiTrackPromptEnhancer"
+    assert schema.is_input_list is True
+    assert schema.not_idempotent is True
+    assert schema.enable_expand is True
+    assert inputs["system_prompt"].kwargs["force_input"] is True
+    assert inputs["user_prompt"].kwargs["force_input"] is True
+    assert inputs["llama_model"].kwargs["lazy"] is True
+    model_options = dict(inputs["model"].kwargs["options"])
+    h3_inputs = {port.name: port for port in model_options[module.MINIMAX_MODEL]}
+    assert h3_inputs["return_async"].kwargs["tooltip"] == (
+        "Only effective for h3-context-ir. When enabled, return the task ID "
+        "without polling the task status."
+    )
+    assert set(h3_inputs) == {"apikey", "ratio", "return_async"}
+    for model_name, (default, maximum) in module.PROMPT_ENHANCER_MAX_TOKENS.items():
+        child_inputs = {port.name: port for port in model_options[model_name]}
+        expected_inputs = (
+            {"inference_mode", "force_offload", "max_tokens"}
+            if model_name == module.LLAMACPP_MODEL
+            else {"apikey", "max_tokens"}
+        )
+        assert set(child_inputs) == expected_inputs
+        assert child_inputs["max_tokens"].kwargs["default"] == default
+        assert child_inputs["max_tokens"].kwargs["max"] == maximum
+    assert all(input_port.kwargs.get("tooltip") for input_port in schema.inputs)
+    assert all(output_port.kwargs.get("tooltip") for output_port in schema.outputs)
+    assert [output.name for output in schema.outputs] == ["PROMPT", "TASK_ID"]
+    execute_parameters = set(inspect.signature(module.MultiTrackPromptEnhancer.execute).parameters)
+    assert execute_parameters.isdisjoint({
+        "apikey",
+        "ratio",
+        "return_async",
+        "inference_mode",
+        "max_frames",
+        "force_offload",
+        "max_tokens",
+    })
+
+
+def test_multitrack_prompt_enhancer_only_requests_llama_model_for_local_model():
+    module = _load_basic_module()
+    module.comfy_nodes.NODE_CLASS_MAPPINGS[module.LLAMA_CPP_INSTRUCT_NODE_ID] = object
+
+    assert module.MultiTrackPromptEnhancer.check_lazy_status(
+        model=[{"model": module.MINIMAX_MODEL}],
+    ) == []
+    assert module.MultiTrackPromptEnhancer.check_lazy_status(
+        model=[{"model": "third-party", "apikey": "secret"}],
+    ) == []
+    assert module.MultiTrackPromptEnhancer.check_lazy_status(
+        model=[{"model": module.LLAMACPP_MODEL, "max_tokens": 4096}],
+    ) == ["llama_model"]
+    assert module.MultiTrackPromptEnhancer.check_lazy_status(
+        model=[{"model": module.LLAMACPP_MODEL}],
+        llama_model=[object()],
+    ) == []
+
+
+def test_multitrack_prompt_enhancer_expands_local_llama_instruct_node():
+    module = _load_basic_module()
+    module.comfy_nodes.NODE_CLASS_MAPPINGS[module.LLAMA_CPP_INSTRUCT_NODE_ID] = object
+    image = torch.zeros(1, 2, 2, 3)
+    llama_model = {"model": "local.gguf"}
+
+    output = module.MultiTrackPromptEnhancer.execute(
+        system_prompt=["System"],
+        user_prompt=["Enhance this prompt"],
+        images=[image],
+        llama_model=[llama_model],
+        model=[{
+            "model": module.LLAMACPP_MODEL,
+            "inference_mode": "images",
+            "max_frames": 48,
+            "force_offload": True,
+            "max_tokens": 1024,
+        }],
+        seed=[9],
+    )
+
+    image_bridge = output.expand["local_llama_images"]
+    expanded = output.expand["local_llama_prompt_enhancer"]
+    assert output.values == (["local_llama_prompt_enhancer", 0], "")
+    assert image_bridge == {
+        "class_type": module.LLAMA_CPP_IMAGE_LIST_BRIDGE_NODE_ID,
+        "inputs": {"images": [image]},
+    }
+    assert expanded["class_type"] == module.LLAMA_CPP_INSTRUCT_NODE_ID
+    assert expanded["inputs"]["llama_model"] == llama_model
+    assert expanded["inputs"]["preset_prompt"] == "Empty - Nothing"
+    assert expanded["inputs"]["custom_prompt"] == "Enhance this prompt"
+    assert expanded["inputs"]["system_prompt"] == "System"
+    assert expanded["inputs"]["inference_mode"] == "images"
+    assert expanded["inputs"]["max_frames"] == 24
+    assert expanded["inputs"]["max_size"] == 1024
+    assert expanded["inputs"]["seed"] == 9
+    assert expanded["inputs"]["force_offload"] is True
+    assert expanded["inputs"]["save_states"] is False
+    assert expanded["inputs"]["images"] == ["local_llama_images", 0]
+
+
+def test_multitrack_prompt_enhancer_reports_missing_local_llama_node():
+    module = _load_basic_module()
+
+    assert module.MultiTrackPromptEnhancer.check_lazy_status(
+        model=[{"model": module.LLAMACPP_MODEL}],
+    ) == []
+
+    with pytest.raises(RuntimeError) as error:
+        module.MultiTrackPromptEnhancer.execute(
+            user_prompt=["Prompt"],
+            llama_model=[object()],
+            model=[{"model": module.LLAMACPP_MODEL}],
+        )
+
+    assert module.LLAMA_CPP_INSTRUCT_NODE_ID in str(error.value)
+    assert module.LLAMA_CPP_INSTALL_URL in str(error.value)
+
+
+def test_multitrack_prompt_enhancer_executes_with_progress_and_h3_task_id(monkeypatch):
+    module = _load_basic_module()
+    calls = []
+
+    class FakeClient:
+        def __init__(self, model, api_key):
+            calls.append((model, api_key))
+
+        def enhance(self, **kwargs):
+            calls.append(kwargs)
+            for _ in range(20):
+                kwargs["poll_callback"]("running")
+            return types.SimpleNamespace(prompt="Enhanced prompt", task_id="task-789")
+
+    monkeypatch.setattr(module, "PromptEnhancerClient", FakeClient)
+    monkeypatch.setattr(
+        module,
+        "image_tensor_data_uris",
+        lambda values, **kwargs: ["image"],
+    )
+    monkeypatch.setattr(
+        module,
+        "video_data_uris",
+        lambda values, **kwargs: calls.append(("video_data", kwargs)) or ["video"],
+    )
+    monkeypatch.setattr(module, "audio_data_uris", lambda values: ["audio"])
+    monkeypatch.setattr(module, "minimax_length_to_seconds", lambda length: 6)
+
+    output = module.MultiTrackPromptEnhancer.execute(
+        system_prompt=["System"],
+        user_prompt=["User"],
+        type=["r2v"],
+        length=[124],
+        images=[torch.zeros(1, 2, 2, 3)],
+        video=[object()],
+        audio=[{"waveform": torch.zeros(1, 1, 16), "sample_rate": 16}],
+        files=["reference.pdf", None],
+        model=[{
+            "model": module.MINIMAX_MODEL,
+            "ratio": "16:9",
+            "return_async": True,
+            "apikey": "secret",
+        }],
+        seed=[9],
+    )
+
+    assert output.values == ("Enhanced prompt", "task-789")
+    assert calls[0] == (module.MINIMAX_MODEL, "secret")
+    assert ("video_data", {"max_duration": 15}) in calls
+    request_call = calls[-1]
+    assert request_call["duration"] == 6
+    assert request_call["poll_interval"] == 5.0
+    assert request_call["file_count"] == 1
+    assert request_call["request_logger"] is module.log_node_info
+    progress_updates = _ProgressBar.instances[-1].updates
+    assert progress_updates[:3] == [0, 10, 20]
+    assert max(progress_updates[:-1]) == 95
+    assert progress_updates[-1] == 100
+
+
+def test_multitrack_prompt_enhancer_prepares_third_party_video_as_24_frames(
+    monkeypatch,
+):
+    module = _load_basic_module()
+    calls = []
+
+    class FakeClient:
+        def __init__(self, model, api_key):
+            calls.append((model, api_key))
+
+        def enhance(self, **kwargs):
+            calls.append(kwargs)
+            return types.SimpleNamespace(prompt="Enhanced", task_id="ignored")
+
+    monkeypatch.setattr(module, "PromptEnhancerClient", FakeClient)
+    monkeypatch.setattr(
+        module,
+        "image_tensor_data_uris",
+        lambda values, **kwargs: calls.append(("images", kwargs)) or ["image"],
+    )
+    monkeypatch.setattr(
+        module,
+        "prompt_enhancer_video_inputs",
+        lambda model, values: calls.append(("video_inputs", model)) or ["frame"],
+    )
+    monkeypatch.setattr(
+        module,
+        "video_data_uris",
+        lambda values: pytest.fail("third-party providers must not upload a video file"),
+    )
+    monkeypatch.setattr(
+        module,
+        "audio_data_uris",
+        lambda values: pytest.fail("third-party providers must not receive audio"),
+    )
+
+    output = module.MultiTrackPromptEnhancer.execute(
+        system_prompt=["System"],
+        user_prompt=["User"],
+        type=["rv2v"],
+        length=[124],
+        images=[torch.zeros(1, 2, 2, 3)],
+        video=[object()],
+        audio=[{"waveform": torch.zeros(1, 1, 16), "sample_rate": 16}],
+        model=[
+            {
+                "model": "third-party",
+                "apikey": "secret",
+                "max_tokens": 1234,
+            }
+        ],
+        seed=[9],
+    )
+
+    assert output.values == ("Enhanced", "")
+    assert ("images", {"max_pixels": 2_000_000}) in calls
+    assert ("video_inputs", "third-party") in calls
+    assert calls[0] == ("third-party", "secret")
+    assert calls[-1]["max_tokens"] == 1234
+    assert calls[-1]["video_urls"] == ["frame"]
+    assert calls[-1]["audio_urls"] == []
+
+
+def test_multitrack_prompt_enhancer_keeps_video_for_native_video_url_provider(
+    monkeypatch,
+):
+    module = _load_basic_module()
+    calls = []
+
+    class FakeClient:
+        def __init__(self, model, api_key):
+            pass
+
+        def enhance(self, **kwargs):
+            calls.append(kwargs)
+            return types.SimpleNamespace(prompt="Enhanced", task_id="")
+
+    monkeypatch.setattr(module, "PromptEnhancerClient", FakeClient)
+    monkeypatch.setattr(
+        module,
+        "prompt_enhancer_video_inputs",
+        lambda model, values: ["video"],
+    )
+    monkeypatch.setattr(
+        module,
+        "image_tensor_data_uris",
+        lambda values, **kwargs: [],
+    )
+    monkeypatch.setattr(module, "video_data_uris", lambda values: ["video"])
+
+    output = module.MultiTrackPromptEnhancer.execute(
+        system_prompt=["System"],
+        user_prompt=["User"],
+        type=["v2v"],
+        length=[124],
+        video=[object()],
+        model=[{
+            "model": "native-video-provider",
+            "apikey": "secret",
+            "max_tokens": 4096,
+        }],
+        seed=[9],
+    )
+
+    assert output.values == ("Enhanced", "")
+    assert calls[-1]["video_urls"] == ["video"]
+
+
+def test_multitrack_prompt_enhancer_has_complete_chinese_localization():
+    module = _load_basic_module()
+    locale_path = Path(__file__).parents[1] / "locales" / "zh" / "nodeDefs.json"
+    node_defs = json.loads(locale_path.read_text(encoding="utf-8"))
+
+    translation = node_defs["easy multiTrackPromptEnhancer"]
+
+    assert set(translation["inputs"]) == {
+        "system_prompt",
+        "user_prompt",
+        "type",
+        "length",
+        "images",
+        "video",
+        "audio",
+        "files",
+        "llama_model",
+        "model",
+        "inference_mode",
+        "force_offload",
+        "ratio",
+        "return_async",
+        "apikey",
+        "max_tokens",
+        "seed",
+    }
+    assert all("tooltip" in input_translation for input_translation in translation["inputs"].values())
+    assert module.LLAMA_CPP_INSTALL_URL in translation["inputs"]["llama_model"]["tooltip"]
+    assert translation["outputs"] == {
+        "0": {"name": "提示词", "tooltip": "增强后的视频提示词。"},
+        "1": {
+            "name": "任务 ID",
+            "tooltip": "MiniMax 任务 ID；其他厂商返回空字符串。",
+        },
+    }
+
+    bridge_translation = node_defs[
+        module.LLAMA_CPP_IMAGE_LIST_BRIDGE_NODE_ID
+    ]
+    bridge_schema = module.MultiTrackPromptEnhancerImageListBridge.define_schema()
+    assert bridge_translation["inputs"]["images"]["tooltip"]
+    assert bridge_translation["outputs"]["0"]["tooltip"]
+    assert all(port.kwargs.get("tooltip") for port in bridge_schema.inputs)
+    assert all(port.kwargs.get("tooltip") for port in bridge_schema.outputs)
 
 
 def test_match_line_returns_first_containing_line_index():

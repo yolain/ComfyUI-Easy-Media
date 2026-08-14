@@ -13,7 +13,7 @@ import { uuid } from './uuid'
 export const MULTITRACK_DEFAULT_FRAME_RATE = 24
 export const MULTITRACK_DEFAULT_TOTAL_LENGTH = 120
 export const MULTITRACK_MIN_DURATION_SECONDS = 5
-export const MULTITRACK_TASK_MODES = ['default', 'ref', 'edit'] as const
+export const MULTITRACK_TASK_MODES = ['default', 'l2v', 'ref', 'edit'] as const
 export const MULTITRACK_DEFAULT_TASK_MODE: MultiTrackTaskMode = 'default'
 export const MULTITRACK_DEFAULT_VOLUME_DB = 0
 export const MULTITRACK_MIN_VOLUME_DB = -20
@@ -476,7 +476,7 @@ export function applyCombinedTaskTexts(
   if (normalizedParts.length === segments.length) {
     return segments.map((segment, index) => ({
       ...segment,
-      content: { ...segment.content, user_prompt: normalizedParts[index] },
+      content: applySelectedTaskUserPrompt(segment.content, normalizedParts[index]),
     }))
   }
 
@@ -497,7 +497,7 @@ export function applyCombinedTaskTexts(
       end_frame: cursor,
       color: existing?.color ?? color,
       content: existing
-        ? { ...existing.content, user_prompt: userPrompt }
+        ? applySelectedTaskUserPrompt(existing.content, userPrompt)
         : {
             media_type: 'none',
             task_mode: MULTITRACK_DEFAULT_TASK_MODE,
@@ -506,6 +506,28 @@ export function applyCombinedTaskTexts(
           },
     }
   })
+}
+
+export function getSelectedTaskUserPrompt(content: MultiTrackSegmentContent): string {
+  return content.user_prompt_variant === 'b'
+    ? content.user_prompt_b ?? ''
+    : content.user_prompt ?? content.text ?? ''
+}
+
+export function getSelectedTaskUserPromptPatch(
+  content: MultiTrackSegmentContent,
+  value: string,
+): Partial<MultiTrackSegmentContent> {
+  return content.user_prompt_variant === 'b'
+    ? { user_prompt_b: value }
+    : { user_prompt: value }
+}
+
+function applySelectedTaskUserPrompt(
+  content: MultiTrackSegmentContent,
+  value: string,
+): MultiTrackSegmentContent {
+  return { ...content, ...getSelectedTaskUserPromptPatch(content, value) }
 }
 
 export function distributeMultiTrackSegmentsEvenly(

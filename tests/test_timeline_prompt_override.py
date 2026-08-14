@@ -110,6 +110,20 @@ def _load_basic_module(monkeypatch):
     )
     utils.trim_audio = lambda audio, *args, **kwargs: audio
     utils.video_input_to_local_file = lambda *args, **kwargs: ("", [])
+    utils.log_node_info = lambda *args, **kwargs: None
+    utils.audio_data_uris = lambda values: []
+    utils.image_tensor_data_uris = lambda values, **kwargs: []
+    utils.video_data_uris = lambda values: []
+    utils.video_frame_data_uris = lambda values, **kwargs: []
+    utils.LLAMACPP_MODEL = "llama.cpp (本地)"
+    utils.MINIMAX_MODEL = "h3-context-ir (海螺官方)"
+    utils.PROMPT_ENHANCER_MODELS = [utils.MINIMAX_MODEL]
+    utils.PROMPT_ENHANCER_MAX_TOKENS = {}
+    utils.PromptEnhancerApiError = RuntimeError
+    utils.PromptEnhancerClient = object
+    utils.prompt_enhancer_supports_video_url = lambda model: False
+    utils.prompt_enhancer_video_inputs = lambda model, values: []
+    utils.minimax_length_to_seconds = lambda length: 5
     utils.write_ass_file = lambda *args, **kwargs: None
     utils.write_srt_file = lambda *args, **kwargs: None
     prompt_override_path = Path(__file__).resolve().parents[1] / "utils" / "prompt_override.py"

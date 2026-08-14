@@ -2017,6 +2017,8 @@ describe('MultiTrackWidget', () => {
       type: 'subtitle',
       name: 'Subtitle',
       color: '#ffffff',
+      muted: false,
+      locked: false,
       segments: [{
         id: 'subtitle-active',
         start_frame: 0,

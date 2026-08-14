@@ -59,6 +59,8 @@ class EasyMediaExtension(ComfyExtension):
             AddSubtitleToVideo,
             MultiTrackAddSubtitleToVideo,
             MultiTrackTaskOutput,
+            MultiTrackPromptEnhancer,
+            MultiTrackPromptEnhancerImageListBridge,
             TimelineSegmentOutput,
             TimelineSegmentCount,
             MakeRefsCompositeBySam3,
