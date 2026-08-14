@@ -468,7 +468,12 @@ def test_minimax_sync_request_polls_every_five_seconds():
         [
             {"task_id": "task-456"},
             {"task": {"status": "queued"}},
-            {"task": {"status": "succeeded", "content": {"prompt": "Enhanced."}}},
+            {
+                "task": {
+                    "status": "succeeded",
+                    "content": {"prompt": "```text\nEnhanced.\n```"},
+                }
+            },
         ]
     )
     sleeps = []
@@ -554,7 +559,9 @@ def test_openai_compatible_request_extracts_prompt_without_task_id():
 
     def opener(request, timeout):
         requests.append(request)
-        return _Response({"choices": [{"message": {"content": "  Better prompt.  "}}]})
+        return _Response({
+            "choices": [{"message": {"content": "  ```text\nBetter prompt.\n```  "}}]
+        })
 
     client = module.PromptEnhancerClient(
         module.ZHIPU_MODEL,
@@ -581,6 +588,48 @@ def test_openai_compatible_request_extracts_prompt_without_task_id():
         "content": "You enhance prompts.",
     }
     assert payload["messages"][1]["content"][1]["type"] == "image_url"
+
+
+def test_openai_compatible_request_maps_comfyui_seed_to_int32():
+    module = _load_module()
+    requests = []
+
+    client = module.PromptEnhancerClient(
+        module.ZHIPU_MODEL,
+        "secret",
+        opener=lambda request, timeout: (
+            requests.append(request)
+            or _Response({"choices": [{"message": {"content": "Enhanced"}}]})
+        ),
+    )
+    client.enhance(
+        system_prompt="",
+        user_prompt="Prompt",
+        task_type="t2v",
+        duration=5,
+        ratio="16:9",
+        seed=715809353714956,
+    )
+
+    payload = json.loads(requests[0].data)
+    assert payload["seed"] == 1514229004
+    assert 0 <= payload["seed"] <= 0x7FFFFFFF
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected"),
+    [
+        ("```text\nA cinematic prompt.\n```", "A cinematic prompt."),
+        ("  ```text\r\nA cinematic prompt.\r\n```  ", "A cinematic prompt."),
+        ("```json\n{\"prompt\": \"keep\"}\n```", "```json\n{\"prompt\": \"keep\"}\n```"),
+        ("```text\nMissing closing fence", "```text\nMissing closing fence"),
+        ("Plain prompt", "Plain prompt"),
+    ],
+)
+def test_strip_text_code_fence_only_removes_complete_text_fence(prompt, expected):
+    module = _load_module()
+
+    assert module.strip_text_code_fence(prompt) == expected
 
 
 def test_minimax_failed_task_is_logged():

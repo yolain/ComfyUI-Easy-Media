@@ -55,6 +55,7 @@ __all__ = [
     "minimax_length_to_seconds",
     "prompt_enhancer_supports_video_url",
     "prompt_enhancer_video_inputs",
+    "strip_text_code_fence",
     "video_data_uris",
     "video_frame_data_uris",
 ]
@@ -62,6 +63,7 @@ __all__ = [
 H3_UPLOAD_ENDPOINT = "https://api.minimaxi.com/v1/files/upload"
 H3_UPLOAD_PURPOSE = "video_generation_input"
 THIRD_PARTY_MAX_IMAGE_PIXELS = 2_000_000
+OPENAI_SEED_MODULUS = 2**31
 
 PROMPT_ENHANCER_MODELS = [
     MINIMAX_MODEL,
@@ -151,6 +153,19 @@ PROMPT_ENHANCER_MAX_TOKENS = {
     if config.default_max_tokens is not None and config.max_tokens_limit is not None
 }
 PROMPT_ENHANCER_MAX_TOKENS[LLAMACPP_MODEL] = (512, 8192)
+
+
+def _openai_compatible_seed(seed: int) -> int:
+    """Map ComfyUI's unsigned 64-bit seed into the API's signed int32 range."""
+    return int(seed) % OPENAI_SEED_MODULUS
+
+
+def strip_text_code_fence(prompt: str) -> str:
+    """Remove a complete Markdown text fence while preserving other fence types."""
+    text = str(prompt).strip()
+    if text.startswith("```text") and text.endswith("```"):
+        return text[len("```text"):-len("```")].strip()
+    return text
 
 
 def prompt_enhancer_supports_video_url(model: str) -> bool:
@@ -1130,7 +1145,7 @@ class PromptEnhancerClient:
             "stream": False,
         }
         if self.config.supports_seed:
-            payload["seed"] = int(seed)
+            payload["seed"] = _openai_compatible_seed(seed)
         token_limit = self.config.max_tokens_limit
         requested_max_tokens = (
             self.config.default_max_tokens if max_tokens is None else int(max_tokens)
@@ -1159,7 +1174,7 @@ class PromptEnhancerClient:
             prompt = "".join(
                 str(item.get("text", "")) for item in prompt if isinstance(item, dict)
             )
-        prompt = str(prompt).strip()
+        prompt = strip_text_code_fence(str(prompt))
         if not prompt:
             raise PromptEnhancerApiError(
                 f"{self.config.provider} API returned an empty prompt."
@@ -1232,7 +1247,10 @@ class PromptEnhancerClient:
                     request_logger,
                     f"task succeeded: task_id={task_id}",
                 )
-                return PromptEnhancerResult(prompt=prompt.strip(), task_id=task_id)
+                return PromptEnhancerResult(
+                    prompt=strip_text_code_fence(prompt),
+                    task_id=task_id,
+                )
             if status in {"failed", "cancelled"}:
                 error = task.get("error")
                 error_message = _extract_error_message(error)

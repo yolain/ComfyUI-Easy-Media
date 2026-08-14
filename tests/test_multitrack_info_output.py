@@ -2855,7 +2855,7 @@ def test_multitrack_prompt_enhancer_expands_local_llama_instruct_node():
 
     image_bridge = output.expand["local_llama_images"]
     expanded = output.expand["local_llama_prompt_enhancer"]
-    assert output.values == (["local_llama_prompt_enhancer", 0], "")
+    assert output.values == (["local_llama_prompt_start_switch", 0], "")
     assert image_bridge == {
         "class_type": module.LLAMA_CPP_IMAGE_LIST_BRIDGE_NODE_ID,
         "inputs": {"images": [image]},
@@ -2872,6 +2872,53 @@ def test_multitrack_prompt_enhancer_expands_local_llama_instruct_node():
     assert expanded["inputs"]["force_offload"] is True
     assert expanded["inputs"]["save_states"] is False
     assert expanded["inputs"]["images"] == ["local_llama_images", 0]
+    assert output.expand["local_llama_prompt_starts_with_text_fence"] == {
+        "class_type": module.STRING_COMPARE_NODE_ID,
+        "inputs": {
+            "string_a": ["local_llama_prompt_trim", 0],
+            "string_b": "```text",
+            "mode": "Starts With",
+            "case_sensitive": True,
+        },
+    }
+    assert output.expand["local_llama_prompt_ends_with_fence"] == {
+        "class_type": module.STRING_COMPARE_NODE_ID,
+        "inputs": {
+            "string_a": ["local_llama_prompt_trim", 0],
+            "string_b": "```",
+            "mode": "Ends With",
+            "case_sensitive": True,
+        },
+    }
+    assert output.expand["local_llama_prompt_remove_text_fence"]["class_type"] == (
+        module.STRING_REPLACE_NODE_ID
+    )
+    assert output.expand["local_llama_prompt_remove_closing_fence"]["class_type"] == (
+        module.STRING_REPLACE_NODE_ID
+    )
+    assert output.expand["local_llama_prompt_start_switch"] == {
+        "class_type": module.SWITCH_NODE_ID,
+        "inputs": {
+            "switch": ["local_llama_prompt_starts_with_text_fence", 0],
+            "on_false": ["local_llama_prompt_trim", 0],
+            "on_true": ["local_llama_prompt_end_switch", 0],
+        },
+    }
+
+
+def test_multitrack_prompt_enhancer_unwraps_tuple_wrapped_llama_model():
+    module = _load_basic_module()
+    module.comfy_nodes.NODE_CLASS_MAPPINGS[module.LLAMA_CPP_INSTRUCT_NODE_ID] = object
+    llama_model = {"model": "local.gguf", "mmproj": "local-mmproj.gguf"}
+
+    output = module.MultiTrackPromptEnhancer.execute(
+        user_prompt=["Enhance this prompt"],
+        llama_model=[(llama_model,)],
+        model=[{"model": module.LLAMACPP_MODEL}],
+    )
+
+    expanded = output.expand["local_llama_prompt_enhancer"]
+    assert expanded["inputs"]["llama_model"] == llama_model
 
 
 def test_multitrack_prompt_enhancer_reports_missing_local_llama_node():

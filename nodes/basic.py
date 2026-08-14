@@ -187,6 +187,10 @@ CATEGORY_VIDEO = "EasyUse/Video"
 PROMPT_FORMAT_OPTIONS = ["default", "promptRelay"]
 LLAMA_CPP_INSTRUCT_NODE_ID = "llama_cpp_instruct_adv"
 LLAMA_CPP_IMAGE_LIST_BRIDGE_NODE_ID = "easy multiTrackPromptEnhancerImageListBridge"
+STRING_COMPARE_NODE_ID = "StringCompare"
+STRING_REPLACE_NODE_ID = "StringReplace"
+STRING_TRIM_NODE_ID = "StringTrim"
+SWITCH_NODE_ID = "ComfySwitchNode"
 LLAMA_CPP_INSTALL_URL = "https://github.com/lihaoyun6/ComfyUI-llama-cpp_vlm"
 PROMPT_ENHANCER_RATIO_OPTIONS = [
     "adaptive",
@@ -2355,6 +2359,16 @@ def _unwrap_list_scalar(value, default=None):
     return value if value is not None else default
 
 
+def _unwrap_singleton_container(value, default=None):
+    while isinstance(value, (list, tuple)):
+        if not value:
+            return default
+        if len(value) != 1:
+            return value
+        value = value[0]
+    return value if value is not None else default
+
+
 def _track_output_index(track: dict) -> 'int | None':
     raw_index = track.get("media_index")
     if raw_index is None:
@@ -3034,10 +3048,15 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                     f"{LLAMA_CPP_INSTALL_URL} 下载并安装 ComfyUI-llama-cpp_vlm，"
                     "然后重启 ComfyUI。"
                 )
-            selected_llama_model = _unwrap_list_scalar(llama_model, None)
+            selected_llama_model = _unwrap_singleton_container(llama_model, None)
             if selected_llama_model is None:
                 raise RuntimeError(
                     "llama_model must be connected when model is llama.cpp (本地)."
+                )
+            if not isinstance(selected_llama_model, dict):
+                raise TypeError(
+                    "llama_model must resolve to a llama.cpp configuration dictionary; "
+                    f"received {type(selected_llama_model).__name__}."
                 )
             graph = GraphBuilder()
             node_inputs: dict[str, object] = {
@@ -3069,9 +3088,65 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                 id="local_llama_prompt_enhancer",
                 **node_inputs,
             )
+            trimmed = graph.node(
+                STRING_TRIM_NODE_ID,
+                id="local_llama_prompt_trim",
+                string=enhancer.out(0),
+                mode="Both",
+            )
+            starts_with_text_fence = graph.node(
+                STRING_COMPARE_NODE_ID,
+                id="local_llama_prompt_starts_with_text_fence",
+                string_a=trimmed.out(0),
+                string_b="```text",
+                mode="Starts With",
+                case_sensitive=True,
+            )
+            ends_with_fence = graph.node(
+                STRING_COMPARE_NODE_ID,
+                id="local_llama_prompt_ends_with_fence",
+                string_a=trimmed.out(0),
+                string_b="```",
+                mode="Ends With",
+                case_sensitive=True,
+            )
+            without_text_fence = graph.node(
+                STRING_REPLACE_NODE_ID,
+                id="local_llama_prompt_remove_text_fence",
+                string=trimmed.out(0),
+                find="```text",
+                replace="",
+            )
+            without_closing_fence = graph.node(
+                STRING_REPLACE_NODE_ID,
+                id="local_llama_prompt_remove_closing_fence",
+                string=without_text_fence.out(0),
+                find="```",
+                replace="",
+            )
+            cleaned = graph.node(
+                STRING_TRIM_NODE_ID,
+                id="local_llama_prompt_cleaned_trim",
+                string=without_closing_fence.out(0),
+                mode="Both",
+            )
+            cleaned_if_ending_matches = graph.node(
+                SWITCH_NODE_ID,
+                id="local_llama_prompt_end_switch",
+                switch=ends_with_fence.out(0),
+                on_false=trimmed.out(0),
+                on_true=cleaned.out(0),
+            )
+            final_prompt = graph.node(
+                SWITCH_NODE_ID,
+                id="local_llama_prompt_start_switch",
+                switch=starts_with_text_fence.out(0),
+                on_false=trimmed.out(0),
+                on_true=cleaned_if_ending_matches.out(0),
+            )
             process_bar.update_absolute(progress_total, progress_total)
             return io.NodeOutput(
-                enhancer.out(0),
+                final_prompt.out(0),
                 "",
                 expand=graph.finalize(),
             )
