@@ -12,7 +12,7 @@ import torch
 import torch.nn.functional as F
 
 from comfy_api.latest import InputImpl, Types, io
-from comfy_execution.graph_utils import GraphBuilder
+from comfy_execution.graph_utils import GraphBuilder, is_link
 from comfy.utils import ProgressBar
 from ..utils import (
     FFMPEG_RESIZE_METHODS,
@@ -2935,6 +2935,7 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                     "llama_model",
                     optional=True,
                     lazy=True,
+                    raw_link=True,
                     tooltip=(
                         "Local llama.cpp model input; evaluated only when the local "
                         "provider is selected. Requires llama_cpp_instruct_adv from "
@@ -2971,31 +2972,6 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                 ),
             ],
         )
-
-    @classmethod
-    def check_lazy_status(
-        cls,
-        model: list[str] | str | dict | None = None,
-        llama_model: list | object | None = None,
-        enabled: list[bool] | bool | None = None,
-        **_kwargs: object,
-    ) -> list[str]:
-        if not bool(_unwrap_list_scalar(enabled, True)):
-            return []
-        model_config = _unwrap_list_scalar(model, {})
-        selected_model = (
-            str(_unwrap_list_scalar(model_config.get("model"), MINIMAX_MODEL))
-            if isinstance(model_config, dict)
-            else str(model_config or MINIMAX_MODEL)
-        )
-        resolved_llama_model = _unwrap_singleton_container(llama_model, None)
-        if selected_model == LLAMACPP_MODEL and resolved_llama_model is None:
-            if LLAMA_CPP_INSTRUCT_NODE_ID not in getattr(
-                comfy_nodes, "NODE_CLASS_MAPPINGS", {}
-            ):
-                return []
-            return ["llama_model"]
-        return []
 
     @classmethod
     def execute(
@@ -3054,9 +3030,12 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                 raise RuntimeError(
                     "llama_model must be connected when model is llama.cpp (本地)."
                 )
-            if not isinstance(selected_llama_model, dict):
+            if not isinstance(selected_llama_model, dict) and not is_link(
+                selected_llama_model
+            ):
                 raise TypeError(
-                    "llama_model must resolve to a llama.cpp configuration dictionary; "
+                    "llama_model must resolve to a graph link or llama.cpp "
+                    "configuration dictionary; "
                     f"received {type(selected_llama_model).__name__}."
                 )
             graph = GraphBuilder()

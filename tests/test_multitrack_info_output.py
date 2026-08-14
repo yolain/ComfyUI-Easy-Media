@@ -198,6 +198,12 @@ def _load_basic_module():
     comfy_execution = types.ModuleType("comfy_execution")
     graph_utils = types.ModuleType("comfy_execution.graph_utils")
     graph_utils.GraphBuilder = _GraphBuilder
+    graph_utils.is_link = lambda value: (
+        isinstance(value, list)
+        and len(value) == 2
+        and isinstance(value[0], str)
+        and isinstance(value[1], (int, float))
+    )
     comfy_execution.graph_utils = graph_utils
 
     package = types.ModuleType("easy_media")
@@ -2755,6 +2761,7 @@ def test_multitrack_prompt_enhancer_schema_exposes_requested_inputs_and_outputs(
     assert inputs["system_prompt"].kwargs["force_input"] is True
     assert inputs["user_prompt"].kwargs["force_input"] is True
     assert inputs["llama_model"].kwargs["lazy"] is True
+    assert inputs["llama_model"].kwargs["raw_link"] is True
     model_options = dict(inputs["model"].kwargs["options"])
     h3_inputs = {port.name: port for port in model_options[module.MINIMAX_MODEL]}
     assert h3_inputs["return_async"].kwargs["tooltip"] == (
@@ -2809,35 +2816,19 @@ def test_multitrack_prompt_enhancer_returns_user_prompt_unchanged_when_disabled(
     assert output.expand is None
 
 
-def test_multitrack_prompt_enhancer_only_requests_llama_model_for_local_model():
+def test_multitrack_prompt_enhancer_passes_connected_llama_model_link_to_expansion():
     module = _load_basic_module()
     module.comfy_nodes.NODE_CLASS_MAPPINGS[module.LLAMA_CPP_INSTRUCT_NODE_ID] = object
 
-    assert module.MultiTrackPromptEnhancer.check_lazy_status(
-        model=[{"model": module.MINIMAX_MODEL}],
-    ) == []
-    assert module.MultiTrackPromptEnhancer.check_lazy_status(
+    output = module.MultiTrackPromptEnhancer.execute(
+        user_prompt=["Enhance this prompt"],
+        llama_model=[["llama-loader", 0]],
         model=[{"model": module.LLAMACPP_MODEL}],
-        enabled=[False],
-    ) == []
-    assert module.MultiTrackPromptEnhancer.check_lazy_status(
-        model=[{"model": "third-party", "apikey": "secret"}],
-    ) == []
-    assert module.MultiTrackPromptEnhancer.check_lazy_status(
-        model=[{"model": module.LLAMACPP_MODEL, "max_tokens": 4096}],
-    ) == ["llama_model"]
-    assert module.MultiTrackPromptEnhancer.check_lazy_status(
-        model=[{"model": module.LLAMACPP_MODEL}],
-        llama_model=(None,),
-    ) == ["llama_model"]
-    assert module.MultiTrackPromptEnhancer.check_lazy_status(
-        model=[{"model": module.LLAMACPP_MODEL}],
-        llama_model=[(None,)],
-    ) == ["llama_model"]
-    assert module.MultiTrackPromptEnhancer.check_lazy_status(
-        model=[{"model": module.LLAMACPP_MODEL}],
-        llama_model=[object()],
-    ) == []
+    )
+
+    expanded = output.expand["local_llama_prompt_enhancer"]
+    assert expanded["inputs"]["llama_model"] == ["llama-loader", 0]
+    assert "check_lazy_status" not in module.MultiTrackPromptEnhancer.__dict__
 
 
 def test_multitrack_prompt_enhancer_expands_local_llama_instruct_node():
@@ -2931,10 +2922,6 @@ def test_multitrack_prompt_enhancer_unwraps_tuple_wrapped_llama_model():
 
 def test_multitrack_prompt_enhancer_reports_missing_local_llama_node():
     module = _load_basic_module()
-
-    assert module.MultiTrackPromptEnhancer.check_lazy_status(
-        model=[{"model": module.LLAMACPP_MODEL}],
-    ) == []
 
     with pytest.raises(RuntimeError) as error:
         module.MultiTrackPromptEnhancer.execute(
