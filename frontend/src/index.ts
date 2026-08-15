@@ -16,7 +16,7 @@ declare global {
 
 const [
   { createReactWidget },
-  { TimelineWidget, MultiTrackWidget, CompareVideoWidget },
+  { TimelineWidget, MultiTrackWidget, CompareVideoWidget, PromptEnhancerAccountWidget },
   { createDefaultTimelineData },
   { createDefaultTrackData },
 ] = await Promise.all([
@@ -64,6 +64,16 @@ globalThis.comfyAPI!.app.app.registerExtension({
         defaultValue: DEFAULT_COMPARE_VIDEO_VALUE,
         domWidgetOptions: {
           getMinHeight: () => 360,
+          hideOnZoom: false,
+          serialize: true,
+        },
+      }),
+      EASY_API_ACCOUNT: createReactWidget<string>(PromptEnhancerAccountWidget, {
+        defaultValue: '',
+        height: 30,
+        domWidgetOptions: {
+          getMinHeight: () => 30,
+          getMaxHeight: () => 30,
           hideOnZoom: false,
           serialize: true,
         },
