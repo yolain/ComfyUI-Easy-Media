@@ -2,6 +2,15 @@
 
 ---
 
+## [1.2.0] - pre-release
+
+### ✨ New Features
+
+- **Multi-Track Prompt Enhancer**: Added this node, supports prompt enhancement for models like h3-context-ir, supports local model usage
+- **Multi-Track Editor**: Added user prompt A/B output, supports selecting different user prompt outputs
+- **Multi-Track Editor**: Added user prompt reference functionality, supports referencing resources via `<Picture 1>`, `<Audio 1>`, `<Video 1>`, `@图片1` and similar methods, supports multi-element combinations
+
+
 ## [1.1.4] - 2026-08-05
 
 ### ✨ Features
