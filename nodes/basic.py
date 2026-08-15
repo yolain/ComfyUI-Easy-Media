@@ -2841,7 +2841,7 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                 default, maximum = PROMPT_ENHANCER_MAX_TOKENS[model_name]
                 inputs.append(
                     io.Int.Input(
-                        "max_tokens",
+                        "max_size",
                         default=default,
                         min=128 if model_name == LLAMACPP_MODEL else 1,
                         max=maximum,
@@ -3020,7 +3020,7 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
         selected_api_key = str(
             _unwrap_list_scalar(model_config.get("apikey"), "")
         )
-        selected_max_tokens = model_config.get("max_tokens")
+        selected_max_size = model_config.get("max_size")
         selected_inference_mode = model_config.get(
             "inference_mode", "one by one"
         )
@@ -3057,7 +3057,7 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                 )
             graph = GraphBuilder()
             local_max_size = min(
-                int(_unwrap_list_scalar(selected_max_tokens, 512)),
+                int(_unwrap_list_scalar(selected_max_size, 512)),
                 PROMPT_ENHANCER_MAX_TOKENS[LLAMACPP_MODEL][1],
             )
             node_inputs: dict[str, object] = {
@@ -3211,10 +3211,10 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                 image_urls=image_urls,
                 video_urls=video_urls,
                 audio_urls=audio_urls,
-                max_tokens=(
+                max_size=(
                     None
-                    if selected_max_tokens is None
-                    else int(_unwrap_list_scalar(selected_max_tokens, 4096))
+                    if selected_max_size is None
+                    else int(_unwrap_list_scalar(selected_max_size, 512))
                 ),
                 return_async=async_requested,
                 poll_interval=5.0,
