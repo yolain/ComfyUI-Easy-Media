@@ -2762,8 +2762,19 @@ def test_multitrack_prompt_enhancer_schema_exposes_requested_inputs_and_outputs(
     assert inputs["user_prompt"].kwargs["force_input"] is True
     assert inputs["llama_model"].kwargs["lazy"] is True
     assert inputs["llama_model"].kwargs["raw_link"] is True
+    assert schema.inputs[-1].name == "api_account"
+    assert "socketless" not in inputs["api_account"].kwargs
     model_options = dict(inputs["model"].kwargs["options"])
     h3_inputs = {port.name: port for port in model_options[module.MINIMAX_MODEL]}
+    assert h3_inputs["ratio"].kwargs["options"] == [
+        "adaptive",
+        "21:9",
+        "16:9",
+        "4:3",
+        "1:1",
+        "3:4",
+        "9:16",
+    ]
     assert h3_inputs["return_async"].kwargs["tooltip"] == (
         "Only effective for h3-context-ir. When enabled, return the task ID "
         "without polling the task status."
@@ -2781,8 +2792,13 @@ def test_multitrack_prompt_enhancer_schema_exposes_requested_inputs_and_outputs(
         assert child_inputs["max_tokens"].kwargs["max"] == maximum
     assert all(input_port.kwargs.get("tooltip") for input_port in schema.inputs)
     assert all(output_port.kwargs.get("tooltip") for output_port in schema.outputs)
-    assert [output.name for output in schema.outputs] == ["PROMPT", "TASK_ID"]
+    assert [output.name for output in schema.outputs] == [
+        "PROMPT",
+        "TASK_ID",
+        "FILE_IDS",
+    ]
     execute_parameters = set(inspect.signature(module.MultiTrackPromptEnhancer.execute).parameters)
+    assert "api_account" in execute_parameters
     assert execute_parameters.isdisjoint({
         "apikey",
         "ratio",
@@ -2812,7 +2828,7 @@ def test_multitrack_prompt_enhancer_returns_user_prompt_unchanged_when_disabled(
         enabled=[False],
     )
 
-    assert output.values == ("Keep this prompt unchanged", "")
+    assert output.values == ("Keep this prompt unchanged", "", "")
     assert output.expand is None
 
 
@@ -2854,7 +2870,7 @@ def test_multitrack_prompt_enhancer_expands_local_llama_instruct_node():
 
     image_bridge = output.expand["local_llama_images"]
     expanded = output.expand["local_llama_prompt_enhancer"]
-    assert output.values == (["local_llama_prompt_start_switch", 0], "")
+    assert output.values == (["local_llama_prompt_start_switch", 0], "", "")
     assert image_bridge == {
         "class_type": module.LLAMA_CPP_IMAGE_LIST_BRIDGE_NODE_ID,
         "inputs": {"images": [image]},
@@ -2946,7 +2962,11 @@ def test_multitrack_prompt_enhancer_executes_with_progress_and_h3_task_id(monkey
             calls.append(kwargs)
             for _ in range(20):
                 kwargs["poll_callback"]("running")
-            return types.SimpleNamespace(prompt="Enhanced prompt", task_id="task-789")
+            return types.SimpleNamespace(
+                prompt="Enhanced prompt",
+                task_id="task-789",
+                file_ids="101,202,303",
+            )
 
     monkeypatch.setattr(module, "PromptEnhancerClient", FakeClient)
     monkeypatch.setattr(
@@ -2980,7 +3000,7 @@ def test_multitrack_prompt_enhancer_executes_with_progress_and_h3_task_id(monkey
         seed=[9],
     )
 
-    assert output.values == ("Enhanced prompt", "task-789")
+    assert output.values == ("Enhanced prompt", "task-789", "101,202,303")
     assert calls[0] == (module.MINIMAX_MODEL, "secret")
     assert ("video_data", {"max_duration": 15}) in calls
     request_call = calls[-1]
@@ -3006,7 +3026,7 @@ def test_multitrack_prompt_enhancer_prepares_third_party_video_as_24_frames(
 
         def enhance(self, **kwargs):
             calls.append(kwargs)
-            return types.SimpleNamespace(prompt="Enhanced", task_id="ignored")
+            return types.SimpleNamespace(prompt="Enhanced", task_id="ignored", file_ids="")
 
     monkeypatch.setattr(module, "PromptEnhancerClient", FakeClient)
     monkeypatch.setattr(
@@ -3048,7 +3068,7 @@ def test_multitrack_prompt_enhancer_prepares_third_party_video_as_24_frames(
         seed=[9],
     )
 
-    assert output.values == ("Enhanced", "")
+    assert output.values == ("Enhanced", "", "")
     assert ("images", {"max_pixels": 2_000_000}) in calls
     assert ("video_inputs", "third-party") in calls
     assert calls[0] == ("third-party", "secret")
@@ -3069,7 +3089,7 @@ def test_multitrack_prompt_enhancer_keeps_video_for_native_video_url_provider(
 
         def enhance(self, **kwargs):
             calls.append(kwargs)
-            return types.SimpleNamespace(prompt="Enhanced", task_id="")
+            return types.SimpleNamespace(prompt="Enhanced", task_id="", file_ids="")
 
     monkeypatch.setattr(module, "PromptEnhancerClient", FakeClient)
     monkeypatch.setattr(
@@ -3098,7 +3118,7 @@ def test_multitrack_prompt_enhancer_keeps_video_for_native_video_url_provider(
         seed=[9],
     )
 
-    assert output.values == ("Enhanced", "")
+    assert output.values == ("Enhanced", "", "")
     assert calls[-1]["video_urls"] == ["video"]
 
 
@@ -3128,6 +3148,7 @@ def test_multitrack_prompt_enhancer_has_complete_chinese_localization():
         "max_tokens",
         "seed",
         "enabled",
+        "api_account",
     }
     assert all("tooltip" in input_translation for input_translation in translation["inputs"].values())
     assert module.LLAMA_CPP_INSTALL_URL in translation["inputs"]["llama_model"]["tooltip"]
@@ -3136,6 +3157,13 @@ def test_multitrack_prompt_enhancer_has_complete_chinese_localization():
         "1": {
             "name": "任务 ID",
             "tooltip": "MiniMax 任务 ID；其他厂商返回空字符串。",
+        },
+        "2": {
+            "name": "文件 ID",
+            "tooltip": (
+                "MiniMax 已上传图像、视频和音频的文件 ID，多个 ID 使用英文逗号分隔；"
+                "没有上传媒体时返回空字符串。"
+            ),
         },
     }
 
