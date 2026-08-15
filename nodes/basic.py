@@ -178,6 +178,7 @@ TYPE_TRACK_DATA = io.Custom(io_type="TRACK_DATA")
 TYPE_TRACKS_INFO = io.Custom(io_type="TRACKS_INFO")
 TYPE_LLAMACPP_MODEL = io.Custom(io_type="LLAMACPPMODEL")
 TYPE_LLAMACPP_MODEL_CONFIG = io.Custom(io_type="LLAMACPPMODEL_CONFIG")
+TYPE_PROMPT_ENHANCER_ACCOUNT = io.Custom(io_type="EASY_API_ACCOUNT")
 CATEGORY_MEDIA = "EasyUse/Media"
 CATEGORY_TIMELINE = "EasyUse/TimelineEditor"
 CATEGORY_MULTITRACK = "EasyUse/MultiTrackEditor"
@@ -199,6 +200,7 @@ PROMPT_ENHANCER_RATIO_OPTIONS = [
     "4:3",
     "1:1",
     "3:4",
+    "9:16",
 ]
 
 
@@ -2963,12 +2965,26 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                         "user_prompt unchanged without calling the selected model."
                     ),
                 ),
+                TYPE_PROMPT_ENHANCER_ACCOUNT.Input(
+                    "api_account",
+                    tooltip=(
+                        "Provider balance and API key management. This widget is for "
+                        "account status only and does not affect prompt enhancement."
+                    ),
+                ),
             ],
             outputs=[
                 io.String.Output("PROMPT", tooltip="Enhanced video prompt."),
                 io.String.Output(
                     "TASK_ID",
                     tooltip="MiniMax task ID; empty for all other providers.",
+                ),
+                io.String.Output(
+                    "FILE_IDS",
+                    tooltip=(
+                        "Comma-separated MiniMax file IDs for uploaded images, "
+                        "videos, and audio; empty when no media was uploaded."
+                    ),
                 ),
             ],
         )
@@ -2988,11 +3004,12 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
         model: list[dict] | dict | None = None,
         seed: list[int] | int | None = None,
         enabled: list[bool] | bool | None = None,
+        api_account: list[str] | str | None = None,
     ) -> io.NodeOutput:
         system_text = str(_unwrap_list_scalar(system_prompt, ""))
         user_text = str(_unwrap_list_scalar(user_prompt, ""))
         if not bool(_unwrap_list_scalar(enabled, True)):
-            return io.NodeOutput(user_text, "")
+            return io.NodeOutput(user_text, "", "")
 
         model_config = _unwrap_list_scalar(model, {})
         if not isinstance(model_config, dict):
@@ -3128,6 +3145,7 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
             return io.NodeOutput(
                 final_prompt.out(0),
                 "",
+                "",
                 expand=graph.finalize(),
             )
 
@@ -3207,7 +3225,11 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
             raise RuntimeError(f"Prompt enhancement failed: {exc}") from exc
 
         process_bar.update_absolute(progress_total, progress_total)
-        return io.NodeOutput(result.prompt, result.task_id if selected_model == MINIMAX_MODEL else "")
+        return io.NodeOutput(
+            result.prompt,
+            result.task_id if selected_model == MINIMAX_MODEL else "",
+            result.file_ids if selected_model == MINIMAX_MODEL else "",
+        )
 
 
 class MultiTrackPromptEnhancerImageListBridge(io.ComfyNode):

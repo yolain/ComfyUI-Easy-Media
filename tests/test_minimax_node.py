@@ -428,38 +428,41 @@ def test_empty_media_routes_to_text_to_video_for_every_mode(monkeypatch, mode):
 
 
 @pytest.mark.parametrize(
-    ("mode", "videos", "audios"),
+    ("mode", "media_kind"),
     [
-        ("multi_frames", [object()], []),
-        (
-            "multi_frames",
-            [],
-            [{"waveform": torch.ones(1, 1, 4), "sample_rate": 32000}],
-        ),
-        (
-            "multi_frames",
-            [object()],
-            [{"waveform": torch.ones(1, 1, 4), "sample_rate": 32000}],
-        ),
-        ("last_frame", [object()], []),
-        (
-            "last_frame",
-            [],
-            [{"waveform": torch.ones(1, 1, 4), "sample_rate": 32000}],
-        ),
+        ("multi_frames", "video"),
+        ("multi_frames", "audio"),
+        ("last_frame", "video"),
+        ("last_frame", "audio"),
     ],
 )
-def test_frame_modes_reject_video_and_audio_inputs(monkeypatch, mode, videos, audios):
+def test_frame_modes_with_video_or_audio_route_to_reference_subgraph(
+    monkeypatch, mode, media_kind
+):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
+    audio = {"waveform": torch.ones(1, 1, 4), "sample_rate": 32000}
+    overrides = {
+        "audio_vae": [_AudioVae()],
+        "images": [_image_values(1, 2)],
+        "videos": [object()] if media_kind == "video" else [],
+        "audios": [audio] if media_kind == "audio" else [],
+    }
 
-    with pytest.raises(
-        ValueError,
-        match="videos and audios are only supported in reference mode",
-    ):
-        module.EasyMiniMaxH3ToVideo.execute(
-            **_base_inputs(mode=[mode], videos=videos, audios=audios)
-        )
+    output = module.EasyMiniMaxH3ToVideo.execute(
+        **_base_inputs(mode=[mode], **overrides)
+    )
+
+    nodes_by_type = {node["class_type"]: node for node in output.expand.values()}
+    conditioning = nodes_by_type[module.REFERENCE_BRIDGE_NODE_ID]
+    assert "MiniMaxH3ImageToVideo" not in nodes_by_type
+    assert "ref_image_0" in conditioning["inputs"]
+    assert "ref_image_1" in conditioning["inputs"]
+    if media_kind == "video":
+        assert "GetVideoComponents" in nodes_by_type
+        assert "ref_video_0" in conditioning["inputs"]
+    else:
+        assert conditioning["inputs"]["ref_audio_0"] is audio
 
 
 def test_reference_video_extraction_is_deferred_to_a_cacheable_subnode(monkeypatch):
@@ -754,6 +757,8 @@ def test_minimax_node_has_complete_chinese_localization():
     assert "重采样" not in translation["inputs"]["videos"]["tooltip"]
     assert "任何参考视频" in translation["inputs"]["audio_vae"]["tooltip"]
     assert "仅缩小，不放大" in translation["inputs"]["ref_image_size"]["tooltip"]
+    assert "输入后会自动改走参考生视频" in translation["inputs"]["videos"]["tooltip"]
+    assert "输入后会自动改走参考生视频" in translation["inputs"]["audios"]["tooltip"]
 
     for node_id in ["MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo"]:
         fallback_translation = node_defs[node_id]
