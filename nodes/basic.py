@@ -2562,7 +2562,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 io.Combo.Input(
                     "prompt_format",
                     options=PROMPT_FORMAT_OPTIONS + ["api", "llm"],
-                    default="default",
+                    default="api",
                     tooltip="Choose prompt format.",
                 ),
             ],
