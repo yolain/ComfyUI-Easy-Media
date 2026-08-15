@@ -81,7 +81,7 @@ export const PROMPT_ENHANCER_ACCOUNT_PROVIDERS: readonly PromptEnhancerAccountPr
       PROMPT_ENHANCER_MODELS.runningHubDoubao,
       PROMPT_ENHANCER_MODELS.runningHubGlm,
     ],
-    balancePageUrl: 'https://www.runninghub.cn/?inviteCode=rh-v1623',
+    balancePageUrl: 'https://www.runninghub.cn/call-api/bill-task?tab=llmLogs&inviteCode=rh-v1623',
     apiKeyPageUrl: 'https://www.runninghub.cn/zh-cn/enterprise-api/sharedApi?inviteCode=rh-v1623',
     balanceRequest: {
       url: '/easy-media/prompt-enhancer/runninghub-balance',

@@ -110,7 +110,7 @@ function PromptEnhancerAccountBarContent({
     }
     if (balance) {
       return (
-        <Badge className="h-5 max-w-full truncate px-1.5 text-[10px] " title={formatBalance(balance, locale)} variant="secondary">
+        <Badge className="h-5 max-w-full truncate px-1.5 text-[10px] cursor-pointer" title={formatBalance(balance, locale)} variant="secondary" onClick={() => provider.balancePageUrl && openExternal(provider.balancePageUrl)}>
           {t('promptEnhancerAccount.balance', { amount: formatBalance(balance, locale) })}
         </Badge>
       )
