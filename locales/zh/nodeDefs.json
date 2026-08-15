@@ -811,7 +811,8 @@
     "description": "内部节点，用于在本地 llama.cpp 展开子图中保持图片列表语义。",
     "inputs": {
       "images": { "name": "图像", "tooltip": "由多轨提示词增强器转发的图片数据。" },
-      "max_size": { "name": "最大尺寸", "tooltip": "送入本地 llama.cpp 视觉推理前使用的图片长边上限。" }
+      "max_size": { "name": "最大尺寸", "tooltip": "送入本地 llama.cpp 视觉推理前使用的图片长边上限，硬上限为 768。" },
+      "inference_mode": { "name": "推理模式", "tooltip": "保留独立参考图，并按同一次推理中的图片或采样帧数量分摊视觉尺寸预算。" }
     },
     "outputs": {
       "0": { "name": "图像", "tooltip": "以 ComfyUI 输出列表形式转发的图片。" }

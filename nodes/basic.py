@@ -2822,7 +2822,7 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                             io.Combo.Input(
                                 "inference_mode",
                                 options=["one by one", "images", "video"],
-                                default="one by one",
+                                default="images",
                                 tooltip=(
                                     "one by one: process every list item separately; "
                                     "a multi-image batch inside one item is inferred "
@@ -3056,6 +3056,10 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                     f"received {type(selected_llama_model).__name__}."
                 )
             graph = GraphBuilder()
+            local_max_size = min(
+                int(_unwrap_list_scalar(selected_max_tokens, 512)),
+                PROMPT_ENHANCER_MAX_TOKENS[LLAMACPP_MODEL][1],
+            )
             node_inputs: dict[str, object] = {
                 "llama_model": selected_llama_model,
                 "preset_prompt": "Empty - Nothing",
@@ -3065,7 +3069,7 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                     _unwrap_list_scalar(selected_inference_mode, "one by one")
                 ),
                 "max_frames": 24,
-                "max_size": int(_unwrap_list_scalar(selected_max_tokens, 512)),
+                "max_size": local_max_size,
                 "seed": selected_seed,
                 "force_offload": bool(
                     _unwrap_list_scalar(selected_force_offload, True)
@@ -3078,7 +3082,10 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                     LLAMA_CPP_IMAGE_LIST_BRIDGE_NODE_ID,
                     id="local_llama_images",
                     images=image_inputs,
-                    max_size=int(_unwrap_list_scalar(selected_max_tokens, 512)),
+                    inference_mode=str(
+                        _unwrap_list_scalar(selected_inference_mode, "one by one")
+                    ),
+                    max_size=local_max_size,
                 )
                 node_inputs["images"] = image_bridge.out(0)
             enhancer = graph.node(
@@ -3254,11 +3261,20 @@ class MultiTrackPromptEnhancerImageListBridge(io.ComfyNode):
                     "max_size",
                     default=512,
                     min=128,
-                    max=16384,
+                    max=PROMPT_ENHANCER_MAX_TOKENS[LLAMACPP_MODEL][1],
                     step=64,
                     tooltip=(
                         "Maximum image long-edge size used before local llama.cpp "
                         "vision inference."
+                    ),
+                ),
+                io.Combo.Input(
+                    "inference_mode",
+                    options=["one by one", "images", "video"],
+                    default="one by one",
+                    tooltip=(
+                        "Preserves separate references and distributes the visual-size "
+                        "budget across images or sampled video frames."
                     ),
                 ),
             ],
@@ -3276,9 +3292,22 @@ class MultiTrackPromptEnhancerImageListBridge(io.ComfyNode):
         cls,
         images: list | torch.Tensor | None = None,
         max_size: int = 512,
+        inference_mode: str = "one by one",
     ) -> io.NodeOutput:
+        image_inputs = _as_list_input(images)
+        safe_max_size = min(
+            max_size,
+            PROMPT_ENHANCER_MAX_TOKENS[LLAMACPP_MODEL][1],
+        )
+        total_frame_count = sum(
+            image.shape[0]
+            if isinstance(image, torch.Tensor) and image.ndim == 4
+            else 1
+            for image in image_inputs
+        )
+
         resized_images: list[torch.Tensor] = []
-        for image in _as_list_input(images):
+        for image in image_inputs:
             if not isinstance(image, torch.Tensor):
                 raise TypeError("llama.cpp image inputs must be torch.Tensor values.")
             if image.ndim not in (3, 4):
@@ -3287,10 +3316,20 @@ class MultiTrackPromptEnhancerImageListBridge(io.ComfyNode):
                 )
 
             batched_image = image.unsqueeze(0) if image.ndim == 3 else image
+            if inference_mode == "images":
+                budget_frame_count = total_frame_count
+            elif inference_mode == "video":
+                budget_frame_count = min(batched_image.shape[0], 24)
+            else:
+                budget_frame_count = batched_image.shape[0]
+            effective_max_size = max(
+                128,
+                int(safe_max_size / math.sqrt(max(1, budget_frame_count))),
+            )
             height, width = batched_image.shape[1:3]
             long_edge = max(height, width)
-            if long_edge > max_size:
-                scale = max_size / long_edge
+            if long_edge > effective_max_size:
+                scale = effective_max_size / long_edge
                 target_width = max(1, round(width * scale))
                 target_height = max(1, round(height * scale))
                 batched_image = F.interpolate(
