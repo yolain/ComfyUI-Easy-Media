@@ -426,7 +426,7 @@ def test_minimax_async_request_returns_task_id_and_maps_ratio():
         opener=opener,
     )
     result = client.enhance(
-        system_prompt="Enhance faithfully.",
+        system_prompt="System instructions that H3 must ignore. " * 300,
         user_prompt="A dancer turns.",
         task_type="r2v",
         duration=2,
@@ -442,6 +442,7 @@ def test_minimax_async_request_returns_task_id_and_maps_ratio():
 
     assert result.prompt == ""
     assert result.task_id == "task-123"
+    assert result.file_ids == "101"
     upload_request, upload_timeout = requests[0]
     assert upload_timeout == 300.0
     assert upload_request.full_url == "https://api.minimaxi.com/v1/files/upload"
@@ -452,6 +453,10 @@ def test_minimax_async_request_returns_task_id_and_maps_ratio():
     payload = json.loads(request.data)
     assert payload["duration"] == 4
     assert payload["ratio"] == "9:16"
+    assert payload["content"][0] == {
+        "type": "text",
+        "text": "A dancer turns.",
+    }
     assert payload["content"][1]["role"] == "reference_image"
     assert payload["content"][1]["image_url"]["url"] == "mm_file://101"
     assert request.headers["Authorization"] == "Bearer secret"
@@ -462,10 +467,86 @@ def test_minimax_async_request_returns_task_id_and_maps_ratio():
     assert messages[3] == "H3 create request succeeded: task_id=task-123"
 
 
+def test_minimax_rejects_only_user_prompt_over_7000_characters():
+    module = _load_module()
+    requests = []
+    client = module.PromptEnhancerClient(
+        module.MINIMAX_MODEL,
+        "secret",
+        opener=lambda request, timeout: requests.append(request),
+    )
+
+    with pytest.raises(ValueError, match="cannot exceed 7000 characters"):
+        client.enhance(
+            system_prompt="Ignored system instructions.",
+            user_prompt="x" * 7001,
+            task_type="t2v",
+            duration=5,
+            ratio="16:9",
+            seed=0,
+        )
+
+    assert requests == []
+
+
+def test_minimax_returns_uploaded_file_ids_in_media_order():
+    module = _load_module()
+    upload_ids = iter([101, 202, 303])
+
+    def opener(request, timeout):
+        if request.full_url.endswith("/v1/files/upload"):
+            return _Response({"file": {"file_id": next(upload_ids)}})
+        return _Response({"task_id": "task-files"})
+
+    client = module.PromptEnhancerClient(
+        module.MINIMAX_MODEL,
+        "secret",
+        opener=opener,
+    )
+    result = client.enhance(
+        system_prompt="",
+        user_prompt="Use all references.",
+        task_type="r2v",
+        duration=5,
+        ratio="adaptive",
+        seed=0,
+        image_urls=[_png_data_uri()],
+        video_urls=["data:video/mp4;base64,AAAA"],
+        audio_urls=["data:audio/wav;base64,AAAA"],
+        return_async=True,
+    )
+
+    assert result.file_ids == "101,202,303"
+
+
+def test_minimax_rejects_empty_user_prompt_before_upload_or_create_request():
+    module = _load_module()
+    requests = []
+    client = module.PromptEnhancerClient(
+        module.MINIMAX_MODEL,
+        "secret",
+        opener=lambda request, timeout: requests.append(request),
+    )
+
+    with pytest.raises(ValueError, match="user_prompt cannot be empty"):
+        client.enhance(
+            system_prompt="Ignored system instructions.",
+            user_prompt="   ",
+            task_type="r2v",
+            duration=5,
+            ratio="adaptive",
+            seed=0,
+            image_urls=[_png_data_uri()],
+        )
+
+    assert requests == []
+
+
 def test_minimax_sync_request_polls_every_five_seconds():
     module = _load_module()
     payloads = iter(
         [
+            {"file": {"file_id": 404}},
             {"task_id": "task-456"},
             {"task": {"status": "queued"}},
             {
@@ -489,10 +570,11 @@ def test_minimax_sync_request_polls_every_five_seconds():
     result = client.enhance(
         system_prompt="",
         user_prompt="A city at night.",
-        task_type="t2v",
+        task_type="i2v",
         duration=5,
         ratio="adaptive",
         seed=0,
+        image_urls=[_png_data_uri()],
         poll_interval=5.0,
         poll_callback=statuses.append,
         request_logger=lambda _name, message=None: log_messages.append(message),
@@ -500,6 +582,7 @@ def test_minimax_sync_request_polls_every_five_seconds():
 
     assert result.prompt == "Enhanced."
     assert result.task_id == "task-456"
+    assert result.file_ids == "404"
     assert sleeps == [5.0, 5.0]
     assert statuses == ["queued", "succeeded"]
     assert log_messages[-4:] == [

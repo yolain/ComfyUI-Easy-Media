@@ -225,6 +225,7 @@ class PromptEnhancerApiError(RuntimeError):
 class PromptEnhancerResult:
     prompt: str
     task_id: str = ""
+    file_ids: str = ""
 
 
 def load_config_value(
@@ -1036,10 +1037,12 @@ class PromptEnhancerClient:
     ) -> PromptEnhancerResult:
         user_text = (user_prompt or "").strip()
         system_text = (system_prompt or "").strip()
-        if not user_text and not system_text:
-            raise ValueError("system_prompt and user_prompt cannot both be empty.")
 
         if self.config.provider == "minimax":
+            if not user_text:
+                raise ValueError(
+                    "MiniMax H3-Context-IR user_prompt cannot be empty."
+                )
             h3_mode, selected_images, selected_videos, selected_audios = (
                 self._h3_media_for_task_type(
                     task_type,
@@ -1048,10 +1051,7 @@ class PromptEnhancerClient:
                     audio_urls,
                 )
             )
-            text = user_text
-            if system_text:
-                text = f"{system_text}\n\nUser request:\n{user_text}" if user_text else system_text
-            if len(text) > 7000:
+            if len(user_text) > 7000:
                 raise ValueError("MiniMax H3-Context-IR text input cannot exceed 7000 characters.")
             official_ratio = "9:16" if ratio == "9:19" else ratio
             if h3_mode == "t2va" and official_ratio == "adaptive":
@@ -1073,8 +1073,12 @@ class PromptEnhancerClient:
                 "audio",
                 request_logger,
             )
+            uploaded_media = uploaded_images + uploaded_videos + uploaded_audios
+            file_ids = ",".join(
+                url.removeprefix("mm_file://") for url in uploaded_media
+            )
             content = self._h3_content(
-                text,
+                user_text,
                 task_type,
                 uploaded_images,
                 uploaded_videos,
@@ -1089,7 +1093,7 @@ class PromptEnhancerClient:
             self._log_request_info(
                 duration=payload["duration"],
                 ratio=payload["ratio"],
-                system_prompt_count=int(bool(system_text)),
+                system_prompt_count=0,
                 user_prompt_count=int(bool(user_text)),
                 image_count=len(selected_images),
                 video_count=len(selected_videos),
@@ -1114,14 +1118,22 @@ class PromptEnhancerClient:
                 f"create request succeeded: task_id={task_id}",
             )
             if return_async:
-                return PromptEnhancerResult(prompt="", task_id=task_id)
+                return PromptEnhancerResult(
+                    prompt="",
+                    task_id=task_id,
+                    file_ids=file_ids,
+                )
             return self._poll_minimax(
                 task_id,
                 poll_interval,
                 poll_timeout,
                 poll_callback,
                 request_logger,
+                file_ids,
             )
+
+        if not user_text and not system_text:
+            raise ValueError("system_prompt and user_prompt cannot both be empty.")
 
         selected_images, selected_videos, _selected_audios = self._media_for_task_type(
             task_type,
@@ -1188,6 +1200,7 @@ class PromptEnhancerClient:
         poll_timeout: float,
         poll_callback: Callable[[str], None] | None,
         request_logger: Callable[[str, str | None], None] | None,
+        file_ids: str,
     ) -> PromptEnhancerResult:
         query_url = (
             "https://api.minimaxi.com/v2/query/video_generation/"
@@ -1250,6 +1263,7 @@ class PromptEnhancerClient:
                 return PromptEnhancerResult(
                     prompt=strip_text_code_fence(prompt),
                     task_id=task_id,
+                    file_ids=file_ids,
                 )
             if status in {"failed", "cancelled"}:
                 error = task.get("error")
