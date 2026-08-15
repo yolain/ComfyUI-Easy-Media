@@ -694,12 +694,10 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
             progress_value = min(progress_total, progress_value + count)
             progress.update_absolute(progress_value, progress_total)
 
-        if selected_mode in frame_modes and (video_inputs or standalone_audios):
-            raise ValueError("videos and audios are only supported in reference mode")
-
-        if selected_mode in frame_modes or not (
-            expanded_images or video_inputs or standalone_audios
-        ):
+        has_audio_or_video = bool(video_inputs or standalone_audios)
+        has_media = bool(expanded_images or has_audio_or_video)
+        use_frame_subgraph = selected_mode in frame_modes and not has_audio_or_video
+        if use_frame_subgraph or not has_media:
             node_inputs: dict[str, Any] = {
                 "clip": selected_clip,
                 "vae": selected_vae,

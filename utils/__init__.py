@@ -6,5 +6,7 @@ from .panorama import *
 from .models import *
 from .minimax import *
 from .media import split_list_outputs
+from .llm_api import *
+from .log import *
 from .prompt_override import *
 from .subtitles import *

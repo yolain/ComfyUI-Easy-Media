@@ -776,6 +776,46 @@
       "7": { "name": "图像索引" }
     }
   },
+  "easy multiTrackPromptEnhancer": {
+    "display_name": "多轨提示词增强器",
+    "description": "调用 MiniMax H3-Context-IR、第三方多模态大模型或本地 llama.cpp 模型，根据多轨任务提示词和参考媒体反推并增强视频提示词。",
+    "inputs": {
+      "system_prompt": { "name": "系统提示词", "tooltip": "可选的系统指令输入；MiniMax H3 会忽略此输入。" },
+      "user_prompt": { "name": "用户提示词", "tooltip": "用户提示词输入；MiniMax H3 要求内容非空。" },
+      "type": { "name": "类型", "tooltip": "用于选择 H3 的 t2va、i2va 或 r2va 请求格式，并拼接各服务的媒体角色。" },
+      "length": { "name": "帧数", "tooltip": "MiniMax 对齐帧数，将按最近整数换算为 4–15 秒。" },
+      "images": { "name": "图像", "tooltip": "支持单张图像、图像批次或列表。H3 会逐张上传；第三方模型输入会限制在 200 万像素以内。" },
+      "video": { "name": "视频", "tooltip": "支持视频或视频列表。厂商支持当前来源时优先传入公网视频 URL 或本地视频数据；不支持时才对每个视频最多均匀抽取 24 帧。原生视频上传最多保留 15 秒，RunningHub 视频还会限制为 10MB。" },
+      "audio": { "name": "音频", "tooltip": "用于 H3 r2va 的音频或音频列表，逐个上传至 MiniMax；第三方模型不会传入音频。" },
+      "files": { "name": "文件", "tooltip": "预留文件输入口，等待后续服务接入。" },
+      "llama_model": { "name": "llama.cpp 模型", "tooltip": "本地 llama.cpp 模型输入，仅选择本地模型时才会加载。需要安装 ComfyUI-llama-cpp_vlm 提供的 llama_cpp_instruct_adv 节点：https://github.com/lihaoyun6/ComfyUI-llama-cpp_vlm" },
+      "model": { "name": "模型", "tooltip": "选择用于增强提示词的服务厂商与模型。" },
+      "inference_mode": { "name": "推理模式", "tooltip": "one by one：逐项处理输入列表，同一项内的多图批次会一起推理；images：把所有列表项中的全部图片合并到一次提示中；video：把每个图片列表项分别视为一个视频片段。" },
+      "force_offload": { "name": "强制卸载", "tooltip": "推理完成后卸载本地 llama.cpp 模型以释放内存。" },
+      "ratio": { "name": "宽高比", "tooltip": "海螺官方接口；纯文本 adaptive 请求使用 16:9。" },
+      "return_async": { "name": "异步返回", "tooltip": "当前仅在 h3-context-ir 有效；开启时不进行任务查询。" },
+      "apikey": { "name": "API 密钥", "tooltip": "服务 API 密钥。留空时从 config.yaml 或环境变量读取对应厂商的密钥。" },
+      "max_tokens": { "name": "最大词元数 / 尺寸", "tooltip": "API 模型使用最大输出词元数；本地 llama.cpp 模型会将其作为 max_size，限制 images 和 video 模式的输入图片尺寸。" },
+      "seed": { "name": "随机种", "tooltip": "ComfyUI 常规随机种，由兼容的第三方大模型接口使用。" },
+      "enabled": { "name": "启用", "tooltip": "开启时增强提示词；关闭时不调用所选模型，直接原样输出用户提示词。" },
+      "api_account": { "name": "API 账户", "tooltip": "显示当前厂商余额并提供余额页面和 API Key 管理入口，不参与提示词增强执行。" }
+    },
+    "outputs": {
+      "0": { "name": "提示词", "tooltip": "增强后的视频提示词。" },
+      "1": { "name": "任务 ID", "tooltip": "MiniMax 任务 ID；其他厂商返回空字符串。" },
+      "2": { "name": "文件 ID", "tooltip": "MiniMax 已上传图像、视频和音频的文件 ID，多个 ID 使用英文逗号分隔；没有上传媒体时返回空字符串。" }
+    }
+  },
+  "easy multiTrackPromptEnhancerImageListBridge": {
+    "display_name": "多轨提示词增强器图片列表桥接",
+    "description": "内部节点，用于在本地 llama.cpp 展开子图中保持图片列表语义。",
+    "inputs": {
+      "images": { "name": "图像", "tooltip": "由多轨提示词增强器转发的图片数据。" }
+    },
+    "outputs": {
+      "0": { "name": "图像", "tooltip": "以 ComfyUI 输出列表形式转发的图片。" }
+    }
+  },
   "LTXVMakeRefVideo": {
     "display_name": "LTXV 制作参考视频",
     "description": "将批次参考图像扩展为用于 IC-LoRA 的参考视频。",
@@ -1086,15 +1126,15 @@
       },
       "images": {
         "name": "图像",
-        "tooltip": "支持单张图像、图像批次或图像列表。参考模式使用全部图像；首尾帧模式在仅有一张图像时将其作为首帧，有多张图像时使用展开后的第一张和最后一张图像；尾帧模式仅使用展开后的最后一张图像。"
+        "tooltip": "支持单张图像、图像批次或图像列表。参考模式使用全部图像；未输入视频或音频时，首尾帧模式在仅有一张图像时将其作为首帧，有多张图像时使用展开后的第一张和最后一张图像，尾帧模式仅使用展开后的最后一张图像。输入视频或音频后会改走参考生视频，并将全部图像用作参考图像。"
       },
       "videos": {
         "name": "视频",
-        "tooltip": "参考视频或视频列表。参考模式下会自动提取原始帧和内含音频。"
+        "tooltip": "参考视频或视频列表。输入后会自动改走参考生视频，并提取原始帧和内含音频。"
       },
       "audios": {
         "name": "音频",
-        "tooltip": "独立参考音频或音频列表，仅在参考模式下使用。"
+        "tooltip": "独立参考音频或音频列表。输入后会自动改走参考生视频。"
       },
       "prompt": {
         "name": "提示词",
@@ -1102,7 +1142,7 @@
       },
       "mode": {
         "name": "生成模式",
-        "tooltip": "选择参考生视频、首尾帧生视频或尾帧生视频。所有媒体输入均为空时，各模式都会执行文生视频。",
+        "tooltip": "选择参考生视频、首尾帧生视频或尾帧生视频。首尾帧或尾帧模式下输入视频或音频时，会自动改走参考生视频；所有媒体输入均为空时，各模式都会执行文生视频。",
         "options": {
           "reference": "参考生视频",
           "multi_frames": "首尾帧生视频",

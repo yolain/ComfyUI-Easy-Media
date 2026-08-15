@@ -23,6 +23,16 @@
     "settings": "Output settings",
     "downloadOutput": "Download output video"
   },
+  "promptEnhancerAccount": {
+    "balance": "Balance: {amount}",
+    "balanceEmpty": "Balance: --",
+    "viewBalance": "View balance",
+    "loadingBalance": "Loading balance...",
+    "balanceUnavailable": "Balance is temporarily unavailable",
+    "apiKeyRequired": "Enter an API key to load the balance",
+    "apiKey": "API Key",
+    "localModel": "Local model — no API account required"
+  },
   "toolbar": {
     "frames": "Frames",
     "seconds": "Seconds",
@@ -38,6 +48,7 @@
   },
   "multitrackTaskModes": {
     "default": "Default",
+    "l2v": "Last Frame",
     "ref": "Reference",
     "edit": "Edit"
   },
@@ -62,11 +73,19 @@
     "editTaskDuration": "Edit task duration",
     "prompt": "Prompt",
     "promptPlaceholder": "Double-click to describe what you want to generate...",
+    "minimaxPromptPlaceholder": "Reference mode supports up to 9 images, 3 audio clips, and 3 videos. Enter text or use @ references to freely combine images, text, audio, and video. For example, @Picture 1 imitates the movement in @Video 1 with the voice from @Audio 1.",
+    "openReferenceResources": "Open reference resources",
     "userPrompt": "User Prompt",
+    "userPromptVariantTooltip": "New: The user prompt output follows your A/B selection (select A to output A, select B to output B). Use A/B to compare prompts, or to preserve both the original and reverse-engineered prompts.",
     "systemPrompt": "System Prompt",
     "systemPromptPlaceholder": "System prompt",
     "loadingSystemPrompt": "Loading default system prompt...",
     "resetSystemPrompt": "Reset system prompt",
+    "referenceResources": "Reference resources",
+    "referenceResourcesEmpty": "Add task images or media clips to a track first.",
+    "referencePicture": "Picture {n}",
+    "referenceAudioItem": "Audio {n}",
+    "referenceVideoItem": "Video {n}",
     "taskImageDropZone": "Task image drop zone",
     "selectImage": "Select image",
     "addImage": "Add image",

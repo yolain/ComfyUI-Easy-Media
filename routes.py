@@ -36,6 +36,7 @@ from aiohttp import web
 import folder_paths
 
 from .utils.prompt_builder import get_system_prompt_options
+from .utils.llm_api import load_api_key_from_config
 from .utils.models import (
     MissingEasyMediaModelError,
     download_model,
@@ -66,6 +67,7 @@ from .utils.video import (
 
 _SMART_SPLIT_LOCK = asyncio.Lock()
 _SUBTITLE_SPEECH_LOCK = asyncio.Lock()
+_RUNNINGHUB_ACCOUNT_ENDPOINT = "https://www.runninghub.cn/uc/openapi/accountStatus"
 
 
 def _segment_source_audio_window(data: dict, fps: float) -> tuple[float, float]:
@@ -265,6 +267,71 @@ async def handle_system_prompt_options(request: web.Request) -> web.Response:
             "items": get_system_prompt_options(),
         }),
     )
+
+
+@PromptServer.instance.routes.post("/easy-media/prompt-enhancer/runninghub-balance")
+async def handle_runninghub_balance(request: web.Request) -> web.Response:
+    """Proxy RunningHub balance lookup so the widget is not blocked by browser CORS."""
+    try:
+        try:
+            data = await request.json()
+        except Exception as error:
+            raise ValueError("Invalid JSON body") from error
+        if not isinstance(data, dict):
+            raise ValueError("request body must be a JSON object")
+
+        explicit_api_key = data.get("api_key", "")
+        if explicit_api_key is not None and not isinstance(explicit_api_key, str):
+            raise ValueError("api_key must be a string")
+        api_key = str(explicit_api_key or "").strip()
+        if not api_key:
+            api_key = load_api_key_from_config("RUNNINGHUB_API_KEY")
+        if not api_key:
+            api_key = os.getenv("RUNNINGHUB_API_KEY", "").strip()
+        if not api_key:
+            raise ValueError(
+                "RunningHub API key is required in the node, config.yaml, or RUNNINGHUB_API_KEY."
+            )
+
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                _RUNNINGHUB_ACCOUNT_ENDPOINT,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={"apikey": api_key},
+            ) as response:
+                try:
+                    payload = await response.json(content_type=None)
+                except (aiohttp.ContentTypeError, json.JSONDecodeError) as error:
+                    raise RuntimeError("RunningHub returned an invalid account response.") from error
+                if response.status >= 400:
+                    message = payload.get("msg") if isinstance(payload, dict) else None
+                    raise RuntimeError(message or f"RunningHub account request failed ({response.status}).")
+
+        if not isinstance(payload, dict) or payload.get("code") != 0:
+            message = payload.get("msg") if isinstance(payload, dict) else None
+            raise RuntimeError(message or "RunningHub account request failed.")
+        account = payload.get("data")
+        if not isinstance(account, dict):
+            raise RuntimeError("RunningHub account response did not contain account data.")
+        try:
+            amount = float(account.get("remainMoney"))
+        except (TypeError, ValueError) as error:
+            raise RuntimeError("RunningHub account response did not contain a valid balance.") from error
+        if not math.isfinite(amount):
+            raise RuntimeError("RunningHub account response did not contain a finite balance.")
+        currency = account.get("currency")
+        return web.json_response({
+            "amount": amount,
+            "currency": currency if isinstance(currency, str) else "CNY",
+        })
+    except ValueError as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except (aiohttp.ClientError, asyncio.TimeoutError, RuntimeError) as error:
+        return web.json_response({"error": str(error)}, status=502)
 
 
 @PromptServer.instance.routes.post("/easy-media/models/download")

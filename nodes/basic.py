@@ -7,10 +7,12 @@ from enum import Enum
 from pathlib import Path
 
 import folder_paths
+import nodes as comfy_nodes
 import torch
 import torch.nn.functional as F
 
 from comfy_api.latest import InputImpl, Types, io
+from comfy_execution.graph_utils import GraphBuilder, is_link
 from comfy.utils import ProgressBar
 from ..utils import (
     FFMPEG_RESIZE_METHODS,
@@ -25,8 +27,19 @@ from ..utils import (
     frames_to_seconds,
     load_audio_waveform,
     load_image_tensor,
+    log_node_info,
     iter_valid_audio_inputs,
     merge_audio_inputs,
+    audio_data_uris,
+    image_tensor_data_uris,
+    LLAMACPP_MODEL,
+    MINIMAX_MODEL,
+    PROMPT_ENHANCER_MAX_TOKENS,
+    PROMPT_ENHANCER_MODELS,
+    PromptEnhancerApiError,
+    PromptEnhancerClient,
+    prompt_enhancer_video_inputs,
+    minimax_length_to_seconds,
     split_list_outputs,
     merge_video_track_with_ffmpeg,
     parse_subtitle_text,
@@ -39,6 +52,7 @@ from ..utils import (
     silence,
     trim_audio,
     video_input_to_local_file,
+    video_data_uris,
     write_ass_file,
     write_srt_file,
 )
@@ -162,6 +176,9 @@ TYPE_TIMELINE = io.Custom(io_type="TIMELINE")
 TYPE_TIMELINE_INFO = io.Custom(io_type="TIMELINE_INFO")
 TYPE_TRACK_DATA = io.Custom(io_type="TRACK_DATA")
 TYPE_TRACKS_INFO = io.Custom(io_type="TRACKS_INFO")
+TYPE_LLAMACPP_MODEL = io.Custom(io_type="LLAMACPPMODEL")
+TYPE_LLAMACPP_MODEL_CONFIG = io.Custom(io_type="LLAMACPPMODEL_CONFIG")
+TYPE_PROMPT_ENHANCER_ACCOUNT = io.Custom(io_type="EASY_API_ACCOUNT")
 CATEGORY_MEDIA = "EasyUse/Media"
 CATEGORY_TIMELINE = "EasyUse/TimelineEditor"
 CATEGORY_MULTITRACK = "EasyUse/MultiTrackEditor"
@@ -169,6 +186,22 @@ CATEGORY_AUDIO = "EasyUse/Audio"
 CATEGORY_LOGIC = "EasyUse/Logic"
 CATEGORY_VIDEO = "EasyUse/Video"
 PROMPT_FORMAT_OPTIONS = ["default", "promptRelay"]
+LLAMA_CPP_INSTRUCT_NODE_ID = "llama_cpp_instruct_adv"
+LLAMA_CPP_IMAGE_LIST_BRIDGE_NODE_ID = "easy multiTrackPromptEnhancerImageListBridge"
+STRING_COMPARE_NODE_ID = "StringCompare"
+STRING_REPLACE_NODE_ID = "StringReplace"
+STRING_TRIM_NODE_ID = "StringTrim"
+SWITCH_NODE_ID = "ComfySwitchNode"
+LLAMA_CPP_INSTALL_URL = "https://github.com/lihaoyun6/ComfyUI-llama-cpp_vlm"
+PROMPT_ENHANCER_RATIO_OPTIONS = [
+    "adaptive",
+    "21:9",
+    "16:9",
+    "4:3",
+    "1:1",
+    "3:4",
+    "9:16",
+]
 
 
 def _align_video_frame_count(frame_count: int, format_name: str) -> int:
@@ -2328,6 +2361,16 @@ def _unwrap_list_scalar(value, default=None):
     return value if value is not None else default
 
 
+def _unwrap_singleton_container(value, default=None):
+    while isinstance(value, (list, tuple)):
+        if not value:
+            return default
+        if len(value) != 1:
+            return value
+        value = value[0]
+    return value if value is not None else default
+
+
 def _track_output_index(track: dict) -> 'int | None':
     raw_index = track.get("media_index")
     if raw_index is None:
@@ -2378,6 +2421,8 @@ def _multitrack_task_type(task: dict, image_count: int, has_video: bool) -> str:
     if isinstance(explicit_task_type, str) and explicit_task_type.strip():
         return explicit_task_type.strip()
     mode = content.get("task_mode", "default") if isinstance(content, dict) else "default"
+    if mode == "l2v":
+        return "l2v"
     if mode == "ref":
         return "rv2v" if has_video else "r2v"
     if mode == "edit":
@@ -2458,6 +2503,14 @@ def _format_multitrack_prompt_relay(
     return " | ".join(formatted)
 
 
+def _selected_multitrack_user_prompt(content: dict) -> str:
+    if str(content.get("user_prompt_variant", "a")).lower() == "b":
+        prompt = str(content.get("user_prompt_b") or "")
+    else:
+        prompt = str(content.get("user_prompt") or content.get("text") or "")
+    return prompt.replace("@", "")
+
+
 def _format_marker_task_prompt_relay(
     tasks: list[dict],
     start_frame: int,
@@ -2472,7 +2525,7 @@ def _format_marker_task_prompt_relay(
         content = task.get("content", {})
         if not isinstance(content, dict):
             continue
-        prompt = str(content.get("user_prompt") or content.get("text") or "").strip()
+        prompt = _selected_multitrack_user_prompt(content).strip()
         if prompt:
             formatted.append(_format_multitrack_prompt_relay(prompt, task_start, task_end, 0))
     return " | ".join(formatted)
@@ -2509,7 +2562,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 io.Combo.Input(
                     "prompt_format",
                     options=PROMPT_FORMAT_OPTIONS + ["api", "llm"],
-                    default="default",
+                    default="api",
                     tooltip="Choose prompt format.",
                 ),
             ],
@@ -2670,13 +2723,19 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 )
 
         task_type = _multitrack_task_type(task, len(selected_images), has_video)
-        prompt = content.get("user_prompt") or content.get("text", "")
+        prompt = _selected_multitrack_user_prompt(content)
         system_prompt, api_prompt, json_mode = build_prompt_request(
             task_type,
             prompt,
             images=selected_images,
             video=selected_video,
-            custom_system_prompt=content.get("system_prompt") or None,
+            custom_system_prompt=(
+                str(content.get("system_prompt")).replace("@", "")
+                if content.get("system_prompt")
+                else None
+            ),
+            video_format=info.get("format"),
+            task_mode=content.get("task_mode", "default"),
         )
         chat_system_prompt, chat_user_prompt = _build_chat_prompts(system_prompt, api_prompt, prompt)
         llm_prompt = build_llm_prompt(chat_system_prompt, chat_user_prompt, json_mode)
@@ -2713,6 +2772,497 @@ class MultiTrackTaskOutput(io.ComfyNode):
             (selected_video or [None]) if is_minimax else selected_video,
             image_indexes,
         )
+
+
+class MultiTrackPromptEnhancer(io.ComfyNode):
+    @staticmethod
+    def _api_key_input() -> object:
+        return io.String.Input(
+            "apikey",
+            default="",
+            tooltip=(
+                "Provider API key. If empty, the matching key is read from "
+                "config.yaml or the environment."
+            ),
+        )
+
+    @classmethod
+    def _model_options(cls) -> list:
+        options: list = []
+        for model_name in PROMPT_ENHANCER_MODELS:
+            inputs: list = []
+            if model_name != LLAMACPP_MODEL:
+                inputs.append(cls._api_key_input())
+            if model_name == MINIMAX_MODEL:
+                inputs.extend(
+                    [
+                        io.Combo.Input(
+                            "ratio",
+                            options=PROMPT_ENHANCER_RATIO_OPTIONS,
+                            default="adaptive",
+                            tooltip=(
+                                "MiniMax official API ratio. Text-only adaptive "
+                                "requests use 16:9."
+                            ),
+                        ),
+                        io.Boolean.Input(
+                            "return_async",
+                            default=False,
+                            tooltip=(
+                                "Only effective for h3-context-ir. When enabled, "
+                                "return the task ID without polling the task status."
+                            ),
+                        ),
+                    ]
+                )
+            elif model_name in PROMPT_ENHANCER_MAX_TOKENS:
+                if model_name == LLAMACPP_MODEL:
+                    inputs.extend(
+                        [
+                            io.Combo.Input(
+                                "inference_mode",
+                                options=["one by one", "images", "video"],
+                                default="one by one",
+                                tooltip=(
+                                    "one by one: process every list item separately; "
+                                    "a multi-image batch inside one item is inferred "
+                                    "together. images: combine all images from every "
+                                    "list item into one prompt. video: treat each image "
+                                    "list item as a separate video clip."
+                                ),
+                            ),
+                            io.Boolean.Input(
+                                "force_offload",
+                                default=True,
+                                tooltip="Unload the local llama.cpp model after inference.",
+                            ),
+                        ]
+                    )
+                default, maximum = PROMPT_ENHANCER_MAX_TOKENS[model_name]
+                inputs.append(
+                    io.Int.Input(
+                        "max_tokens",
+                        default=default,
+                        min=128 if model_name == LLAMACPP_MODEL else 1,
+                        max=maximum,
+                        step=64 if model_name == LLAMACPP_MODEL else 1,
+                        tooltip=(
+                            "Maximum input image size in llama.cpp images and video modes."
+                            if model_name == LLAMACPP_MODEL
+                            else "Maximum number of output tokens generated by the model."
+                        ),
+                    )
+                )
+            options.append(io.DynamicCombo.Option(model_name, inputs))
+        return options
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy multiTrackPromptEnhancer",
+            display_name="MultiTrack Prompt Enhancer",
+            category=CATEGORY_MULTITRACK,
+            description=(
+                "Use MiniMax H3-Context-IR, a configured third-party multimodal LLM, "
+                "or a local llama.cpp model to enhance a multitrack video prompt."
+            ),
+            is_input_list=True,
+            not_idempotent=True,
+            enable_expand=True,
+            inputs=[
+                io.String.Input(
+                    "system_prompt",
+                    default="",
+                    multiline=True,
+                    force_input=True,
+                    tooltip="Optional system instructions from MultiTrack Task Output.",
+                ),
+                io.String.Input(
+                    "user_prompt",
+                    default="",
+                    multiline=True,
+                    force_input=True,
+                    tooltip="Optional user prompt from MultiTrack Task Output.",
+                ),
+                io.String.Input(
+                    "type",
+                    default="t2v",
+                    force_input=True,
+                    tooltip=(
+                        "Task type used to select H3 t2va, i2va, or r2va and "
+                        "assemble provider-specific media roles."
+                    ),
+                ),
+                io.Int.Input(
+                    "length",
+                    default=124,
+                    min=1,
+                    max=0x7FFFFFFF,
+                    force_input=True,
+                    tooltip="MiniMax-aligned frame length; converted back to 4–15 integer seconds.",
+                ),
+                io.Image.Input(
+                    "images",
+                    optional=True,
+                    tooltip=(
+                        "Optional image, batch, or list. H3 uploads each selected image; "
+                        "third-party inputs are limited to 2 megapixels."
+                    ),
+                ),
+                io.Audio.Input(
+                    "audio",
+                    optional=True,
+                    tooltip=(
+                        "Optional H3 r2va audio input or list. Audio is uploaded to "
+                        "MiniMax and omitted for third-party models."
+                    ),
+                ),
+                io.Video.Input(
+                    "video",
+                    optional=True,
+                    tooltip=(
+                        "Optional video input or list. A supported public video URL "
+                        "or local video data is sent natively when the provider accepts "
+                        "it; otherwise up to 24 resized frames are sent per video. "
+                        "Native video uploads are limited to 15 seconds; RunningHub "
+                        "videos are additionally limited to 10MB."
+                    ),
+                ),
+                io.AnyType.Input(
+                    "files",
+                    optional=True,
+                    tooltip="Reserved file input for a future provider implementation.",
+                ),
+                TYPE_LLAMACPP_MODEL.Input(
+                    "llama_model",
+                    optional=True,
+                    lazy=True,
+                    raw_link=True,
+                    tooltip=(
+                        "Local llama.cpp model input; evaluated only when the local "
+                        "provider is selected. Requires llama_cpp_instruct_adv from "
+                        f"{LLAMA_CPP_INSTALL_URL}."
+                    ),
+                ),
+                io.DynamicCombo.Input(
+                    "model",
+                    options=cls._model_options(),
+                    tooltip="Provider and model used to enhance the prompt.",
+                ),
+                io.Int.Input(
+                    "seed",
+                    default=0,
+                    min=0,
+                    max=0xFFFFFFFFFFFFFFFF,
+                    control_after_generate=True,
+                    tooltip="ComfyUI generation seed; used by compatible third-party LLM APIs.",
+                ),
+                io.Boolean.Input(
+                    "enabled",
+                    default=True,
+                    tooltip=(
+                        "Enhance the prompt when enabled. When disabled, return "
+                        "user_prompt unchanged without calling the selected model."
+                    ),
+                ),
+                TYPE_PROMPT_ENHANCER_ACCOUNT.Input(
+                    "api_account",
+                    tooltip=(
+                        "Provider balance and API key management. This widget is for "
+                        "account status only and does not affect prompt enhancement."
+                    ),
+                ),
+            ],
+            outputs=[
+                io.String.Output("PROMPT", tooltip="Enhanced video prompt."),
+                io.String.Output(
+                    "TASK_ID",
+                    tooltip="MiniMax task ID; empty for all other providers.",
+                ),
+                io.String.Output(
+                    "FILE_IDS",
+                    tooltip=(
+                        "Comma-separated MiniMax file IDs for uploaded images, "
+                        "videos, and audio; empty when no media was uploaded."
+                    ),
+                ),
+            ],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        system_prompt: list[str] | str | None = None,
+        user_prompt: list[str] | str | None = None,
+        type: list[str] | str | None = None,
+        length: list[int] | int | None = None,
+        images: list | torch.Tensor | None = None,
+        video: list | object | None = None,
+        audio: list | dict | None = None,
+        files: list | object | None = None,
+        llama_model: list | object | None = None,
+        model: list[dict] | dict | None = None,
+        seed: list[int] | int | None = None,
+        enabled: list[bool] | bool | None = None,
+        api_account: list[str] | str | None = None,
+    ) -> io.NodeOutput:
+        system_text = str(_unwrap_list_scalar(system_prompt, ""))
+        user_text = str(_unwrap_list_scalar(user_prompt, ""))
+        if not bool(_unwrap_list_scalar(enabled, True)):
+            return io.NodeOutput(user_text, "", "")
+
+        model_config = _unwrap_list_scalar(model, {})
+        if not isinstance(model_config, dict):
+            raise TypeError("model must be a DynamicCombo configuration dictionary.")
+        selected_model = str(
+            _unwrap_list_scalar(model_config.get("model"), MINIMAX_MODEL)
+        )
+        selected_api_key = str(
+            _unwrap_list_scalar(model_config.get("apikey"), "")
+        )
+        selected_max_tokens = model_config.get("max_tokens")
+        selected_inference_mode = model_config.get(
+            "inference_mode", "one by one"
+        )
+        selected_force_offload = model_config.get("force_offload", True)
+        selected_ratio_value = model_config.get("ratio", "adaptive")
+        selected_return_async = model_config.get("return_async", False)
+        progress_total = 100
+        process_bar = ProgressBar(progress_total)
+        process_bar.update_absolute(0, progress_total)
+
+        selected_seed = int(_unwrap_list_scalar(seed, 0))
+
+        if selected_model == LLAMACPP_MODEL:
+            if LLAMA_CPP_INSTRUCT_NODE_ID not in getattr(
+                comfy_nodes, "NODE_CLASS_MAPPINGS", {}
+            ):
+                raise RuntimeError(
+                    f"Missing node '{LLAMA_CPP_INSTRUCT_NODE_ID}'. 未找到该节点。请前往 "
+                    f"{LLAMA_CPP_INSTALL_URL} 下载并安装 ComfyUI-llama-cpp_vlm，"
+                    "然后重启 ComfyUI。"
+                )
+            selected_llama_model = _unwrap_singleton_container(llama_model, None)
+            if selected_llama_model is None:
+                raise RuntimeError(
+                    "llama_model must be connected when model is llama.cpp (本地)."
+                )
+            if not isinstance(selected_llama_model, dict) and not is_link(
+                selected_llama_model
+            ):
+                raise TypeError(
+                    "llama_model must resolve to a graph link or llama.cpp "
+                    "configuration dictionary; "
+                    f"received {type(selected_llama_model).__name__}."
+                )
+            graph = GraphBuilder()
+            node_inputs: dict[str, object] = {
+                "llama_model": selected_llama_model,
+                "preset_prompt": "Empty - Nothing",
+                "custom_prompt": user_text,
+                "system_prompt": system_text,
+                "inference_mode": str(
+                    _unwrap_list_scalar(selected_inference_mode, "one by one")
+                ),
+                "max_frames": 24,
+                "max_size": int(_unwrap_list_scalar(selected_max_tokens, 512)),
+                "seed": selected_seed,
+                "force_offload": bool(
+                    _unwrap_list_scalar(selected_force_offload, True)
+                ),
+                "save_states": False,
+            }
+            image_inputs = _as_list_input(images)
+            if image_inputs:
+                image_bridge = graph.node(
+                    LLAMA_CPP_IMAGE_LIST_BRIDGE_NODE_ID,
+                    id="local_llama_images",
+                    images=image_inputs,
+                )
+                node_inputs["images"] = image_bridge.out(0)
+            enhancer = graph.node(
+                LLAMA_CPP_INSTRUCT_NODE_ID,
+                id="local_llama_prompt_enhancer",
+                **node_inputs,
+            )
+            trimmed = graph.node(
+                STRING_TRIM_NODE_ID,
+                id="local_llama_prompt_trim",
+                string=enhancer.out(0),
+                mode="Both",
+            )
+            starts_with_text_fence = graph.node(
+                STRING_COMPARE_NODE_ID,
+                id="local_llama_prompt_starts_with_text_fence",
+                string_a=trimmed.out(0),
+                string_b="```text",
+                mode="Starts With",
+                case_sensitive=True,
+            )
+            ends_with_fence = graph.node(
+                STRING_COMPARE_NODE_ID,
+                id="local_llama_prompt_ends_with_fence",
+                string_a=trimmed.out(0),
+                string_b="```",
+                mode="Ends With",
+                case_sensitive=True,
+            )
+            without_text_fence = graph.node(
+                STRING_REPLACE_NODE_ID,
+                id="local_llama_prompt_remove_text_fence",
+                string=trimmed.out(0),
+                find="```text",
+                replace="",
+            )
+            without_closing_fence = graph.node(
+                STRING_REPLACE_NODE_ID,
+                id="local_llama_prompt_remove_closing_fence",
+                string=without_text_fence.out(0),
+                find="```",
+                replace="",
+            )
+            cleaned = graph.node(
+                STRING_TRIM_NODE_ID,
+                id="local_llama_prompt_cleaned_trim",
+                string=without_closing_fence.out(0),
+                mode="Both",
+            )
+            cleaned_if_ending_matches = graph.node(
+                SWITCH_NODE_ID,
+                id="local_llama_prompt_end_switch",
+                switch=ends_with_fence.out(0),
+                on_false=trimmed.out(0),
+                on_true=cleaned.out(0),
+            )
+            final_prompt = graph.node(
+                SWITCH_NODE_ID,
+                id="local_llama_prompt_start_switch",
+                switch=starts_with_text_fence.out(0),
+                on_false=trimmed.out(0),
+                on_true=cleaned_if_ending_matches.out(0),
+            )
+            process_bar.update_absolute(progress_total, progress_total)
+            return io.NodeOutput(
+                final_prompt.out(0),
+                "",
+                "",
+                expand=graph.finalize(),
+            )
+
+        try:
+            client = PromptEnhancerClient(
+                selected_model,
+                selected_api_key,
+            )
+            is_minimax = selected_model == MINIMAX_MODEL
+            image_urls = image_tensor_data_uris(
+                _as_list_input(images),
+                max_pixels=None if is_minimax else 2_000_000,
+            )
+            video_urls = (
+                video_data_uris(_as_list_input(video), max_duration=15)
+                if is_minimax
+                else prompt_enhancer_video_inputs(
+                    selected_model,
+                    _as_list_input(video),
+                )
+            )
+            audio_urls = audio_data_uris(_as_list_input(audio)) if is_minimax else []
+            file_items = [item for item in _as_list_input(files) if item is not None]
+            process_bar.update_absolute(10, progress_total)
+
+            # The file socket is reserved until provider uploads are implemented.
+            duration = minimax_length_to_seconds(_unwrap_list_scalar(length, 124))
+            task_type = str(_unwrap_list_scalar(type, "t2v"))
+            selected_ratio = str(_unwrap_list_scalar(selected_ratio_value, "adaptive"))
+            async_requested = bool(
+                _unwrap_list_scalar(selected_return_async, False)
+            )
+
+            poll_progress = 20
+
+            def on_poll(_status: str) -> None:
+                nonlocal poll_progress
+                try:
+                    import comfy.model_management as model_management
+
+                    model_management.throw_exception_if_processing_interrupted()
+                except ImportError:
+                    pass
+                poll_progress = min(95, poll_progress + 5)
+                process_bar.update_absolute(poll_progress, progress_total)
+
+            process_bar.update_absolute(poll_progress, progress_total)
+            result = client.enhance(
+                system_prompt=system_text,
+                user_prompt=user_text,
+                task_type=task_type,
+                duration=duration,
+                ratio=selected_ratio,
+                seed=selected_seed,
+                image_urls=image_urls,
+                video_urls=video_urls,
+                audio_urls=audio_urls,
+                max_tokens=(
+                    None
+                    if selected_max_tokens is None
+                    else int(_unwrap_list_scalar(selected_max_tokens, 4096))
+                ),
+                return_async=async_requested,
+                poll_interval=5.0,
+                poll_callback=on_poll,
+                file_count=len(file_items),
+                request_logger=log_node_info,
+            )
+        except (
+            PromptEnhancerApiError,
+            NotImplementedError,
+            ValueError,
+            TypeError,
+            OSError,
+        ) as exc:
+            process_bar.update_absolute(progress_total, progress_total)
+            raise RuntimeError(f"Prompt enhancement failed: {exc}") from exc
+
+        process_bar.update_absolute(progress_total, progress_total)
+        return io.NodeOutput(
+            result.prompt,
+            result.task_id if selected_model == MINIMAX_MODEL else "",
+            result.file_ids if selected_model == MINIMAX_MODEL else "",
+        )
+
+
+class MultiTrackPromptEnhancerImageListBridge(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id=LLAMA_CPP_IMAGE_LIST_BRIDGE_NODE_ID,
+            display_name="MultiTrack Prompt Enhancer Image List Bridge",
+            category="_easy_media/internal",
+            description=(
+                "Internal bridge that preserves list-style image inputs for the local "
+                "llama.cpp expansion graph."
+            ),
+            is_dev_only=True,
+            inputs=[
+                io.AnyType.Input(
+                    "images",
+                    tooltip="Image values forwarded by MultiTrack Prompt Enhancer.",
+                )
+            ],
+            outputs=[
+                io.Image.Output(
+                    "IMAGES",
+                    is_output_list=True,
+                    tooltip="Images forwarded as a ComfyUI output list.",
+                )
+            ],
+        )
+
+    @classmethod
+    def execute(cls, images: list | torch.Tensor | None = None) -> io.NodeOutput:
+        return io.NodeOutput(_as_list_input(images))
+
 
 TYPE_MAP = {"flf": 0, "fmlf": 1, "ref": 2}
 

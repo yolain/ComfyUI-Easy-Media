@@ -1,2 +1,7 @@
 # Set the environment variables for the web application
-WEB_VERSION: dev
+# WEB_VERSION: dev
+# Set APIKEY
+MINIMAX_API_KEY:
+VOLCENGINE_API_KEY:
+BIGMODEL_API_KEY:
+RUNNINGHUB_API_KEY:

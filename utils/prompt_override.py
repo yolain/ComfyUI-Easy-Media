@@ -107,6 +107,8 @@ def prompt_override_has_value(prompt_override) -> bool:
 
 
 def _multitrack_task_mode_from_override_type(seg_type: str) -> str:
+    if seg_type == "l2v":
+        return "l2v"
     if seg_type in ("ref", "r2v", "rv2v"):
         return "ref"
     if seg_type in ("fmlf", "v2v", "vi2v"):

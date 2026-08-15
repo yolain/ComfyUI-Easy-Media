@@ -1138,9 +1138,11 @@ export function PreviewArea({
             segment={selectedSegment.segment}
             trackSegments={taskSegments}
             videoSegments={videoSegments}
+            mediaTracks={data.tracks.filter((track) => track.type === 'audio' || track.type === 'video')}
             frameRate={data.frame_rate}
             totalFrames={data.total_length}
             imageIndexOffset={resolutionInput.format === 'MiniMax' ? 1 : 0}
+            format={resolutionInput.format}
             onContentChange={onSelectedSegmentContentChange}
             onTrackSegmentsContentChange={onTrackSegmentsContentChange}
             onTrackSegmentsChange={onTaskTrackSegmentsChange}

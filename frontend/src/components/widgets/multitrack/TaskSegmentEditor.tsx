@@ -5,17 +5,20 @@ import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Textarea } from '@/components/ui/textarea'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
 import { useT } from '@/lib/i18n'
 import { mediaContentToViewUrl } from '@/lib/media-url'
+import { getSegmentTrackPresentation } from '@/lib/multitrack-segment-style'
 import {
   applyCombinedTaskTexts,
   formatMultiTrackDurationTimecode,
   frameToSeconds,
+  getSelectedTaskUserPrompt,
+  getSelectedTaskUserPromptPatch,
   getMultiTrackTaskModeLabel,
   MULTITRACK_DEFAULT_FRAME_RATE,
+  MULTITRACK_TASK_MODES,
   parseMultiTrackDurationTimecode,
   segmentDuration,
 } from '@/lib/multitrack-utils'
@@ -29,12 +32,15 @@ import {
 } from '@/lib/task-image-utils'
 import { invalidateMediaListCache } from '@/stores/media-list-store'
 import type {
+  MultiTrack,
   MultiTrackSegment,
   MultiTrackSegmentContent,
   MultiTrackTaskImage,
   MultiTrackTaskMode,
+  MultiTrackUserPromptVariant,
 } from '@/types/multitrack'
 import { PanoramaImagePreview } from '@/components/widgets/panorama/PanoramaImagePreview'
+import { PromptContentEditor, type PromptReferenceResource } from './PromptContentEditor'
 
 type PromptTab = 'user' | 'system'
 type EditMode = 'individual' | 'combined'
@@ -48,9 +54,11 @@ interface TaskSegmentEditorProps {
   segment: MultiTrackSegment
   trackSegments?: MultiTrackSegment[]
   videoSegments?: MultiTrackSegment[]
+  mediaTracks?: MultiTrack[]
   frameRate?: number
   totalFrames?: number
   imageIndexOffset?: number
+  format?: string
   onContentChange: (patch: Partial<MultiTrackSegmentContent>) => void
   onTrackSegmentsContentChange?: (updates: TrackSegmentContentUpdate[]) => void
   onTrackSegmentsChange?: (segments: MultiTrackSegment[]) => void
@@ -65,9 +73,10 @@ interface SystemPromptResponse {
 interface SystemPromptOption {
   task_type?: string
   system_prompt?: string
+  format?: string
+  modes?: MultiTrackTaskMode[]
 }
 
-const TASK_MODES: MultiTrackTaskMode[] = ['default', 'ref', 'edit']
 let cachedSystemPromptOptions: SystemPromptOption[] | undefined
 let systemPromptOptionsRequest: Promise<SystemPromptOption[]> | null = null
 
@@ -91,6 +100,7 @@ function imageDisplayName(image: MultiTrackTaskImage): string {
 }
 
 function getTaskType(mode: MultiTrackTaskMode, imageCount: number, hasVideoInRange: boolean): string {
+  if (mode === 'l2v') return 'l2v'
   if (mode === 'ref') return hasVideoInRange ? 'rv2v' : 'r2v'
   if (mode === 'edit') return imageCount > 0 ? 'vi2v' : 'v2v'
   return imageCount > 0 ? 'i2v' : 't2v'
@@ -108,6 +118,7 @@ function getDefaultSystemPromptForSegment(
   segment: MultiTrackSegment,
   options: SystemPromptOption[],
   videoSegments: MultiTrackSegment[],
+  format?: string,
 ): string {
   const images = taskImages(segment)
   const taskType = getTaskType(
@@ -115,25 +126,14 @@ function getDefaultSystemPromptForSegment(
     images.length,
     hasVideoInRange(segment, videoSegments),
   )
-  return options.find((option) => option.task_type === taskType)?.system_prompt ?? ''
-}
-
-function renderSystemPromptHighlight(value: string) {
-  return value.split(/(\{[^{}]*\})/g).map((part, index) => (
-    /^\{[^{}]*\}$/.test(part) ? (
-      <span key={`${part}-${index}`} className="text-highlight" data-system-prompt-variable="true">
-        {part}
-      </span>
-    ) : part
+  const mode = segment.content.task_mode ?? 'default'
+  const formatMatch = options.find((option) => (
+    option.format === format
+    && (option.modes?.includes(mode) || option.task_type === taskType)
   ))
-}
-
-function renderCombinedPromptHighlight(value: string) {
-  return value.split(/([|｜])/).map((part, index) => (
-    part === '|' || part === '｜' ? (
-      <span key={`pipe-${index}`} className="text-highlight" data-pipe="true">|</span>
-    ) : part
-  ))
+  return formatMatch?.system_prompt
+    ?? options.find((option) => option.task_type === taskType && option.format === undefined)?.system_prompt
+    ?? ''
 }
 
 async function loadSystemPromptOptions(): Promise<SystemPromptOption[]> {
@@ -160,9 +160,11 @@ export function TaskSegmentEditor({
   segment,
   trackSegments,
   videoSegments = [],
+  mediaTracks = [],
   frameRate = MULTITRACK_DEFAULT_FRAME_RATE,
   totalFrames,
   imageIndexOffset = 0,
+  format,
   onContentChange,
   onTrackSegmentsContentChange,
   onTrackSegmentsChange,
@@ -171,9 +173,6 @@ export function TaskSegmentEditor({
 }: Readonly<TaskSegmentEditorProps>) {
   const t = useT()
   const draggedImageIdRef = useRef<string | null>(null)
-  const combinedPromptComposingRef = useRef(false)
-  const combinedPromptOverlayRef = useRef<HTMLDivElement>(null)
-  const systemPromptOverlayRef = useRef<HTMLDivElement>(null)
   const [promptTab, setPromptTab] = useState<PromptTab>('user')
   const [editMode, setEditMode] = useState<EditMode>('individual')
   const [mediaSelectorOpen, setMediaSelectorOpen] = useState(false)
@@ -189,19 +188,67 @@ export function TaskSegmentEditor({
   const editableSegments = useMemo(() => (
     trackSegments && trackSegments.length > 0 ? trackSegments : [segment]
   ), [segment, trackSegments])
-  const combinedPromptValue = editableSegments.map((item) => item.content.user_prompt ?? '').join('|')
+  const combinedPromptValue = editableSegments.map((item) => (
+    getSelectedTaskUserPrompt(item.content)
+  )).join('|')
   const [combinedPromptInput, setCombinedPromptInput] = useState(combinedPromptValue)
   const taskIndex = Math.max(0, editableSegments.findIndex((item) => item.id === segment.id))
+  const promptVariant: MultiTrackUserPromptVariant = segment.content.user_prompt_variant === 'b' ? 'b' : 'a'
   const promptValue = editMode === 'combined'
     ? combinedPromptInput
-    : segment.content.user_prompt ?? ''
+    : getSelectedTaskUserPrompt(segment.content)
+  const usesMiniMaxPromptPlaceholder = format === 'MiniMax'
+  const promptPlaceholder = usesMiniMaxPromptPlaceholder
+    ? t('multitrack.minimaxPromptPlaceholder')
+    : t('multitrack.promptPlaceholder')
   const segmentHasVideoInRange = hasVideoInRange(segment, videoSegments)
-  const systemPromptDefault = getDefaultSystemPromptForSegment(segment, systemPromptOptions ?? [], videoSegments)
+  const systemPromptDefault = getDefaultSystemPromptForSegment(segment, systemPromptOptions ?? [], videoSegments, format)
   const systemPromptValue = editMode === 'combined'
     ? editableSegments.map((item) => (
-        item.content.system_prompt ?? getDefaultSystemPromptForSegment(item, systemPromptOptions ?? [], videoSegments)
+        item.content.system_prompt ?? getDefaultSystemPromptForSegment(item, systemPromptOptions ?? [], videoSegments, format)
       )).join('|')
     : segment.content.system_prompt || systemPromptDefault
+  const promptResources = useMemo<PromptReferenceResource[]>(() => {
+    const imageResources = images.map((image, index) => ({
+      id: `image:${image.id}`,
+      type: 'image' as const,
+      index: index + 1,
+      label: t('multitrack.referencePicture', { n: index + 1 }),
+      detail: imageDisplayName(image),
+      token: `@${t('multitrack.referencePicture', { n: index + 1 })}`,
+      color: getSegmentTrackPresentation('task').backgroundColor,
+      thumbnailUrl: mediaContentToViewUrl({
+        source_type: image.source_type ?? 'input',
+        file_path: image.file_path,
+        local_path: image.local_path,
+        url: image.url,
+        slot_name: image.slot_name,
+      }) ?? undefined,
+    }))
+    const trackResources = (['audio', 'video'] as const).flatMap((type) => (
+      mediaTracks
+        .filter((track) => (
+          track.type === type
+          && track.segments.some((item) => item.content.media_type === type)
+        ))
+        .map((track, index) => {
+          const resourceIndex = index + 1
+          const labelKey = type === 'audio' ? 'multitrack.referenceAudioItem' : 'multitrack.referenceVideoItem'
+          const label = t(labelKey, { n: resourceIndex })
+          return {
+            id: `${type}:${track.id}`,
+            type,
+            index: resourceIndex,
+            label,
+            detail: track.name,
+            token: `@${label}`,
+            color: getSegmentTrackPresentation(type).waveformColor
+              ?? getSegmentTrackPresentation(type).backgroundColor,
+          }
+        })
+    ))
+    return [...imageResources, ...trackResources]
+  }, [images, mediaTracks, t])
 
   useEffect(() => {
     setDurationInput(formattedDuration)
@@ -212,7 +259,6 @@ export function TaskSegmentEditor({
   }, [segment.id])
 
   useEffect(() => {
-    if (combinedPromptComposingRef.current) return
     setCombinedPromptInput((current) => current === combinedPromptValue ? current : combinedPromptValue)
   }, [combinedPromptValue])
 
@@ -322,30 +368,17 @@ export function TaskSegmentEditor({
     }
     onTrackSegmentsContentChange?.(editableSegments.map((item, index) => ({
       segmentId: item.id,
-      patch: { user_prompt: parts[index] ?? '' },
+      patch: getSelectedTaskUserPromptPatch(item.content, parts[index] ?? ''),
     })))
   }
 
   function handlePromptChange(value: string) {
     if (editMode === 'combined') {
       setCombinedPromptInput(value)
-      if (combinedPromptComposingRef.current) return
       commitCombinedPrompt(value)
       return
     }
-    onContentChange({ user_prompt: value })
-  }
-
-  function handleCombinedPromptShortcut(event: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (!(event.ctrlKey || event.metaKey)) return
-    if (!['a', 'c', 'v', 'x'].includes(event.key.toLowerCase())) return
-    event.stopPropagation()
-  }
-
-  function handleCombinedPromptScroll(event: React.UIEvent<HTMLTextAreaElement>) {
-    if (!combinedPromptOverlayRef.current) return
-    combinedPromptOverlayRef.current.scrollTop = event.currentTarget.scrollTop
-    combinedPromptOverlayRef.current.scrollLeft = event.currentTarget.scrollLeft
+    onContentChange(getSelectedTaskUserPromptPatch(segment.content, value))
   }
 
   function handleSystemPromptChange(value: string) {
@@ -358,12 +391,6 @@ export function TaskSegmentEditor({
       return
     }
     onContentChange({ system_prompt: value })
-  }
-
-  function handleSystemPromptScroll(event: React.UIEvent<HTMLTextAreaElement>) {
-    if (!systemPromptOverlayRef.current) return
-    systemPromptOverlayRef.current.scrollTop = event.currentTarget.scrollTop
-    systemPromptOverlayRef.current.scrollLeft = event.currentTarget.scrollLeft
   }
 
   function handleDeleteImage(imageId: string) {
@@ -563,7 +590,30 @@ export function TaskSegmentEditor({
                   {t('multitrack.systemPrompt')}
                 </Button>
               </div>
-              {promptTab === 'system' && Boolean(segment.content.system_prompt) && (
+              {promptTab === 'user' ? (
+                <TooltipProvider delayDuration={300}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div aria-label={t('multitrack.userPromptVariantTooltip')}>
+                        <Tabs
+                          value={promptVariant}
+                          onValueChange={(value) => onContentChange({
+                            user_prompt_variant: value as MultiTrackUserPromptVariant,
+                          })}
+                        >
+                          <TabsList className="h-7 bg-card p-1">
+                            <TabsTrigger value="a" className="h-full min-w-7 px-2 text-[10px]">A</TabsTrigger>
+                            <TabsTrigger value="b" className="h-full min-w-7 px-2 text-[10px]">B</TabsTrigger>
+                          </TabsList>
+                        </Tabs>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-72">
+                      {t('multitrack.userPromptVariantTooltip')}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : Boolean(segment.content.system_prompt) && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -584,63 +634,46 @@ export function TaskSegmentEditor({
           )}
           {editMode === 'combined' ? (
             <div className="flex min-h-0 flex-1 flex-col gap-1 p-2">
-              <div className="relative min-h-24 flex-1 overflow-hidden rounded-md bg-card">
-                <div
-                  ref={combinedPromptOverlayRef}
-                  data-testid="combined-prompt-highlight"
-                  aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 z-0 overflow-auto whitespace-pre-wrap wrap-break-word px-3 py-2 text-[10px] leading-normal text-foreground"
-                >
-                  {renderCombinedPromptHighlight(promptValue)}
-                </div>
-                <Textarea
-                  aria-label={t('multitrack.prompt')}
-                  placeholder={t('multitrack.promptPlaceholder')}
-                  className="absolute inset-0 z-10 h-full min-h-0 resize-none border-none bg-transparent text-[10px] leading-normal text-transparent caret-foreground shadow-none focus-visible:ring-1"
+              <div className="relative min-h-24 flex-1 rounded-md bg-card">
+                <PromptContentEditor
+                  ariaLabel={t('multitrack.prompt')}
+                  placeholder={promptPlaceholder}
+                  interactivePlaceholder={usesMiniMaxPromptPlaceholder}
+                  testId="combined-prompt-highlight"
+                  className="border-none bg-card shadow-none"
                   value={promptValue}
-                  onChange={(event) => handlePromptChange(event.currentTarget.value)}
-                  onKeyDown={handleCombinedPromptShortcut}
-                  onScroll={handleCombinedPromptScroll}
-                  onCompositionStart={() => {
-                    combinedPromptComposingRef.current = true
-                  }}
-                  onCompositionEnd={(event) => {
-                    combinedPromptComposingRef.current = false
-                    const value = event.currentTarget.value
-                    setCombinedPromptInput(value)
-                    commitCombinedPrompt(value)
-                  }}
+                  resources={promptResources}
+                  mentionsEnabled
+                  highlightPipes
+                  onChange={handlePromptChange}
                 />
               </div>
               <p className="shrink-0 text-[9px] text-muted-foreground mt-1">{t('maintainTrack.combinedHint')}</p>
             </div>
           ) : promptTab === 'user' ? (
             <div className="min-h-0 flex-1 pb-2 px-2">
-              <Textarea
-                aria-label={t('multitrack.prompt')}
-                placeholder={t('multitrack.promptPlaceholder')}
-                className="h-full min-h-24 resize-none border-none bg-card text-[10px] caret-foreground shadow-none focus-visible:ring-1"
+              <PromptContentEditor
+                placeholder={promptPlaceholder}
+                interactivePlaceholder={usesMiniMaxPromptPlaceholder}
+                ariaLabel={t('multitrack.prompt')}
+                className="border-none bg-card shadow-none"
                 value={promptValue}
-                onChange={(event) => handlePromptChange(event.currentTarget.value)}
+                resources={promptResources}
+                mentionsEnabled
+                onChange={handlePromptChange}
               />
             </div>
           ) : (
             <div className="relative min-h-0 flex-1 pb-2 px-2">
-              <div className="relative h-full min-h-24 overflow-hidden rounded-md bg-card">
-                <div
-                  ref={systemPromptOverlayRef}
-                  aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 z-0 overflow-hidden whitespace-pre-wrap wrap-break-word px-3 py-2 text-[10px] leading-normal text-foreground"
-                >
-                  {renderSystemPromptHighlight(systemPromptValue)}
-                </div>
-                <Textarea
-                  aria-label={t('multitrack.systemPrompt')}
+              <div className="relative h-full min-h-24 rounded-md bg-card">
+                <PromptContentEditor
+                  ariaLabel={t('multitrack.systemPrompt')}
                   placeholder={systemPromptLoading ? t('multitrack.loadingSystemPrompt') : t('multitrack.systemPromptPlaceholder')}
-                  className="absolute inset-0 z-10 h-full min-h-0 resize-none border-none bg-transparent text-[10px] leading-normal text-transparent caret-foreground shadow-none focus-visible:ring-1"
+                  className="border-none bg-card shadow-none"
                   value={systemPromptValue}
-                  onChange={(event) => handleSystemPromptChange(event.currentTarget.value)}
-                  onScroll={handleSystemPromptScroll}
+                  resources={promptResources}
+                  highlightSystemVariables
+                  onChange={handleSystemPromptChange}
                 />
               </div>
             </div>
@@ -701,7 +734,7 @@ export function TaskSegmentEditor({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {TASK_MODES.map((taskMode) => (
+            {MULTITRACK_TASK_MODES.map((taskMode) => (
               <SelectItem key={taskMode} value={taskMode}>
                 <span className="text-[10px]">
                   {getMultiTrackTaskModeLabel(taskMode, t)} ({getTaskType(taskMode, images.length, segmentHasVideoInRange)})

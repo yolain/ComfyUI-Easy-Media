@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   addDefaultTaskSegmentIfRangeEmpty,
+  applyCombinedTaskTexts,
   calculateTotalLength,
   calculateReplacementAudioEndFrame,
   cloneMultiTrackSegment,
@@ -38,6 +39,47 @@ import {
 } from '@/lib/multitrack-utils'
 
 describe('multitrack utilities', () => {
+  it('applies combined prompt text to each task selected A/B variant', () => {
+    const data = createDefaultTrackData()
+    const first = {
+      id: 'task-a',
+      start_frame: 0,
+      end_frame: 60,
+      color: data.tracks[0].color,
+      content: {
+        media_type: 'none' as const,
+        task_mode: 'default' as const,
+        user_prompt: 'A1',
+      },
+    }
+    const second = {
+      ...first,
+      id: 'task-b',
+      start_frame: 60,
+      end_frame: 120,
+      content: {
+        ...first.content,
+        user_prompt: 'A2',
+        user_prompt_b: 'B2',
+        user_prompt_variant: 'b' as const,
+      },
+    }
+
+    const updated = applyCombinedTaskTexts(
+      ['Updated A', 'Updated B'],
+      [first, second],
+      120,
+      first.color,
+    )
+
+    expect(updated[0].content).toMatchObject({ user_prompt: 'Updated A' })
+    expect(updated[1].content).toMatchObject({
+      user_prompt: 'A2',
+      user_prompt_b: 'Updated B',
+      user_prompt_variant: 'b',
+    })
+  })
+
   it('uses a short segment range instead of padding the timeline to five seconds', () => {
     const data = createDefaultTrackData()
     data.tracks[0].segments = [{
@@ -249,8 +291,9 @@ describe('multitrack utilities', () => {
   })
 
   it('maintains task modes separately from media track types', () => {
-    expect(MULTITRACK_TASK_MODES).toEqual(['default', 'ref', 'edit'])
+    expect(MULTITRACK_TASK_MODES).toEqual(['default', 'ref', 'edit', 'l2v'])
     expect(getMultiTrackTaskModeLabel('default', (key) => key)).toBe('multitrackTaskModes.default')
+    expect(getMultiTrackTaskModeLabel('l2v', (key) => key)).toBe('multitrackTaskModes.l2v')
     expect(getMultiTrackTaskModeLabel('ref', (key) => key)).toBe('multitrackTaskModes.ref')
     expect(getMultiTrackTaskModeLabel('edit', (key) => key)).toBe('multitrackTaskModes.edit')
   })
