@@ -23,6 +23,16 @@
     "settings": "Output settings",
     "downloadOutput": "Download output video"
   },
+  "promptEnhancerAccount": {
+    "balance": "Balance: {amount}",
+    "balanceEmpty": "Balance: --",
+    "viewBalance": "View balance",
+    "loadingBalance": "Loading balance...",
+    "balanceUnavailable": "Balance is temporarily unavailable",
+    "apiKeyRequired": "Enter an API key to load the balance",
+    "apiKey": "API Key",
+    "localModel": "Local model — no API account required"
+  },
   "toolbar": {
     "frames": "Frames",
     "seconds": "Seconds",

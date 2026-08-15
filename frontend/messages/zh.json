@@ -23,6 +23,16 @@
     "settings": "输出设置",
     "downloadOutput": "下载输出视频"
   },
+  "promptEnhancerAccount": {
+    "balance": "余额：{amount}",
+    "balanceEmpty": "余额：--",
+    "viewBalance": "去查看余额",
+    "loadingBalance": "正在获取余额...",
+    "balanceUnavailable": "暂时无法获取余额",
+    "apiKeyRequired": "填写 API Key 后可获取余额",
+    "apiKey": "API Key",
+    "localModel": "本地模型，无需 API 账户"
+  },
   "toolbar": {
     "frames": "帧",
     "seconds": "秒",
