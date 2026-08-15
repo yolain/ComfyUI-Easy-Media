@@ -13,7 +13,7 @@ import { uuid } from './uuid'
 export const MULTITRACK_DEFAULT_FRAME_RATE = 24
 export const MULTITRACK_DEFAULT_TOTAL_LENGTH = 120
 export const MULTITRACK_MIN_DURATION_SECONDS = 5
-export const MULTITRACK_TASK_MODES = ['default', 'l2v', 'ref', 'edit'] as const
+export const MULTITRACK_TASK_MODES = ['default', 'ref', 'edit', 'l2v'] as const
 export const MULTITRACK_DEFAULT_TASK_MODE: MultiTrackTaskMode = 'default'
 export const MULTITRACK_DEFAULT_VOLUME_DB = 0
 export const MULTITRACK_MIN_VOLUME_DB = -20

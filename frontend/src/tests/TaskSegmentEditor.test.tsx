@@ -130,7 +130,7 @@ describe('TaskSegmentEditor', () => {
     expect(bSegment.content.user_prompt).toBe('Initial prompt')
   })
 
-  it('offers last-frame mode between default and reference', () => {
+  it('offers last-frame mode after edit', () => {
     const onContentChange = vi.fn()
     render(<TaskSegmentEditor segment={taskSegment()} onContentChange={onContentChange} />)
 
@@ -139,9 +139,9 @@ describe('TaskSegmentEditor', () => {
 
     expect(options).toEqual([
       'Default (i2v)',
-      'Last Frame (l2v)',
       'Reference (r2v)',
       'Edit (vi2v)',
+      'Last Frame (l2v)',
     ])
     fireEvent.click(screen.getByRole('option', { name: 'Last Frame (l2v)' }))
     expect(onContentChange).toHaveBeenCalledWith({ task_mode: 'l2v' })
@@ -604,6 +604,27 @@ describe('TaskSegmentEditor', () => {
     expect(onCanvasPaste).not.toHaveBeenCalled()
     expect(onContentChange).toHaveBeenLastCalledWith({ user_prompt: '<Picture 1> moves' })
     expect(prompt.querySelector('[data-prompt-reference-token="<Picture 1>"]')).not.toBeNull()
+  })
+
+  it('copies newly inserted reference chips as their prompt tag text', () => {
+    render(<TaskSegmentEditor segment={taskSegment()} onContentChange={vi.fn()} />)
+
+    const prompt = screen.getByRole('textbox', { name: 'Prompt' })
+    inputEditable(prompt, '@')
+    fireEvent.keyDown(prompt, { key: 'Enter' })
+    expect(prompt.querySelector('[data-prompt-reference-token="@Picture 1"]')).not.toBeNull()
+
+    const selection = window.getSelection()
+    const selectAll = document.createRange()
+    selectAll.selectNodeContents(prompt)
+    selection?.removeAllRanges()
+    selection?.addRange(selectAll)
+    const setData = vi.fn()
+    fireEvent.copy(prompt, {
+      clipboardData: { setData },
+    })
+
+    expect(setData).toHaveBeenCalledWith('text/plain', '@Picture 1')
   })
 
   it('deletes a reference chip as one atomic value with Backspace', () => {

@@ -220,6 +220,14 @@ function insertPlainTextAtSelection(editor: HTMLElement, text: string): boolean 
   return true
 }
 
+function selectedPromptText(editor: HTMLElement): string | null {
+  const selection = window.getSelection()
+  if (!selection?.rangeCount || selection.isCollapsed) return null
+  const range = selection.getRangeAt(0)
+  if (!editor.contains(range.commonAncestorContainer)) return null
+  return serializePromptContent(range.cloneContents())
+}
+
 function appendReferenceChip(
   container: HTMLElement,
   token: string,
@@ -521,6 +529,14 @@ export function PromptContentEditor({
           const editor = editorRef.current
           const text = event.clipboardData.getData('text/plain')
           if (editor && insertPlainTextAtSelection(editor, text)) commitEditorChange()
+        }}
+        onCopy={(event) => {
+          event.stopPropagation()
+          const editor = editorRef.current
+          const text = editor ? selectedPromptText(editor) : null
+          if (text === null) return
+          event.preventDefault()
+          event.clipboardData.setData('text/plain', text)
         }}
         onKeyDown={(event) => {
           if ((event.key === 'Backspace' || event.key === 'Delete') && deleteAdjacentReference(event.key)) {

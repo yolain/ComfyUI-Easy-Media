@@ -291,7 +291,7 @@ describe('multitrack utilities', () => {
   })
 
   it('maintains task modes separately from media track types', () => {
-    expect(MULTITRACK_TASK_MODES).toEqual(['default', 'l2v', 'ref', 'edit'])
+    expect(MULTITRACK_TASK_MODES).toEqual(['default', 'ref', 'edit', 'l2v'])
     expect(getMultiTrackTaskModeLabel('default', (key) => key)).toBe('multitrackTaskModes.default')
     expect(getMultiTrackTaskModeLabel('l2v', (key) => key)).toBe('multitrackTaskModes.l2v')
     expect(getMultiTrackTaskModeLabel('ref', (key) => key)).toBe('multitrackTaskModes.ref')
