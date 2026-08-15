@@ -77,7 +77,7 @@ def test_third_party_video_url_capabilities_match_provider_documentation():
 def test_llamacpp_max_tokens_widget_limits():
     module = _load_module()
 
-    assert module.PROMPT_ENHANCER_MAX_TOKENS[module.LLAMACPP_MODEL] == (512, 8192)
+    assert module.PROMPT_ENHANCER_MAX_TOKENS[module.LLAMACPP_MODEL] == (512, 768)
 
 
 @pytest.mark.parametrize(

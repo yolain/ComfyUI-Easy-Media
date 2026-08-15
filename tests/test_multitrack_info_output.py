@@ -288,7 +288,7 @@ def _load_basic_module():
         "glm (智谱)": (65536, 131072),
         "doubao (RunningHub)": (4096, 131072),
         "glm (RunningHub)": (65536, 131072),
-        utils_module.LLAMACPP_MODEL: (512, 8192),
+        utils_module.LLAMACPP_MODEL: (512, 768),
     }
     utils_module.PromptEnhancerApiError = RuntimeError
     utils_module.PromptEnhancerClient = object
@@ -2873,7 +2873,11 @@ def test_multitrack_prompt_enhancer_expands_local_llama_instruct_node():
     assert output.values == (["local_llama_prompt_start_switch", 0], "", "")
     assert image_bridge == {
         "class_type": module.LLAMA_CPP_IMAGE_LIST_BRIDGE_NODE_ID,
-        "inputs": {"images": [image]},
+        "inputs": {
+            "images": [image],
+            "inference_mode": "images",
+            "max_size": 768,
+        },
     }
     assert expanded["class_type"] == module.LLAMA_CPP_INSTRUCT_NODE_ID
     assert expanded["inputs"]["llama_model"] == llama_model
@@ -2882,7 +2886,7 @@ def test_multitrack_prompt_enhancer_expands_local_llama_instruct_node():
     assert expanded["inputs"]["system_prompt"] == "System"
     assert expanded["inputs"]["inference_mode"] == "images"
     assert expanded["inputs"]["max_frames"] == 24
-    assert expanded["inputs"]["max_size"] == 1024
+    assert expanded["inputs"]["max_size"] == 768
     assert expanded["inputs"]["seed"] == 9
     assert expanded["inputs"]["force_offload"] is True
     assert expanded["inputs"]["save_states"] is False
@@ -3176,6 +3180,61 @@ def test_multitrack_prompt_enhancer_has_complete_chinese_localization():
     assert bridge_translation["outputs"]["0"]["tooltip"]
     assert all(port.kwargs.get("tooltip") for port in bridge_schema.inputs)
     assert all(port.kwargs.get("tooltip") for port in bridge_schema.outputs)
+
+
+def test_multitrack_prompt_enhancer_image_bridge_limits_single_image_long_edge():
+    module = _load_basic_module()
+    image = torch.zeros(1, 1200, 800, 3)
+
+    output = module.MultiTrackPromptEnhancerImageListBridge.execute(
+        images=[image],
+        max_size=512,
+    )
+
+    assert len(output.values[0]) == 1
+    assert output.values[0][0].shape == (1, 512, 341, 3)
+
+
+def test_multitrack_prompt_enhancer_image_bridge_preserves_small_batches():
+    module = _load_basic_module()
+    image_batch = torch.zeros(2, 64, 96, 3)
+
+    output = module.MultiTrackPromptEnhancerImageListBridge.execute(
+        images=[image_batch],
+        max_size=512,
+    )
+
+    assert len(output.values[0]) == 1
+    assert output.values[0][0] is image_batch
+
+
+def test_multitrack_prompt_enhancer_image_bridge_preserves_images_mode_references():
+    module = _load_basic_module()
+    images = [torch.zeros(1, 512, 512, 3), torch.ones(1, 512, 512, 3)]
+
+    output = module.MultiTrackPromptEnhancerImageListBridge.execute(
+        images=images,
+        max_size=512,
+        inference_mode="images",
+    )
+
+    assert len(output.values[0]) == 2
+    assert output.values[0][0].shape == (1, 362, 362, 3)
+    assert output.values[0][1].shape == (1, 362, 362, 3)
+
+
+def test_multitrack_prompt_enhancer_image_bridge_caps_all_inference_modes():
+    module = _load_basic_module()
+    image = torch.zeros(1, 1024, 1024, 3)
+
+    for inference_mode in ("one by one", "images", "video"):
+        output = module.MultiTrackPromptEnhancerImageListBridge.execute(
+            images=[image],
+            max_size=8192,
+            inference_mode=inference_mode,
+        )
+
+        assert output.values[0][0].shape == (1, 768, 768, 3)
 
 
 def test_match_line_returns_first_containing_line_index():

@@ -152,7 +152,7 @@ PROMPT_ENHANCER_MAX_TOKENS = {
     for model, config in MODEL_CONFIGS.items()
     if config.default_max_tokens is not None and config.max_tokens_limit is not None
 }
-PROMPT_ENHANCER_MAX_TOKENS[LLAMACPP_MODEL] = (512, 8192)
+PROMPT_ENHANCER_MAX_TOKENS[LLAMACPP_MODEL] = (512, 768)
 
 
 def _openai_compatible_seed(seed: int) -> int:
