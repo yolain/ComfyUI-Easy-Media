@@ -63,7 +63,7 @@ describe('MediaSelector', () => {
     render(<MediaSelector value="" mediaType="video" onChange={vi.fn()} />)
 
     const fileName = await screen.findByTitle('clip.mp4')
-    const fileButton = fileName.closest('button')
+    const fileButton = fileName.closest('[role="button"]')
 
     await waitFor(() => {
       const video = fileButton?.querySelector('video')
@@ -92,7 +92,7 @@ describe('MediaSelector', () => {
     render(<MediaSelector value="" mediaType="video" onChange={vi.fn()} />)
 
     const fileName = await screen.findByTitle('clip.mp4')
-    const video = fileName.closest('button')?.querySelector('video')
+    const video = fileName.closest('[role="button"]')?.querySelector('video')
     if (!video) throw new Error('Expected a video thumbnail')
     expect(video?.getAttribute('src')).toBeNull()
 
@@ -131,6 +131,110 @@ describe('MediaSelector', () => {
     await screen.findByTitle('clip.mp4')
 
     expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses one inverse-icon button to toggle grid and list views', async () => {
+    render(<MediaSelector value="" mediaType="video" onChange={vi.fn()} />)
+    await screen.findByTitle('clip.mp4')
+
+    const viewButton = screen.getByTitle('mediaSelector.viewList')
+    expect(viewButton.querySelector('.lucide-layout-list')).not.toBeNull()
+    expect(screen.queryByTitle('mediaSelector.viewGrid')).toBeNull()
+
+    fireEvent.click(viewButton)
+
+    const gridButton = screen.getByTitle('mediaSelector.viewGrid')
+    expect(gridButton.querySelector('.lucide-layout-grid')).not.toBeNull()
+    expect(screen.queryByTitle('mediaSelector.viewList')).toBeNull()
+  })
+
+  it('keeps image selection single by default', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        items: [{
+          type: 'file',
+          name: 'a.png',
+          path: 'a.png',
+          url: '/view?filename=a.png&type=input&subfolder=',
+          size: 10,
+          mtime: 1,
+        }],
+      }),
+    } as Response)
+    const onChange = vi.fn()
+
+    render(<MediaSelector value="" mediaType="image" onChange={onChange} />)
+
+    fireEvent.click(await screen.findByTitle('a.png'))
+    expect(screen.queryByText('mediaSelector.filter')).toBeNull()
+    expect(onChange).toHaveBeenCalledWith('a.png', 'input')
+  })
+
+  it('selects image files in batches without exceeding the supplied limit', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        items: [
+          { type: 'dir', name: 'folder', path: 'folder' },
+          ...['a.png', 'b.png', 'c.png'].map((name, index) => ({
+            type: 'file',
+            name,
+            path: name,
+            url: `/view?filename=${name}&type=input&subfolder=`,
+            size: 10,
+            mtime: index,
+          })),
+        ],
+      }),
+    } as Response)
+    const onChange = vi.fn()
+
+    render(
+      <MediaSelector
+        value=""
+        mediaType="image"
+        allowMultipleSelection
+        maxSelectionCount={2}
+        onChange={onChange}
+      />,
+    )
+    await screen.findByTitle('a.png')
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0)
+
+    fireEvent.click(screen.getByText('mediaSelector.filter'))
+
+    expect(screen.queryByTitle('mediaSelector.viewList')).toBeNull()
+    expect(screen.queryByText('mediaSelector.filter')).toBeNull()
+    expect(screen.getAllByRole('checkbox')).toHaveLength(3)
+    fireEvent.click(screen.getByText('mediaSelector.selectAll'))
+    expect(screen.getAllByRole('checkbox', { checked: true })).toHaveLength(2)
+
+    fireEvent.click(screen.getByText('mediaSelector.confirm'))
+    expect(onChange).toHaveBeenCalledWith('a.png|MULTIPLE|b.png', 'input')
+  })
+
+  it('navigates each level of a nested breadcrumb', async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const subfolder = new URL(String(input), 'http://localhost').searchParams.get('subfolder') ?? ''
+      const items = subfolder === 'parent/child'
+        ? [{ type: 'file', name: 'inside.mp4', path: 'parent/child/inside.mp4', size: 10, mtime: 1 }]
+        : subfolder === 'parent'
+          ? [{ type: 'dir', name: 'child', path: 'parent/child' }]
+          : [{ type: 'dir', name: 'parent', path: 'parent' }]
+      return { ok: true, json: async () => ({ items }) } as Response
+    })
+
+    render(<MediaSelector value="" mediaType="all" onChange={vi.fn()} />)
+    fireEvent.click(await screen.findByTitle('parent'))
+    fireEvent.click(await screen.findByTitle('child'))
+    await screen.findByTitle('inside.mp4')
+
+    fireEvent.click(screen.getByRole('button', { name: 'parent' }))
+    await waitFor(() => {
+      expect(screen.queryByTitle('inside.mp4')).toBeNull()
+    })
+    expect(screen.getByTitle('child')).not.toBeNull()
   })
 
   it('clears the search query when entering a subdirectory', async () => {

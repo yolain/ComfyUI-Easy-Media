@@ -104,6 +104,34 @@ describe('CompareVideoWidget', () => {
     expect(screen.getByRole('button', { name: 'Mute audio' })).not.toBeNull()
   })
 
+  it('shows source and output in equal-width A/B panels when both videos are available', () => {
+    render(createElement(CompareVideoWidget, widgetProps({
+      id: 9,
+      __easyMediaCompareVideos: { source, output },
+    })))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Compare' }))
+
+    expect(screen.getByRole('button', { name: 'A/B' })).not.toBeNull()
+    const sourcePanel = document.querySelector('[data-compare-video-panel="source"]')
+    const outputPanel = document.querySelector('[data-compare-video-panel="output"]')
+    expect(sourcePanel?.className).toContain('w-1/2')
+    expect(sourcePanel?.className).toContain('right-auto')
+    expect(outputPanel?.className).toContain('w-1/2')
+    expect(outputPanel?.className).toContain('left-1/2')
+    expect((outputPanel as HTMLVideoElement | null)?.style.clipPath).toBe('')
+  })
+
+  it('does not offer A/B mode unless both videos are available', () => {
+    render(createElement(CompareVideoWidget, widgetProps({
+      id: 10,
+      __easyMediaCompareVideos: { source },
+    })))
+
+    expect(screen.queryByRole('button', { name: 'A/B' })).toBeNull()
+    expect(document.querySelector('[data-compare-video-panel]')).toBeNull()
+  })
+
   it('edits save settings in the empty state', () => {
     const onChange = vi.fn()
     render(createElement(CompareVideoWidget, widgetProps({ id: 2 }, onChange)))
