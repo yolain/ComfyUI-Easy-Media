@@ -106,6 +106,7 @@ class _AudioVae:
 def _load_minimax_node(monkeypatch):
     io = types.SimpleNamespace(
         Audio=_PortType,
+        AnyType=_PortType,
         Autogrow=_Autogrow,
         Clip=_PortType,
         Combo=_PortType,
@@ -769,3 +770,80 @@ def test_minimax_node_has_complete_chinese_localization():
             "0": {"name": "正向条件"},
             "1": {"name": "潜空间"},
         }
+
+
+def test_remove_h3_motion_context_latent_schema(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+
+    schema = module.EasyRemoveH3MotionContextLatent.define_schema()
+
+    assert schema.node_id == "easy removeH3MotionContextLatent"
+    assert schema.display_name == "!!Remove h3 motion context latent"
+    assert schema.is_output_node is True
+    assert schema.not_idempotent is True
+    assert schema.inputs[0].name == "filename_path"
+    assert schema.inputs[0].kwargs["default"] == "h3_context/clip"
+    assert schema.inputs[1].name == "input"
+    assert [output.name for output in schema.outputs] == ["output", "deleted_count"]
+
+
+def test_remove_h3_motion_context_latent_has_matching_chinese_localization():
+    node_defs = json.loads(
+        (Path(__file__).parents[1] / "locales" / "zh" / "nodeDefs.json").read_text()
+    )
+    translation = node_defs["easy removeH3MotionContextLatent"]
+
+    assert translation["inputs"]["input"]["name"] == "输入"
+    assert translation["outputs"] == {
+        "0": {"name": "输出"},
+        "1": {"name": "已删除数量"},
+    }
+
+
+def test_remove_h3_motion_context_latent_deletes_matching_output_files(
+    monkeypatch, tmp_path
+):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+    latent_directory = tmp_path / "h3_context"
+    latent_directory.mkdir()
+    matching_files = [
+        latent_directory / "clip_00001.safetensors",
+        latent_directory / "clip_00002_.safetensors",
+    ]
+    for path in matching_files:
+        path.write_bytes(b"latent")
+    preserved_file = latent_directory / "other_00001.safetensors"
+    preserved_file.write_bytes(b"latent")
+
+    folder_paths = types.ModuleType("folder_paths")
+    folder_paths.get_output_directory = lambda: str(tmp_path)
+    monkeypatch.setitem(sys.modules, "folder_paths", folder_paths)
+
+    passthrough = object()
+    output = module.EasyRemoveH3MotionContextLatent.execute(
+        passthrough,
+        "h3_context/clip",
+    )
+
+    assert output.values == (passthrough, 2)
+    assert not any(path.exists() for path in matching_files)
+    assert preserved_file.exists()
+
+
+@pytest.mark.parametrize(
+    "filename_path",
+    ["", "../clip", "h3_context/../clip", "/h3_context/clip"],
+)
+def test_remove_h3_motion_context_latent_rejects_unsafe_paths(
+    monkeypatch, tmp_path, filename_path
+):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+    folder_paths = types.ModuleType("folder_paths")
+    folder_paths.get_output_directory = lambda: str(tmp_path)
+    monkeypatch.setitem(sys.modules, "folder_paths", folder_paths)
+
+    with pytest.raises(ValueError, match="filename_path"):
+        module.EasyRemoveH3MotionContextLatent.execute(object(), filename_path)

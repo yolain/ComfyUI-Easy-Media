@@ -77,6 +77,7 @@ class EasyMediaExtension(ComfyExtension):
             # MiniMax
             EasyMiniMaxH3ToVideo,
             EasyMiniMaxH3ReferenceToVideoBridge,
+            EasyRemoveH3MotionContextLatent,
             # Wan
             BerniniModelPatch,
             EasyBerniniS2VConditioning,
