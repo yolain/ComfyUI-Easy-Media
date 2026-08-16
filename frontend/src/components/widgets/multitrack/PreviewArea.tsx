@@ -598,6 +598,8 @@ export function PreviewArea({
           <MediaSelector
             value=""
             mediaType="image"
+            allowMultipleSelection
+            maxSelectionCount={MAX_TASK_IMAGES - activeTaskImages.allImages.length}
             onChange={handleActiveTaskSelectedMedia}
           />
         </PopoverContent>

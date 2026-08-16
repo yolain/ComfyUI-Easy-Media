@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ExternalLink, KeyRound, LoaderCircle } from 'lucide-react'
+import { KeyRound, LoaderCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { LocaleContext, useT } from '@/lib/i18n'

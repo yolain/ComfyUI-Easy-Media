@@ -11,6 +11,7 @@ from comfy_execution.graph_utils import GraphBuilder
 from ..utils.minimax import (
     expand_image_inputs,
     flatten_media_inputs,
+    remove_output_files_by_prefix,
 )
 
 
@@ -772,3 +773,45 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
             conditioning.out(1),
             expand=graph.finalize(),
         )
+
+
+class EasyRemoveH3MotionContextLatent(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy removeH3MotionContextLatent",
+            display_name="!!Remove h3 motion context latent",
+            category=CATEGORY_MINIMAX,
+            description=(
+                "Remove H3 Motion Context latent files after a loop finishes. "
+                "The path is a file prefix relative to ComfyUI's output directory."
+            ),
+            inputs=[
+                io.String.Input(
+                    "filename_path",
+                    default="h3_context/clip",
+                    tooltip=(
+                        "File prefix relative to the output directory. Slashes select "
+                        "subdirectories; h3_context/clip removes files beginning with "
+                        "clip inside output/h3_context."
+                    ),
+                ),
+                io.AnyType.Input("input"),
+            ],
+            outputs=[io.AnyType.Output("output"), io.Int.Output("deleted_count")],
+            is_output_node=True,
+            not_idempotent=True,
+        )
+
+    @classmethod
+    def execute(cls, input, filename_path: str = "h3_context/clip") -> io.NodeOutput:
+        try:
+            import folder_paths
+        except ImportError as error:
+            raise RuntimeError("ComfyUI output path utilities are unavailable") from error
+
+        deleted_count = remove_output_files_by_prefix(
+            folder_paths.get_output_directory(),
+            filename_path,
+        )
+        return io.NodeOutput(input, deleted_count)

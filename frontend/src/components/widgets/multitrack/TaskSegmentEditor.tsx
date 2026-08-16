@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { CloudUpload, Eye, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
+import type { MediaTab } from '@/components/widgets/mediaSelector/MediaSelector'
 import { useT } from '@/lib/i18n'
 import { mediaContentToViewUrl } from '@/lib/media-url'
 import { getSegmentTrackPresentation } from '@/lib/multitrack-segment-style'
@@ -35,6 +36,7 @@ import type {
   MultiTrack,
   MultiTrackSegment,
   MultiTrackSegmentContent,
+  MultiTrackSourceType,
   MultiTrackTaskImage,
   MultiTrackTaskMode,
   MultiTrackUserPromptVariant,
@@ -97,6 +99,30 @@ function moveImage(images: MultiTrackTaskImage[], sourceId: string, targetId: st
 
 function imageDisplayName(image: MultiTrackTaskImage): string {
   return image.file_name ?? image.file_path ?? image.local_path ?? image.url ?? image.slot_name ?? image.id
+}
+
+function imageSelectorValue(image: MultiTrackTaskImage | undefined): string {
+  if (!image) return ''
+  if (image.slot_name) return `__slot__:${image.slot_name}`
+  return image.file_path ?? image.local_path ?? image.url ?? ''
+}
+
+function imageSelectorTab(image: MultiTrackTaskImage | undefined): MediaTab {
+  if (image?.source_type === 'output') return 'outputs'
+  if (image?.source_type === 'local') return 'local'
+  if (image?.source_type === 'url') return 'url'
+  if (image?.source_type === 'slot') return 'slot'
+  return 'inputs'
+}
+
+function selectedImageSource(
+  filePath: string,
+  source?: 'input' | 'output' | 'local',
+): MultiTrackSourceType {
+  if (source) return source
+  if (filePath.startsWith('__slot__:')) return 'slot'
+  if (filePath.startsWith('http://') || filePath.startsWith('https://')) return 'url'
+  return 'input'
 }
 
 function getTaskType(mode: MultiTrackTaskMode, imageCount: number, hasVideoInRange: boolean): string {
@@ -176,6 +202,7 @@ export function TaskSegmentEditor({
   const [promptTab, setPromptTab] = useState<PromptTab>('user')
   const [editMode, setEditMode] = useState<EditMode>('individual')
   const [mediaSelectorOpen, setMediaSelectorOpen] = useState(false)
+  const [reselectImageId, setReselectImageId] = useState<string | null>(null)
   const [isImageDragOver, setIsImageDragOver] = useState(false)
   const [systemPromptOptions, setSystemPromptOptions] = useState<SystemPromptOption[] | null>(cachedSystemPromptOptions ?? null)
   const [systemPromptLoading, setSystemPromptLoading] = useState(false)
@@ -184,6 +211,7 @@ export function TaskSegmentEditor({
   const formattedDuration = formatMultiTrackDurationTimecode(duration, frameRate)
   const [durationInput, setDurationInput] = useState(formattedDuration)
   const images = taskImages(segment)
+  const reselectImage = images.find((image) => image.id === reselectImageId)
   const mode = segment.content.task_mode ?? 'default'
   const editableSegments = useMemo(() => (
     trackSegments && trackSegments.length > 0 ? trackSegments : [segment]
@@ -344,13 +372,21 @@ export function TaskSegmentEditor({
   }
 
   function handleSelectedMedia(filePath: string, source?: 'input' | 'output' | 'local') {
-    const remainingSlots = MAX_TASK_IMAGES - images.length
+    const remainingSlots = reselectImageId ? 1 : MAX_TASK_IMAGES - images.length
     if (remainingSlots <= 0) return
     const selectedPaths = splitSelectedTaskMedia(filePath).slice(0, remainingSlots)
-    const sourceType = source ?? (filePath.startsWith('http://') || filePath.startsWith('https://') ? 'url' : 'input')
+    const sourceType = selectedImageSource(filePath, source)
     const nextImages = selectedPaths.map((path) => createTaskImage(path, sourceType))
     if (nextImages.length === 0) return
-    onContentChange({ images: [...images, ...nextImages] })
+    if (reselectImageId) {
+      const replacement = { ...nextImages[0], id: reselectImageId }
+      onContentChange({
+        images: images.map((image) => image.id === reselectImageId ? replacement : image),
+      })
+    } else {
+      onContentChange({ images: [...images, ...nextImages] })
+    }
+    setReselectImageId(null)
     setMediaSelectorOpen(false)
   }
 
@@ -419,7 +455,13 @@ export function TaskSegmentEditor({
             onDragLeave={handleImageDragLeave}
             onDrop={handleDrop}
           >
-            <Popover open={mediaSelectorOpen} onOpenChange={setMediaSelectorOpen}>
+            <Popover
+              open={mediaSelectorOpen}
+              onOpenChange={(open) => {
+                setMediaSelectorOpen(open)
+                if (!open) setReselectImageId(null)
+              }}
+            >
               {images.length === 0 ? (
                 <PopoverTrigger asChild>
                   <div
@@ -430,6 +472,7 @@ export function TaskSegmentEditor({
                       imagePickerSurfaceClass,
                     )}
                     aria-label={t('multitrack.taskImageDropZone')}
+                    onClick={() => setReselectImageId(null)}
                     onKeyDown={(event) => {
                       if (event.key !== 'Enter' && event.key !== ' ') return
                       event.preventDefault()
@@ -444,14 +487,15 @@ export function TaskSegmentEditor({
                   </div>
                 </PopoverTrigger>
               ) : (
-                <div
-                  data-testid="task-image-grid"
-                  className={cn(
-                    'task-image-grid relative grid h-full w-full content-start gap-2 overflow-y-auto rounded-md p-3 transition-colors',
-                    imageGridColumns,
-                    imagePickerSurfaceClass,
-                  )}
-                >
+                <PopoverAnchor asChild>
+                  <div
+                    data-testid="task-image-grid"
+                    className={cn(
+                      'task-image-grid relative grid h-full w-full content-start gap-2 overflow-y-auto rounded-md p-3 transition-colors',
+                      imageGridColumns,
+                      imagePickerSurfaceClass,
+                    )}
+                  >
                   {images.map((image, index) => {
                     const imageUrl = mediaContentToViewUrl({
                       source_type: image.source_type ?? 'input',
@@ -466,6 +510,20 @@ export function TaskSegmentEditor({
                         draggable
                         data-testid={`task-image-${image.id}`}
                         className="task-image-grid-item group relative flex aspect-square w-full self-start cursor-pointer items-center justify-center overflow-hidden rounded-md border border-border bg-black"
+                        role="button"
+                        tabIndex={0}
+                        aria-label={t('multitrack.reselectImage', { name: imageDisplayName(image) })}
+                        onClick={() => {
+                          setReselectImageId(image.id)
+                          setMediaSelectorOpen(true)
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.target !== event.currentTarget) return
+                          if (event.key !== 'Enter' && event.key !== ' ') return
+                          event.preventDefault()
+                          setReselectImageId(image.id)
+                          setMediaSelectorOpen(true)
+                        }}
                         onDragStart={() => {
                           draggedImageIdRef.current = image.id
                         }}
@@ -521,7 +579,10 @@ export function TaskSegmentEditor({
                             variant="ghost"
                             className="h-6 w-6 cursor-pointer bg-background/70 text-destructive hover:bg-background/90 hover:text-destructive [&_svg]:!size-3"
                             aria-label={t('multitrack.deleteImage')}
-                            onClick={() => handleDeleteImage(image.id)}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              handleDeleteImage(image.id)
+                            }}
                           >
                             <Trash2 />
                           </Button>
@@ -536,23 +597,30 @@ export function TaskSegmentEditor({
                     )
                   })}
                   {images.length < MAX_TASK_IMAGES && (
-                    <PopoverTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="task-image-grid-add aspect-square h-auto w-full self-start border-dashed text-muted-foreground"
-                        aria-label={t('multitrack.selectImage')}
-                      >
-                        <Plus className="h-7 w-7" />
-                      </Button>
-                    </PopoverTrigger>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="task-image-grid-add aspect-square h-auto w-full self-start border-dashed text-muted-foreground"
+                      aria-label={t('multitrack.selectImage')}
+                      onClick={() => {
+                        setReselectImageId(null)
+                        setMediaSelectorOpen(true)
+                      }}
+                    >
+                      <Plus className="h-7 w-7" />
+                    </Button>
                   )}
-                </div>
+                  </div>
+                </PopoverAnchor>
               )}
               <PopoverContent className="w-auto p-0" align="end">
                 <MediaSelector
-                  value=""
+                  key={reselectImageId ?? 'add-images'}
+                  value={imageSelectorValue(reselectImage)}
                   mediaType="image"
+                  defaultTab={imageSelectorTab(reselectImage)}
+                  allowMultipleSelection={!reselectImageId}
+                  maxSelectionCount={reselectImageId ? 1 : MAX_TASK_IMAGES - images.length}
                   onChange={handleSelectedMedia}
                 />
               </PopoverContent>

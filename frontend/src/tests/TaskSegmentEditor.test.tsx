@@ -7,7 +7,23 @@ import { getMediaListStoreRevision } from '@/stores/media-list-store'
 import type { MultiTrack, MultiTrackSegment } from '@/types/multitrack'
 
 vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
-  MediaSelector: () => null,
+  MediaSelector: (props: {
+    value: string
+    allowMultipleSelection?: boolean
+    maxSelectionCount?: number
+    onChange: (value: string, source: 'input') => void
+  }) => (
+    <div
+      data-testid="media-selector-mock"
+      data-value={props.value}
+      data-multiple={String(props.allowMultipleSelection)}
+      data-limit={String(props.maxSelectionCount)}
+    >
+      <button type="button" onClick={() => props.onChange('replacement.png', 'input')}>
+        choose replacement
+      </button>
+    </div>
+  ),
 }))
 
 function activateTab(name: string) {
@@ -298,11 +314,44 @@ describe('TaskSegmentEditor', () => {
 
     fireEvent.click(previewButton)
     expect(onOpenImagePreview).toHaveBeenCalledWith('a')
+    expect(screen.queryByTestId('media-selector-mock')).toBeNull()
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Delete image' })[0])
     expect(onContentChange).toHaveBeenCalledWith({
       images: [expect.objectContaining({ id: 'b' })],
     })
+    expect(screen.queryByTestId('media-selector-mock')).toBeNull()
+  })
+
+  it('reselects an image in place and opens the chosen image first without batch controls', () => {
+    const onContentChange = vi.fn()
+    render(<TaskSegmentEditor segment={taskSegment()} onContentChange={onContentChange} />)
+
+    fireEvent.click(screen.getByTestId('task-image-a'))
+
+    const selector = screen.getByTestId('media-selector-mock')
+    expect(selector.dataset.value).toBe('a.png')
+    expect(selector.dataset.multiple).toBe('false')
+    expect(selector.dataset.limit).toBe('1')
+
+    fireEvent.click(screen.getByRole('button', { name: 'choose replacement' }))
+    expect(onContentChange).toHaveBeenLastCalledWith({
+      images: [
+        expect.objectContaining({ id: 'a', file_path: 'replacement.png' }),
+        expect.objectContaining({ id: 'b', file_path: 'b.png' }),
+      ],
+    })
+  })
+
+  it('passes the remaining image capacity to the add-image selector', () => {
+    render(<TaskSegmentEditor segment={taskSegment()} onContentChange={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select image' }))
+
+    const selector = screen.getByTestId('media-selector-mock')
+    expect(selector.dataset.value).toBe('')
+    expect(selector.dataset.multiple).toBe('true')
+    expect(selector.dataset.limit).toBe('7')
   })
 
   it('supports one-based image item numbering', () => {

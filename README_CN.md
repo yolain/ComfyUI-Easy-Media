@@ -205,6 +205,7 @@ bun run build:release
 | easy matchLine | 返回包含匹配文本的第一行的零基索引 |
 | easy apiWorkflowGate | 判断是否为 API 调用的工作流，透传前面输入项 |
 | easy minimaxH3ToVideo | 构建 MiniMax H3 文生视频、参考生视频或首尾帧生视频的条件与潜空间输入 |
+| easy removeH3MotionContextLatent | 在循环结束后删除 H3 Motion Context 潜空间文件 |
 | LTXVAddGuidesFromBatchIndexes | 从批量图像添加引导图到潜在变量的指定帧索引 |
 | LTXVMakeRefVideo | 将参考图像批次扩展为 IC-LoRA 参考视频 |
 | easy ltxMultiTrackEncode | 构建 Prompt Relay 条件并生成 LTX 视频/音频潜变量 |

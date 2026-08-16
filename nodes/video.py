@@ -16,7 +16,7 @@ import torch
 from comfy_api.latest import Input, InputImpl, Types, io, ui
 from comfy.utils import ProgressBar
 
-from ..utils import merge_two_audio, save_audio_to_temp_wav, split_list_outputs
+from ..utils import flatten_media_inputs, merge_two_audio, save_audio_to_temp_wav, split_list_outputs
 from ..utils.video import extract_merge_spec, ffmpeg_concat, ffmpeg_concat_with_fade, ffmpeg_extract_audio, ffmpeg_replace_audio, ffmpeg_supports_xfade, ffprobe_info, normalize_video_images, tensor_crossfade_audio, tensor_crossfade_images, trim_video_with_ffmpeg, validate_merge_compatibility, video_input_to_local_file
 
 logger = logging.getLogger(__name__)
@@ -496,6 +496,22 @@ def _compare_video_settings(value: object) -> dict[str, object]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _normalize_compare_video_inputs(
+    source: object,
+    output: object,
+) -> "tuple[Optional[Input.Video], Optional[Input.Video]]":
+    source_videos = flatten_media_inputs(source)
+    output_videos = flatten_media_inputs(output)
+
+    if len(source_videos) >= 2:
+        return source_videos[0], source_videos[1]
+    if source_videos:
+        return source_videos[0], output_videos[0] if output_videos else None
+    if len(output_videos) >= 2:
+        return output_videos[0], output_videos[1]
+    return None, output_videos[0] if output_videos else None
+
+
 def _save_compare_video_output(
     path: str,
     filename_prefix: str,
@@ -596,9 +612,11 @@ class EasyCompareVideos(io.ComfyNode):
             display_name="Compare Videos",
             category=CATEGORY_VIDEO,
             description=(
-                "Preview source and output VIDEO inputs side by side with an interactive comparison slider. "
+                "Preview source and output VIDEO inputs with slider and A/B comparison modes. "
+                "VIDEO lists use at most the first two items as source and output. "
                 "When both inputs are provided, playback duration follows the output VIDEO."
             ),
+            is_input_list=True,
             inputs=[
                 io.Video.Input("source", optional=True),
                 io.Video.Input("output", optional=True),
@@ -611,14 +629,16 @@ class EasyCompareVideos(io.ComfyNode):
     @classmethod
     def execute(
         cls,
-        source: Optional[Input.Video] = None,
-        output: Optional[Input.Video] = None,
-        compare_video: object = "{}",
+        source: "Optional[Input.Video] | list[Input.Video]" = None,
+        output: "Optional[Input.Video] | list[Input.Video]" = None,
+        compare_video: "object | list[object]" = "{}",
     ) -> io.NodeOutput:
+        source, output = _normalize_compare_video_inputs(source, output)
         if source is None and output is None:
             raise ValueError("At least one VIDEO input is required.")
 
-        settings = _compare_video_settings(compare_video)
+        settings_values = flatten_media_inputs(compare_video)
+        settings = _compare_video_settings(settings_values[0] if settings_values else "{}")
         save_output = settings.get("save_output") is True
         filename_prefix = str(settings.get("filename_prefix") or "ComfyUI")
 

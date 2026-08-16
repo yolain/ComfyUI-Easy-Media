@@ -201,6 +201,7 @@ bun run build:release
 | easy matchLine | Return zero-based index of the first line containing matching text |
 | easy apiWorkflowGate | Determine if the workflow is an API call and pass through preceding input items |
 | easy minimaxH3ToVideo | Build MiniMax H3 text-to-video, reference-to-video, or first/last-frame conditioning and latent inputs |
+| easy removeH3MotionContextLatent | Remove H3 Motion Context latent files after a loop finishes |
 | LTXVAddGuidesFromBatchIndexes | Add guide images from batch images to specified frame indexes of latent variables |
 | LTXVMakeRefVideo | Expand a reference image batch into an IC-LoRA reference video |
 | easy ltxMultiTrackEncode | Build Prompt Relay conditioning and LTX video/audio latents |

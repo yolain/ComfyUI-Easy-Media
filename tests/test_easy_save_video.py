@@ -258,6 +258,13 @@ def _install_comfy_stubs(monkeypatch, tmp_path: Path):
     easy_media_utils = types.ModuleType("easy_media.utils")
     easy_media_utils.merge_two_audio = lambda first, second, method: (first, second, method)
     easy_media_utils.save_audio_to_temp_wav = lambda audio: None
+    easy_media_utils.flatten_media_inputs = lambda value: (
+        []
+        if value is None
+        else [item for child in value for item in easy_media_utils.flatten_media_inputs(child)]
+        if isinstance(value, list)
+        else [value]
+    )
     easy_media_utils.split_list_outputs = lambda values, output_count=10: (
         list(values[:output_count]) + [None] * max(0, output_count - len(values))
     )
@@ -338,6 +345,58 @@ def test_compare_videos_schema_uses_socketless_widget(monkeypatch, tmp_path):
     widget = schema.inputs[2]
     assert widget.args[0] == "compare_video"
     assert video_module.TYPE_COMPARE_VIDEO.io_type == "EASY_COMPARE_VIDEO"
+    assert schema.is_input_list is True
+
+
+def test_compare_videos_uses_only_first_two_videos_from_source_list(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    first = _FakeVideo(frames=24, fps=24)
+    second = _FakeVideo(frames=48, fps=24)
+    ignored = _FakeVideo(frames=72, fps=24)
+    probed = []
+    original_probe = video_module._probe_compare_video
+
+    def capture_probe(video, label):
+        probed.append((video, label))
+        return original_probe(video, label)
+
+    monkeypatch.setattr(video_module, "_probe_compare_video", capture_probe)
+
+    result = video_module.EasyCompareVideos.execute(
+        source=[first, [second, ignored]],
+        compare_video=[json.dumps({"save_output": True, "filename_prefix": "list_compare"})],
+    )
+
+    assert probed == [(first, "source"), (second, "output")]
+    assert result.ui["compare_videos"][0]["duration"] == 2.0
+    assert result.ui["compare_videos"][0]["output"]["filename"] == "list_compare_00001_.mp4"
+
+
+def test_compare_videos_preserves_separate_source_and_output_inputs(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    source_video = _FakeVideo(frames=24, fps=24)
+    output_video = _FakeVideo(frames=36, fps=24)
+
+    normalized = video_module._normalize_compare_video_inputs(
+        [source_video],
+        [output_video],
+    )
+
+    assert normalized == (source_video, output_video)
+
+
+def test_compare_videos_maps_output_list_to_source_and_output(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    first = _FakeVideo()
+    second = _FakeVideo()
+    ignored = _FakeVideo()
+
+    normalized = video_module._normalize_compare_video_inputs(
+        None,
+        [first, second, ignored],
+    )
+
+    assert normalized == (first, second)
 
 
 def test_compare_videos_saves_matching_pair(monkeypatch, tmp_path):
