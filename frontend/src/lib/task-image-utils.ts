@@ -9,13 +9,16 @@ export function taskImagesFromContent(images: MultiTrackTaskImage[] | undefined)
 }
 
 export function createTaskImage(filePath: string, source: MultiTrackSourceType): MultiTrackTaskImage {
-  const fileName = filePath.split(/[\\/]/).pop() ?? filePath
+  const normalizedSource = filePath.startsWith('__slot__:') ? 'slot' : source
+  const slotName = normalizedSource === 'slot' ? filePath.replace(/^__slot__:/, '') : undefined
+  const fileName = slotName ?? filePath.split(/[\\/]/).pop() ?? filePath
   return {
     id: uuid(),
-    source_type: source,
-    file_path: source === 'local' || source === 'url' ? undefined : filePath,
-    local_path: source === 'local' ? filePath : undefined,
-    url: source === 'url' ? filePath : undefined,
+    source_type: normalizedSource,
+    file_path: normalizedSource === 'input' || normalizedSource === 'output' ? filePath : undefined,
+    local_path: normalizedSource === 'local' ? filePath : undefined,
+    url: normalizedSource === 'url' ? filePath : undefined,
+    slot_name: slotName,
     file_name: fileName,
   }
 }

@@ -12,7 +12,7 @@ import { LocaleContext, useT } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 
-type CompareMode = 'source' | 'compare' | 'output'
+type CompareMode = 'source' | 'compare' | 'side-by-side' | 'output'
 
 export interface CompareVideoSettings {
   save_output: boolean
@@ -207,13 +207,8 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
   const duration = Math.max(payload?.duration ?? 0, metadataDuration, 0)
 
   const visibleMode: CompareMode = canCompare ? mode : hasSource ? 'source' : 'output'
-  const displaySplit = canCompare
-    ? visibleMode === 'source'
-      ? 100
-      : visibleMode === 'output'
-        ? 0
-        : split
-    : hasSource ? 100 : 0
+  const isSideBySide = canCompare && visibleMode === 'side-by-side'
+  const displaySplit = visibleMode === 'source' ? 100 : visibleMode === 'output' ? 0 : isSideBySide ? 50 : split
   const animateComparison = visibleMode !== 'compare' || !isPointerInside
 
   useEffect(() => {
@@ -336,7 +331,12 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
   }
 
   function cycleMode() {
-    setMode((current) => current === 'compare' ? 'source' : current === 'source' ? 'output' : 'compare')
+    setMode((current) => {
+      if (current === 'compare') return 'side-by-side'
+      if (current === 'side-by-side') return 'source'
+      if (current === 'source') return 'output'
+      return 'compare'
+    })
   }
 
   function downloadOutputVideo() {
@@ -388,7 +388,9 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
               className={cn(
                 'absolute inset-0 h-full w-full object-contain',
                 !hasSource && 'invisible',
+                isSideBySide && 'right-auto w-1/2',
               )}
+              data-compare-video-panel={isSideBySide ? 'source' : undefined}
               src={sourceUrl}
               loop
               muted={muted || hasOutput}
@@ -408,11 +410,13 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
               className={cn(
                 'absolute inset-0 h-full w-full object-contain',
                 !hasOutput && 'invisible',
+                isSideBySide && 'left-1/2 w-1/2',
               )}
               style={{
-                clipPath: `inset(0 0 0 ${displaySplit}%)`,
-                transition: animateComparison ? 'clip-path 260ms ease' : undefined,
+                clipPath: isSideBySide ? undefined : `inset(0 0 0 ${displaySplit}%)`,
+                transition: !isSideBySide && animateComparison ? 'clip-path 260ms ease' : undefined,
               }}
+              data-compare-video-panel={isSideBySide ? 'output' : undefined}
               src={outputUrl}
               loop
               muted={muted}
@@ -427,18 +431,18 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
             />
           ) : null}
 
-          {hasSource && visibleMode == 'compare' ? (
+          {hasSource && (visibleMode === 'compare' || isSideBySide) ? (
             <Badge className="absolute left-3 top-2 bg-muted/60 text-foreground shadow-sm hover:bg-muted/90">
               {t('compareVideo.source')}
             </Badge>
           ) : null}
-          {hasOutput && visibleMode =='compare' ? (
+          {hasOutput && (visibleMode === 'compare' || isSideBySide) ? (
             <Badge className="absolute right-3 top-2 bg-muted/60 text-foreground shadow-sm hover:bg-muted/90">
               {t('compareVideo.output')}
             </Badge>
           ) : null}
 
-          {canCompare ? (
+          {canCompare && (visibleMode === 'compare' || isSideBySide) ? (
             <div
               className="pointer-events-none absolute inset-y-0 w-px bg-white shadow"
               style={{
@@ -457,8 +461,14 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
               size="sm"
               variant="secondary"
             >
-              {visibleMode === 'source' ? <FilePlay className="h-4 w-4" /> : visibleMode === 'output' ? <FilePlay className="h-4 w-4" /> : <Columns2 className="h-4 w-4" />}
-              {visibleMode === 'source' ? t('compareVideo.sourceOnly') : visibleMode === 'output' ? t('compareVideo.outputOnly') : t('compareVideo.compare')}
+              {visibleMode === 'source' || visibleMode === 'output' ? <FilePlay className="h-4 w-4" /> : <Columns2 className="h-4 w-4" />}
+              {visibleMode === 'source'
+                ? t('compareVideo.sourceOnly')
+                : visibleMode === 'output'
+                  ? t('compareVideo.outputOnly')
+                  : visibleMode === 'side-by-side'
+                    ? t('compareVideo.sideBySide')
+                    : t('compareVideo.compare')}
             </Button>
           ) : null}
         </div>
