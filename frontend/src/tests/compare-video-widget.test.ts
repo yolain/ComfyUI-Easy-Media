@@ -7,22 +7,36 @@ import {
   parseCompareVideoPayload,
 } from '@/components/widgets/compareVideoWidget'
 import { suppressCompareVideoDefaultPreview } from '@/lib/compare-video-node'
-import { getRecentMediaHistory } from '@/stores/media-list-store'
 
 vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
   MediaSelector: () => null,
 }))
 
-vi.mock('@/stores/media-list-store', async () => {
-  const actual = await vi.importActual<typeof import('@/stores/media-list-store')>('@/stores/media-list-store')
-  return {
-    ...actual,
-    getRecentMediaHistory: vi.fn().mockResolvedValue([]),
-  }
-})
-
 const source = { filename: 'source.mp4', type: 'temp' as const }
 const output = { filename: 'output.mp4', type: 'temp' as const }
+
+function createEventApi() {
+  const listeners = new Map<string, Set<(event: CustomEvent<unknown>) => void>>()
+  return {
+    addEventListener(type: string, callback: (event: CustomEvent<unknown>) => void) {
+      const callbacks = listeners.get(type) ?? new Set()
+      callbacks.add(callback)
+      listeners.set(type, callbacks)
+    },
+    removeEventListener(type: string, callback: (event: CustomEvent<unknown>) => void) {
+      listeners.get(type)?.delete(callback)
+    },
+    emit(type: string, detail: unknown) {
+      const callbacks = listeners.get(type)
+      if (!callbacks) return
+      const event = { detail } as CustomEvent<unknown>
+      for (const callback of callbacks) callback(event)
+    },
+    listenerCount(type: string) {
+      return listeners.get(type)?.size ?? 0
+    },
+  }
+}
 
 function recentVideo(path: string, mtime: number, sourceType: 'output' | 'temp' = 'output') {
   return {
@@ -182,10 +196,11 @@ describe('CompareVideoWidget', () => {
       source?: { source_type: 'input' | 'output' | 'temp' | 'url'; file_path?: string; url?: string } | null
       output?: { source_type: 'input' | 'output' | 'temp' | 'url'; file_path?: string; url?: string } | null
     } = { save_output: false, filename_prefix: 'ComfyUI', watch_output_history: false },
+    api: ReturnType<typeof createEventApi> = createEventApi(),
   ) {
     return {
       app: {
-        api: {},
+        api,
         canvas: { ds: { scale: 1 } },
         ui: { settings: { settingsValues: {} } },
       } as never,
@@ -361,13 +376,9 @@ describe('CompareVideoWidget', () => {
     }))
   })
 
-  it('does not refetch recent output history when clearing a displayed slot while watching', async () => {
+  it('does not populate watch output history when first enabled', () => {
     const onChange = vi.fn()
-    vi.mocked(getRecentMediaHistory).mockClear()
-    vi.mocked(getRecentMediaHistory).mockResolvedValue([
-      recentVideo('renders/source.mp4', 200),
-      recentVideo('renders/output.mp4', 100),
-    ])
+    const api = createEventApi()
 
     render(createElement(CompareVideoWidget, widgetProps(
       { id: 20 },
@@ -376,19 +387,14 @@ describe('CompareVideoWidget', () => {
         save_output: false,
         filename_prefix: 'ComfyUI',
         watch_output_history: true,
-        source: { source_type: 'output', file_path: 'renders/source.mp4' },
-        output: { source_type: 'output', file_path: 'renders/output.mp4' },
       },
+      api,
     )))
 
-    await waitFor(() => expect(getRecentMediaHistory).toHaveBeenCalledTimes(1))
-    const callsBeforeClear = vi.mocked(getRecentMediaHistory).mock.calls.length
-
-    fireEvent.click(screen.getByRole('button', { name: 'Clear source video' }))
-    await new Promise((resolve) => setTimeout(resolve, 0))
-
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ source: null }))
-    expect(vi.mocked(getRecentMediaHistory)).toHaveBeenCalledTimes(callsBeforeClear)
+    expect(api.listenerCount('executed')).toBeGreaterThan(0)
+    expect(api.listenerCount('execution_success')).toBeGreaterThan(0)
+    expect(onChange).not.toHaveBeenCalled()
+    expect(document.querySelectorAll('video')).toHaveLength(0)
   })
 
   it('clears stale executed payload when leaving watch output history mode with empty slots', () => {
@@ -426,12 +432,9 @@ describe('CompareVideoWidget', () => {
     expect(document.querySelectorAll('video')).toHaveLength(0)
   })
 
-  it('fills the previous output into source and newest output into output while watching', async () => {
+  it('fills the previous output into source and newest output into output after a successful execution', async () => {
     const onChange = vi.fn()
-    vi.mocked(getRecentMediaHistory).mockResolvedValueOnce([
-      recentVideo('renders/latest.mp4', 200),
-      recentVideo('renders/previous.mp4', 100),
-    ])
+    const api = createEventApi()
 
     render(createElement(CompareVideoWidget, widgetProps(
       { id: 14 },
@@ -441,7 +444,21 @@ describe('CompareVideoWidget', () => {
         filename_prefix: 'ComfyUI',
         watch_output_history: true,
       },
+      api,
     )))
+
+    await waitFor(() => expect(api.listenerCount('execution_success')).toBeGreaterThan(0))
+    api.emit('execution_start', {})
+    api.emit('executed', {
+      node: 1,
+      output: {
+        video: [
+          { filename: 'previous.mp4', subfolder: 'renders', type: 'output' },
+          { filename: 'latest.mp4', subfolder: 'renders', type: 'output' },
+        ],
+      },
+    })
+    api.emit('execution_success', {})
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
       source: { source_type: 'output', file_path: 'renders/previous.mp4' },
@@ -449,11 +466,9 @@ describe('CompareVideoWidget', () => {
     })))
   })
 
-  it('puts a single recent output into the output slot while watching', async () => {
+  it('puts a single successful output into the output slot while watching', async () => {
     const onChange = vi.fn()
-    vi.mocked(getRecentMediaHistory).mockResolvedValueOnce([
-      recentVideo('only.mp4', 200),
-    ])
+    const api = createEventApi()
 
     render(createElement(CompareVideoWidget, widgetProps(
       { id: 15 },
@@ -463,7 +478,16 @@ describe('CompareVideoWidget', () => {
         filename_prefix: 'ComfyUI',
         watch_output_history: true,
       },
+      api,
     )))
+
+    await waitFor(() => expect(api.listenerCount('execution_success')).toBeGreaterThan(0))
+    api.emit('execution_start', {})
+    api.emit('executed', {
+      node: 2,
+      output: { video: [{ filename: 'only.mp4', subfolder: '', type: 'output' }] },
+    })
+    api.emit('execution_success', {})
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
       source: null,
@@ -471,11 +495,9 @@ describe('CompareVideoWidget', () => {
     })))
   })
 
-  it('accepts temp preview videos from recent output history while watching', async () => {
+  it('accepts temp preview videos from the successful execution while watching', async () => {
     const onChange = vi.fn()
-    vi.mocked(getRecentMediaHistory).mockResolvedValueOnce([
-      recentVideo('easy_compare_source_abc.mp4', 200, 'temp'),
-    ])
+    const api = createEventApi()
 
     render(createElement(CompareVideoWidget, widgetProps(
       { id: 16 },
@@ -485,20 +507,26 @@ describe('CompareVideoWidget', () => {
         filename_prefix: 'ComfyUI',
         watch_output_history: true,
       },
+      api,
     )))
+
+    await waitFor(() => expect(api.listenerCount('execution_success')).toBeGreaterThan(0))
+    api.emit('execution_start', {})
+    api.emit('executed', {
+      node: 3,
+      output: { images: [{ filename: 'preview_output_abc.mp4', subfolder: '', type: 'temp' }] },
+    })
+    api.emit('execution_success', {})
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
       source: null,
-      output: { source_type: 'temp', file_path: 'easy_compare_source_abc.mp4' },
+      output: { source_type: 'temp', file_path: 'preview_output_abc.mp4' },
     })))
   })
 
-  it('preserves the selected compare mode after refreshing recent output history', async () => {
+  it('preserves the selected compare mode after a successful execution', async () => {
     const onChange = vi.fn()
-    vi.mocked(getRecentMediaHistory).mockResolvedValueOnce([
-      recentVideo('renders/latest.mp4', 200),
-      recentVideo('renders/previous.mp4', 100),
-    ])
+    const api = createEventApi()
 
     render(createElement(CompareVideoWidget, widgetProps(
       { id: 19 },
@@ -509,7 +537,21 @@ describe('CompareVideoWidget', () => {
         watch_output_history: true,
         compare_mode: 'side-by-side',
       },
+      api,
     )))
+
+    await waitFor(() => expect(api.listenerCount('execution_success')).toBeGreaterThan(0))
+    api.emit('execution_start', {})
+    api.emit('executed', {
+      node: 4,
+      output: {
+        video: [
+          { filename: 'previous.mp4', subfolder: 'renders', type: 'output' },
+          { filename: 'latest.mp4', subfolder: 'renders', type: 'output' },
+        ],
+      },
+    })
+    api.emit('execution_success', {})
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
       compare_mode: 'side-by-side',

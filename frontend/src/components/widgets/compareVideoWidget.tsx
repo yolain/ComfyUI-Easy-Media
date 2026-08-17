@@ -25,10 +25,7 @@ import { mediaPathToViewUrl } from '@/lib/media-url'
 import { cn } from '@/lib/utils'
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
-import {
-  getRecentMediaHistory,
-  type RecentMediaHistoryEntry,
-} from '@/stores/media-list-store'
+import type { RecentMediaHistoryEntry } from '@/stores/media-list-store'
 
 type CompareMode = 'source' | 'compare' | 'side-by-side' | 'output'
 
@@ -57,6 +54,18 @@ const DEFAULT_COMPARE_VIDEO_SETTINGS: CompareVideoSettings = {
   source: null,
   output: null,
 }
+
+const WATCH_OUTPUT_HISTORY_LIMIT = 50
+const WATCH_VIDEO_EXTENSIONS: ReadonlySet<string> = new Set([
+  '.mp4',
+  '.webm',
+  '.mov',
+  '.avi',
+  '.mkv',
+  '.flv',
+  '.wmv',
+  '.m4v',
+])
 
 export interface CompareVideoResult {
   filename: string
@@ -160,6 +169,65 @@ function mediaSelectionTab(
 function mediaSelectionName(selection: CompareVideoMediaSelection | null | undefined): string {
   const value = mediaSelectionValue(selection)
   return value.split(/[\\/]/).pop() || value
+}
+
+function recentMediaHistoryKey(entry: RecentMediaHistoryEntry): string | null {
+  return entry.path ? `${entry.source_type}:${entry.path}` : null
+}
+
+function executedOutputToHistory(value: unknown, mtime: number): RecentMediaHistoryEntry | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  const filename = typeof record.filename === 'string' ? record.filename : ''
+  const sourceType = record.type === 'output' || record.type === 'temp' ? record.type : undefined
+  if (!filename || !sourceType) return null
+  if (filename.toLowerCase().includes('easy_compare')) return null
+
+  const extensionIndex = filename.lastIndexOf('.')
+  if (extensionIndex <= 0) return null
+  const extension = filename.slice(extensionIndex).toLowerCase()
+  if (!WATCH_VIDEO_EXTENSIONS.has(extension)) return null
+
+  const subfolder = typeof record.subfolder === 'string'
+    ? record.subfolder.replaceAll('\\', '/')
+    : ''
+  const relativePath = subfolder ? `${subfolder}/${filename}` : filename
+  return {
+    type: 'file',
+    name: filename,
+    path: relativePath,
+    url: mediaPathToViewUrl(relativePath, sourceType),
+    size: 0,
+    mtime,
+    source_type: sourceType,
+  }
+}
+
+function collectExecutedWatchOutputs(detail: unknown): RecentMediaHistoryEntry[] {
+  if (!detail || typeof detail !== 'object') return []
+  const output = (detail as Record<string, unknown>).output
+  if (!output || typeof output !== 'object') return []
+
+  const outputRecord = output as Record<string, unknown>
+  const entries: RecentMediaHistoryEntry[] = []
+  const seen = new Set<string>()
+  let mtime = Date.now()
+
+  for (const key of ['video', 'images'] as const) {
+    const values = outputRecord[key]
+    if (!Array.isArray(values)) continue
+    for (const value of values) {
+      const entry = executedOutputToHistory(value, mtime)
+      if (!entry) continue
+      const entryKey = recentMediaHistoryKey(entry)
+      if (!entryKey || seen.has(entryKey)) continue
+      seen.add(entryKey)
+      entries.push(entry)
+      mtime += 1
+    }
+  }
+
+  return entries
 }
 
 function outputMediaSelection(filePath: string): CompareVideoMediaSelection {
@@ -588,46 +656,84 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
   useEffect(() => {
     if (!settings.watch_output_history) return
 
-    let cancelled = false
+    const watchHistory: RecentMediaHistoryEntry[] = []
+    let runOutputs: RecentMediaHistoryEntry[] = []
+    let runOutputKeys = new Set<string>()
 
-    async function refreshRecentOutputs() {
-      try {
-        const videos = await getRecentMediaHistory('video', 48, 50)
-        if (cancelled) return
+    function applyWatchHistory() {
+      const currentSettings = settingsRef.current
+      if (!currentSettings.watch_output_history) return
 
-        const currentSettings = settingsRef.current
-        const { source: nextSource, output: nextOutput } = mergeWatchOutputHistorySelections(
-          currentSettings,
-          videos,
-          manualSlotsRef.current,
-        )
+      const { source: nextSource, output: nextOutput } = mergeWatchOutputHistorySelections(
+        currentSettings,
+        watchHistory,
+        manualSlotsRef.current,
+      )
 
-        if (
-          !compareMediaSelectionsEqual(currentSettings.source, nextSource)
-          || !compareMediaSelectionsEqual(currentSettings.output, nextOutput)
-        ) {
-          onSettingsChangeRef.current({ ...currentSettings, source: nextSource, output: nextOutput })
-          setCurrentTime(0)
-          setMetadataDuration(0)
-          setIsPlaying(false)
-        }
-      } catch (error) {
-        console.error('[CompareVideoWidget] failed to refresh output history:', error)
+      if (
+        compareMediaSelectionsEqual(currentSettings.source, nextSource)
+        && compareMediaSelectionsEqual(currentSettings.output, nextOutput)
+      ) {
+        return
+      }
+
+      onSettingsChangeRef.current({ ...currentSettings, source: nextSource, output: nextOutput })
+      setCurrentTime(0)
+      setMetadataDuration(0)
+      setIsPlaying(false)
+    }
+
+    function handleExecuted(event: CustomEvent<unknown>) {
+      const entries = collectExecutedWatchOutputs(event.detail)
+      if (entries.length === 0) return
+
+      for (const entry of entries) {
+        const entryKey = recentMediaHistoryKey(entry)
+        if (!entryKey || runOutputKeys.has(entryKey)) continue
+        runOutputKeys.add(entryKey)
+        runOutputs.push(entry)
       }
     }
 
-    void refreshRecentOutputs()
-    const api = app.api as CompareVideoEventApi | undefined
-    const handleExecutionFinished = () => {
-      void refreshRecentOutputs()
+    function handleExecutionStart() {
+      runOutputs = []
+      runOutputKeys = new Set()
     }
-    api?.addEventListener?.('execution_success', handleExecutionFinished)
-    api?.addCustomEventListener?.('execution_success', handleExecutionFinished)
+
+    function handleExecutionSuccess() {
+      const newestFirstRunOutputs = [...runOutputs].reverse()
+      const mergedHistory: RecentMediaHistoryEntry[] = []
+      const historyKeys = new Set<string>()
+
+      for (const entry of [...newestFirstRunOutputs, ...watchHistory]) {
+        const entryKey = recentMediaHistoryKey(entry)
+        if (!entryKey || historyKeys.has(entryKey)) continue
+        historyKeys.add(entryKey)
+        mergedHistory.push(entry)
+      }
+
+      watchHistory.splice(0, watchHistory.length, ...mergedHistory.slice(0, WATCH_OUTPUT_HISTORY_LIMIT))
+
+      runOutputs = []
+      runOutputKeys = new Set()
+      applyWatchHistory()
+    }
+
+    const api = app.api as CompareVideoEventApi | undefined
+    api?.addEventListener?.('execution_start', handleExecutionStart)
+    api?.addEventListener?.('executed', handleExecuted)
+    api?.addEventListener?.('execution_success', handleExecutionSuccess)
+    api?.addCustomEventListener?.('execution_start', handleExecutionStart)
+    api?.addCustomEventListener?.('executed', handleExecuted)
+    api?.addCustomEventListener?.('execution_success', handleExecutionSuccess)
 
     return () => {
-      cancelled = true
-      api?.removeEventListener?.('execution_success', handleExecutionFinished)
-      api?.removeCustomEventListener?.('execution_success', handleExecutionFinished)
+      api?.removeEventListener?.('execution_start', handleExecutionStart)
+      api?.removeEventListener?.('executed', handleExecuted)
+      api?.removeEventListener?.('execution_success', handleExecutionSuccess)
+      api?.removeCustomEventListener?.('execution_start', handleExecutionStart)
+      api?.removeCustomEventListener?.('executed', handleExecuted)
+      api?.removeCustomEventListener?.('execution_success', handleExecutionSuccess)
     }
   }, [app.api, settings.watch_output_history])
 
