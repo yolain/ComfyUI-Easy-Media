@@ -682,8 +682,8 @@ class EasyCompareVideos(io.ComfyNode):
             source = _compare_video_selected_source(settings.get("source"))
         if output is None:
             output = _compare_video_selected_source(settings.get("output"))
-        if source is None and output is None:
-            raise ValueError("At least one VIDEO input or selected video is required.")
+        # if source is None and output is None:
+        #     raise ValueError("At least one VIDEO input or selected video is required.")
 
         payload: dict[str, object] = {
             "source": None,
