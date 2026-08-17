@@ -155,6 +155,8 @@ def list_recent_media_files(
         for name in files:
             if Path(name).suffix.lower() not in allowed:
                 continue
+            if "easy_compare" in name.lower():
+                continue
             entry = Path(root) / name
             try:
                 stat = entry.stat()

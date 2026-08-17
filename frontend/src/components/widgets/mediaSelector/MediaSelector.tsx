@@ -75,6 +75,8 @@ export interface MediaSelectorProps {
   slotItems?: SlotItem[]
   /** History tab source: output only, or combined output + temp previews. */
   historySource?: 'outputs' | 'combined'
+  /** Only render the history tab. Used by watch-output-history flows. */
+  historyOnly?: boolean
   /** Enables the image-only batch selection toolbar. */
   allowMultipleSelection?: boolean
   /** Maximum number of files that can be returned in one batch. */
@@ -705,6 +707,7 @@ export function MediaSelector({
   defaultTab = 'inputs',
   slotItems = [],
   historySource = 'outputs',
+  historyOnly = false,
   allowMultipleSelection = false,
   maxSelectionCount = 9,
 }: Readonly<MediaSelectorProps>) {
@@ -714,7 +717,9 @@ export function MediaSelector({
   const initialSubfolders = value && ['inputs', 'outputs', 'local'].includes(defaultTab)
     ? { ...initialSession?.subfolders, [defaultTab]: getSelectedMediaParent(value) }
     : initialSession?.subfolders ?? {}
-  const [activeTab, setActiveTab] = useState<MediaTab>(value ? defaultTab : initialSession?.activeTab ?? defaultTab)
+  const [activeTab, setActiveTab] = useState<MediaTab>(
+    historyOnly ? 'history' : value ? defaultTab : initialSession?.activeTab ?? defaultTab,
+  )
   const [subfolders, setSubfolders] = useState<Partial<Record<BrowsableMediaTab, string>>>(
     initialSubfolders,
   )
@@ -739,11 +744,12 @@ export function MediaSelector({
 
   // Sync defaultTab when it changes after mount (e.g. a mounted selector targets another segment).
   useEffect(() => {
+    if (historyOnly) return
     if (previousDefaultTabRef.current === defaultTab) return
     previousDefaultTabRef.current = defaultTab
     setActiveTab(defaultTab)
     setSearchQuery('')
-  }, [defaultTab])
+  }, [defaultTab, historyOnly])
 
   function rememberSession(nextTab: MediaTab, nextSubfolders = subfolders) {
     mediaSelectorSessions.set(mediaType, { activeTab: nextTab, subfolders: nextSubfolders })
@@ -930,25 +936,33 @@ export function MediaSelector({
       <Tabs value={activeTab} onValueChange={(v) => handleTabChange(v as MediaTab)} className="flex flex-col flex-1 overflow-hidden">
         {/* Tab header */}
         <TabsList className="w-full rounded-none rounded-t-md h-7 p-0.5 gap-0.5 shrink-0">
-          <TabsTrigger value="inputs" className="flex-1 h-full text-[11px] px-1">
-            {t('mediaSelector.tabInputs')}
-          </TabsTrigger>
-          <TabsTrigger value="outputs" className="flex-1 h-full text-[11px] px-1">
-            {t('mediaSelector.tabOutputs')}
-          </TabsTrigger>
-          <TabsTrigger value="history" className="flex-1 h-full text-[11px] px-1">
-            {t('mediaSelector.tabHistory')}
-          </TabsTrigger>
-          {/* <TabsTrigger value="local" className="flex-1 h-full text-[11px] px-1">
-            {t('mediaSelector.tabLocal')}
-          </TabsTrigger> */}
-          <TabsTrigger value="url" className="flex-1 h-full text-[11px] px-1">
-            {t('mediaSelector.tabUrl')}
-          </TabsTrigger>
-          {showSlotTab && (
-            <TabsTrigger value="slot" className="flex-1 h-full text-[11px] px-1">
-              {t('mediaSelector.tabSlot')}
+          {historyOnly ? (
+            <TabsTrigger value="history" className="flex-1 h-full text-[11px] px-1">
+              {t('mediaSelector.tabHistory')}
             </TabsTrigger>
+          ) : (
+            <>
+              <TabsTrigger value="inputs" className="flex-1 h-full text-[11px] px-1">
+                {t('mediaSelector.tabInputs')}
+              </TabsTrigger>
+              <TabsTrigger value="outputs" className="flex-1 h-full text-[11px] px-1">
+                {t('mediaSelector.tabOutputs')}
+              </TabsTrigger>
+              <TabsTrigger value="history" className="flex-1 h-full text-[11px] px-1">
+                {t('mediaSelector.tabHistory')}
+              </TabsTrigger>
+              {/* <TabsTrigger value="local" className="flex-1 h-full text-[11px] px-1">
+                {t('mediaSelector.tabLocal')}
+              </TabsTrigger> */}
+              <TabsTrigger value="url" className="flex-1 h-full text-[11px] px-1">
+                {t('mediaSelector.tabUrl')}
+              </TabsTrigger>
+              {showSlotTab && (
+                <TabsTrigger value="slot" className="flex-1 h-full text-[11px] px-1">
+                  {t('mediaSelector.tabSlot')}
+                </TabsTrigger>
+              )}
+            </>
           )}
         </TabsList>
 
