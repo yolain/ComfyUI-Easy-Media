@@ -524,6 +524,8 @@ def _compare_video_selected_source(selection: object) -> "Optional[Input.Video]"
         resolved_path = raw_value
     elif source_type == "output":
         resolved_path = os.path.join(folder_paths.get_output_directory(), raw_value)
+    elif source_type == "temp":
+        resolved_path = os.path.join(folder_paths.get_temp_directory(), raw_value)
     else:
         resolved_path = os.path.join(folder_paths.get_input_directory(), raw_value)
 

@@ -35,6 +35,15 @@ def test_file_entry_encodes_unicode_view_url_components(tmp_path):
     )
 
 
+def test_file_entry_supports_temp_preview_urls(tmp_path):
+    media_file = tmp_path / "easy_compare_source_preview.mp4"
+    media_file.write_bytes(b"video")
+
+    entry = file_entry(str(media_file), "easy_compare_source_preview.mp4", "temp")
+
+    assert entry["url"] == "/view?filename=easy_compare_source_preview.mp4&type=temp&subfolder="
+
+
 def test_list_recent_media_files_recurses_and_filters_by_recency_and_type(tmp_path):
     output_dir = tmp_path / "output"
     nested = output_dir / "sub" / "nested"

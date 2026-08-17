@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { CompareVideoWidget, parseCompareVideoPayload } from '@/components/widgets/compareVideoWidget'
 import { suppressCompareVideoDefaultPreview } from '@/lib/compare-video-node'
-import { getRecentMedia } from '@/stores/media-list-store'
+import { getRecentMediaHistory } from '@/stores/media-list-store'
 
 vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
   MediaSelector: () => null,
@@ -13,7 +13,7 @@ vi.mock('@/stores/media-list-store', async () => {
   const actual = await vi.importActual<typeof import('@/stores/media-list-store')>('@/stores/media-list-store')
   return {
     ...actual,
-    getRecentMedia: vi.fn().mockResolvedValue([]),
+    getRecentMediaHistory: vi.fn().mockResolvedValue([]),
   }
 })
 
@@ -217,7 +217,7 @@ describe('CompareVideoWidget', () => {
 
   it('fills source first and then output while watching recent output videos', async () => {
     const onChange = vi.fn()
-    vi.mocked(getRecentMedia).mockResolvedValueOnce([
+    vi.mocked(getRecentMediaHistory).mockResolvedValueOnce([
       {
         type: 'file',
         name: 'latest.mp4',
@@ -225,6 +225,7 @@ describe('CompareVideoWidget', () => {
         url: '/view?filename=latest.mp4&type=output&subfolder=renders',
         size: 100,
         mtime: 200,
+        source_type: 'output' as const,
       },
       {
         type: 'file',
@@ -233,6 +234,7 @@ describe('CompareVideoWidget', () => {
         url: '/view?filename=previous.mp4&type=output&subfolder=renders',
         size: 100,
         mtime: 100,
+        source_type: 'output' as const,
       },
     ])
 
@@ -254,7 +256,7 @@ describe('CompareVideoWidget', () => {
 
   it('puts a single recent output into source while watching', async () => {
     const onChange = vi.fn()
-    vi.mocked(getRecentMedia).mockResolvedValueOnce([
+    vi.mocked(getRecentMediaHistory).mockResolvedValueOnce([
       {
         type: 'file',
         name: 'only.mp4',
@@ -262,6 +264,7 @@ describe('CompareVideoWidget', () => {
         url: '/view?filename=only.mp4&type=output&subfolder=',
         size: 100,
         mtime: 200,
+        source_type: 'output' as const,
       },
     ])
 
@@ -277,6 +280,36 @@ describe('CompareVideoWidget', () => {
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
       source: { source_type: 'output', file_path: 'only.mp4' },
+      output: null,
+    })))
+  })
+
+  it('accepts temp preview videos from recent output history while watching', async () => {
+    const onChange = vi.fn()
+    vi.mocked(getRecentMediaHistory).mockResolvedValueOnce([
+      {
+        type: 'file',
+        name: 'easy_compare_source_abc.mp4',
+        path: 'easy_compare_source_abc.mp4',
+        url: '/view?filename=easy_compare_source_abc.mp4&type=temp&subfolder=',
+        size: 100,
+        mtime: 200,
+        source_type: 'temp' as const,
+      },
+    ])
+
+    render(createElement(CompareVideoWidget, widgetProps(
+      { id: 16 },
+      onChange,
+      {
+        save_output: false,
+        filename_prefix: 'ComfyUI',
+        watch_output_history: true,
+      },
+    )))
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      source: { source_type: 'temp', file_path: 'easy_compare_source_abc.mp4' },
       output: null,
     })))
   })

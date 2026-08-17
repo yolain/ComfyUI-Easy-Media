@@ -540,6 +540,7 @@ def test_compare_video_selected_source_resolves_input_and_output_paths(monkeypat
     video_module = _load_video_module(monkeypatch, tmp_path)
     (tmp_path / "input" / "clip.mp4").write_bytes(b"video")
     (tmp_path / "output" / "render.mp4").write_bytes(b"video")
+    (tmp_path / "temp" / "preview.mp4").write_bytes(b"video")
 
     assert video_module._compare_video_selected_source({
         "source_type": "input",
@@ -549,6 +550,10 @@ def test_compare_video_selected_source_resolves_input_and_output_paths(monkeypat
         "source_type": "output",
         "file_path": "render.mp4",
     }) == str(tmp_path / "output" / "render.mp4")
+    assert video_module._compare_video_selected_source({
+        "source_type": "temp",
+        "file_path": "preview.mp4",
+    }) == str(tmp_path / "temp" / "preview.mp4")
 
 
 def test_make_video_list_fills_missing_inputs_with_empty_video(monkeypatch, tmp_path):

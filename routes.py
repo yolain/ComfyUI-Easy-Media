@@ -150,6 +150,8 @@ async def handle_media_recent(request: web.Request) -> web.Response:
         base = Path(folder_paths.get_input_directory())
     elif source == "outputs":
         base = Path(folder_paths.get_output_directory())
+    elif source == "temp":
+        base = Path(folder_paths.get_temp_directory())
     else:
         return web.Response(
             status=400,

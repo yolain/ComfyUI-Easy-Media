@@ -61,9 +61,9 @@ def allowed_extensions(media_type: str) -> set[str]:
 def file_entry(abs_path: str, rel_path: str, source: str) -> dict[str, Any]:
     """Build a file-info dict from an absolute path."""
     stat = os.stat(abs_path)
-    if source in ("inputs", "outputs"):
+    if source in ("inputs", "outputs", "temp"):
         # ComfyUI serves these via /view?filename=<name>&type=<source>&subfolder=<dir>
-        source_param = "input" if source == "inputs" else "output"
+        source_param = "input" if source == "inputs" else "output" if source == "outputs" else "temp"
         filename = os.path.basename(abs_path)
         subfolder = os.path.dirname(rel_path)
         encoded_filename = quote(filename, safe="-_.!~*'()")

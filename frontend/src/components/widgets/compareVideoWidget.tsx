@@ -25,7 +25,7 @@ import { mediaPathToViewUrl } from '@/lib/media-url'
 import { cn } from '@/lib/utils'
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
-import { getRecentMedia, type MediaFileEntry } from '@/stores/media-list-store'
+import { getRecentMediaHistory } from '@/stores/media-list-store'
 
 type CompareMode = 'source' | 'compare' | 'side-by-side' | 'output'
 
@@ -37,7 +37,7 @@ export interface CompareVideoSettings {
   output?: CompareVideoMediaSelection | null
 }
 
-type CompareVideoMediaSourceType = 'input' | 'output' | 'url'
+type CompareVideoMediaSourceType = 'input' | 'output' | 'temp' | 'url'
 
 export interface CompareVideoMediaSelection {
   source_type: CompareVideoMediaSourceType
@@ -103,7 +103,7 @@ function normalizeCompareVideoMediaSelection(value: unknown): CompareVideoMediaS
   const record = value as Record<string, unknown>
   const rawType = record.source_type ?? record.type
   const sourceType: CompareVideoMediaSourceType | undefined =
-    rawType === 'input' || rawType === 'output' || rawType === 'url'
+    rawType === 'input' || rawType === 'output' || rawType === 'temp' || rawType === 'url'
       ? rawType
       : undefined
   const filePath =
@@ -132,7 +132,7 @@ function mediaSelectionToUrl(selection: CompareVideoMediaSelection | null | unde
   if (sourceType === 'url' || /^https?:\/\//i.test(url ?? filePath ?? '')) {
     return url ?? filePath ?? null
   }
-  if ((sourceType === 'input' || sourceType === 'output') && filePath) {
+  if ((sourceType === 'input' || sourceType === 'output' || sourceType === 'temp') && filePath) {
     return mediaPathToViewUrl(filePath, sourceType)
   }
   return null
@@ -159,6 +159,10 @@ function mediaSelectionName(selection: CompareVideoMediaSelection | null | undef
 
 function outputMediaSelection(filePath: string): CompareVideoMediaSelection {
   return { source_type: 'output', file_path: filePath }
+}
+
+function tempMediaSelection(filePath: string): CompareVideoMediaSelection {
+  return { source_type: 'temp', file_path: filePath }
 }
 
 function compareMediaSelectionsEqual(
@@ -329,7 +333,7 @@ function CompareVideoMediaPicker({
   slot: 'source' | 'output'
   selection: CompareVideoMediaSelection | null | undefined
   disabled?: boolean
-  onSelect: (filePath: string, source?: 'input' | 'output' | 'local') => void
+  onSelect: (filePath: string, source?: 'input' | 'output' | 'temp' | 'local') => void
   onClear: () => void
 }>) {
   const t = useT()
@@ -370,8 +374,15 @@ function CompareVideoMediaPicker({
             value={mediaSelectionValue(selection)}
             mediaType="video"
             defaultTab={mediaSelectionTab(selection, slot)}
+            historySource="combined"
             onChange={(filePath, source) => {
-              onSelect(filePath, source)
+              if (source === undefined) {
+                onSelect(filePath, source)
+                setOpen(false)
+              }
+            }}
+            onSourceChange={(event) => {
+              onSelect(event.filePath, event.sourceType)
               setOpen(false)
             }}
           />
@@ -487,21 +498,15 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
 
     async function refreshRecentOutputs() {
       try {
-        const items = await getRecentMedia({
-          source: 'outputs',
-          mediaType: 'video',
-          hours: 48,
-          limit: 20,
-        })
+        const videos = await getRecentMediaHistory('video', 48, 50)
         if (cancelled) return
 
-        const videos = items.filter((item): item is MediaFileEntry => (
-          item.type === 'file' && typeof item.path === 'string'
-        ))
         let nextSource: CompareVideoMediaSelection | null = null
         let nextOutput: CompareVideoMediaSelection | null = null
         for (const video of [...videos].reverse()) {
-          const selection = outputMediaSelection(video.path)
+          const selection = video.source_type === 'temp'
+            ? tempMediaSelection(video.path)
+            : outputMediaSelection(video.path)
           if (!nextSource) {
             nextSource = selection
           } else if (!nextOutput) {
@@ -625,12 +630,14 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
   function handleMediaSelect(
     slot: 'source' | 'output',
     filePath: string,
-    source?: 'input' | 'output' | 'local',
+    source?: 'input' | 'output' | 'temp' | 'local',
   ) {
     if (settings.watch_output_history) return
     const isUrl = /^https?:\/\//i.test(filePath)
     const sourceType: CompareVideoMediaSourceType = source === 'output'
       ? 'output'
+      : source === 'temp'
+        ? 'temp'
       : source === 'input'
         ? 'input'
         : isUrl
