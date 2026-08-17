@@ -443,6 +443,24 @@ def test_compare_videos_optionally_saves_output_with_prefix(monkeypatch, tmp_pat
     assert [path.name for path in (tmp_path / "output").iterdir()] == ["compare_00001_.mp4"]
 
 
+def test_compare_videos_watch_output_history_disables_save_output(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+
+    result = video_module.EasyCompareVideos.execute(
+        source=_FakeVideo(frames=24, fps=24),
+        output=_FakeVideo(frames=24, fps=24),
+        compare_video=json.dumps({
+            "save_output": True,
+            "watch_output_history": True,
+            "filename_prefix": "watch_compare",
+        }),
+    )
+
+    payload = result.ui["compare_videos"][0]
+    assert payload["output"]["type"] == "temp"
+    assert not list((tmp_path / "output").iterdir())
+
+
 def test_compare_videos_allows_mismatched_fps_when_duration_matches(monkeypatch, tmp_path):
     video_module = _load_video_module(monkeypatch, tmp_path)
 
@@ -482,6 +500,60 @@ def test_compare_videos_uses_output_duration_when_durations_differ(monkeypatch, 
     assert payload["duration"] == 1.125
     assert payload["source"]["filename"].startswith("easy_compare_source_")
     assert payload["output"]["filename"].startswith("easy_compare_output_")
+
+
+def test_compare_videos_uses_widget_media_selections_without_video_inputs(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    source_path = tmp_path / "input" / "source.mp4"
+    output_path = tmp_path / "input" / "output.mp4"
+    source_path.write_bytes(b"source")
+    output_path.write_bytes(b"output")
+
+    def fake_probe(video, label):
+        return video, [], {
+            "fps": 24.0,
+            "fps_fraction": Fraction(24),
+            "frame_count": 24,
+            "duration": 1.0,
+            "width": 320,
+            "height": 240,
+        }
+
+    monkeypatch.setattr(video_module, "_probe_compare_video", fake_probe)
+
+    result = video_module.EasyCompareVideos.execute(
+        compare_video=json.dumps({
+            "save_output": False,
+            "filename_prefix": "ComfyUI",
+            "source": {"source_type": "input", "file_path": "source.mp4"},
+            "output": {"source_type": "input", "file_path": "output.mp4"},
+        }),
+    )
+
+    payload = result.ui["compare_videos"][0]
+    assert payload["source"]["type"] == "temp"
+    assert payload["output"]["type"] == "temp"
+    assert payload["duration"] == 1.0
+
+
+def test_compare_video_selected_source_resolves_input_and_output_paths(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    (tmp_path / "input" / "clip.mp4").write_bytes(b"video")
+    (tmp_path / "output" / "render.mp4").write_bytes(b"video")
+    (tmp_path / "temp" / "preview.mp4").write_bytes(b"video")
+
+    assert video_module._compare_video_selected_source({
+        "source_type": "input",
+        "file_path": "clip.mp4",
+    }) == str(tmp_path / "input" / "clip.mp4")
+    assert video_module._compare_video_selected_source({
+        "source_type": "output",
+        "file_path": "render.mp4",
+    }) == str(tmp_path / "output" / "render.mp4")
+    assert video_module._compare_video_selected_source({
+        "source_type": "temp",
+        "file_path": "preview.mp4",
+    }) == str(tmp_path / "temp" / "preview.mp4")
 
 
 def test_make_video_list_fills_missing_inputs_with_empty_video(monkeypatch, tmp_path):

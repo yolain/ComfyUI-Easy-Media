@@ -29,12 +29,15 @@ import type { SlotItem } from '@/lib/timeline-utils'
 import {
   getMediaList,
   getMediaListStoreRevision,
+  getRecentMedia,
+  getRecentMediaHistory,
   invalidateMediaListCache,
   subscribeMediaListStore,
   type MediaDirEntry,
   type MediaFileEntry,
   type MediaItem,
   type MediaListMediaType,
+  type RecentMediaHistoryEntry,
 } from '@/stores/media-list-store'
 
 // ---------------------------------------------------------------------------
@@ -42,7 +45,7 @@ import {
 // ---------------------------------------------------------------------------
 
 export type MediaType = MediaListMediaType
-export type MediaTab = 'inputs' | 'outputs' | 'local' | 'url' | 'slot'
+export type MediaTab = 'inputs' | 'outputs' | 'history' | 'local' | 'url' | 'slot'
 type ViewMode = 'grid' | 'list'
 type SortBy = 'name' | 'date' | 'folders'
 type BrowsableMediaTab = Extract<MediaTab, 'inputs' | 'outputs' | 'local'>
@@ -58,7 +61,7 @@ const MULTIPLE_MEDIA_SEPARATOR = '|MULTIPLE|'
 
 interface MediaSelectorChangeEvent {
   filePath: string
-  sourceType: 'input' | 'output' | 'local'
+  sourceType: 'input' | 'output' | 'temp' | 'local'
 }
 
 export interface MediaSelectorProps {
@@ -70,6 +73,8 @@ export interface MediaSelectorProps {
   defaultTab?: MediaTab
   /** Slot items computed from the connected node graph (only for image/audio media types) */
   slotItems?: SlotItem[]
+  /** History tab source: output only, or combined output + temp previews. */
+  historySource?: 'outputs' | 'combined'
   /** Enables the image-only batch selection toolbar. */
   allowMultipleSelection?: boolean
   /** Maximum number of files that can be returned in one batch. */
@@ -321,7 +326,9 @@ function RemoteFileList({
   sortBy,
   searchQuery,
   value,
+  historySource = 'outputs',
   onChange,
+  onSourceChange,
   initialSubfolder,
   onNavigateSubfolder,
   onAddLocalFile,
@@ -330,14 +337,16 @@ function RemoteFileList({
   onToggleSelection,
   onVisibleFilesChange,
 }: Readonly<{
-  source: 'inputs' | 'outputs' | 'local'
+  source: 'inputs' | 'outputs' | 'history' | 'local'
   mediaType: MediaType
   localPath: string
   viewMode: ViewMode
   sortBy: SortBy
   searchQuery: string
   value: string
+  historySource?: 'outputs' | 'combined'
   onChange: (v: string, source: 'input' | 'output' | 'local') => void
+  onSourceChange?: (event: MediaSelectorChangeEvent) => void
   initialSubfolder?: string
   onNavigateSubfolder?: (path: string) => void
   onAddLocalFile?: () => void
@@ -359,7 +368,7 @@ function RemoteFileList({
   const selectedValues = getSelectedMediaValues(value)
 
   // Reset to root when the source or local path changes
-  const rootKey = `${source}|${localPath}`
+  const rootKey = source === 'history' ? 'history' : `${source}|${localPath}`
   const prevRootKeyRef = useRef(rootKey)
 
   useEffect(() => {
@@ -381,7 +390,12 @@ function RemoteFileList({
     setError(null)
 
     let cancelled = false
-    getMediaList({ source, mediaType, localPath, subfolder })
+    const request = source === 'history'
+      ? historySource === 'combined'
+        ? getRecentMediaHistory(mediaType, 48, 50)
+        : getRecentMedia({ source: 'outputs', mediaType, hours: 48, limit: 50 })
+      : getMediaList({ source, mediaType, localPath, subfolder })
+    request
       .then((list) => {
         if (!cancelled) setItems(list)
       })
@@ -391,7 +405,7 @@ function RemoteFileList({
       .finally(() => { if (!cancelled) setLoading(false) })
 
     return () => { cancelled = true }
-  }, [source, mediaType, localPath, subfolder, cacheRevision])
+  }, [source, historySource, mediaType, localPath, subfolder, cacheRevision])
 
   const dirs = sortDirs(items.filter((i): i is MediaDirEntry => i.type === 'dir'))
   const files = sortFiles(
@@ -434,8 +448,22 @@ function RemoteFileList({
     onNavigateSubfolder?.(path)
   }
 
+  function fileSourceType(file: MediaFileEntry): 'input' | 'output' | 'temp' | 'local' {
+    if (source === 'history') {
+      const historyType = (file as RecentMediaHistoryEntry).source_type
+      return historyType === 'temp' ? 'temp' : 'output'
+    }
+    return source === 'outputs' ? 'output' : source === 'local' ? 'local' : 'input'
+  }
+
+  function selectFile(file: MediaFileEntry) {
+    const actualSource = fileSourceType(file)
+    onChange(file.path, actualSource === 'temp' ? 'output' : actualSource)
+    onSourceChange?.({ filePath: file.path, sourceType: actualSource })
+  }
+
   function renderGridFile(file: MediaFileEntry, selected: boolean) {
-    const sourceType = source === 'outputs' ? 'output' : source === 'local' ? 'local' : 'input'
+    const sourceType = fileSourceType(file)
     const selectionDisabled = multipleSelection && !selected && selectedValues.size >= selectionLimit
     return (
       <div
@@ -448,14 +476,14 @@ function RemoteFileList({
           selectionDisabled && 'cursor-not-allowed opacity-50',
         )}
         onClick={() => multipleSelection
-          ? onToggleSelection(file.path, sourceType)
-          : onChange(file.path, sourceType)}
+          ? onToggleSelection(file.path, sourceType === 'temp' ? 'output' : sourceType)
+          : selectFile(file)}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return
           if (event.key !== 'Enter' && event.key !== ' ') return
           event.preventDefault()
-          if (multipleSelection) onToggleSelection(file.path, sourceType)
-          else onChange(file.path, sourceType)
+          if (multipleSelection) onToggleSelection(file.path, sourceType === 'temp' ? 'output' : sourceType)
+          else selectFile(file)
         }}
       >
         <FileThumbnail file={file} mediaType={mediaType} isSelected={selected && !multipleSelection} />
@@ -466,7 +494,7 @@ function RemoteFileList({
             aria-label={t('mediaSelector.selectFile', { name: file.name })}
             className="absolute right-1 top-1 z-10 bg-background/80"
             onClick={(event) => event.stopPropagation()}
-            onCheckedChange={() => onToggleSelection(file.path, sourceType)}
+            onCheckedChange={() => onToggleSelection(file.path, sourceType === 'temp' ? 'output' : sourceType)}
           />
         )}
         <span className="text-[10px] truncate leading-tight max-w-full" title={file.name}>
@@ -484,7 +512,7 @@ function RemoteFileList({
     const showThumb = isImageFile(file.name, mediaType) && !!file.url
     const showVideoThumb = !showThumb && isVideoFile(file.name, mediaType) && !!file.url
     const showAudioIcon = !showThumb && !showVideoThumb && isAudioFile(file.name, mediaType)
-    const sourceType = source === 'outputs' ? 'output' : source === 'local' ? 'local' : 'input'
+    const sourceType = fileSourceType(file)
     const selectionDisabled = multipleSelection && !selected && selectedValues.size >= selectionLimit
 
     return (
@@ -499,14 +527,14 @@ function RemoteFileList({
           selectionDisabled && 'cursor-not-allowed opacity-50',
         )}
         onClick={() => multipleSelection
-          ? onToggleSelection(file.path, sourceType)
-          : onChange(file.path, sourceType)}
+          ? onToggleSelection(file.path, sourceType === 'temp' ? 'output' : sourceType)
+          : selectFile(file)}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return
           if (event.key !== 'Enter' && event.key !== ' ') return
           event.preventDefault()
-          if (multipleSelection) onToggleSelection(file.path, sourceType)
-          else onChange(file.path, sourceType)
+          if (multipleSelection) onToggleSelection(file.path, sourceType === 'temp' ? 'output' : sourceType)
+          else selectFile(file)
         }}
       >
         {multipleSelection && (
@@ -515,7 +543,7 @@ function RemoteFileList({
             disabled={selectionDisabled}
             aria-label={t('mediaSelector.selectFile', { name: file.name })}
             onClick={(event) => event.stopPropagation()}
-            onCheckedChange={() => onToggleSelection(file.path, sourceType)}
+            onCheckedChange={() => onToggleSelection(file.path, sourceType === 'temp' ? 'output' : sourceType)}
           />
         )}
         {showThumb && (
@@ -647,7 +675,9 @@ function RemoteFileList({
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
-      <Breadcrumb subfolder={subfolder} onNavigate={navigateSubfolder} />
+      {source !== 'history' ? (
+        <Breadcrumb subfolder={subfolder} onNavigate={navigateSubfolder} />
+      ) : null}
       {isEmpty && (
         <div className="flex items-center justify-center h-24 text-muted-foreground text-xs">
           {t('mediaSelector.empty')}
@@ -670,6 +700,7 @@ export function MediaSelector({
   mediaType = 'all',
   defaultTab = 'inputs',
   slotItems = [],
+  historySource = 'outputs',
   allowMultipleSelection = false,
   maxSelectionCount = 9,
 }: Readonly<MediaSelectorProps>) {
@@ -740,8 +771,11 @@ export function MediaSelector({
     })
   }
 
-  function handleFileChange(filePath: string, source: 'input' | 'output' | 'local') {
-    onChange(filePath, source)
+  function handleFileChange(
+    filePath: string,
+    source: 'input' | 'output' | 'temp' | 'local',
+  ) {
+    onChange(filePath, source === 'temp' ? 'output' : source)
     onSourceChange?.({ filePath, sourceType: source })
   }
 
@@ -790,7 +824,11 @@ export function MediaSelector({
 
   function confirmMultipleSelection() {
     if (draftSelectedValues.size === 0) return
-    const source = activeTab === 'outputs' ? 'output' : activeTab === 'local' ? 'local' : 'input'
+    const source = activeTab === 'outputs' || activeTab === 'history'
+      ? 'output'
+      : activeTab === 'local'
+        ? 'local'
+        : 'input'
     handleFileChange([...draftSelectedValues].join(MULTIPLE_MEDIA_SEPARATOR), source)
     setMultipleSelection(false)
   }
@@ -893,6 +931,9 @@ export function MediaSelector({
           </TabsTrigger>
           <TabsTrigger value="outputs" className="flex-1 h-full text-[11px] px-1">
             {t('mediaSelector.tabOutputs')}
+          </TabsTrigger>
+          <TabsTrigger value="history" className="flex-1 h-full text-[11px] px-1">
+            {t('mediaSelector.tabHistory')}
           </TabsTrigger>
           {/* <TabsTrigger value="local" className="flex-1 h-full text-[11px] px-1">
             {t('mediaSelector.tabLocal')}
@@ -1020,6 +1061,26 @@ export function MediaSelector({
             onChange={(path) => handleFileChange(path, 'output')}
             initialSubfolder={subfolders.outputs}
             onNavigateSubfolder={(path) => handleSubfolderChange('outputs', path)}
+            multipleSelection={multipleSelection}
+            selectionLimit={normalizedSelectionLimit}
+            onToggleSelection={handleToggleSelection}
+            onVisibleFilesChange={handleVisibleFilesChange}
+          />
+        </TabsContent>
+
+        <TabsContent value="history" className="mt-0 flex-1 overflow-hidden flex flex-col">
+          <RemoteFileList
+            source="history"
+            mediaType={mediaType}
+            localPath=""
+            viewMode={viewMode}
+            sortBy={sortBy}
+            searchQuery={searchQuery}
+            value={effectiveValue}
+            historySource={historySource}
+            onChange={(path, source) => handleFileChange(path, source)}
+            onSourceChange={onSourceChange}
+            initialSubfolder=""
             multipleSelection={multipleSelection}
             selectionLimit={normalizedSelectionLimit}
             onToggleSelection={handleToggleSelection}

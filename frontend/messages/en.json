@@ -6,11 +6,16 @@
     "delete": "Delete"
   },
   "compareVideo": {
-    "empty": "Run the node to preview videos.",
+    "empty": "Choose source and output videos to compare, or run the node with inputs.",
     "source": "Source",
     "output": "Output",
+    "selectSource": "Select source",
+    "selectOutput": "Select output",
+    "clearSource": "Clear source video",
+    "clearOutput": "Clear output video",
     "sourceOnly": "Source",
     "outputOnly": "Output",
+    "sideBySide": "A/B",
     "compare": "Compare",
     "play": "Play",
     "pause": "Pause",
@@ -19,6 +24,7 @@
     "unmute": "Unmute audio",
     "volume": "Volume",
     "saveOutput": "Save output video",
+    "watchOutputHistory": "Watch output history",
     "filenamePrefix": "Save prefix",
     "settings": "Output settings",
     "downloadOutput": "Download output video"
@@ -315,6 +321,10 @@
   "mediaSelector": {
     "tabInputs": "Inputs",
     "tabOutputs": "Outputs",
+    "tabHistory": "History",
+    "filter": "Multi",
+    "selectAll":"SelectAll",
+    "confirm": "Confirm",
     "tabLocal": "Local",
     "tabUrl": "URL",
     "searchPlaceholder": "Search...",

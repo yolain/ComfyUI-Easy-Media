@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any, Sequence, TypeVar
 from urllib.parse import quote
@@ -60,9 +61,9 @@ def allowed_extensions(media_type: str) -> set[str]:
 def file_entry(abs_path: str, rel_path: str, source: str) -> dict[str, Any]:
     """Build a file-info dict from an absolute path."""
     stat = os.stat(abs_path)
-    if source in ("inputs", "outputs"):
+    if source in ("inputs", "outputs", "temp"):
         # ComfyUI serves these via /view?filename=<name>&type=<source>&subfolder=<dir>
-        source_param = "input" if source == "inputs" else "output"
+        source_param = "input" if source == "inputs" else "output" if source == "outputs" else "temp"
         filename = os.path.basename(abs_path)
         subfolder = os.path.dirname(rel_path)
         encoded_filename = quote(filename, safe="-_.!~*'()")
@@ -124,6 +125,48 @@ def list_dir_shallow(
         except (OSError, ValueError):
             continue
     return items
+
+
+def list_recent_media_files(
+    base_path: Path,
+    subfolder: str,
+    source: str,
+    allowed: set[str],
+    hours: float,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """List recently modified media files recursively inside *base_path*."""
+    base_resolved = base_path.resolve()
+    target = (base_resolved / subfolder) if subfolder else base_resolved
+
+    # Security: disallow path traversal outside base
+    try:
+        target = target.resolve()
+        target.relative_to(base_resolved)
+    except ValueError:
+        return []
+
+    if not target.is_dir():
+        return []
+
+    cutoff = time.time() - max(0.0, float(hours)) * 3600.0
+    items: list[dict[str, Any]] = []
+    for root, _dirs, files in os.walk(target):
+        for name in files:
+            if Path(name).suffix.lower() not in allowed:
+                continue
+            entry = Path(root) / name
+            try:
+                stat = entry.stat()
+                if stat.st_mtime < cutoff:
+                    continue
+                rel = str(entry.relative_to(base_resolved))
+                items.append(file_entry(str(entry), rel, source))
+            except (OSError, ValueError):
+                continue
+
+    items.sort(key=lambda item: float(item.get("mtime", 0)), reverse=True)
+    return items[: max(1, min(1000, int(limit)))]
 
 
 def extract_filename_from_content_disposition(header: str | None) -> str | None:

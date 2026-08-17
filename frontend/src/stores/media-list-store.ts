@@ -27,6 +27,19 @@ export interface MediaListRequest {
   subfolder: string
 }
 
+export type RecentMediaSource = Extract<MediaListSource, 'inputs' | 'outputs'> | 'temp'
+
+export interface RecentMediaRequest {
+  source: RecentMediaSource
+  mediaType: MediaListMediaType
+  hours: number
+  limit?: number
+}
+
+export interface RecentMediaHistoryEntry extends MediaFileEntry {
+  source_type: 'output' | 'temp'
+}
+
 interface CacheEntry {
   request: MediaListRequest
   items: MediaItem[]
@@ -96,6 +109,40 @@ export function getMediaList(request: MediaListRequest): Promise<MediaItem[]> {
 
   pending.set(key, { request, promise })
   return promise
+}
+
+export async function getRecentMedia(request: RecentMediaRequest): Promise<MediaItem[]> {
+  const params = new URLSearchParams({
+    source: request.source,
+    type: request.mediaType,
+    hours: String(request.hours),
+  })
+  if (request.limit) params.set('limit', String(request.limit))
+
+  const response = await fetch(`/easy-media/media/recent?${params}`)
+  if (!response.ok) throw new Error(`${response.status}`)
+  const data = await response.json() as unknown
+  return normalizeMediaItems(data)
+}
+
+export async function getRecentMediaHistory(
+  mediaType: MediaListMediaType,
+  hours = 48,
+  limit = 50,
+): Promise<RecentMediaHistoryEntry[]> {
+  const [outputItems, tempItems] = await Promise.all([
+    getRecentMedia({ source: 'outputs', mediaType, hours, limit }),
+    getRecentMedia({ source: 'temp', mediaType, hours, limit }),
+  ])
+
+  const outputFiles = outputItems.filter((item): item is MediaFileEntry => (
+    item.type === 'file' && typeof item.path === 'string'
+  )).map((item) => ({ ...item, source_type: 'output' as const }))
+  const tempFiles = tempItems.filter((item): item is MediaFileEntry => (
+    item.type === 'file' && typeof item.path === 'string'
+  )).map((item) => ({ ...item, source_type: 'temp' as const }))
+
+  return [...outputFiles, ...tempFiles].sort((left, right) => right.mtime - left.mtime)
 }
 
 export function invalidateMediaListCache(source?: MediaListSource): void {

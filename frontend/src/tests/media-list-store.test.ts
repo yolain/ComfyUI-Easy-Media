@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   clearMediaListCache,
   getMediaList,
+  getRecentMedia,
+  getRecentMediaHistory,
   invalidateMediaListCache,
 } from '@/stores/media-list-store'
 
@@ -55,5 +57,27 @@ describe('media list store', () => {
     await expect(getMediaList(request)).rejects.toThrow('500')
     await expect(getMediaList(request)).resolves.toEqual([])
     expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('requests recent media with the supplied source, type, hours, and limit', async () => {
+    await getRecentMedia({
+      source: 'outputs',
+      mediaType: 'video',
+      hours: 48,
+      limit: 20,
+    })
+
+    expect(fetch).toHaveBeenCalledWith('/easy-media/media/recent?source=outputs&type=video&hours=48&limit=20')
+  })
+
+  it('combines recent output and temp media history', async () => {
+    const items = await getRecentMediaHistory('video', 48, 20)
+
+    expect(items).toEqual([
+      expect.objectContaining({ path: 'clip.mp4', source_type: 'output' }),
+      expect.objectContaining({ path: 'clip.mp4', source_type: 'temp' }),
+    ])
+    expect(fetch).toHaveBeenCalledWith('/easy-media/media/recent?source=outputs&type=video&hours=48&limit=20')
+    expect(fetch).toHaveBeenCalledWith('/easy-media/media/recent?source=temp&type=video&hours=48&limit=20')
   })
 })

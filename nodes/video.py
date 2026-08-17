@@ -496,6 +496,44 @@ def _compare_video_settings(value: object) -> dict[str, object]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _compare_video_selected_source(selection: object) -> "Optional[Input.Video]":
+    """Resolve a media-selection object from the compare widget to a VIDEO."""
+    if isinstance(selection, str) and selection.strip():
+        selection = {
+            "source_type": "url" if selection.startswith(("http://", "https://")) else "input",
+            "file_path": selection,
+        }
+    if not isinstance(selection, dict):
+        return None
+
+    source_type = str(selection.get("source_type") or selection.get("type") or "input")
+    file_path = selection.get("file_path") or selection.get("path")
+    url = selection.get("url")
+    raw_value = str(url or file_path or "").strip()
+    if not raw_value:
+        return None
+
+    if source_type == "url" or raw_value.startswith(("http://", "https://")):
+        try:
+            with urllib.request.urlopen(raw_value, timeout=30) as response:  # noqa: S310
+                return InputImpl.VideoFromFile(_io.BytesIO(response.read()))
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load selected VIDEO URL: {raw_value}") from exc
+
+    if os.path.isabs(raw_value):
+        resolved_path = raw_value
+    elif source_type == "output":
+        resolved_path = os.path.join(folder_paths.get_output_directory(), raw_value)
+    elif source_type == "temp":
+        resolved_path = os.path.join(folder_paths.get_temp_directory(), raw_value)
+    else:
+        resolved_path = os.path.join(folder_paths.get_input_directory(), raw_value)
+
+    if not os.path.isfile(resolved_path):
+        raise FileNotFoundError(f"Selected VIDEO file not found: {resolved_path}")
+    return InputImpl.VideoFromFile(resolved_path)
+
+
 def _normalize_compare_video_inputs(
     source: object,
     output: object,
@@ -614,7 +652,8 @@ class EasyCompareVideos(io.ComfyNode):
             description=(
                 "Preview source and output VIDEO inputs with slider and A/B comparison modes. "
                 "VIDEO lists use at most the first two items as source and output. "
-                "When both inputs are provided, playback duration follows the output VIDEO."
+                "When both inputs are provided, playback duration follows the output VIDEO. "
+                "Source and output videos can also be selected directly from the widget when inputs are not connected."
             ),
             is_input_list=True,
             inputs=[
@@ -634,13 +673,19 @@ class EasyCompareVideos(io.ComfyNode):
         compare_video: "object | list[object]" = "{}",
     ) -> io.NodeOutput:
         source, output = _normalize_compare_video_inputs(source, output)
-        if source is None and output is None:
-            raise ValueError("At least one VIDEO input is required.")
 
         settings_values = flatten_media_inputs(compare_video)
         settings = _compare_video_settings(settings_values[0] if settings_values else "{}")
-        save_output = settings.get("save_output") is True
+        watch_output_history = settings.get("watch_output_history") is True
+        save_output = settings.get("save_output") is True and not watch_output_history
         filename_prefix = str(settings.get("filename_prefix") or "ComfyUI")
+
+        if source is None:
+            source = _compare_video_selected_source(settings.get("source"))
+        if output is None:
+            output = _compare_video_selected_source(settings.get("output"))
+        # if source is None and output is None:
+        #     raise ValueError("At least one VIDEO input or selected video is required.")
 
         payload: dict[str, object] = {
             "source": None,

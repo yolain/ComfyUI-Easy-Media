@@ -8,8 +8,8 @@
         "tooltip": "源视频输入（可选）。"
       },
       "output": {
-        "name": "输出视频",
-        "tooltip": "输出视频输入（可选）。"
+        "name": "目标视频",
+        "tooltip": "目标视频输入（可选）。"
       },
       "compare_video": {
         "name": "对比视频数据",

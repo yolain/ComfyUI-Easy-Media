@@ -390,4 +390,34 @@ describe('MediaSelector', () => {
       expect(folder.compareDocumentPosition(unselectedFile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     })
   })
+
+  it('shows recent generated output media in the history tab', async () => {
+    const onChange = vi.fn()
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const url = new URL(String(input), 'http://localhost')
+      if (url.pathname === '/easy-media/media/recent') {
+        return {
+          ok: true,
+          json: async () => ({
+            items: [{
+              type: 'file',
+              name: 'recent.mp4',
+              path: 'renders/recent.mp4',
+              url: '/view?filename=recent.mp4&type=output&subfolder=renders',
+              size: 10,
+              mtime: 2,
+            }],
+          }),
+        } as Response
+      }
+      return { ok: true, json: async () => ({ items: [] }) } as Response
+    })
+
+    render(<MediaSelector value="" mediaType="video" onChange={onChange} />)
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'mediaSelector.tabHistory' }))
+
+    fireEvent.click(await screen.findByTitle('recent.mp4'))
+    expect(onChange).toHaveBeenCalledWith('renders/recent.mp4', 'output')
+    expect(fetch).toHaveBeenCalledWith('/easy-media/media/recent?source=outputs&type=video&hours=48&limit=50')
+  })
 })

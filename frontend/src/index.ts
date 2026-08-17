@@ -1,6 +1,7 @@
 import { addInlineStyles } from "@/lib/add-stylesheet";
 import { installEasyMediaSyncPlay } from "@/lib/sync-play";
 import { preserveTimelineEditorNodeSize } from "@/lib/timeline-node-size";
+import { preserveCompareVideoNodeSize } from "@/lib/compare-video-node-size";
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 import type { TimelineData } from '@/types/timeline'
 import type { TrackData } from '@/types/multitrack'
@@ -28,7 +29,11 @@ const [
 
 const DEFAULT_TIMELINE_VALUE = JSON.stringify(createDefaultTimelineData())
 const DEFAULT_TRACK_DATA_VALUE = JSON.stringify(createDefaultTrackData())
-const DEFAULT_COMPARE_VIDEO_VALUE = JSON.stringify({ save_output: true, filename_prefix: 'ComfyUI' })
+const DEFAULT_COMPARE_VIDEO_VALUE = JSON.stringify({
+  save_output: true,
+  filename_prefix: 'ComfyUI',
+  watch_output_history: false,
+})
 
 globalThis.comfyAPI!.app.app.registerExtension({
   name: 'Comfy.EasyMedia.widgets',
@@ -42,6 +47,7 @@ globalThis.comfyAPI!.app.app.registerExtension({
 
   beforeRegisterNodeDef(nodeType, nodeData) {
     preserveTimelineEditorNodeSize(nodeType, nodeData)
+    preserveCompareVideoNodeSize(nodeType, nodeData)
     installEasyMediaSyncPlay(nodeType, nodeData)
     suppressCompareVideoDefaultPreview(nodeType, nodeData)
   },

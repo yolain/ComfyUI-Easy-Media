@@ -6,7 +6,7 @@
 
 ### ✨ New Features
 
-- **Compare Video**: Added side-by-side comparison mode
+- **Compare Video**: Added `Side-by-side Compare` mode, support for directly selecting media for comparison, and `Watch Output History` mode
 - **Media Selector**: Added support for multi-selecting image items and selecting all images in current path
 - **Multi-Track Prompt Enhancer**: Added this node, supports prompt enhancement for models like h3-context-ir, supports local model usage
 - **Multi-Track Editor**: Added user prompt A/B output, supports selecting different user prompt outputs

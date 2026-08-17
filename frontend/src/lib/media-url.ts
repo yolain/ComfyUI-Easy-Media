@@ -1,6 +1,6 @@
 import type { AudioContent } from '@/types/timeline'
 
-type ViewSourceType = 'input' | 'output'
+type ViewSourceType = 'input' | 'output' | 'temp'
 
 export interface ViewableMediaContent {
   source_type: 'preset' | 'input' | 'output' | 'local' | 'url' | 'slot'
