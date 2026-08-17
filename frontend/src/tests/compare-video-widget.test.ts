@@ -1,8 +1,21 @@
 import { createElement } from 'react'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { CompareVideoWidget, parseCompareVideoPayload } from '@/components/widgets/compareVideoWidget'
 import { suppressCompareVideoDefaultPreview } from '@/lib/compare-video-node'
+import { getRecentMedia } from '@/stores/media-list-store'
+
+vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
+  MediaSelector: () => null,
+}))
+
+vi.mock('@/stores/media-list-store', async () => {
+  const actual = await vi.importActual<typeof import('@/stores/media-list-store')>('@/stores/media-list-store')
+  return {
+    ...actual,
+    getRecentMedia: vi.fn().mockResolvedValue([]),
+  }
+})
 
 const source = { filename: 'source.mp4', type: 'temp' as const }
 const output = { filename: 'output.mp4', type: 'temp' as const }
@@ -70,7 +83,15 @@ describe('compare video node preview', () => {
 })
 
 describe('CompareVideoWidget', () => {
-  function widgetProps(node: object, onChange = vi.fn()) {
+  function widgetProps(
+    node: object,
+    onChange = vi.fn(),
+    value: {
+      save_output: boolean
+      filename_prefix: string
+      watch_output_history: boolean
+    } = { save_output: false, filename_prefix: 'ComfyUI', watch_output_history: false },
+  ) {
     return {
       app: {
         api: {},
@@ -78,7 +99,7 @@ describe('CompareVideoWidget', () => {
         ui: { settings: { settingsValues: {} } },
       } as never,
       node,
-      value: { save_output: false, filename_prefix: 'ComfyUI' },
+      value,
       onChange,
       inputName: 'compare_video',
       widget: {} as never,
@@ -132,6 +153,13 @@ describe('CompareVideoWidget', () => {
     expect(document.querySelector('[data-compare-video-panel]')).toBeNull()
   })
 
+  it('shows source and output media pickers before any videos are available', () => {
+    render(createElement(CompareVideoWidget, widgetProps({ id: 11 })))
+
+    expect(screen.getByRole('button', { name: 'Select source' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Select output' })).not.toBeNull()
+  })
+
   it('edits save settings in the empty state', () => {
     const onChange = vi.fn()
     render(createElement(CompareVideoWidget, widgetProps({ id: 2 }, onChange)))
@@ -139,10 +167,118 @@ describe('CompareVideoWidget', () => {
     const saveOutputCheckbox = screen.getByRole('checkbox', { name: 'Save output video' })
     expect(saveOutputCheckbox.getAttribute('aria-checked')).toBe('false')
     fireEvent.click(saveOutputCheckbox)
-    expect(onChange).toHaveBeenCalledWith({ save_output: true, filename_prefix: 'ComfyUI' })
+    expect(onChange).toHaveBeenCalledWith({
+      save_output: true,
+      filename_prefix: 'ComfyUI',
+      watch_output_history: false,
+      source: null,
+      output: null,
+    })
 
     fireEvent.change(screen.getByRole('textbox', { name: 'Save prefix' }), { target: { value: 'renders/final' } })
-    expect(onChange).toHaveBeenCalledWith({ save_output: false, filename_prefix: 'renders/final' })
+    expect(onChange).toHaveBeenCalledWith({
+      save_output: false,
+      filename_prefix: 'renders/final',
+      watch_output_history: false,
+      source: null,
+      output: null,
+    })
+  })
+
+  it('turns off save output and starts watching output history when watch mode is enabled', () => {
+    const onChange = vi.fn()
+    render(createElement(CompareVideoWidget, widgetProps({ id: 12 }, onChange)))
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Watch output history' }))
+
+    expect(onChange).toHaveBeenCalledWith({
+      save_output: false,
+      filename_prefix: 'ComfyUI',
+      watch_output_history: true,
+      source: null,
+      output: null,
+    })
+  })
+
+  it('disables save output while watch output history is enabled', () => {
+    render(createElement(CompareVideoWidget, widgetProps(
+      { id: 13 },
+      vi.fn(),
+      {
+        save_output: false,
+        filename_prefix: 'ComfyUI',
+        watch_output_history: true,
+      },
+    )))
+
+    const saveOutputCheckbox = screen.getByRole('checkbox', { name: 'Save output video' })
+    expect((saveOutputCheckbox as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('fills source first and then output while watching recent output videos', async () => {
+    const onChange = vi.fn()
+    vi.mocked(getRecentMedia).mockResolvedValueOnce([
+      {
+        type: 'file',
+        name: 'latest.mp4',
+        path: 'renders/latest.mp4',
+        url: '/view?filename=latest.mp4&type=output&subfolder=renders',
+        size: 100,
+        mtime: 200,
+      },
+      {
+        type: 'file',
+        name: 'previous.mp4',
+        path: 'renders/previous.mp4',
+        url: '/view?filename=previous.mp4&type=output&subfolder=renders',
+        size: 100,
+        mtime: 100,
+      },
+    ])
+
+    render(createElement(CompareVideoWidget, widgetProps(
+      { id: 14 },
+      onChange,
+      {
+        save_output: false,
+        filename_prefix: 'ComfyUI',
+        watch_output_history: true,
+      },
+    )))
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      source: { source_type: 'output', file_path: 'renders/previous.mp4' },
+      output: { source_type: 'output', file_path: 'renders/latest.mp4' },
+    })))
+  })
+
+  it('puts a single recent output into source while watching', async () => {
+    const onChange = vi.fn()
+    vi.mocked(getRecentMedia).mockResolvedValueOnce([
+      {
+        type: 'file',
+        name: 'only.mp4',
+        path: 'only.mp4',
+        url: '/view?filename=only.mp4&type=output&subfolder=',
+        size: 100,
+        mtime: 200,
+      },
+    ])
+
+    render(createElement(CompareVideoWidget, widgetProps(
+      { id: 15 },
+      onChange,
+      {
+        save_output: false,
+        filename_prefix: 'ComfyUI',
+        watch_output_history: true,
+      },
+    )))
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      source: { source_type: 'output', file_path: 'only.mp4' },
+      output: null,
+    })))
   })
 
   it('shows output settings and download controls after preview', () => {
@@ -159,7 +295,13 @@ describe('CompareVideoWidget', () => {
     expect(screen.getByRole('button', { name: 'Download output video' })).not.toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Output settings' }))
     fireEvent.change(screen.getByRole('textbox', { name: 'Save prefix' }), { target: { value: 'compare' } })
-    expect(onChange).toHaveBeenCalledWith({ save_output: false, filename_prefix: 'compare' })
+    expect(onChange).toHaveBeenCalledWith({
+      save_output: false,
+      filename_prefix: 'compare',
+      watch_output_history: false,
+      source: null,
+      output: null,
+    })
 
     fireEvent.click(screen.getByRole('button', { name: 'Download output video' }))
     expect(anchorClick).toHaveBeenCalledOnce()

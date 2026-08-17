@@ -48,6 +48,7 @@ from .utils.media import (
     extract_filename_from_content_disposition,
     is_json_error,
     list_dir_shallow,
+    list_recent_media_files,
 )
 from .modules.subtitle_recognition import (
     MissingSubtitleRecognitionDependenciesError,
@@ -122,6 +123,41 @@ async def handle_media_list(request: web.Request) -> web.Response:
             text=json.dumps({"error": f"unknown source '{source}'"}),
         )
 
+    return web.Response(
+        content_type="application/json",
+        text=json.dumps({"items": items}),
+    )
+
+
+@PromptServer.instance.routes.get("/easy-media/media/recent")
+async def handle_media_recent(request: web.Request) -> web.Response:
+    source = request.rel_url.query.get("source", "outputs")
+    media_type = request.rel_url.query.get("type", "all")
+    subfolder = request.rel_url.query.get("subfolder", "")
+    try:
+        hours = max(0.0, float(request.rel_url.query.get("hours", "48")))
+        limit = max(1, min(1000, int(request.rel_url.query.get("limit", "100"))))
+    except (TypeError, ValueError):
+        return web.Response(
+            status=400,
+            content_type="application/json",
+            text=json.dumps({"error": "hours and limit must be valid numbers"}),
+        )
+
+    allowed = allowed_extensions(media_type)
+
+    if source == "inputs":
+        base = Path(folder_paths.get_input_directory())
+    elif source == "outputs":
+        base = Path(folder_paths.get_output_directory())
+    else:
+        return web.Response(
+            status=400,
+            content_type="application/json",
+            text=json.dumps({"error": f"unknown source '{source}'"}),
+        )
+
+    items = list_recent_media_files(base, subfolder, source, allowed, hours, limit)
     return web.Response(
         content_type="application/json",
         text=json.dumps({"items": items}),

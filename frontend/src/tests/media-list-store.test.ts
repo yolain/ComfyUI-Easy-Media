@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   clearMediaListCache,
   getMediaList,
+  getRecentMedia,
   invalidateMediaListCache,
 } from '@/stores/media-list-store'
 
@@ -55,5 +56,16 @@ describe('media list store', () => {
     await expect(getMediaList(request)).rejects.toThrow('500')
     await expect(getMediaList(request)).resolves.toEqual([])
     expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('requests recent media with the supplied source, type, hours, and limit', async () => {
+    await getRecentMedia({
+      source: 'outputs',
+      mediaType: 'video',
+      hours: 48,
+      limit: 20,
+    })
+
+    expect(fetch).toHaveBeenCalledWith('/easy-media/media/recent?source=outputs&type=video&hours=48&limit=20')
   })
 })
