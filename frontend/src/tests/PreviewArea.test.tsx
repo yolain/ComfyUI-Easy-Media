@@ -616,6 +616,58 @@ describe('PreviewArea', () => {
     expect((screen.getByTestId('task-prompt-editor') as HTMLTextAreaElement).value).toBe('Updated preview prompt')
   })
 
+  it('shows and edits the selected B prompt for the active unselected task segment', () => {
+    const { data } = trackData()
+    data.tracks.unshift({
+      id: 'task-track',
+      name: 'Task 1',
+      type: 'task',
+      color: 'var(--primary)',
+      muted: false,
+      locked: false,
+      segments: [{
+        id: 'active-task',
+        start_frame: 24,
+        end_frame: 48,
+        color: 'var(--primary)',
+        content: {
+          media_type: 'none',
+          user_prompt: 'Prompt A',
+          user_prompt_b: 'Prompt B',
+          user_prompt_variant: 'b',
+        },
+      }],
+    })
+
+    const onTrackSegmentsContentChange = vi.fn()
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={36}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('task-prompt-text').textContent).toBe('Prompt B')
+
+    fireEvent.doubleClick(screen.getByTestId('task-prompt-text'))
+    const editor = screen.getByTestId('task-prompt-editor') as HTMLTextAreaElement
+    expect(editor.value).toBe('Prompt B')
+    fireEvent.change(editor, { target: { value: 'Updated prompt B' } })
+
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
+      segmentId: 'active-task',
+      patch: { user_prompt_b: 'Updated prompt B' },
+    }])
+    expect((screen.getByTestId('task-prompt-editor') as HTMLTextAreaElement).value).toBe('Updated prompt B')
+  })
+
   it('shows and updates the active task mode from the prompt bar', () => {
     const { data } = trackData()
     data.tracks.unshift({

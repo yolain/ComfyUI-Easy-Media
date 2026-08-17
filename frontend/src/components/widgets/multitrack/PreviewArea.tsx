@@ -14,6 +14,8 @@ import {
   getActivePreviewAudioSources,
   getActivePreviewVideoSegment,
   getMultiTrackTaskModeLabel,
+  getSelectedTaskUserPrompt,
+  getSelectedTaskUserPromptPatch,
   MULTITRACK_TASK_MODES,
   parseMultiTrackPreviewResolution,
   segmentDuration,
@@ -37,7 +39,7 @@ import {
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
 import { DEFAULT_SUBTITLE_STYLE } from '@/lib/subtitle-recognition'
 import { invalidateMediaListCache } from '@/stores/media-list-store'
-import type { MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSubtitleStyle, MultiTrackTaskImage, MultiTrackTaskMode, TrackData } from '@/types/multitrack'
+import type { MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSubtitleStyle, MultiTrackTaskImage, MultiTrackTaskMode, MultiTrackUserPromptVariant, TrackData } from '@/types/multitrack'
 import { PreviewFloatingToolbar } from './PreviewFloatingToolbar'
 import { PreviewAudioPlayback } from './PreviewAudioPlayback'
 import { PanoramaImagePreview } from '@/components/widgets/panorama/PanoramaImagePreview'
@@ -92,6 +94,7 @@ interface ActiveTaskPrompt {
   segmentId: string
   prompt: string
   taskMode: MultiTrackTaskMode
+  content: MultiTrackSegmentContent
 }
 
 type PreviewLayoutMode = 'balanced' | 'image-large'
@@ -155,8 +158,13 @@ function getActiveTaskPrompt(data: TrackData, currentTime: number): ActiveTaskPr
     ))
     if (!segment) continue
 
-    const prompt = segment.content.user_prompt ?? ''
-    return { segmentId: segment.id, prompt, taskMode: segment.content.task_mode ?? 'default' }
+    const prompt = getSelectedTaskUserPrompt(segment.content)
+    return {
+      segmentId: segment.id,
+      prompt,
+      taskMode: segment.content.task_mode ?? 'default',
+      content: segment.content,
+    }
   }
 
   return null
@@ -248,7 +256,11 @@ export function PreviewArea({
   const [previewLayoutMode, setPreviewLayoutMode] = useState<PreviewLayoutMode>('balanced')
   const [activeTaskMediaSelectorOpen, setActiveTaskMediaSelectorOpen] = useState(false)
   const [activeTaskImageDragOver, setActiveTaskImageDragOver] = useState(false)
-  const [editingTaskPrompt, setEditingTaskPrompt] = useState<{ segmentId: string; text: string } | null>(null)
+  const [editingTaskPrompt, setEditingTaskPrompt] = useState<{
+    segmentId: string
+    variant: MultiTrackUserPromptVariant
+    text: string
+  } | null>(null)
   const [editingSubtitle, setEditingSubtitle] = useState<{ segmentId: string; text: string } | null>(null)
   const [firstVideoMetadata, setFirstVideoMetadata] = useState<MultiTrackVideoMetadata | null>(null)
   const [resolutionInput, setResolutionInput] = useState(() => collectMultiTrackPreviewResolutionInput(node))
@@ -357,9 +369,13 @@ export function PreviewArea({
       setEditingTaskPrompt(null)
       return
     }
-    if (editingTaskPrompt?.segmentId === activeTaskPrompt.segmentId) return
+    const activeVariant = activeTaskPrompt.content.user_prompt_variant === 'b' ? 'b' : 'a'
+    if (
+      editingTaskPrompt?.segmentId === activeTaskPrompt.segmentId
+      && editingTaskPrompt.variant === activeVariant
+    ) return
     setEditingTaskPrompt(null)
-  }, [activeTaskPrompt, editingTaskPrompt?.segmentId])
+  }, [activeTaskPrompt, editingTaskPrompt?.segmentId, editingTaskPrompt?.variant])
 
   useEffect(() => {
     if (expandedTaskImageTarget?.source === 'active' && expandedTaskImageTarget.segmentId !== activeTaskImages?.segmentId) {
@@ -507,11 +523,11 @@ export function PreviewArea({
   }
 
   function handleTaskPromptInput(text: string) {
-    if (!editingTaskPrompt) return
+    if (!editingTaskPrompt || !activeTaskPrompt) return
     setEditingTaskPrompt({ ...editingTaskPrompt, text })
     onTrackSegmentsContentChange?.([{
       segmentId: editingTaskPrompt.segmentId,
-      patch: { user_prompt: text },
+      patch: getSelectedTaskUserPromptPatch(activeTaskPrompt.content, text),
     }])
   }
 
@@ -973,6 +989,7 @@ export function PreviewArea({
               event.stopPropagation()
               setEditingTaskPrompt({
                 segmentId: activeTaskPrompt.segmentId,
+                variant: activeTaskPrompt.content.user_prompt_variant === 'b' ? 'b' : 'a',
                 text: activeTaskPrompt.prompt,
               })
             }}
