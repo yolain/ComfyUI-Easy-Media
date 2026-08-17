@@ -33,6 +33,7 @@ export interface CompareVideoSettings {
   save_output: boolean
   filename_prefix: string
   watch_output_history: boolean
+  compare_mode?: CompareMode
   source?: CompareVideoMediaSelection | null
   output?: CompareVideoMediaSelection | null
 }
@@ -49,6 +50,7 @@ const DEFAULT_COMPARE_VIDEO_SETTINGS: CompareVideoSettings = {
   save_output: false,
   filename_prefix: 'ComfyUI',
   watch_output_history: false,
+  compare_mode: 'compare',
   source: null,
   output: null,
 }
@@ -191,12 +193,17 @@ function normalizeCompareVideoPayload(value: unknown): CompareVideoPayload | nul
 function normalizeCompareVideoSettings(value: unknown): CompareVideoSettings {
   if (!value || typeof value !== 'object') return { ...DEFAULT_COMPARE_VIDEO_SETTINGS }
   const record = value as Record<string, unknown>
+  const rawMode = record.compare_mode
+  const compareMode: CompareMode = (rawMode === 'source' || rawMode === 'compare' || rawMode === 'side-by-side' || rawMode === 'output')
+    ? rawMode
+    : 'compare'
   return {
     save_output: record.save_output === true,
     filename_prefix: typeof record.filename_prefix === 'string'
       ? record.filename_prefix
       : DEFAULT_COMPARE_VIDEO_SETTINGS.filename_prefix,
     watch_output_history: record.watch_output_history === true,
+    compare_mode: compareMode,
     source: normalizeCompareVideoMediaSelection(record.source),
     output: normalizeCompareVideoMediaSelection(record.output),
   }
@@ -412,7 +419,7 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
   const outputRef = useRef<HTMLVideoElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
   const [payload, setPayload] = useState<CompareVideoPayload | null>(() => node.__easyMediaCompareVideos ?? null)
-  const [mode, setMode] = useState<CompareMode>('compare')
+  const [mode, setMode] = useState<CompareMode>(settings.compare_mode ?? 'compare')
   const [split, setSplit] = useState(50)
   const [isPointerInside, setIsPointerInside] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -620,10 +627,12 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
 
   function cycleMode() {
     setMode((current) => {
-      if (current === 'compare') return 'side-by-side'
-      if (current === 'side-by-side') return 'source'
-      if (current === 'source') return 'output'
-      return 'compare'
+      let next: CompareMode = 'compare'
+      if (current === 'compare') next = 'side-by-side'
+      else if (current === 'side-by-side') next = 'source'
+      else if (current === 'source') next = 'output'
+      onSettingsChange({ ...settings, compare_mode: next })
+      return next
     })
   }
 
@@ -655,6 +664,7 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
     setIsPlaying(false)
     if (mediaSelectionToUrl(selection) && mediaSelectionToUrl(otherSelection)) {
       setMode('compare')
+      onSettingsChange({ ...nextSettings, compare_mode: 'compare' })
     }
   }
 
