@@ -132,6 +132,10 @@ function getSelectedMediaParent(value: string): string {
   return normalized.split('/').slice(0, -1).join('/')
 }
 
+function splitSubfolderPath(subfolder: string): string[] {
+  return subfolder.replaceAll('\\', '/').split('/').filter(Boolean)
+}
+
 function formatMediaInfo(file: MediaFileEntry, mediaType: MediaType): string {
   if (isImageFile(file.name, mediaType) && file.width && file.height) {
     return `${file.width}×${file.height}`
@@ -285,7 +289,7 @@ function Breadcrumb({
   onNavigate,
 }: Readonly<{ subfolder: string; onNavigate: (path: string) => void }>) {
   if (!subfolder) return null
-  const parts = subfolder.split('/').filter(Boolean)
+  const parts = splitSubfolderPath(subfolder)
   return (
     <div className="flex items-center gap-0.5 px-2 py-0.5 border-b border-border text-[11px] text-muted-foreground flex-wrap">
       <button

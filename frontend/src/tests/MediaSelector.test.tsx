@@ -237,6 +237,26 @@ describe('MediaSelector', () => {
     expect(screen.getByTitle('child')).not.toBeNull()
   })
 
+  it('splits Windows-style subfolders into separate breadcrumb levels', async () => {
+    vi.mocked(fetch).mockImplementation(async (input) => {
+      const subfolder = new URL(String(input), 'http://localhost').searchParams.get('subfolder') ?? ''
+      const items = subfolder === 'parent\\child'
+        ? [{ type: 'file', name: 'inside.mp4', path: 'parent\\child\\inside.mp4', size: 10, mtime: 1 }]
+        : subfolder === 'parent'
+          ? [{ type: 'dir', name: 'child', path: 'parent\\child' }]
+          : [{ type: 'dir', name: 'parent', path: 'parent' }]
+      return { ok: true, json: async () => ({ items }) } as Response
+    })
+
+    render(<MediaSelector value="clip.mp4" mediaType="all" onChange={vi.fn()} />)
+    fireEvent.click(await screen.findByTitle('parent'))
+    fireEvent.click(await screen.findByTitle('child'))
+    await screen.findByTitle('inside.mp4')
+
+    expect(screen.getByRole('button', { name: 'parent' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'child' })).not.toBeNull()
+  })
+
   it('clears the search query when entering a subdirectory', async () => {
     vi.mocked(fetch).mockImplementation(async (input) => {
       const url = new URL(String(input), 'http://localhost')
