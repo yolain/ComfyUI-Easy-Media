@@ -25,7 +25,10 @@ import { mediaPathToViewUrl } from '@/lib/media-url'
 import { cn } from '@/lib/utils'
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
-import { getRecentMediaHistory } from '@/stores/media-list-store'
+import {
+  getRecentMediaHistory,
+  type RecentMediaHistoryEntry,
+} from '@/stores/media-list-store'
 
 type CompareMode = 'source' | 'compare' | 'side-by-side' | 'output'
 
@@ -178,6 +181,59 @@ function compareMediaSelectionsEqual(
     && left.url === right.url
 }
 
+function compareMediaSelectionKey(selection: CompareVideoMediaSelection | null | undefined): string | null {
+  if (!selection) return null
+  const value = selection.file_path ?? selection.url ?? ''
+  return value ? `${selection.source_type}:${value}` : null
+}
+
+function historyVideoToSelection(video: RecentMediaHistoryEntry): CompareVideoMediaSelection {
+  return video.source_type === 'temp'
+    ? tempMediaSelection(video.path)
+    : outputMediaSelection(video.path)
+}
+
+export function mergeWatchOutputHistorySelections(
+  current: Pick<CompareVideoSettings, 'source' | 'output'>,
+  videos: readonly RecentMediaHistoryEntry[],
+  manualSlots: ReadonlySet<'source' | 'output'> = new Set(),
+): Pick<CompareVideoSettings, 'source' | 'output'> {
+  const uniqueSelections: CompareVideoMediaSelection[] = []
+  const seenKeys = new Set<string>()
+  for (const video of videos) {
+    const selection = historyVideoToSelection(video)
+    const key = compareMediaSelectionKey(selection)
+    if (!key || seenKeys.has(key)) continue
+    seenKeys.add(key)
+    uniqueSelections.push(selection)
+  }
+
+  const sourceIsManual = manualSlots.has('source') && current.source != null
+  const outputIsManual = manualSlots.has('output') && current.output != null
+
+  const source = sourceIsManual
+    ? current.source ?? null
+    : outputIsManual
+      ? uniqueSelections.find((selection) => (
+          compareMediaSelectionKey(selection) !== compareMediaSelectionKey(current.output)
+        )) ?? null
+      : uniqueSelections.length >= 2
+        ? uniqueSelections[1]
+        : null
+
+  const output = outputIsManual
+    ? current.output ?? null
+    : sourceIsManual
+      ? uniqueSelections.find((selection) => (
+          compareMediaSelectionKey(selection) !== compareMediaSelectionKey(source)
+        )) ?? null
+      : uniqueSelections.length >= 1
+        ? uniqueSelections[0]
+        : null
+
+  return { source, output }
+}
+
 function normalizeCompareVideoPayload(value: unknown): CompareVideoPayload | null {
   if (Array.isArray(value)) {
     for (const item of value) {
@@ -298,11 +354,16 @@ function CompareVideoSettingsFields({
           role="checkbox"
           aria-checked={settings.watch_output_history}
           className="h-auto flex-1 cursor-pointer justify-start gap-2 px-0 py-1 hover:bg-transparent"
-          onClick={() => onSettingsChange({
-            ...settings,
-            watch_output_history: !settings.watch_output_history,
-            save_output: settings.watch_output_history ? settings.save_output : false,
-          })}
+          onClick={() => {
+            const nextWatchOutputHistory = !settings.watch_output_history
+            onSettingsChange({
+              ...settings,
+              watch_output_history: nextWatchOutputHistory,
+              source: nextWatchOutputHistory ? null : settings.source,
+              output: nextWatchOutputHistory ? null : settings.output,
+              save_output: nextWatchOutputHistory ? false : settings.save_output,
+            })
+          }}
         >
           <span
             className={cn(
@@ -334,12 +395,14 @@ function CompareVideoMediaPicker({
   slot,
   selection,
   disabled = false,
+  watchHistory = false,
   onSelect,
   onClear,
 }: Readonly<{
   slot: 'source' | 'output'
   selection: CompareVideoMediaSelection | null | undefined
   disabled?: boolean
+  watchHistory?: boolean
   onSelect: (filePath: string, source?: 'input' | 'output' | 'temp' | 'local') => void
   onClear: () => void
 }>) {
@@ -380,8 +443,9 @@ function CompareVideoMediaPicker({
             key={`${slot}-${selectedName || 'empty'}`}
             value={mediaSelectionValue(selection)}
             mediaType="video"
-            defaultTab={mediaSelectionTab(selection, slot)}
+            defaultTab={watchHistory ? 'history' : mediaSelectionTab(selection, slot)}
             historySource="combined"
+            historyOnly={watchHistory}
             onChange={(filePath, source) => {
               if (source === undefined) {
                 onSelect(filePath, source)
@@ -428,21 +492,27 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
   const [currentTime, setCurrentTime] = useState(0)
   const [metadataDuration, setMetadataDuration] = useState(0)
   const settingsRef = useRef(settings)
+  const onSettingsChangeRef = useRef(onSettingsChange)
+  const manualSlotsRef = useRef<Set<'source' | 'output'>>(new Set())
+  const previousWatchRef = useRef(settings.watch_output_history)
   settingsRef.current = settings
+  onSettingsChangeRef.current = onSettingsChange
 
   const sourceUrl = useMemo(
-    () => mediaSelectionToUrl(settings.source) ?? resultToUrl(payload?.source),
-    [payload, settings.source],
+    () => mediaSelectionToUrl(settings.source)
+      ?? (settings.watch_output_history ? null : resultToUrl(payload?.source)),
+    [payload, settings.source, settings.watch_output_history],
   )
   const outputUrl = useMemo(
-    () => mediaSelectionToUrl(settings.output) ?? resultToUrl(payload?.output),
-    [payload, settings.output],
+    () => mediaSelectionToUrl(settings.output)
+      ?? (settings.watch_output_history ? null : resultToUrl(payload?.output)),
+    [payload, settings.output, settings.watch_output_history],
   )
   const hasSource = Boolean(sourceUrl)
   const hasOutput = Boolean(outputUrl)
   const hasAnyVideo = hasSource || hasOutput
   const canCompare = hasSource && hasOutput
-  const duration = Math.max(payload?.duration ?? 0, metadataDuration, 0)
+  const duration = hasOutput ? metadataDuration : Math.max(payload?.duration ?? 0, metadataDuration, 0)
 
   const visibleMode: CompareMode = canCompare ? mode : hasSource ? 'source' : 'output'
   const isSideBySide = canCompare && visibleMode === 'side-by-side'
@@ -458,7 +528,6 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
       setCurrentTime(0)
       setIsPlaying(false)
       setMetadataDuration(0)
-      setMode(nextPayload.source && nextPayload.output ? 'compare' : nextPayload.source ? 'source' : 'output')
     }
 
     const original = node.onExecuted as ExecutedHandler | undefined
@@ -494,9 +563,27 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
   }, [hasOutput, muted, volume])
 
   useEffect(() => {
-    if (!canCompare && hasSource) setMode('source')
-    if (!canCompare && hasOutput) setMode('output')
-  }, [canCompare, hasOutput, hasSource])
+    if (canCompare) {
+      setMode(settings.compare_mode ?? 'compare')
+    } else if (hasSource) {
+      setMode('source')
+    } else if (hasOutput) {
+      setMode('output')
+    }
+  }, [canCompare, hasOutput, hasSource, settings.compare_mode])
+
+  useEffect(() => {
+    const previousWatch = previousWatchRef.current
+    previousWatchRef.current = settings.watch_output_history
+    if (settings.watch_output_history && !previousWatch) {
+      manualSlotsRef.current.clear()
+    } else if (!settings.watch_output_history && previousWatch) {
+      node.__easyMediaCompareVideos = null
+      setPayload(null)
+      setCurrentTime(0)
+      setMetadataDuration(0)
+    }
+  }, [node, settings.watch_output_history])
 
   useEffect(() => {
     if (!settings.watch_output_history) return
@@ -508,32 +595,21 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
         const videos = await getRecentMediaHistory('video', 48, 50)
         if (cancelled) return
 
-        let nextSource: CompareVideoMediaSelection | null = null
-        let nextOutput: CompareVideoMediaSelection | null = null
-        for (const video of [...videos].reverse()) {
-          const selection = video.source_type === 'temp'
-            ? tempMediaSelection(video.path)
-            : outputMediaSelection(video.path)
-          if (!nextSource) {
-            nextSource = selection
-          } else if (!nextOutput) {
-            nextOutput = selection
-          } else {
-            nextSource = nextOutput
-            nextOutput = selection
-          }
-        }
         const currentSettings = settingsRef.current
+        const { source: nextSource, output: nextOutput } = mergeWatchOutputHistorySelections(
+          currentSettings,
+          videos,
+          manualSlotsRef.current,
+        )
 
         if (
           !compareMediaSelectionsEqual(currentSettings.source, nextSource)
           || !compareMediaSelectionsEqual(currentSettings.output, nextOutput)
         ) {
-          onSettingsChange({ ...currentSettings, source: nextSource, output: nextOutput })
+          onSettingsChangeRef.current({ ...currentSettings, source: nextSource, output: nextOutput })
           setCurrentTime(0)
           setMetadataDuration(0)
           setIsPlaying(false)
-          if (nextSource && nextOutput) setMode('compare')
         }
       } catch (error) {
         console.error('[CompareVideoWidget] failed to refresh output history:', error)
@@ -553,7 +629,7 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
       api?.removeEventListener?.('execution_success', handleExecutionFinished)
       api?.removeCustomEventListener?.('execution_success', handleExecutionFinished)
     }
-  }, [app.api, onSettingsChange, settings.watch_output_history])
+  }, [app.api, settings.watch_output_history])
 
   const syncVideos = useCallback((time: number) => {
     seek(sourceRef.current, time)
@@ -641,7 +717,6 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
     filePath: string,
     source?: 'input' | 'output' | 'temp' | 'local',
   ) {
-    if (settings.watch_output_history) return
     const isUrl = /^https?:\/\//i.test(filePath)
     const sourceType: CompareVideoMediaSourceType = source === 'output'
       ? 'output'
@@ -658,18 +733,23 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
     const nextSettings = { ...settings, [slot]: selection }
     const otherSelection = slot === 'source' ? nextSettings.output : nextSettings.source
 
+    if (settings.watch_output_history) {
+      manualSlotsRef.current.add(slot)
+    }
+
     onSettingsChange(nextSettings)
     setCurrentTime(0)
     setMetadataDuration(0)
     setIsPlaying(false)
     if (mediaSelectionToUrl(selection) && mediaSelectionToUrl(otherSelection)) {
-      setMode('compare')
-      onSettingsChange({ ...nextSettings, compare_mode: 'compare' })
+      setMode(nextSettings.compare_mode ?? 'compare')
     }
   }
 
   function handleMediaClear(slot: 'source' | 'output') {
-    if (settings.watch_output_history) return
+    if (settings.watch_output_history) {
+      manualSlotsRef.current.delete(slot)
+    }
     onSettingsChange({ ...settings, [slot]: null })
     setCurrentTime(0)
     setMetadataDuration(0)
@@ -677,7 +757,9 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
   }
 
   function downloadOutputVideo() {
-    const downloadName = payload?.output?.filename ?? mediaSelectionName(settings.output)
+    const downloadName = settings.watch_output_history
+      ? mediaSelectionName(settings.output)
+      : payload?.output?.filename ?? mediaSelectionName(settings.output)
     if (!outputUrl || !downloadName) return
     try {
       const anchor = document.createElement('a')
@@ -771,7 +853,7 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
             <CompareVideoMediaPicker
               slot="source"
               selection={settings.source}
-              disabled={settings.watch_output_history}
+              watchHistory={settings.watch_output_history}
               onSelect={(filePath, source) => handleMediaSelect('source', filePath, source)}
               onClear={() => handleMediaClear('source')}
             />
@@ -780,7 +862,7 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
             <CompareVideoMediaPicker
               slot="output"
               selection={settings.output}
-              disabled={settings.watch_output_history}
+              watchHistory={settings.watch_output_history}
               onSelect={(filePath, source) => handleMediaSelect('output', filePath, source)}
               onClear={() => handleMediaClear('output')}
             />
