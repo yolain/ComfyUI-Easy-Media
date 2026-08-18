@@ -702,7 +702,7 @@ export function TaskSegmentEditor({
           )}
           {editMode === 'combined' ? (
             <div className="flex min-h-0 flex-1 flex-col gap-1 p-2">
-              <div className="relative min-h-24 flex-1 rounded-md bg-card">
+              <div className="relative h-full min-h-0 flex-1 overflow-hidden rounded-md bg-card">
                 <PromptContentEditor
                   ariaLabel={t('multitrack.prompt')}
                   placeholder={promptPlaceholder}
@@ -719,7 +719,7 @@ export function TaskSegmentEditor({
               <p className="shrink-0 text-[9px] text-muted-foreground mt-1">{t('maintainTrack.combinedHint')}</p>
             </div>
           ) : promptTab === 'user' ? (
-            <div className="min-h-0 flex-1 pb-2 px-2">
+            <div className="relative h-full min-h-0 flex-1 overflow-hidden pb-2 px-2">
               <PromptContentEditor
                 placeholder={promptPlaceholder}
                 interactivePlaceholder={usesMiniMaxPromptPlaceholder}
@@ -732,8 +732,8 @@ export function TaskSegmentEditor({
               />
             </div>
           ) : (
-            <div className="relative min-h-0 flex-1 pb-2 px-2">
-              <div className="relative h-full min-h-24 rounded-md bg-card">
+            <div className="relative h-full min-h-0 flex-1 overflow-hidden pb-2 px-2">
+              <div className="relative h-full min-h-0 overflow-hidden rounded-md bg-card">
                 <PromptContentEditor
                   ariaLabel={t('multitrack.systemPrompt')}
                   placeholder={systemPromptLoading ? t('multitrack.loadingSystemPrompt') : t('multitrack.systemPromptPlaceholder')}

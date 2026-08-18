@@ -497,7 +497,10 @@ export function PromptContentEditor({
   }
 
   return (
-    <div ref={wrapperRef} className="relative h-full min-h-0">
+    <div
+      ref={wrapperRef}
+      className="relative h-full min-h-0 max-h-full overflow-hidden [contain:size_layout_paint]"
+    >
       <div
         ref={editorRef}
         role="textbox"
@@ -508,7 +511,7 @@ export function PromptContentEditor({
         contentEditable
         suppressContentEditableWarning
         className={cn(
-          'prompt-content-editor h-full min-h-24 overflow-auto whitespace-pre-wrap wrap-break-word rounded-md px-3 py-2 text-[10px] leading-normal text-foreground caret-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring',
+          'prompt-content-editor h-full min-h-0 max-h-full overflow-auto whitespace-pre-wrap wrap-break-word rounded-md px-3 py-2 text-[10px] leading-normal text-foreground caret-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring',
           !interactivePlaceholder && 'empty:before:pointer-events-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]',
           className,
         )}
