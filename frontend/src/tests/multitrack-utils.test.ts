@@ -29,6 +29,7 @@ import {
   parseMultiTrackDurationTimecode,
   parseMultiTrackPreviewResolution,
   remapTrackDataFrameRate,
+  resizeTaskSegmentEnd,
   secondsToFrame,
   splitMultiTrackSegmentByFrames,
   snapMultiTrackMoveStartTime,
@@ -782,6 +783,70 @@ describe('multitrack utilities', () => {
     const updated = updateMultiTrackSegmentDuration(trackData, 'selected', 10, 24)
 
     expect(updated.tracks[1].segments[0].end_frame).toBe(60)
+  })
+
+  it('shifts later task segments when resizing an earlier task end', () => {
+    const data = createDefaultTrackData()
+    const segments = [
+      {
+        id: 'first',
+        start_frame: 0,
+        end_frame: 24,
+        color: data.tracks[0].color,
+        content: { media_type: 'none' as const, task_mode: 'default' as const },
+      },
+      {
+        id: 'second',
+        start_frame: 24,
+        end_frame: 48,
+        color: data.tracks[0].color,
+        content: { media_type: 'none' as const, task_mode: 'default' as const },
+      },
+      {
+        id: 'third',
+        start_frame: 60,
+        end_frame: 84,
+        color: data.tracks[0].color,
+        content: { media_type: 'none' as const, task_mode: 'default' as const },
+      },
+    ]
+
+    expect(resizeTaskSegmentEnd(segments, 'first', 36).map((segment) => [
+      segment.start_frame,
+      segment.end_frame,
+    ])).toEqual([
+      [0, 36],
+      [36, 60],
+      [72, 96],
+    ])
+  })
+
+  it('increases total length when editing the duration of an earlier task', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [
+      {
+        id: 'first',
+        start_frame: 0,
+        end_frame: 24,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+      {
+        id: 'second',
+        start_frame: 24,
+        end_frame: 48,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+    ]
+
+    const updated = updateMultiTrackSegmentDuration(data, 'first', 1.5, 24)
+
+    expect(updated.tracks[0].segments.map((segment) => [segment.start_frame, segment.end_frame])).toEqual([
+      [0, 36],
+      [36, 60],
+    ])
+    expect(updated.total_length).toBe(60)
   })
 
   it('snaps resize edges to timeline and neighboring segment boundaries inside a brake distance', () => {

@@ -11,6 +11,7 @@
 [![][github-stars-shield]][github-stars-link]
 [![][github-forks-shield]][github-forks-link]
 [![][github-license-shield]][github-license-link]
+[![][workflow-shield]][workflow-link]
 
 <img src="https://github.com/user-attachments/assets/e12f219c-b4c7-47ce-96fb-23103c621720" style="width:100%">
 </div>
@@ -238,3 +239,5 @@ bun run build:release
 [github-release-shield]: https://img.shields.io/github/v/release/yolain/ComfyUI-Easy-Media?color=f2ff59&labelColor=black&style=flat-square
 [github-stars-link]: https://github.com/yolain/ComfyUI-Easy-Media/network/stargazers
 [github-stars-shield]: https://img.shields.io/github/stars/yolain/ComfyUI-Easy-Media?color=ffcb47&labelColor=black&style=flat-square
+[workflow-shield]: https://img.shields.io/badge/💻-Workflows-efff30?color=e92759&labelColor=black&style=flat-square
+[workflow-link]:https://www.runninghub.ai/user-center/1847825328541474818/userPost?inviteCode=rh-v1623

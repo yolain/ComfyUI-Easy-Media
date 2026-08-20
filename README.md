@@ -11,6 +11,7 @@ A ComfyUI custom node package for streamlined media loading and video pipeline a
 [![][github-stars-shield]][github-stars-link]
 [![][github-forks-shield]][github-forks-link]
 [![][github-license-shield]][github-license-link]
+[![][workflow-shield]][workflow-link]
 
 <img src="https://github.com/user-attachments/assets/493947f1-3fff-4503-b2d3-408591b7597f" style="width:100%">
 </div>
@@ -234,3 +235,5 @@ bun run build:release
 [github-release-shield]: https://img.shields.io/github/v/release/yolain/ComfyUI-Easy-Media?color=f2ff59&labelColor=black&style=flat-square
 [github-stars-link]: https://github.com/yolain/ComfyUI-Easy-Media/network/stargazers
 [github-stars-shield]: https://img.shields.io/github/stars/yolain/ComfyUI-Easy-Media?color=ffcb47&labelColor=black&style=flat-square
+[workflow-shield]: https://img.shields.io/badge/💻-Workflows-efff30?color=e92759&labelColor=black&style=flat-square
+[workflow-link]:https://www.runninghub.cn/user-center/1852215241684750337/userPost?inviteCode=14757185
