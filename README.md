@@ -236,4 +236,4 @@ bun run build:release
 [github-stars-link]: https://github.com/yolain/ComfyUI-Easy-Media/network/stargazers
 [github-stars-shield]: https://img.shields.io/github/stars/yolain/ComfyUI-Easy-Media?color=ffcb47&labelColor=black&style=flat-square
 [workflow-shield]: https://img.shields.io/badge/💻-Workflows-efff30?color=e92759&labelColor=black&style=flat-square
-[workflow-link]:https://www.runninghub.cn/user-center/1852215241684750337/userPost?inviteCode=14757185
+[workflow-link]:https://www.runninghub.ai/user-center/1847825328541474818/userPost?inviteCode=rh-v1623
