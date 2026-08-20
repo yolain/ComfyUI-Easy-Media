@@ -14,6 +14,7 @@
 
 ### 🐛 Bug Fixes
 
+- **Multi-Track Editor**: When two adjacent task segments are connected, modifying the front segment's duration should increase the total duration
 - **Media Selector**: Fixed breadcrumbs should support recursive subdirectories
 - **Media Selector**: Fixed image re-selection issue
 
