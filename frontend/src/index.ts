@@ -76,10 +76,10 @@ globalThis.comfyAPI!.app.app.registerExtension({
       }),
       EASY_API_ACCOUNT: createReactWidget<string>(PromptEnhancerAccountWidget, {
         defaultValue: '',
-        height: 30,
+        height: 44,
         domWidgetOptions: {
-          getMinHeight: () => 30,
-          getMaxHeight: () => 30,
+          getMinHeight: () => 44,
+          getMaxHeight: () => 44,
           hideOnZoom: false,
           serialize: true,
         },

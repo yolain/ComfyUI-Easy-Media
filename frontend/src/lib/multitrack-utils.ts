@@ -1083,6 +1083,31 @@ export function syncMatchingTasksToPrimaryVideoSegment(
   })
 }
 
+export function resizeTaskSegmentEnd(
+  segments: MultiTrackSegment[],
+  segmentId: string,
+  requestedEndFrame: number,
+): MultiTrackSegment[] {
+  const sorted = [...segments].sort((left, right) => left.start_frame - right.start_frame)
+  const selectedIndex = sorted.findIndex((segment) => segment.id === segmentId)
+  if (selectedIndex < 0) return segments
+
+  const selected = sorted[selectedIndex]
+  const endFrame = Math.max(selected.start_frame + 1, Math.round(requestedEndFrame))
+  const delta = endFrame - selected.end_frame
+  if (delta === 0) return sorted
+
+  return sorted.map((segment, index) => {
+    if (index < selectedIndex) return segment
+    if (index === selectedIndex) return { ...segment, end_frame: endFrame }
+    return {
+      ...segment,
+      start_frame: segment.start_frame + delta,
+      end_frame: segment.end_frame + delta,
+    }
+  })
+}
+
 export function updateMultiTrackSegmentDuration(
   data: TrackData,
   segmentId: string,
@@ -1093,10 +1118,16 @@ export function updateMultiTrackSegmentDuration(
   const resizedTracks = data.tracks.map((track) => {
     const selected = track.segments.find((segment) => segment.id === segmentId)
     if (!selected) return track
+    const requestedEnd = snapTimeToFrame(selected.start_frame + nextDuration, frameRate)
+    if (track.type === 'task') {
+      return {
+        ...track,
+        segments: resizeTaskSegmentEnd(track.segments, segmentId, requestedEnd),
+      }
+    }
     const nextSegmentStart = track.segments
       .filter((segment) => segment.id !== segmentId && segment.start_frame > selected.start_frame)
       .reduce((nearest, segment) => Math.min(nearest, segment.start_frame), Number.POSITIVE_INFINITY)
-    const requestedEnd = snapTimeToFrame(selected.start_frame + nextDuration, frameRate)
     const endFrame = Math.max(selected.start_frame + 1, Math.min(requestedEnd, nextSegmentStart))
 
     return {

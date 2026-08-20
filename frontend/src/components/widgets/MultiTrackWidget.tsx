@@ -28,6 +28,7 @@ import {
   normalizeTrackData,
   remapFrameToRate,
   remapTrackDataFrameRate,
+  resizeTaskSegmentEnd,
   secondsToFrame,
   splitMultiTrackSegmentByFrames,
   snapSecondsToFrame,
@@ -842,45 +843,57 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   }
 
   function buildResizedTrackData(sourceData: TrackData, segmentId: string, edge: 'start' | 'end', nextTime: number): TrackData {
-    const resizedTracks = sourceData.tracks.map((track) => ({
-      ...track,
-      segments: track.segments.map((segment) => {
-        if (segment.id !== segmentId) return segment
-        const sortedSegments = [...track.segments].sort((a, b) => a.start_frame - b.start_frame)
-        const segmentIndex = sortedSegments.findIndex((item) => item.id === segmentId)
-        const prevSegment = segmentIndex > 0 ? sortedSegments[segmentIndex - 1] : null
-        const nextSegment = segmentIndex >= 0 && segmentIndex < sortedSegments.length - 1
-          ? sortedSegments[segmentIndex + 1]
-          : null
-        const sourceDuration = segment.content.duration && segment.content.duration > 0
-          ? Math.max(1, snapSecondsToFrame(segment.content.duration, sourceData.frame_rate))
-          : Number.POSITIVE_INFINITY
+    const resizedTracks = sourceData.tracks.map((track) => {
+      if (track.type === 'task' && edge === 'end' && track.segments.some((segment) => segment.id === segmentId)) {
+        return {
+          ...track,
+          segments: resizeTaskSegmentEnd(
+            track.segments,
+            segmentId,
+            snapTimeToFrame(nextTime, sourceData.frame_rate),
+          ),
+        }
+      }
+      return {
+        ...track,
+        segments: track.segments.map((segment) => {
+          if (segment.id !== segmentId) return segment
+          const sortedSegments = [...track.segments].sort((a, b) => a.start_frame - b.start_frame)
+          const segmentIndex = sortedSegments.findIndex((item) => item.id === segmentId)
+          const prevSegment = segmentIndex > 0 ? sortedSegments[segmentIndex - 1] : null
+          const nextSegment = segmentIndex >= 0 && segmentIndex < sortedSegments.length - 1
+            ? sortedSegments[segmentIndex + 1]
+            : null
+          const sourceDuration = segment.content.duration && segment.content.duration > 0
+            ? Math.max(1, snapSecondsToFrame(segment.content.duration, sourceData.frame_rate))
+            : Number.POSITIVE_INFINITY
 
-        if (edge === 'start') {
-          const nextStart = snapTimeToFrame(nextTime, sourceData.frame_rate)
-          const minStart = Math.max(0, prevSegment?.end_frame ?? 0, segment.end_frame - sourceDuration)
-          const maxStart = segment.end_frame - 1
-          const startFrame = Math.max(minStart, Math.min(nextStart, maxStart))
+          if (edge === 'start') {
+            const nextStart = snapTimeToFrame(nextTime, sourceData.frame_rate)
+            const minStart = Math.max(0, prevSegment?.end_frame ?? 0, segment.end_frame - sourceDuration)
+            const maxStart = segment.end_frame - 1
+            const startFrame = Math.max(minStart, Math.min(nextStart, maxStart))
+            return {
+              ...segment,
+              start_frame: startFrame,
+              ...(
+                startFrame !== segment.start_frame && (track.type === 'video' || track.type === 'audio')
+                  ? { origin_start_frame: segment.origin_start_frame ?? segment.start_frame }
+                  : {}
+              ),
+            }
+          }
+
+          const nextEnd = snapTimeToFrame(nextTime, sourceData.frame_rate)
+          const minEnd = segment.start_frame + 1
+          const maxEnd = Math.min(nextSegment?.start_frame ?? Number.POSITIVE_INFINITY, segment.start_frame + sourceDuration)
           return {
             ...segment,
-            start_frame: startFrame,
-            ...(
-              startFrame !== segment.start_frame && (track.type === 'video' || track.type === 'audio')
-                ? { origin_start_frame: segment.origin_start_frame ?? segment.start_frame }
-                : {}
-            ),
+            end_frame: Math.max(minEnd, Math.min(nextEnd, maxEnd)),
           }
-        }
-
-        const nextEnd = snapTimeToFrame(nextTime, sourceData.frame_rate)
-        const minEnd = segment.start_frame + 1
-        const maxEnd = Math.min(nextSegment?.start_frame ?? Number.POSITIVE_INFINITY, segment.start_frame + sourceDuration)
-        return {
-          ...segment,
-          end_frame: Math.max(minEnd, Math.min(nextEnd, maxEnd)),
-        }
-      }).sort((a, b) => a.start_frame - b.start_frame),
-    }))
+        }).sort((a, b) => a.start_frame - b.start_frame),
+      }
+    })
     const updatedTracks = syncMatchingTasksToPrimaryVideoSegment(
       sourceData.tracks,
       resizedTracks,
