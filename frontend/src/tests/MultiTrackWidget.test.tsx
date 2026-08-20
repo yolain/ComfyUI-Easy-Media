@@ -345,6 +345,11 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
         {videoSegment ? (
           <button type="button" onClick={() => onResizeSegment(videoSegment.id, 'end', 8)}>trim video end</button>
         ) : null}
+        {segment ? (
+          <button type="button" onClick={() => onResizeSegment(segment.id, 'end', segment.end_frame + 12)}>
+            extend first task end
+          </button>
+        ) : null}
         {data.tracks[1]?.segments.length >= 2 ? (
           <button
             type="button"
@@ -619,6 +624,37 @@ describe('MultiTrackWidget', () => {
     fireEvent.click(screen.getByRole('button', { name: 'undo history' }))
     const undone = onChange.mock.lastCall?.[0] as TrackData
     expect(undone.tracks[1].segments[0].end_frame).toBe(10)
+  })
+
+  it('increases total length when dragging the end of an earlier task', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [
+      {
+        id: 'task-first',
+        start_frame: 0,
+        end_frame: 24,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+      {
+        id: 'task-second',
+        start_frame: 24,
+        end_frame: 48,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+    ]
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'extend first task end' }))
+
+    const updated = onChange.mock.lastCall?.[0] as TrackData
+    expect(updated.tracks[0].segments.map((segment) => [segment.start_frame, segment.end_frame])).toEqual([
+      [0, 36],
+      [36, 60],
+    ])
+    expect(updated.total_length).toBe(60)
   })
 
   it('animates the ruler and track region to zero height when toggled', () => {
