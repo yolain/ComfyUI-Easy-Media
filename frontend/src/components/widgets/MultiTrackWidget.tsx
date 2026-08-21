@@ -803,11 +803,11 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     commitNormalizedTrackChange({ ...data, tracks: updatedTracks })
   }
 
-  function handleCloneTaskSegment(trackId: string, segmentId: string) {
+  function handleCloneSegment(trackId: string, segmentId: string) {
     let clonedSegmentId: string | null = null
     let trackEnd = 0
     const updatedTracks = data.tracks.map((track) => {
-      if (track.id !== trackId || (track.type !== 'task' && track.type !== 'subtitle')) return track
+      if (track.id !== trackId) return track
       const result = cloneMultiTrackSegment(track.segments, segmentId)
       if (!result) return track
       clonedSegmentId = result.clonedSegmentId
@@ -1392,7 +1392,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     onTrackVisibilityChange={handleTrackVisibilityChange}
                     onTrackAudioSettingsChange={handleTrackAudioSettingsChange}
                     onDistributeTaskSegments={handleDistributeTaskSegments}
-                    onCloneTaskSegment={handleCloneTaskSegment}
+                    onCloneTaskSegment={handleCloneSegment}
                     onSplitTaskSegment={setSplittingTaskSegmentId}
                     onResizeSegment={handleResizeSegment}
                     onResizeSegmentPreview={handleResizeSegmentPreview}

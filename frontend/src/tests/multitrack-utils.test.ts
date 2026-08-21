@@ -182,6 +182,36 @@ describe('multitrack utilities', () => {
     expect(result?.segments[1].content).not.toBe(source.content)
   })
 
+  it('preserves source media offsets when cloning and shifting media segments', () => {
+    const source = {
+      id: 'source',
+      start_frame: 5,
+      end_frame: 8,
+      origin_start_frame: 3,
+      color: 'var(--primary)',
+      content: { media_type: 'video' as const, file_path: 'source.mp4' },
+    }
+    const following = {
+      ...source,
+      id: 'following',
+      start_frame: 8,
+      end_frame: 10,
+      origin_start_frame: 8,
+    }
+    const result = cloneMultiTrackSegment([source, following], source.id)
+
+    expect(result?.segments.map((segment) => [
+      segment.id,
+      segment.start_frame,
+      segment.end_frame,
+      segment.origin_start_frame,
+    ])).toEqual([
+      ['source', 5, 8, 3],
+      [result?.clonedSegmentId, 8, 11, 6],
+      ['following', 11, 13, 11],
+    ])
+  })
+
   it('formats and validates minute-second-frame duration timecodes', () => {
     expect(formatMultiTrackDurationTimecode(65.5, 24)).toBe('01:05:12')
     expect(parseMultiTrackDurationTimecode('01:05:12', 24)).toBe(65.5)

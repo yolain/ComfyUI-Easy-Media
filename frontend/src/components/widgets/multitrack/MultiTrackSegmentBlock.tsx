@@ -170,6 +170,11 @@ export function MultiTrackSegmentBlock({
     }))
   )).flat()
   const presentation = getSegmentTrackPresentation(trackType)
+  const cloneLabel = trackType === 'video'
+    ? t('multitrack.cloneVideoSegment')
+    : trackType === 'audio'
+      ? t('multitrack.cloneAudioSegment')
+      : t('multitrack.cloneTaskSegment')
   const borderColor = isResizing
     ? 'var(--warning)'
     : selected
@@ -534,9 +539,9 @@ export function MultiTrackSegmentBlock({
             {t('multitrack.distributeTaskSegments')}
           </ContextMenuItem>
         ) : null}
-        {(trackType === 'task' || trackType === 'subtitle') && onClone ? (
+        {onClone ? (
           <ContextMenuItem onClick={() => onClone(segment.id)}>
-            {t('multitrack.cloneTaskSegment')}
+            {cloneLabel}
           </ContextMenuItem>
         ) : null}
         {trackType === 'task' && onSplitTask ? (

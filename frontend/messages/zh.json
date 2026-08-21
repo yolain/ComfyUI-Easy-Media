@@ -189,6 +189,8 @@
     "clearReferenceAudio": "清除参考音频",
     "distributeTaskSegments": "均分片段",
     "cloneTaskSegment": "克隆片段",
+    "cloneVideoSegment": "克隆视频",
+    "cloneAudioSegment": "克隆音频",
     "splitTaskSegment": "拆分片段",
     "splitTaskSegmentDescription": "当前片段为 {frames} 帧（{seconds} 秒），请输入每段拆分秒数。",
     "splitTaskSegmentSeconds": "拆分秒数",

@@ -157,6 +157,7 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
   }) => {
     const taskTrack = data.tracks.find((track) => track.type === 'task')
     const audioTrack = data.tracks.find((track) => track.type === 'audio')
+    const audioSegment = audioTrack?.segments[0]
     const segment = taskTrack?.segments[0]
     const videoSegment = data.tracks.find((track) => track.type === 'video')?.segments[0]
     const firstVideoTrack = data.tracks.find((track) => track.type === 'video')
@@ -170,6 +171,16 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
         {taskTrack && segment ? (
           <button type="button" onClick={() => onCloneTaskSegment(taskTrack.id, segment.id)}>
             clone task
+          </button>
+        ) : null}
+        {firstVideoTrack && videoSegment ? (
+          <button type="button" onClick={() => onCloneTaskSegment(firstVideoTrack.id, videoSegment.id)}>
+            clone video
+          </button>
+        ) : null}
+        {audioTrack && audioSegment ? (
+          <button type="button" onClick={() => onCloneTaskSegment(audioTrack.id, audioSegment.id)}>
+            clone audio
           </button>
         ) : null}
         {taskTrack && segment ? (
@@ -791,6 +802,50 @@ describe('MultiTrackWidget', () => {
       content: { media_type: 'subtitle', text: 'Hello' },
     })
     expect(subtitles[1].id).not.toBe('subtitle-0')
+  })
+
+  it('clones video and audio segments from their context actions', () => {
+    const data = createDefaultTrackData()
+    data.tracks[1].segments = [{
+      id: 'video-0',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[1].color,
+      content: { media_type: 'video', source_type: 'input', file_path: 'clip.mp4' },
+    }]
+    data.tracks.push({
+      id: 'audio-track',
+      name: 'Audio 0',
+      type: 'audio',
+      color: 'var(--highlight)',
+      muted: false,
+      locked: false,
+      segments: [{
+        id: 'audio-0',
+        start_frame: 5,
+        end_frame: 15,
+        color: 'var(--highlight)',
+        content: { media_type: 'audio', source_type: 'input', file_path: 'clip.wav' },
+      }],
+    })
+    const onChange = vi.fn()
+    const props = widgetProps()
+    const view = render(<MultiTrackWidget {...props} value={data} onChange={onChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'clone video' }))
+    const videoCloned = onChange.mock.lastCall?.[0] as TrackData
+    expect(videoCloned.tracks[1].segments.map((item) => [item.start_frame, item.end_frame])).toEqual([
+      [0, 10],
+      [10, 20],
+    ])
+
+    view.rerender(<MultiTrackWidget {...props} value={videoCloned} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'clone audio' }))
+    const audioCloned = onChange.mock.lastCall?.[0] as TrackData
+    expect(audioCloned.tracks.at(-1)?.segments.map((item) => [item.start_frame, item.end_frame])).toEqual([
+      [5, 15],
+      [15, 25],
+    ])
   })
 
   it('splits a task segment from the context dialog', () => {

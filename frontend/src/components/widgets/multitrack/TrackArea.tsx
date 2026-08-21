@@ -580,6 +580,7 @@ export function TrackArea({
               onReplaceVideo={onReplaceVideo}
               onSelectSegment={onSelectSegment}
               onDeleteSegment={onDeleteSegment}
+              onCloneSegment={(segmentId) => onCloneTaskSegment(track.id, segmentId)}
               onSmartSplit={onSmartSplit}
               onSmartSplitTasks={onSmartSplitTasks}
               onRecognizeSubtitles={onRecognizeSubtitles}
@@ -616,6 +617,7 @@ export function TrackArea({
               onReplaceAudio={onReplaceAudio}
               onSelectSegment={onSelectSegment}
               onDeleteSegment={onDeleteSegment}
+              onCloneSegment={(segmentId) => onCloneTaskSegment(track.id, segmentId)}
               onDeleteTrack={onDeleteTrack}
               onTrackAudioSettingsChange={onTrackAudioSettingsChange}
               onResizeSegment={onResizeSegment}

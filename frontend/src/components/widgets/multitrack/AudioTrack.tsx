@@ -42,6 +42,7 @@ interface AudioTrackProps {
   ) => void
   onSelectSegment: (segmentId: string, mode?: 'replace' | 'toggle' | 'add') => void
   onDeleteSegment: (segmentId: string) => void
+  onCloneSegment: (segmentId: string) => void
   onDeleteTrack: (trackId: string) => void
   onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo'>>) => void
   onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
@@ -76,6 +77,7 @@ export function AudioTrack({
   onReplaceAudio,
   onSelectSegment,
   onDeleteSegment,
+  onCloneSegment,
   onDeleteTrack,
   onTrackAudioSettingsChange,
   onResizeSegment,
@@ -138,6 +140,7 @@ export function AudioTrack({
             selected={selectedSegmentIds.has(segment.id)}
             onSelect={onSelectSegment}
             onDelete={onDeleteSegment}
+            onClone={onCloneSegment}
             onResize={onResizeSegment}
             onResizePreview={onResizeSegmentPreview}
             onMove={onMoveSegment}

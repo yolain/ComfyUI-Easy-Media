@@ -56,7 +56,7 @@ function renderBlock(trackType: MultiTrackType) {
       onSelect={vi.fn()}
       onDelete={onDelete}
       onDistribute={trackType === 'task' ? onDistribute : undefined}
-      onClone={trackType === 'task' || trackType === 'subtitle' ? onClone : undefined}
+      onClone={onClone}
       onSplitTask={trackType === 'task' ? onSplitTask : undefined}
       onSmartSplit={trackType === 'video' ? onSmartSplit : undefined}
       onSmartSplitTasks={trackType === 'video' ? onSmartSplitTasks : undefined}
@@ -178,6 +178,17 @@ describe('MultiTrackSegmentBlock context menu', () => {
 
     expect(onSmartSplit).toHaveBeenCalledWith('video-segment')
     expect(onSmartSplitTasks).toHaveBeenCalledWith('video-segment')
+  })
+
+  it.each([
+    ['video', 'Clone video'],
+    ['audio', 'Clone audio'],
+  ] as const)('offers the matching clone action for %s segments', (trackType, actionName) => {
+    const { onClone } = renderBlock(trackType)
+
+    fireEvent.click(screen.getByRole('button', { name: actionName }))
+
+    expect(onClone).toHaveBeenCalledWith(`${trackType}-segment`)
   })
 
   it.each(['video', 'audio'] as const)('offers subtitle recognition for %s segments', (trackType) => {

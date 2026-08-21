@@ -613,19 +613,27 @@ export function cloneMultiTrackSegment(
   if (duration <= 0) return null
   const clonedSegmentId = uuid()
   const cloneStart = source.end_frame
+  const cloneOffset = cloneStart - source.start_frame
   const clone: MultiTrackSegment = {
     ...structuredClone(source),
     id: clonedSegmentId,
     start_frame: cloneStart,
     end_frame: cloneStart + duration,
+    ...(source.origin_start_frame === undefined
+      ? {}
+      : { origin_start_frame: source.origin_start_frame + cloneOffset }),
   }
   let nextStart = clone.end_frame
   const subsequent = sorted.slice(index + 1).map((segment) => {
     const nextDuration = segmentDuration(segment)
+    const shift = nextStart - segment.start_frame
     const shifted = {
       ...segment,
       start_frame: nextStart,
       end_frame: nextStart + nextDuration,
+      ...(segment.origin_start_frame === undefined
+        ? {}
+        : { origin_start_frame: segment.origin_start_frame + shift }),
     }
     nextStart = shifted.end_frame
     return shifted

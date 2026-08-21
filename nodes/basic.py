@@ -2679,13 +2679,14 @@ class MultiTrackTaskOutput(io.ComfyNode):
                     start_frame,
                     next_task_start,
                 )
-                if track_media_end is not None:
-                    available_frames = max(0, track_media_end - start_frame)
-                    track_media_duration_frames = (
-                        min(track_media_duration_frames, available_frames)
-                        if track_media_duration_frames is not None
-                        else available_frames
-                    )
+                if track_media_end is None:
+                    continue
+                available_frames = max(0, track_media_end - start_frame)
+                track_media_duration_frames = (
+                    min(track_media_duration_frames, available_frames)
+                    if track_media_duration_frames is not None
+                    else available_frames
+                )
                 if track_media_duration_frames is not None and track_media_duration_frames <= 0:
                     continue
             if track.get("type") == "audio" and media_index is not None and 0 <= media_index < len(audio_items):

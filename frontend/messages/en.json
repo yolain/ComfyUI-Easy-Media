@@ -189,6 +189,8 @@
     "clearReferenceAudio": "Clear reference audio",
     "distributeTaskSegments": "Distribute segments evenly",
     "cloneTaskSegment": "Clone segment",
+    "cloneVideoSegment": "Clone video",
+    "cloneAudioSegment": "Clone audio",
     "splitTaskSegment": "Split segment",
     "splitTaskSegmentDescription": "Current segment is {frames} frames ({seconds}s). Enter the seconds for each split.",
     "splitTaskSegmentSeconds": "Split seconds",

@@ -30,6 +30,7 @@ interface VideoTrackProps {
   ) => void
   onSelectSegment: (segmentId: string, mode?: 'replace' | 'toggle' | 'add') => void
   onDeleteSegment: (segmentId: string) => void
+  onCloneSegment: (segmentId: string) => void
   canDeleteTrack: boolean
   onDeleteTrack: (trackId: string) => void
   onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo'>>) => void
@@ -64,6 +65,7 @@ export function VideoTrack({
   onAddVideo,
   onSelectSegment,
   onDeleteSegment,
+  onCloneSegment,
   canDeleteTrack,
   onDeleteTrack,
   onTrackAudioSettingsChange,
@@ -125,6 +127,7 @@ export function VideoTrack({
             selected={selectedSegmentIds.has(segment.id)}
             onSelect={onSelectSegment}
             onDelete={onDeleteSegment}
+            onClone={onCloneSegment}
             onSmartSplit={onSmartSplit}
             onSmartSplitTasks={onSmartSplitTasks}
             onRecognizeSubtitles={onRecognizeSubtitles}

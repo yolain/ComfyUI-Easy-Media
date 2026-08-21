@@ -2,6 +2,17 @@
 
 ---
 
+## [1.2.1] - 2026-08-22
+
+### ✨ New Features
+
+- **Multi-Track Editor**: Added right-click context menu to clone audio segments and video segments
+
+### 🐛 Bug Fixes
+
+- **Multi-Track Task Output**: Fixed that segments without audio/video in `MiniMax` format should output as None
+
+
 ## [1.2.0] - 2026-08-21
 
 ### ✨ New Features

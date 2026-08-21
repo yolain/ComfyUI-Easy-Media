@@ -2039,6 +2039,45 @@ def test_multitrack_task_output_keeps_minimax_audio_when_video_track_is_empty():
     assert result.values[6] == [None]
 
 
+def test_multitrack_task_output_returns_none_when_selected_minimax_task_has_no_media_segments():
+    module = _load_basic_module()
+    audio_track = {"waveform": torch.arange(10).reshape(1, 1, 10), "sample_rate": 1}
+    video_track = _FakeVideo(_VideoComponents(torch.zeros(10, 2, 2, 3), None, Fraction(1)))
+    tracks_info = {
+        "format": "MiniMax",
+        "frame_rate": 1,
+        "tracks": [
+            {"type": "task", "segments": [
+                {"start_frame": 0, "end_frame": 5, "content": {"user_prompt": "first"}},
+                {"start_frame": 5, "end_frame": 10, "content": {"user_prompt": "second"}},
+            ]},
+            {"type": "audio", "media_index": 0, "segments": [{
+                "start_frame": 0,
+                "end_frame": 5,
+                "content": {"media_type": "audio", "media_index": 0},
+            }]},
+            {"type": "video", "media_index": 0, "segments": [{
+                "start_frame": 0,
+                "end_frame": 5,
+                "content": {"media_type": "video", "media_index": 0},
+            }]},
+        ],
+    }
+
+    first_result = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [], [[audio_track]], [[video_track]], [0], ["default"],
+    )
+    second_result = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [], [[audio_track]], [[video_track]], [1], ["default"],
+    )
+
+    assert first_result.values[5][0]["waveform"].flatten().tolist() == list(range(5))
+    assert first_result.values[6] == [video_track]
+    assert second_result.values[5] == [None]
+    assert second_result.values[6] == [None]
+    assert video_track.trim_calls == [(0.0, 5.0, False)]
+
+
 def test_multitrack_task_output_minimax_stops_audio_at_current_task_last_segment():
     module = _load_basic_module()
     audio_track = {"waveform": torch.arange(7).reshape(1, 1, 7), "sample_rate": 1}
