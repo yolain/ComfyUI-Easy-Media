@@ -196,7 +196,22 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     setSelectedSegmentIds(segmentId ? new Set([segmentId]) : new Set())
   }
 
+  function setPlayheadTime(time: number) {
+    const nextTime = snapTimeToFrame(time, data.frame_rate)
+    currentTimeRef.current = nextTime
+    setCurrentTime(nextTime)
+  }
+
   function handleSelectSegment(segmentId: string, mode: 'replace' | 'toggle' | 'add' = 'replace') {
+    const taskSegment = data.tracks
+      .find((track) => track.type === 'task' && track.segments.some((segment) => segment.id === segmentId))
+      ?.segments.find((segment) => segment.id === segmentId)
+    if (
+      taskSegment &&
+      (currentTimeRef.current < taskSegment.start_frame || currentTimeRef.current >= taskSegment.end_frame)
+    ) {
+      setPlayheadTime(taskSegment.start_frame)
+    }
     setSelectedTaskMarkerId(null)
     setSelectedSegmentIds((current) => {
       if (mode === 'replace') {
@@ -296,6 +311,22 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   useEffect(() => {
     currentTimeRef.current = currentTime
   }, [currentTime])
+
+  useEffect(() => {
+    if (!selectedSegmentId || selectedSegmentIds.size !== 1) return
+    const taskTrack = data.tracks.find((track) => (
+      track.type === 'task' && track.segments.some((segment) => segment.id === selectedSegmentId)
+    ))
+    const selectedTaskSegment = taskTrack?.segments.find((segment) => segment.id === selectedSegmentId)
+    if (!taskTrack || !selectedTaskSegment) return
+    if (currentTime >= selectedTaskSegment.start_frame && currentTime < selectedTaskSegment.end_frame) return
+
+    const taskSegmentAtPlayhead = taskTrack.segments.find((segment) => (
+      currentTime >= segment.start_frame && currentTime < segment.end_frame
+    ))
+    if (!taskSegmentAtPlayhead || taskSegmentAtPlayhead.id === selectedSegmentId) return
+    setSingleSelectedSegment(taskSegmentAtPlayhead.id)
+  }, [currentTime, data.tracks, selectedSegmentId, selectedSegmentIds])
 
   useEffect(() => {
     const syncNode = node as { __easyMediaSyncPlay?: (startAt: number) => void }
@@ -1357,7 +1388,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     currentTime={currentTime}
                     taskMarkers={data.task_markers ?? []}
                     selectedTaskMarkerId={selectedTaskMarkerId}
-                    onSeek={(time) => setCurrentTime(snapTimeToFrame(time, data.frame_rate))}
+                    onSeek={setPlayheadTime}
                     onSelectTaskMarker={(markerId) => {
                       setSingleSelectedSegment(null)
                       setSelectedTaskMarkerId(markerId)

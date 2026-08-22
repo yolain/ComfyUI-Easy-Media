@@ -1,5 +1,5 @@
 import { addInlineStyles } from "@/lib/add-stylesheet";
-import { installEasyMediaSyncPlay } from "@/lib/sync-play";
+import { getEasyMediaSyncPlayMenuItems, installEasyMediaSyncPlay } from "@/lib/sync-play";
 import { preserveTimelineEditorNodeSize } from "@/lib/timeline-node-size";
 import { preserveCompareVideoNodeSize } from "@/lib/compare-video-node-size";
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
@@ -35,7 +35,9 @@ const DEFAULT_COMPARE_VIDEO_VALUE = JSON.stringify({
   watch_output_history: false,
 })
 
-globalThis.comfyAPI!.app.app.registerExtension({
+const comfyApp = globalThis.comfyAPI!.app.app
+
+comfyApp.registerExtension({
   name: 'Comfy.EasyMedia.widgets',
 
   async setup() {
@@ -50,6 +52,11 @@ globalThis.comfyAPI!.app.app.registerExtension({
     preserveCompareVideoNodeSize(nodeType, nodeData)
     installEasyMediaSyncPlay(nodeType, nodeData)
     suppressCompareVideoDefaultPreview(nodeType, nodeData)
+  },
+
+  getNodeMenuItems(node) {
+    const locale = comfyApp.ui?.settings?.settingsValues?.['Comfy.Locale']
+    return getEasyMediaSyncPlayMenuItems(node, comfyApp.canvas, locale)
   },
 
   getCustomWidgets() {

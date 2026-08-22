@@ -1,4 +1,5 @@
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
+import { translate } from './i18n'
 
 export const EASY_MEDIA_SYNC_PLAY_NODE_TYPES = new Set([
   'easy saveVideo',
@@ -6,7 +7,7 @@ export const EASY_MEDIA_SYNC_PLAY_NODE_TYPES = new Set([
   'easy multiTrackEditor',
 ])
 
-export const EASY_MEDIA_SYNC_PLAY_MENU_LABEL = 'Sync Play'
+export const EASY_MEDIA_SYNC_PLAY_MENU_LABEL_KEY = 'common.syncPlay'
 
 export interface EasyMediaSyncPlayNode {
   id?: string | number
@@ -22,11 +23,11 @@ export interface EasyMediaSyncPlayCanvas {
   selected_nodes?: Record<string, EasyMediaSyncPlayNode>
   graph?: {
     _nodes?: EasyMediaSyncPlayNode[]
-  }
+  } | null
 }
 
 export interface EasyMediaMenuOption {
-  content?: string
+  content: string
   disabled?: boolean
   callback?: () => void | Promise<void>
 }
@@ -34,16 +35,8 @@ export interface EasyMediaMenuOption {
 export type EasyMediaMenuEntry = EasyMediaMenuOption | null
 
 interface NodeConstructor {
-  prototype: EasyMediaSyncPlayNode & {
-    getExtraMenuOptions?: unknown
-  }
+  prototype: EasyMediaSyncPlayNode
 }
-
-type EasyMediaMenuGetter = (
-  this: EasyMediaSyncPlayNode,
-  canvas: EasyMediaSyncPlayCanvas,
-  options: EasyMediaMenuEntry[],
-) => EasyMediaMenuEntry[]
 
 function isTargetNode(node: EasyMediaSyncPlayNode | null | undefined): node is EasyMediaSyncPlayNode {
   return EASY_MEDIA_SYNC_PLAY_NODE_TYPES.has(node?.comfyClass ?? node?.type ?? '')
@@ -130,29 +123,25 @@ export async function syncPlayNodes(nodes: EasyMediaSyncPlayNode[]) {
   }))
 }
 
+export function getEasyMediaSyncPlayMenuItems(
+  currentNode: EasyMediaSyncPlayNode,
+  canvas: EasyMediaSyncPlayCanvas | undefined,
+  locale?: string,
+): EasyMediaMenuEntry[] {
+  if (!isTargetNode(currentNode)) return []
+  const targets = getSyncPlayTargetNodes(currentNode, canvas)
+  if (targets.length === 0) return []
+  return [
+    null,
+    {
+      content: translate(locale, EASY_MEDIA_SYNC_PLAY_MENU_LABEL_KEY),
+      callback: () => syncPlayNodes(getSyncPlayTargetNodes(currentNode, canvas)),
+    },
+  ]
+}
+
 export function installEasyMediaSyncPlay(nodeType: NodeConstructor, nodeData: { name?: string }) {
   if (!EASY_MEDIA_SYNC_PLAY_NODE_TYPES.has(nodeData.name ?? '')) return
-
-  const originalGetExtraMenuOptions = nodeType.prototype.getExtraMenuOptions as EasyMediaMenuGetter | undefined
-  nodeType.prototype.getExtraMenuOptions = function getExtraMenuOptions(
-    this: EasyMediaSyncPlayNode,
-    canvas: EasyMediaSyncPlayCanvas,
-    options: EasyMediaMenuEntry[],
-  ) {
-    const nextOptions = originalGetExtraMenuOptions?.call(this, canvas, options) ?? options
-    const targets = getSyncPlayTargetNodes(this, canvas)
-    if (targets.length === 0) return nextOptions
-
-    return [
-      ...nextOptions,
-      null,
-      {
-        content: EASY_MEDIA_SYNC_PLAY_MENU_LABEL,
-        disabled: targets.length === 0,
-        callback: () => syncPlayNodes(getSyncPlayTargetNodes(this, canvas)),
-      },
-    ]
-  }
 
   nodeType.prototype.__easyMediaSyncPlay ??= function syncPlayNativeVideo() {
     playNativeNodeVideosFromStart(this)

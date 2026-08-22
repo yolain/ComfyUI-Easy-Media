@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  EASY_MEDIA_SYNC_PLAY_MENU_LABEL,
+  EASY_MEDIA_SYNC_PLAY_MENU_LABEL_KEY,
+  getEasyMediaSyncPlayMenuItems,
   getSyncPlayTargetNodes,
   installEasyMediaSyncPlay,
   playNativeNodeVideosFromStart,
   syncPlayNodes,
-  type EasyMediaMenuEntry,
   type EasyMediaSyncPlayNode,
 } from '@/lib/sync-play'
 
@@ -35,29 +35,36 @@ describe('sync play node targeting', () => {
 })
 
 describe('sync play menu installation', () => {
-  it('adds a right click menu action that plays selected target nodes', async () => {
+  it('returns a right click menu action that plays selected target nodes', async () => {
     const saveVideo = { comfyClass: 'easy saveVideo', __easyMediaSyncPlay: vi.fn() }
     const editor = { comfyClass: 'easy multiTrackEditor', __easyMediaSyncPlay: vi.fn() }
-    const nodeType = function NodeType() {} as unknown as {
-      prototype: EasyMediaSyncPlayNode & { getExtraMenuOptions?: unknown }
-    }
-    nodeType.prototype = { comfyClass: 'easy saveVideo' }
-
-    installEasyMediaSyncPlay(nodeType, { name: 'easy saveVideo' })
-
-    const getExtraMenuOptions = nodeType.prototype.getExtraMenuOptions as (
-      canvas: { selected_nodes: Record<string, EasyMediaSyncPlayNode> },
-      options: EasyMediaMenuEntry[],
-    ) => EasyMediaMenuEntry[]
-    const options = getExtraMenuOptions({
+    const options = getEasyMediaSyncPlayMenuItems(saveVideo, {
       selected_nodes: { saveVideo, editor },
-    }, [])
-    const syncPlayOption = options.find((option) => option?.content === EASY_MEDIA_SYNC_PLAY_MENU_LABEL)
+    })
+    const syncPlayOption = options.find((option) => option?.content === 'Sync Play')
     await syncPlayOption?.callback?.()
 
     expect(syncPlayOption).toBeDefined()
     expect(saveVideo.__easyMediaSyncPlay).toHaveBeenCalledOnce()
     expect(editor.__easyMediaSyncPlay).toHaveBeenCalledOnce()
+  })
+
+  it('does not add the menu action to unrelated nodes', () => {
+    expect(getEasyMediaSyncPlayMenuItems({ comfyClass: 'KSampler' }, {
+      selected_nodes: {},
+    })).toEqual([])
+  })
+
+  it('installs native playback support without replacing existing custom playback', () => {
+    const existingPlayback = vi.fn()
+    const nodeType = function NodeType() {} as unknown as {
+      prototype: EasyMediaSyncPlayNode
+    }
+    nodeType.prototype = { __easyMediaSyncPlay: existingPlayback }
+
+    installEasyMediaSyncPlay(nodeType, { name: 'easy saveVideo' })
+
+    expect(nodeType.prototype.__easyMediaSyncPlay).toBe(existingPlayback)
   })
 })
 

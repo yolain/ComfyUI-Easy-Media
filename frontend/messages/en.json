@@ -3,7 +3,8 @@
     "cancel": "Cancel",
     "save": "Save",
     "add": "Add",
-    "delete": "Delete"
+    "delete": "Delete",
+    "syncPlay":"Sync Play"
   },
   "compareVideo": {
     "empty": "Choose source and output videos to compare, or run the node with inputs.",
@@ -351,5 +352,8 @@
     "slotImage": "Image {n}",
     "slotAudio": "Audio {n}",
     "addLocal": "Add local file"
+  },
+  "syncPlay": {
+    "menuLabel": "Sync Play"
   }
 }

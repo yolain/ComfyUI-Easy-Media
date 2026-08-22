@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createDefaultTrackData } from '@/lib/multitrack-utils'
 import type { ReactWidgetProps } from '@/lib/create-react-widget'
@@ -197,6 +197,11 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
             }}
           >
             select task segment
+          </button>
+        ) : null}
+        {taskTrack?.segments[1] ? (
+          <button type="button" onClick={() => onSelectSegment(taskTrack.segments[1].id)}>
+            select second task segment
           </button>
         ) : null}
         <button type="button" onClick={() => onAddTrack('video')}>add video track</button>
@@ -411,6 +416,8 @@ vi.mock('@/components/widgets/multitrack/MultiTrackToolbar', () => ({
     canRedo,
     onUndo,
     onRedo,
+    onPlayPause,
+    currentTime,
   }: {
     onToggleTimeline: () => void
     onAddTaskMarker: () => void
@@ -428,8 +435,12 @@ vi.mock('@/components/widgets/multitrack/MultiTrackToolbar', () => ({
     canRedo: boolean
     onUndo: () => void
     onRedo: () => void
+    onPlayPause: () => void
+    currentTime: number
   }) => (
     <div>
+      <span data-testid="toolbar-current-time">{currentTime}</span>
+      <button type="button" onClick={onPlayPause}>toggle playback</button>
       <button type="button" onClick={onToggleTimeline}>toggle timeline</button>
       <button type="button" disabled={!canAddTaskMarker} onClick={onAddTaskMarker}>add task marker</button>
       <button type="button" onClick={() => onTaskOverviewChange(!taskOverview)}>toggle task overview</button>
@@ -726,6 +737,97 @@ describe('MultiTrackWidget', () => {
     render(<MultiTrackWidget {...widgetProps()} value={data} />)
 
     expect(screen.getByTestId('multitrack-track-area').getAttribute('data-task-overview')).toBe('true')
+  })
+
+  it('jumps the playhead to a task start when selecting a task outside the current time', () => {
+    const data = createDefaultTrackData()
+    data.total_length = 48
+    data.tracks[0].segments = [
+      {
+        id: 'task-first',
+        start_frame: 0,
+        end_frame: 24,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+      {
+        id: 'task-second',
+        start_frame: 24,
+        end_frame: 48,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default' },
+      },
+    ]
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} />)
+    fireEvent.click(screen.getByRole('button', { name: 'select second task segment' }))
+
+    expect(screen.getByTestId('toolbar-current-time').textContent).toBe('24')
+  })
+
+  it('switches the selected task when seeking into another task range', () => {
+    const data = createDefaultTrackData()
+    data.total_length = 10
+    data.tracks[0].segments = [
+      {
+        id: 'task-first',
+        start_frame: 0,
+        end_frame: 5,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default', user_prompt: 'First' },
+      },
+      {
+        id: 'task-second',
+        start_frame: 5,
+        end_frame: 10,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default', user_prompt: 'Second' },
+      },
+    ]
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} />)
+    fireEvent.click(screen.getByRole('button', { name: 'select task segment' }))
+    fireEvent.click(screen.getByTestId('multitrack-ruler'))
+
+    expect(screen.getByTestId('selected-task-user-prompt').textContent).toBe('Second')
+  })
+
+  it('switches the selected task when playback enters another task range', () => {
+    const data = createDefaultTrackData()
+    data.frame_rate = 10
+    data.total_length = 20
+    data.tracks[0].segments = [
+      {
+        id: 'task-first',
+        start_frame: 0,
+        end_frame: 5,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default', user_prompt: 'First' },
+      },
+      {
+        id: 'task-second',
+        start_frame: 5,
+        end_frame: 20,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default', user_prompt: 'Second' },
+      },
+    ]
+    let animationFrame: FrameRequestCallback | null = null
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      animationFrame = callback
+      return 1
+    }))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} />)
+    fireEvent.click(screen.getByRole('button', { name: 'select task segment' }))
+    fireEvent.click(screen.getByRole('button', { name: 'toggle playback' }))
+    expect(animationFrame).not.toBeNull()
+
+    act(() => animationFrame?.(performance.now() + 600))
+
+    expect(screen.getByTestId('selected-task-user-prompt').textContent).toBe('Second')
+    vi.unstubAllGlobals()
   })
 
   it('allows a task marker at the timeline end', () => {
