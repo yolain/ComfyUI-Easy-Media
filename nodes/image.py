@@ -238,7 +238,7 @@ class MakeImageList(io.ComfyNode):
             category=CATEGORY_IMAGE,
             description="Combine up to 10 optional image inputs into an images list.",
             inputs=[
-                io.Boolean.Input("skip_empty", default=False, label_on="Skip", label_off="Fill"),
+                io.Boolean.Input("skip_empty", default=True, label_on="Skip", label_off="Fill"),
                 io.Image.Input("image1", optional=True),
                 io.Image.Input("image2", optional=True),
                 io.Image.Input("image3", optional=True),

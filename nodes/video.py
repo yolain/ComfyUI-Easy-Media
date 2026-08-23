@@ -68,7 +68,7 @@ class MakeVideoList(io.ComfyNode):
             category=CATEGORY_VIDEO,
             description="Combine up to 10 optional video inputs into a video list.",
             inputs=[
-                io.Boolean.Input("skip_empty", default=False, label_on="Skip", label_off="Fill"),
+                io.Boolean.Input("skip_empty", default=True, label_on="Skip", label_off="Fill"),
                 io.Video.Input("video1", optional=True),
                 io.Video.Input("video2", optional=True),
                 io.Video.Input("video3", optional=True),

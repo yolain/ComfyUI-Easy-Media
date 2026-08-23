@@ -4,7 +4,7 @@ from typing import Any
 
 from comfy_api.latest import io
 
-from ..utils import iter_valid_audio_inputs, merge_audio_inputs
+from ..utils import iter_valid_audio_inputs, merge_audio_inputs, silence, split_list_outputs
 
 CATEGORY_AUDIO = "EasyUse/Audio"
 AUDIO_METHODS = ["add", "mean", "subtract", "multiply", "after", "before"]
@@ -58,3 +58,70 @@ class EasyAudioMerge(io.ComfyNode):
         method = _first_list_value(merge_method, "add")
         audio_inputs = iter_valid_audio_inputs(audios)
         return io.NodeOutput(merge_audio_inputs(audio_inputs, str(method)))
+
+
+class MakeAudioList(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="easy makeAudioList",
+            display_name="Make Audio List",
+            category=CATEGORY_AUDIO,
+            description="Combine up to 10 optional audio inputs into an audio list.",
+            inputs=[
+                io.Boolean.Input("skip_empty", default=True, label_on="Skip", label_off="Fill"),
+                io.Audio.Input("audio1", optional=True),
+                io.Audio.Input("audio2", optional=True),
+                io.Audio.Input("audio3", optional=True),
+                io.Audio.Input("audio4", optional=True),
+                io.Audio.Input("audio5", optional=True),
+                io.Audio.Input("audio6", optional=True),
+                io.Audio.Input("audio7", optional=True),
+                io.Audio.Input("audio8", optional=True),
+                io.Audio.Input("audio9", optional=True),
+                io.Audio.Input("audio10", optional=True),
+            ],
+            outputs=[
+                io.Audio.Output("AUDIO", is_output_list=True),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, skip_empty: bool, **kwargs: object) -> io.NodeOutput:
+        audios: list[dict] = []
+        for i in range(1, 11):
+            key = f"audio{i}"
+            v = kwargs.get(key)
+            if v is not None:
+                audios.append(v)
+            elif not skip_empty:
+                empty = silence(16000, 0.001, 1)
+                audios.append({"waveform": empty, "sample_rate": 16000})
+
+        return io.NodeOutput(audios)
+
+class SplitAudios(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy splitAudios",
+            display_name="Split Audios",
+            category=CATEGORY_AUDIO,
+            description="Split an audio list into 10 single-audio outputs.",
+            is_input_list=True,
+            inputs=[
+                io.Audio.Input("audios"),
+            ],
+            outputs=[
+                io.Audio.Output(f"AUDIO{i}") for i in range(0, 10)
+            ],
+        )
+
+    @classmethod
+    def execute(cls, audios: list[dict[str, object]]) -> io.NodeOutput:
+        if not audios:
+            raise ValueError("audios must contain at least one audio.")
+        if not all(isinstance(audio, dict) for audio in audios):
+            raise TypeError("audios must contain only audio dictionaries.")
+
+        return io.NodeOutput(*split_list_outputs(audios))
