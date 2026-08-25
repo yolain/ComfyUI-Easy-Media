@@ -2793,6 +2793,8 @@ class MultiTrackTaskOutput(io.ComfyNode):
         selected_image_indexes: set[int] = set()
         marker_image_frames: list[int] = []
         deferred_media = info.get("media_loading") == "deferred"
+        media_progress = ProgressBar(2)
+        media_progress.update_absolute(0)
         for task_content, task_content_start in task_content_entries:
             for image_info in task_content.get("images", []):
                 if not isinstance(image_info, dict):
@@ -2832,6 +2834,8 @@ class MultiTrackTaskOutput(io.ComfyNode):
                     selected_images.append(image_items[media_index])
                     if task_entry.get("marker_mode"):
                         marker_image_frames.append(max(0, task_content_start - start_frame))
+
+        media_progress.update_absolute(1)
 
         if task_entry.get("marker_mode"):
             image_indexes = ",".join(str(frame) for frame in marker_image_frames)
@@ -2962,6 +2966,8 @@ class MultiTrackTaskOutput(io.ComfyNode):
                     and _ranges_overlap(start_frame, end_frame, segment)
                     for segment in track.get("segments", [])
                 )
+
+        media_progress.update_absolute(2)
 
         task_type = _multitrack_task_type(task, len(selected_images), has_video)
         prompt = _selected_multitrack_user_prompt(content)

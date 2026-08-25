@@ -1650,6 +1650,30 @@ def test_multitrack_task_output_passes_task_window_to_deferred_file_video_merge(
     }], 4)]
 
 
+def test_multitrack_task_output_reports_media_processing_progress():
+    module = _load_basic_module()
+    tracks_info = {
+        "media_loading": "deferred",
+        "total_length": 4,
+        "timeline_total_length": 4,
+        "frame_rate": 2,
+        "tracks": [{
+            "type": "task",
+            "segments": [{
+                "start_frame": 0,
+                "end_frame": 4,
+                "content": {"text": "task", "images": []},
+            }],
+        }],
+    }
+
+    module.MultiTrackTaskOutput.execute(tracks_info, task_index=0)
+
+    progress = _ProgressBar.instances[-1]
+    assert progress.total == 2
+    assert progress.updates == [0, 1, 2]
+
+
 def test_multitrack_editor_uses_ffmpeg_for_supported_file_video_resize():
     module = _load_basic_module()
     ffmpeg_calls = []
