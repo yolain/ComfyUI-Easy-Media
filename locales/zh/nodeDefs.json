@@ -294,6 +294,20 @@
       }
     }
   },
+  "easy modelLoaderPack": {
+    "display_name": "模型加载器打包",
+    "description": "将模型组件组合为兼容 FastUse 节点的 FAST_MODEL_LOADER。",
+    "inputs": {
+      "model": { "name": "模型" },
+      "clip": { "name": "CLIP" },
+      "vae": { "name": "VAE" },
+      "audio_vae": { "name": "音频 VAE" },
+      "latent_upscale_model": { "name": "潜空间放大模型" }
+    },
+    "outputs": {
+      "0": { "name": "模型加载器" }
+    }
+  },
   "easy matchLine": {
     "display_name": "匹配行",
     "description": "返回第一行包含匹配文本的从 0 开始的行索引；未找到时返回 -1。",
@@ -1108,6 +1122,132 @@
     "outputs": {
       "0": { "name": "正向条件" },
       "1": { "name": "潜空间" }
+    }
+  },
+  "easy removeH3MotionContextLatent": {
+    "display_name": "移除 H3 Motion Context 潜空间",
+    "description": "循环结束后，按输出目录中的文件前缀移除 H3 Motion Context 潜空间文件。",
+    "inputs": {
+      "filename_path": {
+        "name": "文件路径前缀",
+        "tooltip": "相对于 ComfyUI 输出目录的安全文件前缀。"
+      },
+      "input": { "name": "输入" }
+    },
+    "outputs": {
+      "0": { "name": "输出" },
+      "1": { "name": "已删除数量" }
+    }
+  },
+  "easy MiniMaxH3MotionContext": {
+    "display_name": "简易 MiniMax H3 运动上下文",
+    "description": "将上一段 H3 视频与音频的尾部作为上下文固定到新片段条件中；优先使用上下文潜空间以避免解码和重新编码损失。",
+    "inputs": {
+      "conditioning": { "name": "条件" },
+      "vae": { "name": "VAE" },
+      "latent": { "name": "目标潜空间" },
+      "context_length": {
+        "name": "视频上下文长度",
+        "tooltip": "固定的上一片段视频帧数；选项均与完整 MiniMax H3 潜空间步对齐。"
+      },
+      "audio_context_length": {
+        "name": "音频上下文长度",
+        "tooltip": "固定的上一片段音频帧数；默认 48 帧，0 跟随视频窗口。"
+      },
+      "context_frames": { "name": "上下文帧" },
+      "context_latent": { "name": "上下文潜空间" },
+      "audio_vae": { "name": "音频 VAE" },
+      "context_audio": { "name": "上下文音频" }
+    },
+    "outputs": {
+      "0": { "name": "条件" },
+      "1": { "name": "裁剪帧数" }
+    }
+  },
+  "easy multitrackProject": {
+    "display_name": "多轨工程",
+    "description": "执行多轨 MiniMax H3 工程的一采与可选二采，并保存片段产物。",
+    "inputs": {
+      "model_loader": {
+        "name": "模型加载器",
+        "tooltip": "连接 FastUse 或模型加载器打包节点输出的 FAST_MODEL_LOADER。"
+      },
+      "tracks_info": {
+        "name": "多轨信息",
+        "tooltip": "多轨编辑器输出的完整工程数据。"
+      },
+      "images": { "name": "图像" },
+      "audio": { "name": "音频" },
+      "video": { "name": "视频" },
+      "sampler": { "name": "采样器" },
+      "sigmas": { "name": "Sigmas" },
+      "project_name": {
+        "name": "工程名称",
+        "tooltip": "工程目录位于 output/easy_media/projects/{工程名}/；留空时使用 default 工程目录。"
+      },
+      "project_save": {
+        "name": "工程保存方式",
+        "tooltip": "new 为当前分段创建新视频或latent；override 覆盖当前已有视频或latent。",
+        "options": {
+          "new": "新建",
+          "override": "覆盖"
+        }
+      },
+
+      "sampling_presets": {
+        "name": "采样预设",
+        "tooltip": "选择采样调度方案；外接采样器或 Sigmas 后，执行阶段会自动采用 custom。",
+        "options": {
+          "custom": "自定义",
+          "fast": "快速",
+          "medium": "均衡"
+        }
+      },
+      "sampling_mode": {
+        "name": "采样模式",
+        "tooltip": "选择 dual 后显示二采专用的模型、采样与噪声设置。"
+      },
+      "sampling_mode.model_loader_2": {
+        "name": "模型加载器2",
+        "tooltip": "可选；仅替换二采模型，编码与 VAE 保持一采配置以确保 latent 兼容。"
+      },
+      "sampling_mode.1st_pass_only": {
+        "name": "仅执行一采预览",
+        "tooltip": "在二采模式下，仅执行首个选中片段的一采，用于快速预览。"
+      },
+      "sampling_mode.disable_noise": {
+        "name": "禁用二采噪声",
+        "tooltip": "在二采中禁用噪声。"
+      },
+      "sampling_mode.upscale_by": { "name": "放大倍数" },
+      "upscale_model": { "name": "放大模型" },
+      "segment_start_index": { "name": "片段开始索引" },
+      "segment_count": {
+        "name": "片段最大数量",
+        "tooltip": "从片段开始索引起处理的片段数。-1 表示处理剩余全部片段，并在执行前删除开始索引及其后所有旧片段和产物；超出时自动在末尾停止。"
+      },
+      "seed": {
+        "name": "种子",
+        "tooltip": "一采与二采共用的随机种子。"
+      }
+    },
+    "outputs": {
+      "0": { "name": "工程名称" }
+    }
+  },
+  "easy multitrackProjectVideoCombine": {
+    "display_name": "多轨工程视频合并",
+    "description": "预览并合并多轨工程中的活动视频片段。",
+    "inputs": {
+      "project_name": {
+        "name": "工程名称",
+        "tooltip": "连接多轨工程节点输出的工程名称。"
+      },
+      "project_data": { "name": "工程数据" }
+    },
+    "outputs": {
+      "0": { "name": "视频" },
+      "1": { "name": "文件名前缀" }
     }
   },
   "easy minimaxH3ToVideo": {

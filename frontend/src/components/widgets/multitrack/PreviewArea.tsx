@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { TaskMarkerIcon } from '@/components/ui/custom-lucide-icon'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
@@ -13,13 +14,15 @@ import {
   frameToSeconds,
   getActivePreviewAudioSources,
   getActivePreviewVideoSegment,
+  getMultiTrackPreviewFrame,
   getMultiTrackTaskModeLabel,
   getSelectedTaskUserPrompt,
   getSelectedTaskUserPromptPatch,
+  MULTITRACK_CONTINUITY_MODES,
+  MULTITRACK_DEFAULT_CONTINUITY_MODE,
   MULTITRACK_TASK_MODES,
   parseMultiTrackPreviewResolution,
   segmentDuration,
-  snapTimeToFrame,
   type MultiTrackVideoMetadata,
   type SelectedMultiTrackSegment,
 } from '@/lib/multitrack-utils'
@@ -39,7 +42,7 @@ import {
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
 import { DEFAULT_SUBTITLE_STYLE } from '@/lib/subtitle-recognition'
 import { invalidateMediaListCache } from '@/stores/media-list-store'
-import type { MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSubtitleStyle, MultiTrackTaskImage, MultiTrackTaskMode, MultiTrackUserPromptVariant, TrackData } from '@/types/multitrack'
+import type { MultiTrackContinuityMode, MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSubtitleStyle, MultiTrackTaskImage, MultiTrackTaskMode, MultiTrackUserPromptVariant, TrackData } from '@/types/multitrack'
 import { PreviewFloatingToolbar } from './PreviewFloatingToolbar'
 import { PreviewAudioPlayback } from './PreviewAudioPlayback'
 import { PanoramaImagePreview } from '@/components/widgets/panorama/PanoramaImagePreview'
@@ -91,6 +94,7 @@ interface ActiveTaskImages {
 }
 
 interface ActiveTaskPrompt {
+  index: number
   segmentId: string
   prompt: string
   taskMode: MultiTrackTaskMode
@@ -121,7 +125,7 @@ function moveTaskImage(
 }
 
 function getActiveTaskImages(data: TrackData, currentTime: number): ActiveTaskImages | null {
-  const currentFrame = snapTimeToFrame(currentTime, data.frame_rate)
+  const currentFrame = getMultiTrackPreviewFrame(data, currentTime)
 
   for (const track of data.tracks) {
     if (track.type !== 'task') continue
@@ -149,17 +153,19 @@ function getActiveTaskImages(data: TrackData, currentTime: number): ActiveTaskIm
 }
 
 function getActiveTaskPrompt(data: TrackData, currentTime: number): ActiveTaskPrompt | null {
-  const currentFrame = snapTimeToFrame(currentTime, data.frame_rate)
+  const currentFrame = getMultiTrackPreviewFrame(data, currentTime)
 
   for (const track of data.tracks) {
     if (track.type !== 'task') continue
-    const segment = track.segments.find((item) => (
+    const index = track.segments.findIndex((item) => (
       currentFrame >= item.start_frame && currentFrame < item.end_frame
     ))
-    if (!segment) continue
+    if (index < 0) continue
+    const segment = track.segments[index]
 
     const prompt = getSelectedTaskUserPrompt(segment.content)
     return {
+      index,
       segmentId: segment.id,
       prompt,
       taskMode: segment.content.task_mode ?? 'default',
@@ -171,7 +177,7 @@ function getActiveTaskPrompt(data: TrackData, currentTime: number): ActiveTaskPr
 }
 
 function getActiveSubtitleSegments(data: TrackData, currentTime: number): MultiTrackSegment[] {
-  const currentFrame = snapTimeToFrame(currentTime, data.frame_rate)
+  const currentFrame = getMultiTrackPreviewFrame(data, currentTime)
   return data.tracks.flatMap((track) => {
     if (track.type !== 'subtitle' || track.visible === false) return []
     return track.segments.filter((item) => (
@@ -539,6 +545,16 @@ export function PreviewArea({
     onTrackSegmentsContentChange?.([{
       segmentId,
       patch: { task_mode: taskMode },
+    }])
+  }
+
+  function handleActiveTaskContinuityModeChange(
+    segmentId: string,
+    continuityMode: MultiTrackContinuityMode,
+  ) {
+    onTrackSegmentsContentChange?.([{
+      segmentId,
+      patch: { continuity_mode: continuityMode },
     }])
   }
 
@@ -930,7 +946,7 @@ export function PreviewArea({
     return (
       <div
         data-testid="task-prompt-overlay"
-        className="flex w-full items-center bg-black/70 px-2 text-primary-foreground"
+        className={`flex w-full editing ${ editing ? 'items-end' : 'items-center'} bg-black/70 px-2 text-primary-foreground`}
       >
         { !usesTaskImageOnlyPreview ? (<TooltipProvider>
           <Tooltip>
@@ -959,7 +975,7 @@ export function PreviewArea({
             autoFocus
             aria-label={t('multitrack.userPrompt')}
             placeholder={t('multitrack.promptPlaceholder')}
-            className="min-h-6 flex-1 resize-none border-none bg-transparent px-1 py-0 text-[9px] leading-4 text-primary shadow-none focus-visible:ring-0"
+            className="min-h-24 flex-1 resize-none border-none bg-transparent px-1 py-0 text-[9px] leading-4 text-primary shadow-none focus-visible:ring-0"
             value={editing.text}
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
@@ -998,26 +1014,63 @@ export function PreviewArea({
           </div>
         )}
         <span className="shrink-0 px-1 text-[9px] leading-4 text-secondary">|</span>
-        <select
-          data-testid="task-mode-select"
-          aria-label="task_mode"
-          className="h-5 shrink-0 cursor-pointer border-none bg-transparent px-1 text-[9px] leading-4 text-primary outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+        {resolutionInput.format === 'MiniMax' && activeTaskPrompt.index > 0 && (
+          <>
+          <Select
+            value={activeTaskPrompt.content.continuity_mode ?? MULTITRACK_DEFAULT_CONTINUITY_MODE}
+            disabled={!onTrackSegmentsContentChange}
+            onValueChange={(value) => handleActiveTaskContinuityModeChange(
+              activeTaskPrompt.segmentId,
+              value as MultiTrackContinuityMode,
+            )}
+          >
+            <SelectTrigger
+              data-testid="task-continuity-mode-select"
+              aria-label={t('multitrack.continuityMode')}
+              className="h-5 min-h-0 w-16 shrink-0 cursor-pointer border-none bg-transparent px-1 text-[9px] leading-4 text-primary shadow-none focus-visible:ring-1 focus-visible:ring-ring [&_svg]:size-3"
+              onClick={(event) => event.stopPropagation()}
+              onDoubleClick={(event) => event.stopPropagation()}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MULTITRACK_CONTINUITY_MODES.map((continuityMode) => (
+                <SelectItem key={continuityMode} value={continuityMode}>
+                  <span className="text-[10px]">{t(`multitrackContinuityModes.${continuityMode}`)}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <span className="shrink-0 px-1 text-[9px] leading-4 text-secondary">|</span>
+          </>
+        )}
+        <Select
           value={activeTaskPrompt.taskMode}
           disabled={!onTrackSegmentsContentChange}
-          onMouseDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}
-          onDoubleClick={(event) => event.stopPropagation()}
-          onChange={(event) => handleActiveTaskModeChange(
+          onValueChange={(value) => handleActiveTaskModeChange(
             activeTaskPrompt.segmentId,
-            event.currentTarget.value as MultiTrackTaskMode,
+            value as MultiTrackTaskMode,
           )}
         >
-          {MULTITRACK_TASK_MODES.map((taskMode) => (
-            <option key={taskMode} value={taskMode}>
-              {getMultiTrackTaskModeLabel(taskMode, t)}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger
+            data-testid="task-mode-select"
+            aria-label={t('multitrack.taskMode')}
+            className="h-5 min-h-0 w-12 shrink-0 cursor-pointer border-none bg-transparent px-1 text-[9px] leading-4 text-primary shadow-none focus-visible:ring-1 focus-visible:ring-ring [&_svg]:size-3"
+            onClick={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {MULTITRACK_TASK_MODES.map((taskMode) => (
+              <SelectItem key={taskMode} value={taskMode}>
+                <span className="text-[10px]">
+                  {getMultiTrackTaskModeLabel(taskMode, t)}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
     )
   }

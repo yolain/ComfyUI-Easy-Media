@@ -2,6 +2,8 @@ export type MultiTrackType = 'task' | 'video' | 'audio' | 'subtitle'
 
 export type MultiTrackTaskMode = 'default' | 'l2v' | 'ref' | 'edit'
 
+export type MultiTrackContinuityMode = 'shot' | 'context'
+
 export type MultiTrackUserPromptVariant = 'a' | 'b'
 
 export type MultiTrackMediaType = 'image' | 'audio' | 'video' | 'subtitle' | 'none'
@@ -42,6 +44,7 @@ export interface MultiTrackSegmentContent {
   user_prompt_variant?: MultiTrackUserPromptVariant
   system_prompt?: string
   task_mode?: MultiTrackTaskMode
+  continuity_mode?: MultiTrackContinuityMode
   images?: MultiTrackTaskImage[]
   duration?: number
   volume_db?: number

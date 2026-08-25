@@ -178,41 +178,159 @@ bun run build:release
 
 ## 节点列表
 
-| 节点 ID | 描述 |
-|---------|------|
-| easy timelineEditor | 加载媒体时间线（prompt、图片、音频轨道）并输出结构化数据 |
-| easy timelineInfoOutput | 输出时间线信息，包括格式化的 prompt、尺寸和图片索引 |
-| easy timelineSegmentOutput | 输出时间线的特定片段数据 |
-| easy timelineSegmentCount | 输出时间线中的片段总数 |
-| easy makeImageList | 将多个图片输入组合成图片列表 |
-| easy makeAudioList | 将多个音频输入组合成音频列表 |
-| easy splitAudios | 将音频列表拆分为多个独立音频输出 |
-| easy audioMerge | 合并或拼接最多 6 个音频输入 |
-| easy makeVideoList | 将多个视频输入组合成视频列表 |
-| easy splitVideos | 将视频列表拆分为多个独立视频输出 |
-| easy imageIndexesToIntList | 将逗号分隔的图片索引字符串转换为整数列表 |
-| easy saveVideo | 将图片和可选音频保存为视频文件 |
-| easy getAudioFromVideo | 从 VIDEO 输入中提取音频 |
-| easy mergeVideos | 串联多个兼容的 VIDEO 片段 |
-| easy mergeVideosFromPaths | 从文件路径列表加载并串联视频 |
-| easy multiTrackEditor | 多轨编辑器，编辑和传递多轨媒体数据 |
-| easy multiTrackInfoOutput | 输出多轨维度、时长、帧率和任务数量 |
-| easy multiTrackTaskOutput | 输出多轨任务段的提示词和任务范围媒体 |
-| easy recognizeSubtitle | 使用 Qwen3-ASR 或 Whisper Large V3 识别字幕，可设置 SRT/时间戳输出、每句长度和模型卸载 |
-| easy addSubtitleToVideo | 将 SRT、时间戳或括号格式的多行字幕文本规范化并烧录到视频中 |
-| easy multiTrackAddSubtitleToVideo | 将字幕轨道添加到视频轨道中 |
-| easy makeRefsCompositeBySam3 | 使用 SAM3 检测提示的主体并组合参考图到画布 |
-| easy splitImages | 将图像列表或批次拆分为多个单图像输出 |
-| easy matchLine | 返回包含匹配文本的第一行的零基索引 |
-| easy apiWorkflowGate | 判断是否为 API 调用的工作流，透传前面输入项 |
-| easy minimaxH3ToVideo | 构建 MiniMax H3 文生视频、参考生视频或首尾帧生视频的条件与潜空间输入 |
-| easy removeH3MotionContextLatent | 在循环结束后删除 H3 Motion Context 潜空间文件 |
-| LTXVAddGuidesFromBatchIndexes | 从批量图像添加引导图到潜在变量的指定帧索引 |
-| LTXVMakeRefVideo | 将参考图像批次扩展为 IC-LoRA 参考视频 |
-| easy ltxMultiTrackEncode | 构建 Prompt Relay 条件并生成 LTX 视频/音频潜变量 |
-| easy ltxI2VInplaceAndUpsample | 可选地对 LTX 视频潜变量进行 upscale 并应用图像引导 |
-| easy ltxSamplerSimple | 对组合的 LTX 音视频潜变量进行采样并裁剪视频引导 |
-| easy berniniS2VConditioning | 统一 Bernini + Wan S2V 条件处理，保留可选单人全画面音频，并支持单人遮罩或可选双人顺序音频 |
+<table>
+  <thead>
+    <tr>
+      <th>分类</th>
+      <th>节点 ID</th>
+      <th>描述</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td rowspan="4">🎞️ 多轨编辑器 Multi-Track Editor</td>
+      <td>easy multiTrackEditor</td>
+      <td>多轨编辑器，编辑和传递多轨媒体数据</td>
+    </tr>
+    <tr>
+      <td>easy multiTrackInfoOutput</td>
+      <td>输出多轨维度、时长、帧率和任务数量</td>
+    </tr>
+    <tr>
+      <td>easy multiTrackTaskOutput</td>
+      <td>输出多轨任务段的提示词和任务范围媒体</td>
+    </tr>
+    <tr>
+      <td>easy multiTrackAddSubtitleToVideo</td>
+      <td>将字幕轨道添加到视频轨道中</td>
+    </tr>
+    <tr>
+      <td rowspan="2">🎬 MiniMax H3</td>
+      <td>easy minimaxH3ToVideo</td>
+      <td>构建 MiniMax H3 文生视频、参考生视频或首尾帧生视频的条件与潜空间输入</td>
+    </tr>
+    <tr>
+      <td>easy removeH3MotionContextLatent</td>
+      <td>在循环结束后删除 H3 Motion Context 潜空间文件</td>
+    </tr>
+    <tr>
+      <td rowspan="5">🎞️ LTX Video</td>
+      <td>LTXVAddGuidesFromBatchIndexes</td>
+      <td>从批量图像添加引导图到潜在变量的指定帧索引</td>
+    </tr>
+    <tr>
+      <td>LTXVMakeRefVideo</td>
+      <td>将参考图像批次扩展为 IC-LoRA 参考视频</td>
+    </tr>
+    <tr>
+      <td>easy ltxMultiTrackEncode</td>
+      <td>构建 Prompt Relay 条件并生成 LTX 视频/音频潜变量</td>
+    </tr>
+    <tr>
+      <td>easy ltxI2VInplaceAndUpsample</td>
+      <td>可选地对 LTX 视频潜变量进行 upscale 并应用图像引导</td>
+    </tr>
+    <tr>
+      <td>easy ltxSamplerSimple</td>
+      <td>对组合的 LTX 音视频潜变量进行采样并裁剪视频引导</td>
+    </tr>
+    <tr>
+      <td rowspan="4">🎞️ 时间线编辑 Timeline Editor</td>
+      <td>easy timelineEditor</td>
+      <td>加载媒体时间线（prompt、图片、音频轨道）并输出结构化数据</td>
+    </tr>
+    <tr>
+      <td>easy timelineInfoOutput</td>
+      <td>输出时间线信息，包括格式化的 prompt、尺寸和图片索引</td>
+    </tr>
+    <tr>
+      <td>easy timelineSegmentOutput</td>
+      <td>输出时间线的特定片段数据</td>
+    </tr>
+    <tr>
+      <td>easy timelineSegmentCount</td>
+      <td>输出时间线中的片段总数</td>
+    </tr>
+    <tr>
+      <td rowspan="8">📋 媒体列表操作 Media List Operations</td>
+      <td>easy makeImageList</td>
+      <td>将多个图片输入组合成图片列表</td>
+    </tr>
+    <tr>
+      <td>easy makeAudioList</td>
+      <td>将多个音频输入组合成音频列表</td>
+    </tr>
+    <tr>
+      <td>easy splitAudios</td>
+      <td>将音频列表拆分为多个独立音频输出</td>
+    </tr>
+    <tr>
+      <td>easy audioMerge</td>
+      <td>合并或拼接最多 6 个音频输入</td>
+    </tr>
+    <tr>
+      <td>easy makeVideoList</td>
+      <td>将多个视频输入组合成视频列表</td>
+    </tr>
+    <tr>
+      <td>easy splitVideos</td>
+      <td>将视频列表拆分为多个独立视频输出</td>
+    </tr>
+    <tr>
+      <td>easy imageIndexesToIntList</td>
+      <td>将逗号分隔的图片索引字符串转换为整数列表</td>
+    </tr>
+    <tr>
+      <td>easy splitImages</td>
+      <td>将图像列表或批次拆分为多个单图像输出</td>
+    </tr>
+    <tr>
+      <td rowspan="4">🎬 视频操作 Video Operations</td>
+      <td>easy saveVideo</td>
+      <td>将图片和可选音频保存为视频文件</td>
+    </tr>
+    <tr>
+      <td>easy getAudioFromVideo</td>
+      <td>从 VIDEO 输入中提取音频</td>
+    </tr>
+    <tr>
+      <td>easy mergeVideos</td>
+      <td>串联多个兼容的 VIDEO 片段</td>
+    </tr>
+    <tr>
+      <td>easy mergeVideosFromPaths</td>
+      <td>从文件路径列表加载并串联视频</td>
+    </tr>
+    <tr>
+      <td rowspan="2">📝 字幕 Subtitle</td>
+      <td>easy recognizeSubtitle</td>
+      <td>使用 Qwen3-ASR 或 Whisper Large V3 识别字幕，可设置 SRT/时间戳输出、每句长度和模型卸载</td>
+    </tr>
+    <tr>
+      <td>easy addSubtitleToVideo</td>
+      <td>将 SRT、时间戳或括号格式的多行字幕文本规范化并烧录到视频中</td>
+    </tr>
+    <tr>
+      <td rowspan="1">🖼️ 参考图与图像 Reference & Image</td>
+      <td>easy makeRefsCompositeBySam3</td>
+      <td>使用 SAM3 检测提示的主体并组合参考图到画布</td>
+    </tr>
+    <tr>
+      <td rowspan="2">🔧 工具 Utility</td>
+      <td>easy matchLine</td>
+      <td>返回包含匹配文本的第一行的零基索引</td>
+    </tr>
+    <tr>
+      <td>easy apiWorkflowGate</td>
+      <td>判断是否为 API 调用的工作流，透传前面输入项</td>
+    </tr>
+    <tr>
+      <td rowspan="1">🗣️ 语音转视频 Speech to Video (S2V)</td>
+      <td>easy berniniS2VConditioning</td>
+      <td>统一 Bernini + Wan S2V 条件处理，保留可选单人全画面音频，并支持单人遮罩或可选双人顺序音频</td>
+    </tr>
+  </tbody>
+</table>
 
 ## Credits
 
@@ -221,6 +339,7 @@ bun run build:release
 - [Whisper](https://github.com/openai/whisper)
 - [VoxCPM2](https://github.com/OpenBMB/VoxCPM)
 - [Bernini S2V](https://huggingface.co/rzgar/Bernini-R-S2V)
+- [H3-Motion-Context](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context)
 
 ## Source of Inspiration
 

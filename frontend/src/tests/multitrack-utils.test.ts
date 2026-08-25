@@ -81,6 +81,30 @@ describe('multitrack utilities', () => {
     })
   })
 
+  it('inherits task settings when combined text creates another task segment', () => {
+    const data = createDefaultTrackData()
+    const first = {
+      id: 'task-a',
+      start_frame: 0,
+      end_frame: 60,
+      color: data.tracks[0].color,
+      content: {
+        media_type: 'none' as const,
+        task_mode: 'ref' as const,
+        system_prompt: 'Custom prompt',
+      },
+    }
+
+    const updated = applyCombinedTaskTexts(['First', 'Second'], [first], 120, first.color)
+
+    expect(updated[1].content).toMatchObject({
+      task_mode: 'ref',
+      system_prompt: 'Custom prompt',
+      continuity_mode: 'shot',
+      user_prompt: 'Second',
+    })
+  })
+
   it('uses a short segment range instead of padding the timeline to five seconds', () => {
     const data = createDefaultTrackData()
     data.tracks[0].segments = [{
@@ -389,6 +413,7 @@ describe('multitrack utilities', () => {
     expect(normalized.tracks[0].task_mode).toBe('edit')
     expect(normalized.tracks[0].segments[0].content).toMatchObject({
       task_mode: 'default',
+      continuity_mode: 'shot',
       user_prompt: 'Prompt',
       images: [],
     })
@@ -517,6 +542,12 @@ describe('multitrack utilities', () => {
     expect(getActivePreviewVideoSegment(trackData, 120, 'second-video')).toMatchObject({
       localTime: 3,
     })
+
+    expect(getActivePreviewVideoSegment(trackData, trackData.total_length, null)).toMatchObject({
+      trackId: videoTrack.id,
+      segment: { id: 'second-video' },
+      localTime: 119 / 24,
+    })
   })
 
   it('collects all active audio sources and applies track solo, mute, and dB settings', () => {
@@ -565,6 +596,26 @@ describe('multitrack utilities', () => {
     expect(getActivePreviewAudioSources(data, 24, null).map((source) => source.segment.id)).toEqual(['audio-segment'])
     data.tracks[2].muted = true
     expect(getActivePreviewAudioSources(data, 24, null)).toEqual([])
+  })
+
+  it('keeps the final audio frame active at the timeline end', () => {
+    const data = createDefaultTrackData()
+    data.total_length = 48
+    data.tracks[1] = {
+      ...data.tracks[1],
+      segments: [{
+        id: 'ending-video',
+        start_frame: 0,
+        end_frame: 48,
+        color: data.tracks[1].color,
+        content: { media_type: 'video', source_type: 'input', file_path: 'video.mp4' },
+      }],
+    }
+
+    expect(getActivePreviewAudioSources(data, data.total_length, null)).toMatchObject([{
+      segment: { id: 'ending-video' },
+      localTime: 47 / 24,
+    }])
   })
 
   it('parses preview resolution aspect ratios from fixed, custom, and auto modes', () => {
@@ -1164,7 +1215,31 @@ describe('multitrack utilities', () => {
       content: {
         media_type: 'none',
         task_mode: 'default',
+        continuity_mode: 'shot',
       },
+    })
+  })
+
+  it('inherits task mode and a custom system prompt for an auto-created task segment', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [{
+      id: 'previous-task',
+      start_frame: 0,
+      end_frame: 2,
+      color: data.tracks[0].color,
+      content: {
+        media_type: 'none',
+        task_mode: 'edit',
+        system_prompt: 'Custom instructions',
+      },
+    }]
+
+    const updated = addDefaultTaskSegmentIfRangeEmpty(data.tracks, 2, 5)
+
+    expect(updated[0].segments[1].content).toMatchObject({
+      task_mode: 'edit',
+      system_prompt: 'Custom instructions',
+      continuity_mode: 'shot',
     })
   })
 

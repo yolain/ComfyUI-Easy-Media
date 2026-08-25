@@ -86,9 +86,15 @@ class EasyMediaExtension(ComfyExtension):
             MakeAudioList,
             MakeVideoList,
             # Common
+            EasyModelLoaderPack,
             MatchLine,
             APIWorkflowGate,
             # MiniMax
+            EasyMiniMaxH3MotionContext,
+            EasyH3ProjectContextLatentLoad,
+            EasyH3ProjectArtifact,
+            EasyMultiTrackProject,
+            EasyMultiTrackProjectVideoCombine,
             EasyMiniMaxH3ToVideo,
             EasyMiniMaxH3ReferenceToVideoBridge,
             EasyRemoveH3MotionContextLatent,

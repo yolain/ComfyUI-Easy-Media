@@ -173,42 +173,163 @@ bun run build:release
 
 ## Node List
 
-| Node ID | Description |
-| ------- | ----------- |
-| easy timelineEditor | Load media timeline (prompt, image, audio tracks) and output structured data |
-| easy timelineInfoOutput | Output timeline info including formatted prompt, dimensions, and image indexes |
-| easy timelineSegmentOutput | Output specific segment data from the timeline |
-| easy timelineSegmentCount | Output the total number of segments in the timeline |
-| easy makeImageList | Combine multiple image inputs into an image list |
-| easy makeAudioList | Combine multiple audio inputs into an audio list |
-| easy splitAudios | Split an audio list into multiple single-audio outputs |
-| easy audioMerge | Merge or concatenate up to six audio inputs |
-| easy makeVideoList | Combine multiple video inputs into a video list |
-| easy splitVideos | Split a video list into multiple single-video outputs |
-| easy compareVideos | Preview source and output VIDEO inputs side by side with an interactive comparison slider |
-| easy imageIndexesToIntList | Convert comma-separated image index string to integer list |
-| easy saveVideo | Save images and optional audio as video file |
-| easy getAudioFromVideo | Extract audio from a VIDEO input |
-| easy mergeVideos | Concatenate multiple compatible VIDEO segments |
-| easy mergeVideosFromPaths | Load and concatenate videos from file path list, optionally trimming the merged output by frame count |
-| easy multiTrackEditor | Multi-track editor for editing and transferring multi-track media data |
-| easy multiTrackInfoOutput | Output multi-track dimensions, duration, frame rate, and task count |
-| easy multiTrackTaskOutput | Output multi-track task segment prompts and task-ranged media |
-| easy recognizeSubtitle | Recognize subtitles with Qwen3-ASR or Whisper Large V3; configure SRT/timestamp output, sentence length, and model unloading |
-| easy addSubtitleToVideo | Normalize multiline SRT, timestamp, or bracket-formatted text and burn it into a video |
-| easy multiTrackAddSubtitleToVideo | Add subtitle track to video track |
-| easy makeRefsCompositeBySam3 | Detect subject in prompt using SAM3 and composite reference images onto canvas |
-| easy splitImages | Split an image list or batch into multiple single-image outputs |
-| easy matchLine | Return zero-based index of the first line containing matching text |
-| easy apiWorkflowGate | Determine if the workflow is an API call and pass through preceding input items |
-| easy minimaxH3ToVideo | Build MiniMax H3 text-to-video, reference-to-video, or first/last-frame conditioning and latent inputs |
-| easy removeH3MotionContextLatent | Remove H3 Motion Context latent files after a loop finishes |
-| LTXVAddGuidesFromBatchIndexes | Add guide images from batch images to specified frame indexes of latent variables |
-| LTXVMakeRefVideo | Expand a reference image batch into an IC-LoRA reference video |
-| easy ltxMultiTrackEncode | Build Prompt Relay conditioning and LTX video/audio latents |
-| easy ltxI2VInplaceAndUpsample | Optionally upscale an LTX video latent and apply an image guide in place |
-| easy ltxSamplerSimple | Sample combined LTX audio/video latents and crop video guides |
-| easy berniniS2VConditioning | Unified Bernini + Wan S2V conditioning: original optional single-speaker audio, spatially masked single-speaker audio, or optional sequential two-speaker audio |
+<table>
+  <thead>
+    <tr>
+      <th>Category</th>
+      <th>Node ID</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td rowspan="4">🎞️ Multi-Track Editor</td>
+      <td>easy multiTrackEditor</td>
+      <td>Multi-track editor for editing and transferring multi-track media data</td>
+    </tr>
+    <tr>
+      <td>easy multiTrackInfoOutput</td>
+      <td>Output multi-track dimensions, duration, frame rate, and task count</td>
+    </tr>
+    <tr>
+      <td>easy multiTrackTaskOutput</td>
+      <td>Output multi-track task segment prompts and task-ranged media</td>
+    </tr>
+    <tr>
+      <td>easy multiTrackAddSubtitleToVideo</td>
+      <td>Add subtitle track to video track</td>
+    </tr>
+    <tr>
+      <td rowspan="2">🎬 MiniMax H3</td>
+      <td>easy minimaxH3ToVideo</td>
+      <td>Build MiniMax H3 text-to-video, reference-to-video, or first/last-frame conditioning and latent inputs</td>
+    </tr>
+    <tr>
+      <td>easy removeH3MotionContextLatent</td>
+      <td>Remove H3 Motion Context latent files after a loop finishes</td>
+    </tr>
+    <tr>
+      <td rowspan="5">🎞️ LTX Video</td>
+      <td>LTXVAddGuidesFromBatchIndexes</td>
+      <td>Add guide images from batch images to specified frame indexes of latent variables</td>
+    </tr>
+    <tr>
+      <td>LTXVMakeRefVideo</td>
+      <td>Expand a reference image batch into an IC-LoRA reference video</td>
+    </tr>
+    <tr>
+      <td>easy ltxMultiTrackEncode</td>
+      <td>Build Prompt Relay conditioning and LTX video/audio latents</td>
+    </tr>
+    <tr>
+      <td>easy ltxI2VInplaceAndUpsample</td>
+      <td>Optionally upscale an LTX video latent and apply an image guide in place</td>
+    </tr>
+    <tr>
+      <td>easy ltxSamplerSimple</td>
+      <td>Sample combined LTX audio/video latents and crop video guides</td>
+    </tr>
+    <tr>
+      <td rowspan="4">🎞️ Timeline Editor</td>
+      <td>easy timelineEditor</td>
+      <td>Load media timeline (prompt, image, audio tracks) and output structured data</td>
+    </tr>
+    <tr>
+      <td>easy timelineInfoOutput</td>
+      <td>Output timeline info including formatted prompt, dimensions, and image indexes</td>
+    </tr>
+    <tr>
+      <td>easy timelineSegmentOutput</td>
+      <td>Output specific segment data from the timeline</td>
+    </tr>
+    <tr>
+      <td>easy timelineSegmentCount</td>
+      <td>Output the total number of segments in the timeline</td>
+    </tr>
+    <tr>
+      <td rowspan="8">📋 Media List Operations</td>
+      <td>easy makeImageList</td>
+      <td>Combine multiple image inputs into an image list</td>
+    </tr>
+    <tr>
+      <td>easy makeAudioList</td>
+      <td>Combine multiple audio inputs into an audio list</td>
+    </tr>
+    <tr>
+      <td>easy splitAudios</td>
+      <td>Split an audio list into multiple single-audio outputs</td>
+    </tr>
+    <tr>
+      <td>easy audioMerge</td>
+      <td>Merge or concatenate up to six audio inputs</td>
+    </tr>
+    <tr>
+      <td>easy makeVideoList</td>
+      <td>Combine multiple video inputs into a video list</td>
+    </tr>
+    <tr>
+      <td>easy splitVideos</td>
+      <td>Split a video list into multiple single-video outputs</td>
+    </tr>
+    <tr>
+      <td>easy imageIndexesToIntList</td>
+      <td>Convert comma-separated image index string to integer list</td>
+    </tr>
+    <tr>
+      <td>easy splitImages</td>
+      <td>Split an image list or batch into multiple single-image outputs</td>
+    </tr>
+    <tr>
+      <td rowspan="5">🎬 Video Operations</td>
+      <td>easy saveVideo</td>
+      <td>Save images and optional audio as video file</td>
+    </tr>
+    <tr>
+      <td>easy getAudioFromVideo</td>
+      <td>Extract audio from a VIDEO input</td>
+    </tr>
+    <tr>
+      <td>easy mergeVideos</td>
+      <td>Concatenate multiple compatible VIDEO segments</td>
+    </tr>
+    <tr>
+      <td>easy mergeVideosFromPaths</td>
+      <td>Load and concatenate videos from file path list, optionally trimming the merged output by frame count</td>
+    </tr>
+    <tr>
+      <td>easy compareVideos</td>
+      <td>Preview source and output VIDEO inputs side by side with an interactive comparison slider</td>
+    </tr>
+    <tr>
+      <td rowspan="2">📝 Subtitle</td>
+      <td>easy recognizeSubtitle</td>
+      <td>Recognize subtitles with Qwen3-ASR or Whisper Large V3; configure SRT/timestamp output, sentence length, and model unloading</td>
+    </tr>
+    <tr>
+      <td>easy addSubtitleToVideo</td>
+      <td>Normalize multiline SRT, timestamp, or bracket-formatted text and burn it into a video</td>
+    </tr>
+    <tr>
+      <td rowspan="1">🖼️ Reference & Image</td>
+      <td>easy makeRefsCompositeBySam3</td>
+      <td>Detect subject in prompt using SAM3 and composite reference images onto canvas</td>
+    </tr>
+    <tr>
+      <td rowspan="2">🔧 Utility</td>
+      <td>easy matchLine</td>
+      <td>Return zero-based index of the first line containing matching text</td>
+    </tr>
+    <tr>
+      <td>easy apiWorkflowGate</td>
+      <td>Determine if the workflow is an API call and pass through preceding input items</td>
+    </tr>
+    <tr>
+      <td rowspan="1">🗣️ Speech to Video (S2V)</td>
+      <td>easy berniniS2VConditioning</td>
+      <td>Unified Bernini + Wan S2V conditioning: original optional single-speaker audio, spatially masked single-speaker audio, or optional sequential two-speaker audio</td>
+    </tr>
+  </tbody>
+</table>
 
 ## Credits
 
@@ -217,6 +338,7 @@ bun run build:release
 - [Whisper](https://github.com/openai/whisper)
 - [VoxCPM2](https://github.com/OpenBMB/VoxCPM)
 - [Bernini S2V](https://huggingface.co/rzgar/Bernini-R-S2V)
+- [H3-Motion-Context](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context)
 
 ## Source of Inspiration
 

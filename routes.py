@@ -37,6 +37,7 @@ import folder_paths
 
 from .utils.prompt_builder import get_system_prompt_options
 from .utils.llm_api import load_api_key_from_config
+from .utils.h3_project import load_h3_project_data
 from .utils.models import (
     MissingEasyMediaModelError,
     download_model,
@@ -69,6 +70,39 @@ from .utils.video import (
 _SMART_SPLIT_LOCK = asyncio.Lock()
 _SUBTITLE_SPEECH_LOCK = asyncio.Lock()
 _RUNNINGHUB_ACCOUNT_ENDPOINT = "https://www.runninghub.cn/uc/openapi/accountStatus"
+
+
+@PromptServer.instance.routes.get("/easy-media/project")
+async def handle_h3_project(request: web.Request) -> web.Response:
+    project_name = request.rel_url.query.get("project_name", "")
+    try:
+        return web.json_response(load_h3_project_data(project_name))
+    except (FileNotFoundError, TypeError, ValueError) as error:
+        return web.json_response({"error": str(error)}, status=404)
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"Failed to load H3 project: {error}"}, status=500)
+
+
+@PromptServer.instance.routes.get("/easy-media/projects")
+async def handle_h3_projects(_request: web.Request) -> web.Response:
+    try:
+        root = (
+            Path(folder_paths.get_output_directory()).resolve()
+            / "easy_media"
+            / "projects"
+        )
+        names = {
+            path.name
+            for path in root.iterdir()
+            if path.is_dir() and not path.name.startswith(".")
+        } if root.is_dir() else set()
+        names.add("default")
+        projects = ["default", *sorted(name for name in names if name != "default")]
+        return web.json_response({"projects": projects})
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"Failed to list H3 projects: {error}"}, status=500)
 
 
 def _segment_source_audio_window(data: dict, fps: float) -> tuple[float, float]:

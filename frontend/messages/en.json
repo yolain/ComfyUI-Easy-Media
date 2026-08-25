@@ -40,6 +40,21 @@
     "apiKey": "API Key",
     "localModel": "Local model — no API account required"
   },
+  "projectVideoCombine": {
+    "selectProject": "Select project",
+    "refresh": "Refresh project",
+    "combine": "Combine",
+    "autoCombine": "Auto combine",
+    "clipLabel": "Segment {index}",
+    "emptyPreview": "Refresh the project to preview its generated clips.",
+    "refreshFailed": "Project refresh failed",
+    "combineFailed": "Project combine failed",
+    "projectListFailed": "Could not load projects",
+    "connectSaveNode": "Connect this node to a video save output before combining manually.",
+    "combineQueued": "Combine queued",
+    "combineQueuedDetail": "The {project} project and its downstream nodes were added to the queue.",
+    "queueBusy": "Wait until the current ComfyUI queue is empty before combining manually."
+  },
   "toolbar": {
     "frames": "Frames",
     "seconds": "Seconds",
@@ -54,26 +69,34 @@
     "defaultAudioTrackName": "Audio Track {n}"
   },
   "multitrackTaskModes": {
-    "default": "Default",
-    "l2v": "Last Frame",
-    "ref": "Reference",
+    "default": "TI2V",
+    "l2v": "L2V",
+    "t2v": "T2V",
+    "i2v": "I2V",
+    "fl2v": "FL2V",
+    "fmlf2v": "FMLF2V",
+    "v2v": "V2V",
+    "r2v": "R2V",
+    "rv2v": "RV2V",
+    "vi2v": "VI2V",
+    "ref": "R2V",
     "edit": "Edit"
   },
   "multitrackSegment": {
-    "taskLabel": "Task{n} {mode}"
+    "taskLabel": "Segment{n} {mode}"
   },
   "multitrack": {
     "audio": "Audio",
     "globalAudio": "Audio (GV)",
     "audioSettings": "Audio settings",
     "speed": "Speed",
-    "speedSettings": "Speed settings",
+    "fpsSettings": "fps settings",
     "mutePreviewAudio": "Mute preview audio",
     "unmutePreviewAudio": "Unmute preview audio",
     "mute": "Mute",
     "unmute": "Unmute",
     "volume": "Volume",
-    "frameRate": "Frame rate",
+    "frameRate": "FPS",
     "currentResolution": "Current resolution",
     "fps": "fps",
     "duration": "Duration",
@@ -106,7 +129,9 @@
     "hideTaskPrompt": "Hide task prompt",
     "individualEdit": "Individual",
     "combinedEdit": "Combined",
-    "taskNumber": "Task {n}",
+    "taskNumber": "Segment {n}",
+    "taskMode": "Task mode",
+    "continuityMode": "Continuity mode",
     "previewTaskLabel": "Task{n}",
     "emptyPreviewTitle": "No segments yet",
     "emptyPreviewDescription": "Add a task segment or video clip to the tracks below.",
@@ -143,7 +168,7 @@
     "deleteSelectedSegment": "Delete selected segment",
     "addTaskMarker": "Add task marker",
     "deleteTaskMarker": "Delete task marker",
-    "taskMarkerLabel": "Task {n}",
+    "taskMarkerLabel": "Segment {n}",
     "taskMarkerAtFrame": "Task marker at frame {frame}",
     "taskOverview": "Tasktrack Overview",
     "deleteSegment": "Delete segment",
@@ -215,6 +240,10 @@
     "hideTimeline": "Hide timeline",
     "showTimeline": "Show timeline",
     "timelineZoom": "Timeline zoom"
+  },
+  "multitrackContinuityModes": {
+    "shot": "Shot",
+    "context": "Context"
   },
   "modelDownload": {
     "title": "{name} is missing",

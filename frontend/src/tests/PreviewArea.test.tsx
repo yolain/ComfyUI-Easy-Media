@@ -154,6 +154,50 @@ describe('PreviewArea', () => {
     expect(screen.getByTestId('multitrack-video-stage').closest('.hidden')).not.toBeNull()
   })
 
+  it('shows the final video frame when the playhead is at the timeline end', () => {
+    const { data } = trackData()
+    data.total_length = data.tracks[0].segments[0].end_frame
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={data.total_length}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    const video = screen.getByTestId('multitrack-video-preview') as HTMLVideoElement
+    expect(video.currentTime).toBeCloseTo(1 / data.frame_rate)
+    expect(screen.queryByTestId('multitrack-black-frame')).toBeNull()
+  })
+
+  it('keeps task preview content visible at the timeline end', () => {
+    const { data } = trackData()
+    addActiveTaskTrack(data)
+    data.total_length = 48
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={data.total_length}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getAllByRole('img').map((image) => image.getAttribute('alt'))).toEqual(['first.png', 'second.png'])
+    expect(screen.getByTestId('task-prompt-overlay')).not.toBeNull()
+  })
+
   it('does not bubble preview clicks to the widget clear-selection handler when a segment is selected', () => {
     const onParentClick = vi.fn()
     const { data, selectedSegment } = trackData()
@@ -705,17 +749,61 @@ describe('PreviewArea', () => {
       />,
     )
 
-    const modeSelect = screen.getByTestId('task-mode-select') as HTMLSelectElement
-    expect(modeSelect.value).toBe('ref')
-    expect(modeSelect.selectedOptions[0].textContent).toBe('Reference')
+    const modeSelect = screen.getByTestId('task-mode-select')
+    expect(modeSelect.textContent).toContain('R2V')
     expect(screen.getByText('|').className).toContain('text-secondary')
 
-    fireEvent.change(modeSelect, { target: { value: 'edit' } })
+    fireEvent.click(modeSelect)
+    fireEvent.click(screen.getByRole('option', { name: 'Edit' }))
 
     expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
       segmentId: 'active-task',
       patch: { task_mode: 'edit' },
     }])
+  })
+
+  it('shows MiniMax continuity mode beside task mode from the second active task onward', () => {
+    const { data } = trackData()
+    addActiveTaskTrack(data)
+    data.tracks[0].segments[1].content.continuity_mode = 'shot'
+    const onTrackSegmentsContentChange = vi.fn()
+    const props = {
+      data,
+      selectedSegment: null,
+      isPlaying: false,
+      node: { widgets: [{ name: 'format', value: 'MiniMax' }] },
+      onGlobalSettingsChange: vi.fn(),
+      onSelectedSegmentContentChange: vi.fn(),
+      onTrackSegmentsContentChange,
+      onSelectedSegmentDurationChange: vi.fn(),
+    }
+    const view = render(<PreviewArea {...props} currentTime={36} />)
+
+    const continuitySelect = screen.getByTestId('task-continuity-mode-select')
+    expect(continuitySelect.textContent).toContain('Shot')
+    expect(continuitySelect.className).toContain('w-16')
+    expect(screen.getByTestId('task-mode-select').className).toContain('w-12')
+    expect(continuitySelect.compareDocumentPosition(screen.getByTestId('task-mode-select')))
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    fireEvent.click(continuitySelect)
+    fireEvent.click(screen.getByRole('option', { name: 'Context' }))
+
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
+      segmentId: 'active-task',
+      patch: { continuity_mode: 'context' },
+    }])
+
+    view.rerender(<PreviewArea {...props} currentTime={12} />)
+    expect(screen.queryByTestId('task-continuity-mode-select')).toBeNull()
+
+    view.rerender(
+      <PreviewArea
+        {...props}
+        currentTime={36}
+        node={{ widgets: [{ name: 'format', value: 'Seedance' }] }}
+      />,
+    )
+    expect(screen.queryByTestId('task-continuity-mode-select')).toBeNull()
   })
 
   it('shows an editable active task prompt placeholder and toggles image/video layout', () => {

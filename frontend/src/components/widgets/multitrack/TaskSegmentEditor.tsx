@@ -17,7 +17,9 @@ import {
   frameToSeconds,
   getSelectedTaskUserPrompt,
   getSelectedTaskUserPromptPatch,
-  getMultiTrackTaskModeLabel,
+  getMultiTrackTaskType,
+  MULTITRACK_CONTINUITY_MODES,
+  MULTITRACK_DEFAULT_CONTINUITY_MODE,
   MULTITRACK_DEFAULT_FRAME_RATE,
   MULTITRACK_TASK_MODES,
   parseMultiTrackDurationTimecode,
@@ -34,6 +36,7 @@ import {
 import { invalidateMediaListCache } from '@/stores/media-list-store'
 import type {
   MultiTrack,
+  MultiTrackContinuityMode,
   MultiTrackSegment,
   MultiTrackSegmentContent,
   MultiTrackSourceType,
@@ -125,13 +128,6 @@ function selectedImageSource(
   return 'input'
 }
 
-function getTaskType(mode: MultiTrackTaskMode, imageCount: number, hasVideoInRange: boolean): string {
-  if (mode === 'l2v') return 'l2v'
-  if (mode === 'ref') return hasVideoInRange ? 'rv2v' : 'r2v'
-  if (mode === 'edit') return imageCount > 0 ? 'vi2v' : 'v2v'
-  return imageCount > 0 ? 'i2v' : 't2v'
-}
-
 function hasVideoInRange(segment: MultiTrackSegment, videoSegments: MultiTrackSegment[]): boolean {
   return videoSegments.some((videoSegment) => (
     videoSegment.content.media_type === 'video' &&
@@ -147,18 +143,19 @@ function getDefaultSystemPromptForSegment(
   format?: string,
 ): string {
   const images = taskImages(segment)
-  const taskType = getTaskType(
+  const taskType = getMultiTrackTaskType(
     segment.content.task_mode ?? 'default',
     images.length,
     hasVideoInRange(segment, videoSegments),
   )
   const mode = segment.content.task_mode ?? 'default'
+  const promptTaskType = taskType === 'fl2v' || taskType === 'fmlf2v' ? 'i2v' : taskType
   const formatMatch = options.find((option) => (
     option.format === format
     && (option.modes?.includes(mode) || option.task_type === taskType)
   ))
   return formatMatch?.system_prompt
-    ?? options.find((option) => option.task_type === taskType && option.format === undefined)?.system_prompt
+    ?? options.find((option) => option.task_type === promptTaskType && option.format === undefined)?.system_prompt
     ?? ''
 }
 
@@ -213,6 +210,7 @@ export function TaskSegmentEditor({
   const images = taskImages(segment)
   const reselectImage = images.find((image) => image.id === reselectImageId)
   const mode = segment.content.task_mode ?? 'default'
+  const continuityMode = segment.content.continuity_mode ?? MULTITRACK_DEFAULT_CONTINUITY_MODE
   const editableSegments = useMemo(() => (
     trackSegments && trackSegments.length > 0 ? trackSegments : [segment]
   ), [segment, trackSegments])
@@ -797,20 +795,41 @@ export function TaskSegmentEditor({
           )}
         </div>
 
-        <Select value={mode} onValueChange={(value) => onContentChange({ task_mode: value as MultiTrackTaskMode })}>
-          <SelectTrigger className="w-36 h-8 text-[10px] bg-card">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {MULTITRACK_TASK_MODES.map((taskMode) => (
-              <SelectItem key={taskMode} value={taskMode}>
-                <span className="text-[10px]">
-                  {getMultiTrackTaskModeLabel(taskMode, t)} ({getTaskType(taskMode, images.length, segmentHasVideoInRange)})
-                </span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2">
+          {format === 'MiniMax' && taskIndex > 0 && (
+            <Select
+              value={continuityMode}
+              onValueChange={(value) => onContentChange({
+                continuity_mode: value as MultiTrackContinuityMode,
+              })}
+            >
+              <SelectTrigger aria-label={t('multitrack.continuityMode')} className="h-8 w-24 bg-card text-[10px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MULTITRACK_CONTINUITY_MODES.map((continuityOption) => (
+                  <SelectItem key={continuityOption} value={continuityOption}>
+                    <span className="text-[10px]">{t(`multitrackContinuityModes.${continuityOption}`)}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <Select value={mode} onValueChange={(value) => onContentChange({ task_mode: value as MultiTrackTaskMode })}>
+            <SelectTrigger aria-label={t('multitrack.taskMode')} className="h-8 w-24 bg-card text-[10px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MULTITRACK_TASK_MODES.map((taskMode) => (
+                <SelectItem key={taskMode} value={taskMode}>
+                  <span className="text-[10px]">
+                    {t(`multitrackTaskModes.${getMultiTrackTaskType(taskMode, images.length, segmentHasVideoInRange)}`)}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
     </div>
   )

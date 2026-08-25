@@ -106,12 +106,53 @@ describe('TaskSegmentEditor', () => {
     const onContentChange = vi.fn()
     render(<TaskSegmentEditor segment={taskSegment()} onContentChange={onContentChange} />)
 
-    fireEvent.click(screen.getByRole('combobox'))
-    fireEvent.click(screen.getByRole('option', { name: 'Reference (r2v)' }))
+    fireEvent.click(screen.getByRole('combobox', { name: 'Task mode' }))
+    fireEvent.click(screen.getByRole('option', { name: 'R2V' }))
     inputEditable(screen.getByRole('textbox', { name: 'Prompt' }), 'New prompt')
 
     expect(onContentChange).toHaveBeenCalledWith({ task_mode: 'ref' })
     expect(onContentChange).toHaveBeenCalledWith({ user_prompt: 'New prompt' })
+  })
+
+  it('shows and stores MiniMax continuity mode from the second task onward', () => {
+    const onContentChange = vi.fn()
+    const first = taskSegment()
+    const second = secondTaskSegment()
+    const { rerender } = render(
+      <TaskSegmentEditor
+        segment={second}
+        trackSegments={[first, second]}
+        format="MiniMax"
+        onContentChange={onContentChange}
+      />,
+    )
+
+    const continuitySelect = screen.getByRole('combobox', { name: 'Continuity mode' })
+    expect(continuitySelect.className).toContain('w-24')
+    expect(screen.getByRole('combobox', { name: 'Task mode' }).className).toContain('w-24')
+    fireEvent.click(continuitySelect)
+    fireEvent.click(screen.getByRole('option', { name: 'Context' }))
+    expect(onContentChange).toHaveBeenCalledWith({ continuity_mode: 'context' })
+
+    rerender(
+      <TaskSegmentEditor
+        segment={first}
+        trackSegments={[first, second]}
+        format="MiniMax"
+        onContentChange={onContentChange}
+      />,
+    )
+    expect(screen.queryByRole('combobox', { name: 'Continuity mode' })).toBeNull()
+
+    rerender(
+      <TaskSegmentEditor
+        segment={second}
+        trackSegments={[first, second]}
+        format="Seedance"
+        onContentChange={onContentChange}
+      />,
+    )
+    expect(screen.queryByRole('combobox', { name: 'Continuity mode' })).toBeNull()
   })
 
   it('stores the A/B prompt selection, edits B independently, and shows its tooltip on hover', async () => {
@@ -154,13 +195,31 @@ describe('TaskSegmentEditor', () => {
     const options = screen.getAllByRole('option').map((option) => option.textContent)
 
     expect(options).toEqual([
-      'Default (i2v)',
-      'Reference (r2v)',
-      'Edit (vi2v)',
-      'Last Frame (l2v)',
+      'FL2V',
+      'R2V',
+      'VI2V',
+      'L2V',
     ])
-    fireEvent.click(screen.getByRole('option', { name: 'Last Frame (l2v)' }))
+    fireEvent.click(screen.getByRole('option', { name: 'L2V' }))
     expect(onContentChange).toHaveBeenCalledWith({ task_mode: 'l2v' })
+  })
+
+  it.each([
+    [0, 'T2V'],
+    [1, 'I2V'],
+    [2, 'FL2V'],
+    [3, 'FMLF2V'],
+  ])('shows the default task type for %i task images', (imageCount, expectedLabel) => {
+    const segment = taskSegment()
+    segment.content.images = Array.from({ length: imageCount }, (_, index) => ({
+      id: `image-${index}`,
+      source_type: 'input' as const,
+      file_path: `image-${index}.png`,
+    }))
+
+    render(<TaskSegmentEditor segment={segment} onContentChange={vi.fn()} />)
+
+    expect(screen.getByRole('combobox', { name: 'Task mode' }).textContent).toContain(expectedLabel)
   })
 
   it('keeps task prompt wheel scrolling inside the editor', () => {
@@ -196,7 +255,7 @@ describe('TaskSegmentEditor', () => {
 
     fireEvent.click(screen.getByRole('combobox'))
 
-    expect(screen.getByRole('option', { name: 'Reference (rv2v)' })).not.toBeNull()
+    expect(screen.getByRole('option', { name: 'RV2V' })).not.toBeNull()
   })
 
   it('uses rv2v for reference mode with preset video', () => {
@@ -210,7 +269,7 @@ describe('TaskSegmentEditor', () => {
 
     fireEvent.click(screen.getByRole('combobox'))
 
-    expect(screen.getByRole('option', { name: 'Reference (rv2v)' })).not.toBeNull()
+    expect(screen.getByRole('option', { name: 'RV2V' })).not.toBeNull()
   })
 
   it.each([
@@ -227,7 +286,7 @@ describe('TaskSegmentEditor', () => {
 
     fireEvent.click(screen.getByRole('combobox'))
 
-    expect(screen.getByRole('option', { name: 'Reference (r2v)' })).not.toBeNull()
+    expect(screen.getByRole('option', { name: 'R2V' })).not.toBeNull()
   })
 
   it('uploads dropped image files and appends them to task images', async () => {
@@ -459,7 +518,7 @@ describe('TaskSegmentEditor', () => {
       </LocaleContext.Provider>,
     )
 
-    expect(screen.getByRole('combobox').textContent).toContain('默认 (i2v)')
+    expect(screen.getByRole('combobox').textContent).toContain('首尾生视频')
     expect(screen.getByRole('textbox', { name: '提示词' })).not.toBeNull()
     expect(screen.getByLabelText('任务图片拖放区域')).not.toBeNull()
   })

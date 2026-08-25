@@ -19,6 +19,7 @@ import {
   deleteSegmentWithLinkedTasks,
   distributeMultiTrackSegmentsEvenly,
   getMultiTrackTrackHeight,
+  getInheritedTaskSegmentContent,
   getSelectedMultiTrackSegment,
   MULTITRACK_DEFAULT_VOLUME_DB,
   MULTITRACK_MEDIA_TRACK_LIMIT,
@@ -373,9 +374,12 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       const elapsed = (now - startedAtRef.current) / 1000
       const next = snapTimeToFrame(startTimeRef.current + secondsToFrame(elapsed, data.frame_rate), data.frame_rate)
       if (next >= data.total_length) {
-        currentTimeRef.current = data.total_length
-        setCurrentTime(data.total_length)
-        setIsPlaying(false)
+        currentTimeRef.current = 0
+        startTimeRef.current = 0
+        startedAtRef.current = now
+        setCurrentTime(0)
+        setSyncPlayNonce((value) => value + 1)
+        rafRef.current = requestAnimationFrame(tick)
         return
       }
       currentTimeRef.current = next
@@ -715,7 +719,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         color: track.color,
         content: {
           media_type: 'none' as const,
-          task_mode: track.task_mode ?? 'default',
+          ...getInheritedTaskSegmentContent(track.segments, startFrame, track.task_mode ?? 'default'),
           images: images ?? [],
         },
       }

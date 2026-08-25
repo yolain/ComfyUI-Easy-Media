@@ -217,7 +217,8 @@ class EasySaveVideo(io.ComfyNode):
         file = f"{filename}_{counter:05}_.{ext}"
         full_path = os.path.join(full_output_folder, file)
         prefix = "temp" if write_temp else "output"
-        relative_path = f"{prefix}/{os.path.relpath(full_path, output_dir)}"
+        relative_output_path = os.path.relpath(full_path, output_dir).replace("\\", "/")
+        relative_path = f"{prefix}/{relative_output_path}"
 
         metadata: dict | None = None
         if save_metadata:

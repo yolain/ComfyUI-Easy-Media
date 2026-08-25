@@ -166,10 +166,10 @@ export function PreviewFloatingToolbar({
             type="button"
             variant="ghost"
             className="flex h-12 w-10 flex-col gap-1 rounded-none px-1 py-1 cursor-pointer"
-            aria-label={t('multitrack.speedSettings')}
+            aria-label={t('multitrack.fpsSettings')}
           >
             <Gauge className="h-4 w-4" />
-            <span className="text-[8px]">{t('multitrack.speed')}</span>
+            <span className="text-[8px]">{t('multitrack.frameRate')}</span>
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-72 space-y-4" align="end" side="left">

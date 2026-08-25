@@ -40,6 +40,21 @@
     "apiKey": "API Key",
     "localModel": "本地模型，无需 API 账户"
   },
+  "projectVideoCombine": {
+    "selectProject": "选择工程",
+    "refresh": "刷新工程",
+    "combine": "合并",
+    "autoCombine": "自动合并",
+    "clipLabel": "片段{index}",
+    "emptyPreview": "请刷新工程以预览已生成的视频片段。",
+    "refreshFailed": "工程刷新失败",
+    "combineFailed": "工程合并失败",
+    "projectListFailed": "无法获取工程列表",
+    "connectSaveNode": "请先将此节点连接到视频保存输出节点，再执行手动合并。",
+    "combineQueued": "合并任务已提交",
+    "combineQueuedDetail": "工程 {project} 及其下游节点已加入队列。",
+    "queueBusy": "当前 ComfyUI 队列仍有任务，请等待队列清空后再手动合并。"
+  },
   "toolbar": {
     "frames": "帧",
     "seconds": "秒",
@@ -54,20 +69,28 @@
     "defaultAudioTrackName": "音频轨 {n}"
   },
   "multitrackTaskModes": {
-    "default": "默认",
+    "default": "文图",
+    "t2v": "文生视频",
+    "i2v": "图生视频",
+    "fl2v": "首尾生视频",
+    "fmlf2v": "多帧生视频",
     "l2v": "尾帧",
+    "r2v": "参考生视频",
+    "rv2v": "参考视频生视频",
+    "vi2v": "图像视频编辑",
+    "v2v": "视频生视频",
     "ref": "参考",
     "edit": "编辑"
   },
   "multitrackSegment": {
-    "taskLabel": "任务{n} {mode}"
+    "taskLabel": "片段{n} {mode}"
   },
   "multitrack": {
     "audio": "音频",
     "globalAudio": "总音频",
     "audioSettings": "音频设置",
     "speed": "速度",
-    "speedSettings": "速度设置",
+    "fpsSettings": "速度设置",
     "mutePreviewAudio": "静音预览音频",
     "unmutePreviewAudio": "取消静音预览音频",
     "mute": "静音",
@@ -106,7 +129,9 @@
     "hideTaskPrompt": "隐藏任务提示词",
     "individualEdit": "逐段编辑",
     "combinedEdit": "整体编辑",
-    "taskNumber": "任务 {n}",
+    "taskNumber": "片段 {n}",
+    "taskMode": "任务模式",
+    "continuityMode": "衔接模式",
     "previewTaskLabel": "任务{n}",
     "emptyPreviewTitle": "还没有可预览的片段",
     "emptyPreviewDescription": "请在下方轨道添加任务片段或视频片段。",
@@ -143,7 +168,7 @@
     "deleteSelectedSegment": "删除选中片段",
     "addTaskMarker": "添加任务标记",
     "deleteTaskMarker": "删除任务标记",
-    "taskMarkerLabel": "任务 {n}",
+    "taskMarkerLabel": "片段 {n}",
     "taskMarkerAtFrame": "第 {frame} 帧任务标记",
     "taskOverview": "任务轨概览",
     "deleteSegment": "删除片段",
@@ -215,6 +240,10 @@
     "hideTimeline": "隐藏轨道区域",
     "showTimeline": "显示轨道区域",
     "timelineZoom": "时间线缩放"
+  },
+  "multitrackContinuityModes": {
+    "shot": "分镜",
+    "context": "上下文"
   },
   "modelDownload": {
     "title": "缺少 {name} 模型",
