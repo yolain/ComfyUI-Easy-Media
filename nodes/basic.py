@@ -24,6 +24,7 @@ from ..utils import (
     collect_multitrack_subtitle_segments,
     default_subtitle_filename,
     equirectangular_to_perspective,
+    ffprobe_info,
     frames_to_seconds,
     load_audio_waveform,
     load_image_tensor,
@@ -42,6 +43,8 @@ from ..utils import (
     minimax_length_to_seconds,
     split_list_outputs,
     merge_video_track_with_ffmpeg,
+    multitrack_segments_in_window,
+    multitrack_slot_media_types,
     parse_subtitle_text,
     parse_override_segments,
     prompt_override_has_frame_ranges,
@@ -430,6 +433,14 @@ def _configured_resize_method(resolution: str | dict) -> str:
     return str(resize_method)
 
 
+def _resolution_needs_source_dimensions(resolution: str | dict) -> bool:
+    label = resolution.get("resolution", "") if isinstance(resolution, dict) else resolution
+    if isinstance(label, list):
+        label = label[0] if label else ""
+    normalized = str(label).lower()
+    return any(mode in normalized for mode in ("auto", "shortest", "longest"))
+
+
 def _as_list_input(value) -> list:
     if value is None:
         return []
@@ -485,6 +496,31 @@ def _video_resize_cache_key(video, width: int, height: int, resize_method: str) 
     source = _video_stream_source(video)
     identity = ("source", source) if isinstance(source, str) else ("object", id(video))
     return identity, width, height, resize_method
+
+
+def _deferred_video_dimensions(video_segments: list[tuple[int, int, dict]]) -> tuple[int, int] | None:
+    """Probe the first file or URL video without decoding or materializing it."""
+    for _track_index, _segment_index, content in video_segments:
+        source_type = str(content.get("source_type", "input"))
+        if source_type in {"slot", "preset"}:
+            continue
+        if source_type == "url":
+            source = content.get("url")
+        else:
+            source = resolve_video_path(
+                source_type,
+                content.get("file_path"),
+                content.get("local_path"),
+                content.get("url"),
+            )
+        if not isinstance(source, str) or not source:
+            continue
+        metadata = ffprobe_info(source) or {}
+        width = metadata.get("width")
+        height = metadata.get("height")
+        if width and height:
+            return int(width), int(height)
+    return None
 
 
 def _resize_multitrack_video(
@@ -683,6 +719,7 @@ def _merge_video_track(
     height: int,
     base_volume_db: float = 0.0,
     audio_muted: bool = False,
+    resize_method: str | None = None,
 ):
     file_segments: list[dict] = []
     for segment, video in segments:
@@ -705,15 +742,30 @@ def _merge_video_track(
             file_segment["source_start_frame"] = source_start_frame
         file_segments.append(file_segment)
     else:
-        merged_path = merge_video_track_with_ffmpeg(
-            file_segments,
-            total_length,
-            frame_rate,
-            width,
-            height,
+        merge_args = (file_segments, total_length, frame_rate, width, height)
+        merged_path = (
+            merge_video_track_with_ffmpeg(*merge_args, resize_method=resize_method)
+            if resize_method is not None
+            else merge_video_track_with_ffmpeg(*merge_args)
         )
         if merged_path is not None:
             return InputImpl.VideoFromFile(merged_path)
+    if resize_method is not None:
+        resized_cache: dict[tuple, object] = {}
+        segments = [
+            (
+                segment,
+                _resize_multitrack_video(
+                    video,
+                    width,
+                    height,
+                    resize_method,
+                    resized_cache,
+                    lambda _ratio: None,
+                ),
+            )
+            for segment, video in segments
+        ]
     return _merge_video_track_tensor(
         segments,
         total_length,
@@ -732,6 +784,7 @@ def _build_tracks_info_and_media_outputs(
     video_input,
     resolution: str | dict,
     format_name: str,
+    materialize_media: bool = True,
 ) -> tuple[dict, list, list, list]:
     tracks = data.get("tracks", [])
     if not isinstance(tracks, list):
@@ -803,21 +856,31 @@ def _build_tracks_info_and_media_outputs(
             if isinstance(content, dict) and content.get("media_type") == "video":
                 video_segments.append((track_index, segment_index, content))
 
-    progress = ProgressBar(max(1, len(video_segments) * 3)) if video_segments else None
+    progress = (
+        ProgressBar(max(1, len(video_segments) * 3))
+        if materialize_media and video_segments
+        else None
+    )
     progress_value = 0
     if progress is not None:
         progress.update_absolute(0)
     resolved_videos: dict[tuple[int, int], object] = {}
-    for track_index, segment_index, content in video_segments:
-        video = _resolve_multitrack_video(content, video_input)
-        if video is not None:
-            resolved_videos[(track_index, segment_index)] = video
-        progress_value += 1
-        if progress is not None:
-            progress.update_absolute(progress_value)
+    if materialize_media:
+        for track_index, segment_index, content in video_segments:
+            video = _resolve_multitrack_video(content, video_input)
+            if video is not None:
+                resolved_videos[(track_index, segment_index)] = video
+            progress_value += 1
+            if progress is not None:
+                progress.update_absolute(progress_value)
 
     first_video = next(iter(resolved_videos.values()), None)
-    source_dimensions = first_video.get_dimensions() if first_video is not None else None
+    if first_video is not None:
+        source_dimensions = first_video.get_dimensions()
+    elif _resolution_needs_source_dimensions(resolution):
+        source_dimensions = _deferred_video_dimensions(video_segments)
+    else:
+        source_dimensions = None
     width, height = _resolve_configured_dimensions(resolution, format_name, source_dimensions)
     resize_method = _configured_resize_method(resolution)
     resized_video_cache: dict[tuple, object] = {}
@@ -859,7 +922,11 @@ def _build_tracks_info_and_media_outputs(
                         if not isinstance(image_item, dict):
                             continue
                         normalized_image = dict(image_item)
-                        image = _resolve_timeline_image_item(image_item, image_input)
+                        image = (
+                            _resolve_timeline_image_item(image_item, image_input)
+                            if materialize_media
+                            else None
+                        )
                         if image is not None:
                             panorama_view = image_item.get("panorama_view")
                             if panorama_view is not None:
@@ -880,11 +947,11 @@ def _build_tracks_info_and_media_outputs(
                             normalized_image["media_index"] = media_index
                         normalized_images.append(normalized_image)
                 normalized_content["images"] = normalized_images
-            elif track_type == "audio" and content.get("media_type") == "audio":
+            elif materialize_media and track_type == "audio" and content.get("media_type") == "audio":
                 audio = _resolve_multitrack_audio(content, audio_input)
                 if audio is not None:
                     track_audio_segments.append((segment, audio))
-            elif track_type == "video" and content.get("media_type") == "video":
+            elif materialize_media and track_type == "video" and content.get("media_type") == "video":
                 video = resolved_videos.get((track_index, segment_index))
                 if video is not None:
                     progress_start = progress_value
@@ -919,7 +986,7 @@ def _build_tracks_info_and_media_outputs(
             track_end_frame = _track_media_end_frame(normalized_track)
             if track_end_frame is not None:
                 track_total_length = max(0, track_end_frame)
-        if track_type == "audio" and (format_name != "MiniMax" or track_audio_segments):
+        if materialize_media and track_type == "audio" and (format_name != "MiniMax" or track_audio_segments):
             media_index = len(audio_out)
             audio_out.append(_merge_audio_track(
                 track_audio_segments,
@@ -933,7 +1000,7 @@ def _build_tracks_info_and_media_outputs(
                 content = normalized_segment.get("content", {})
                 if content.get("media_type") == "audio":
                     content["media_index"] = media_index
-        elif track_type == "video" and (format_name != "MiniMax" or track_video_segments):
+        elif materialize_media and track_type == "video" and (format_name != "MiniMax" or track_video_segments):
             media_index = len(video_out)
             video_out.append(
                 _merge_video_track(
@@ -968,6 +1035,8 @@ def _build_tracks_info_and_media_outputs(
         "volume_db": global_volume_db,
         "width": width,
         "height": height,
+        "resize_method": resize_method,
+        "media_loading": "eager" if materialize_media else "deferred",
         "task_markers": [
             dict(marker)
             for marker in data.get("task_markers", [])
@@ -1716,8 +1785,9 @@ class MultiTrackEditor(io.ComfyNode):
             display_name="MultiTrack Editor",
             category=CATEGORY_MULTITRACK,
             description=(
-                "Edit and pass through multitrack media data. Outputs tracks info "
-                "and list-style image, audio, and video media outputs."
+                "Edit multitrack data. Slot-backed timelines materialize media "
+                "immediately; timelines without slots defer media loading to "
+                "downstream task and audio output nodes."
             ),
             is_input_list=True,
             inputs=[
@@ -1729,9 +1799,9 @@ class MultiTrackEditor(io.ComfyNode):
                 io.Combo.Input("format", options=list(VIDEO_FORMATS.keys()), default="Wan",  tooltip="Choose a video format to automatically set resolution and frame rate."),
                 TYPE_TRACK_DATA.Input("track_data"),
                 io.AnyType.Input("prompt_override", optional=True, tooltip="If provided, overrides all segment prompts in the timeline.",),
-                io.Image.Input("image", optional=True, tooltip="Optional image media list for multitrack segments."),
-                io.Audio.Input("audio", optional=True, tooltip="Optional audio media list for multitrack segments."),
-                io.Video.Input("video", optional=True, tooltip="Optional video media list for multitrack segments."),
+                io.Image.Input("image", optional=True, lazy=True, tooltip="Optional image media list for slot-based multitrack segments."),
+                io.Audio.Input("audio", optional=True, lazy=True, tooltip="Optional audio media list for slot-based multitrack segments."),
+                io.Video.Input("video", optional=True, lazy=True, tooltip="Optional video media list for slot-based multitrack segments."),
             ],
             outputs=[
                 TYPE_TRACKS_INFO.Output("TRACKS_INFO"),
@@ -1740,6 +1810,31 @@ class MultiTrackEditor(io.ComfyNode):
                 io.Video.Output("VIDEO", is_output_list=True),
             ],
         )
+
+    @classmethod
+    def check_lazy_status(
+        cls,
+        resolution: str | dict,
+        format: str,
+        track_data: str | dict,
+        prompt_override: object = None,
+        image: object = None,
+        audio: object = None,
+        video: object = None,
+    ) -> list[str]:
+        del resolution, format
+        raw_track_data = track_data[0] if isinstance(track_data, list) and track_data else track_data
+        raw_override = (
+            prompt_override[0]
+            if isinstance(prompt_override, list) and len(prompt_override) == 1
+            else prompt_override
+        )
+        data = _parse_track_data(raw_track_data)
+        if prompt_override_has_value(raw_override):
+            data = build_multitrack_data_from_prompt_override(data, raw_override)
+        slot_types = multitrack_slot_media_types(data)
+        values = {"image": image, "audio": audio, "video": video}
+        return [media_type for media_type in sorted(slot_types) if values[media_type] is None]
 
     @classmethod
     def execute(
@@ -1763,6 +1858,7 @@ class MultiTrackEditor(io.ComfyNode):
         data = _parse_track_data(track_data)
         if prompt_override_has_value(prompt_override):
             data = build_multitrack_data_from_prompt_override(data, prompt_override)
+        materialize_media = bool(multitrack_slot_media_types(data))
         tracks_info, images_out, audio_out, video_out = _build_tracks_info_and_media_outputs(
             data,
             kwargs.get("image"),
@@ -1770,6 +1866,7 @@ class MultiTrackEditor(io.ComfyNode):
             kwargs.get("video"),
             resolution,
             format,
+            materialize_media=materialize_media,
         )
 
         return io.NodeOutput(tracks_info, images_out, audio_out, video_out)
@@ -2093,6 +2190,50 @@ def _silent_audio_for_range(
     return {"waveform": silence(sample_rate, duration, channels), "sample_rate": sample_rate}
 
 
+def _materialize_deferred_audio_tracks(
+    info: dict,
+    tracks: list[dict],
+    start_frame: int,
+    end_frame: int,
+    *,
+    omit_empty: bool = False,
+) -> list[dict]:
+    frame_rate = max(0.001, float(info.get("frame_rate", 24)))
+    duration_frames = max(0, end_frame - start_frame)
+    if duration_frames <= 0:
+        return []
+    global_volume_db = audio_volume_db(info)
+    global_muted = audio_is_muted(info)
+    has_solo_track = any(
+        track.get("type") in {"audio", "video"} and track.get("solo") is True
+        for track in tracks
+        if isinstance(track, dict)
+    )
+    outputs: list[dict] = []
+    for track in tracks:
+        if not isinstance(track, dict) or track.get("type") != "audio":
+            continue
+        local_segments = multitrack_segments_in_window(track, start_frame, end_frame)
+        resolved_segments: list[tuple[dict, dict]] = []
+        for local_segment in local_segments:
+            content = local_segment.get("content", {})
+            resolved_audio = _resolve_multitrack_audio(content, None)
+            if resolved_audio is not None:
+                resolved_segments.append((local_segment, resolved_audio))
+        if omit_empty and not resolved_segments:
+            continue
+        outputs.append(_merge_audio_track(
+            resolved_segments,
+            duration_frames,
+            frame_rate,
+            global_volume_db + audio_volume_db(track),
+            global_muted
+            or audio_is_muted(track)
+            or (has_solo_track and track.get("solo") is not True),
+        ))
+    return outputs
+
+
 class MultiTrackAudioOutput(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -2104,7 +2245,7 @@ class MultiTrackAudioOutput(io.ComfyNode):
             is_input_list=True,
             inputs=[
                 TYPE_TRACKS_INFO.Input("tracks_info"),
-                io.Audio.Input("audio"),
+                io.Audio.Input("audio", optional=True),
                 io.Combo.Input(
                     "mode",
                     options=["default", "crop"],
@@ -2146,6 +2287,18 @@ class MultiTrackAudioOutput(io.ComfyNode):
         ] if isinstance(tracks, list) else []
 
         audios = iter_valid_audio_inputs(audio)
+        if info.get("media_loading") == "deferred":
+            timeline_end = max(
+                0,
+                int(info.get("timeline_total_length", info.get("total_length", 0))),
+            )
+            audios = _materialize_deferred_audio_tracks(
+                info,
+                audio_tracks,
+                0,
+                timeline_end,
+                omit_empty=info.get("format") == "MiniMax",
+            )
         combined_audio = merge_audio_inputs(audios, "add")
         selected_mode = str(_unwrap_list_scalar(mode, "default"))
         if selected_mode == "default":
@@ -2639,9 +2792,34 @@ class MultiTrackTaskOutput(io.ComfyNode):
         selected_images: list[torch.Tensor] = []
         selected_image_indexes: set[int] = set()
         marker_image_frames: list[int] = []
+        deferred_media = info.get("media_loading") == "deferred"
+        media_progress = ProgressBar(2)
+        media_progress.update_absolute(0)
         for task_content, task_content_start in task_content_entries:
             for image_info in task_content.get("images", []):
                 if not isinstance(image_info, dict):
+                    continue
+                if deferred_media:
+                    image = _resolve_timeline_image_item(image_info, None)
+                    if image is None:
+                        continue
+                    panorama_view = image_info.get("panorama_view")
+                    if panorama_view is not None:
+                        try:
+                            image = equirectangular_to_perspective(
+                                image,
+                                panorama_view,
+                                int(info.get("width", 544)),
+                                int(info.get("height", 960)),
+                            )
+                        except (TypeError, ValueError, RuntimeError) as exc:
+                            image_id = image_info.get("id", "")
+                            raise ValueError(
+                                f"Failed to project panorama image {image_id!r}: {exc}"
+                            ) from exc
+                    selected_images.append(image)
+                    if task_entry.get("marker_mode"):
+                        marker_image_frames.append(max(0, task_content_start - start_frame))
                     continue
                 try:
                     media_index = int(image_info.get("media_index"))
@@ -2657,6 +2835,8 @@ class MultiTrackTaskOutput(io.ComfyNode):
                     if task_entry.get("marker_mode"):
                         marker_image_frames.append(max(0, task_content_start - start_frame))
 
+        media_progress.update_absolute(1)
+
         if task_entry.get("marker_mode"):
             image_indexes = ",".join(str(frame) for frame in marker_image_frames)
         else:
@@ -2668,6 +2848,14 @@ class MultiTrackTaskOutput(io.ComfyNode):
         selected_audio: list[dict] = []
         selected_video: list = []
         has_video = False
+        global_volume_db = audio_volume_db(info)
+        global_muted = audio_is_muted(info)
+        has_solo_track = any(
+            isinstance(track, dict)
+            and track.get("type") in {"audio", "video"}
+            and track.get("solo") is True
+            for track in tracks
+        ) if isinstance(tracks, list) else False
         for track in tracks[1:] if isinstance(tracks, list) else []:
             if not isinstance(track, dict):
                 continue
@@ -2689,6 +2877,62 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 )
                 if track_media_duration_frames is not None and track_media_duration_frames <= 0:
                     continue
+            if deferred_media and track.get("type") in {"audio", "video"}:
+                local_duration = (
+                    track_media_duration_frames
+                    if is_minimax
+                    else duration_frames
+                )
+                if local_duration is None or local_duration <= 0:
+                    continue
+                local_segments = multitrack_segments_in_window(
+                    track,
+                    start_frame,
+                    start_frame + local_duration,
+                )
+                track_volume_db = global_volume_db + audio_volume_db(track)
+                track_muted = (
+                    global_muted
+                    or audio_is_muted(track)
+                    or (has_solo_track and track.get("solo") is not True)
+                )
+                if track.get("type") == "audio":
+                    resolved_audio_segments: list[tuple[dict, dict]] = []
+                    for local_segment in local_segments:
+                        local_content = local_segment.get("content", {})
+                        resolved_audio = _resolve_multitrack_audio(local_content, None)
+                        if resolved_audio is not None:
+                            resolved_audio_segments.append((local_segment, resolved_audio))
+                    if not is_minimax or resolved_audio_segments:
+                        selected_audio.append(_merge_audio_track(
+                            resolved_audio_segments,
+                            local_duration,
+                            frame_rate,
+                            track_volume_db,
+                            track_muted,
+                        ))
+                    continue
+
+                resolved_video_segments: list[tuple[dict, object]] = []
+                for local_segment in local_segments:
+                    local_content = local_segment.get("content", {})
+                    resolved_video = _resolve_multitrack_video(local_content, None)
+                    if resolved_video is None:
+                        continue
+                    resolved_video_segments.append((local_segment, resolved_video))
+                has_video = has_video or bool(local_segments)
+                if not is_minimax or resolved_video_segments:
+                    selected_video.append(_merge_video_track(
+                        resolved_video_segments,
+                        local_duration,
+                        frame_rate,
+                        int(info.get("width", 544)),
+                        int(info.get("height", 960)),
+                        track_volume_db,
+                        track_muted,
+                        resize_method=str(info.get("resize_method", "stretch")),
+                    ))
+                continue
             if track.get("type") == "audio" and media_index is not None and 0 <= media_index < len(audio_items):
                 track_audio = audio_items[media_index]
                 if isinstance(track_audio, dict):
@@ -2722,6 +2966,8 @@ class MultiTrackTaskOutput(io.ComfyNode):
                     and _ranges_overlap(start_frame, end_frame, segment)
                     for segment in track.get("segments", [])
                 )
+
+        media_progress.update_absolute(2)
 
         task_type = _multitrack_task_type(task, len(selected_images), has_video)
         prompt = _selected_multitrack_user_prompt(content)

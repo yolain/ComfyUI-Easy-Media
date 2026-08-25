@@ -2,6 +2,18 @@
 
 ---
 
+## [1.3.0] - Unreleased
+
+### ✨ New Features
+
+- **MultiTrack Project**： Building now...
+- **MultiTrack Project Video Combine**： Building now...
+
+### ⚡ Performance
+
+- **Multi-Track Editor**: Defer file and URL media loading when no slot resources are referenced; task output nodes now materialize only the media they need, reduce Unnecessary Overhead in Long-Form Video Tasks. (Now you just need to connect `TRACKS_INFO`; the `image`, `video`, and `audio` output by the multi-track editor will all be set to `None` in Slot-less resource mode.)
+
+
 ## [1.2.1] - 2026-08-22
 
 ### ✨ New Features
