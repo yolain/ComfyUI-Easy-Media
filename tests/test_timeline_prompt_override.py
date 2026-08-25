@@ -94,6 +94,7 @@ def _load_basic_module(monkeypatch):
     utils.collect_multitrack_subtitle_segments = lambda *args, **kwargs: []
     utils.default_subtitle_filename = lambda *args, **kwargs: "subtitles"
     utils.equirectangular_to_perspective = lambda image, *args, **kwargs: image
+    utils.ffprobe_info = lambda *args, **kwargs: {}
     utils.frames_to_seconds = lambda frames, frame_rate: (frames - 1) / frame_rate
     utils.load_audio_waveform = lambda *args, **kwargs: None
     utils.load_image_tensor = lambda *args, **kwargs: None
@@ -102,6 +103,8 @@ def _load_basic_module(monkeypatch):
     utils.parse_subtitle_text = lambda *args, **kwargs: []
     utils.resize_image = lambda image, *args, **kwargs: image
     utils.merge_video_track_with_ffmpeg = lambda *args, **kwargs: None
+    utils.multitrack_segments_in_window = lambda *args, **kwargs: []
+    utils.multitrack_slot_media_types = lambda *args, **kwargs: set()
     utils.resize_video_with_ffmpeg = lambda *args, **kwargs: None
     utils.resolve_video_path = lambda *args, **kwargs: None
     utils.silence = lambda *args, **kwargs: None

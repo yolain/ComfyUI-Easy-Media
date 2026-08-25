@@ -179,10 +179,14 @@ def merge_video_track_with_ffmpeg(
     frame_rate: float,
     width: int,
     height: int,
+    resize_method: str | None = None,
 ) -> str | None:
     """Compose file-backed segments on a black full-length timeline."""
     ffmpeg = get_ffmpeg_path("ffmpeg")
+    resize_filter = _ffmpeg_resize_filter(width, height, resize_method) if resize_method else None
     if ffmpeg is None or total_length <= 0 or frame_rate <= 0 or width % 2 or height % 2:
+        return None
+    if resize_method is not None and resize_filter is None:
         return None
     if any(not os.path.isfile(str(segment.get("source", ""))) for segment in segments):
         return None
@@ -222,10 +226,14 @@ def merge_video_track_with_ffmpeg(
             continue
         clip_label = f"clipv{index}"
         output_label = f"timelinev{index}"
-        filters.append(
-            f"[{input_index}:v]fps={frame_rate},trim=start={source_start_seconds}:duration={duration},"
-            f"setpts=PTS-STARTPTS+{start_seconds}/TB[{clip_label}]"
-        )
+        video_filters = [
+            f"fps={frame_rate}",
+            f"trim=start={source_start_seconds}:duration={duration}",
+        ]
+        if resize_filter is not None:
+            video_filters.append(resize_filter)
+        video_filters.append(f"setpts=PTS-STARTPTS+{start_seconds}/TB")
+        filters.append(f"[{input_index}:v]{','.join(video_filters)}[{clip_label}]")
         filters.append(
             f"[{current_video}][{clip_label}]overlay=eof_action=pass:"
             f"enable='between(t,{start_seconds},{start_seconds + duration})'[{output_label}]"

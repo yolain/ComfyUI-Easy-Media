@@ -2,6 +2,12 @@
 
 ---
 
+## Unreleased
+
+### ⚡ Performance
+
+- **Multi-Track Editor**: Defer file and URL media loading when no slot resources are referenced; task and audio output nodes now materialize only the media they need.
+
 ## [1.2.1] - 2026-08-22
 
 ### ✨ New Features
