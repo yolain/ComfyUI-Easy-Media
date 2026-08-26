@@ -71,6 +71,7 @@ class EasyMediaExtension(ComfyExtension):
             ImageIndexesToIntList,
             # Audio
             EasyAudioMerge,
+            EasyMinimaxH3AudioLock,
             # Video
             EasySaveVideo,
             EasyCompareVideos,
@@ -91,7 +92,13 @@ class EasyMediaExtension(ComfyExtension):
             APIWorkflowGate,
             # MiniMax
             EasyMiniMaxH3MotionContext,
+            EasyMiniMaxH3MotionContextHard,
+            EasyMiniMaxH3HiResContinuity,
             EasyH3ProjectContextLatentLoad,
+            EasyH3SegmentSamplingStart,
+            EasyH3SegmentSaveEnd,
+            EasyH3SegmentEncodingStart,
+            EasyH3ContextMediaTrim,
             EasyH3ProjectArtifact,
             EasyMultiTrackProject,
             EasyMultiTrackProjectVideoCombine,

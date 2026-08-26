@@ -220,23 +220,39 @@ def merge_video_track_with_ffmpeg(
         start_frame = max(0, int(segment.get("start_frame", 0)))
         end_frame = min(total_length, max(start_frame, int(segment.get("end_frame", start_frame))))
         start_seconds = start_frame / frame_rate
-        source_start_seconds = max(0, int(segment.get("source_start_frame", 0))) / frame_rate
-        duration = (end_frame - start_frame) / frame_rate
+        source_start_frame = max(0, int(segment.get("source_start_frame", 0)))
+        frame_count = end_frame - start_frame
+        source_end_frame = source_start_frame + frame_count
+        source_start_seconds = source_start_frame / frame_rate
+        duration = frame_count / frame_rate
         if duration <= 0:
             continue
         clip_label = f"clipv{index}"
         output_label = f"timelinev{index}"
         video_filters = [
-            f"fps={frame_rate}",
-            f"trim=start={source_start_seconds}:duration={duration}",
+            f"trim=start_frame={source_start_frame}:end_frame={source_end_frame}",
+            "setpts=PTS-STARTPTS",
+            f"fps=fps={frame_rate}:start_time=0",
         ]
         if resize_filter is not None:
             video_filters.append(resize_filter)
+        # Some containers report a duration-derived frame count that is one or
+        # two frames longer than the frames FFmpeg can actually decode. Pad with
+        # the final decoded frame before enforcing the exact timeline length so
+        # the black base cannot leak through at a segment boundary.
+        video_filters.extend([
+            f"tpad=stop_mode=clone:stop_duration={duration}",
+            f"trim=end_frame={frame_count}",
+        ])
         video_filters.append(f"setpts=PTS-STARTPTS+{start_seconds}/TB")
         filters.append(f"[{input_index}:v]{','.join(video_filters)}[{clip_label}]")
+        # Use integer timeline frames for the overlay window. Comparing FFmpeg's
+        # `t` against Python-generated fractional seconds can exclude the exact
+        # boundary frame (for example, 260 / 24) because the two sides round the
+        # repeating decimal differently, exposing one frame of the black base.
         filters.append(
             f"[{current_video}][{clip_label}]overlay=eof_action=pass:"
-            f"enable='between(t,{start_seconds},{start_seconds + duration})'[{output_label}]"
+            f"enable='between(n,{start_frame},{end_frame - 1})'[{output_label}]"
         )
         current_video = output_label
 

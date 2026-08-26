@@ -13,22 +13,30 @@ from comfy_api.latest import InputImpl, io
 from comfy_execution.graph_utils import ExecutionBlocker, GraphBuilder
 from comfy.utils import ProgressBar
 
-from ..modules.motion_context.core import apply_motion_context
+from ..modules.motion_context.core import (
+    apply_hard_motion_context,
+    apply_hires_continuity,
+    apply_motion_context,
+)
 from ..utils import log_node_info
-from ..utils.h3_presets import load_h3_presets, select_h3_preset
+from ..utils.h3_presets import get_h3_preset_keys, load_h3_presets, select_h3_preset
 from ..utils.h3_project import (
     choose_h3_generation,
     clear_h3_project_segments_from,
     compact_h3_task_segments,
     compose_h3_project_video,
     h3_generation_mode,
+    h3_locked_audio_track,
     h3_project_filename_prefix,
     h3_first_pass_dimensions,
+    has_h3_first_pass_checkpoint,
     h3_task_entries,
     h3_task_type,
     initialize_h3_project,
+    load_h3_latent,
     parse_tracks_info,
     safe_h3_project_name,
+    save_h3_latent,
     select_h3_task_entries,
 )
 from ..utils.models import detect_turbo_lora_from_prompt, detect_turbo_model
@@ -53,6 +61,34 @@ REFERENCE_BRIDGE_NODE_ID = "easy MiniMaxH3ReferenceToVideoBridge"
 TYPE_FAST_MODEL_LOADER = io.Custom(io_type="FAST_MODEL_LOADER")
 TYPE_TRACKS_INFO = io.Custom(io_type="TRACKS_INFO")
 TYPE_PROJECT_DATA = io.Custom(io_type="PROJECT_DATA")
+MULTITRACK_PROJECT_REFRESH_EVENT = "easy_multitrack_project_refresh"
+
+
+def _notify_multitrack_project_refresh(
+    project_name: str,
+    phase: str,
+    segment_index: int,
+    sampling_pass: str | None = None,
+) -> None:
+    """Ask project widgets to reload at an H3 project lifecycle boundary."""
+    try:
+        from server import PromptServer
+
+        payload: dict[str, Any] = {
+            "project_name": safe_h3_project_name(project_name),
+            "phase": phase,
+            "segment_index": int(segment_index),
+        }
+        if sampling_pass is not None:
+            payload["sampling_pass"] = sampling_pass
+        PromptServer.instance.send_sync(
+            MULTITRACK_PROJECT_REFRESH_EVENT,
+            payload,
+        )
+    except (AttributeError, ImportError, RuntimeError) as error:
+        print(  # noqa: T201 - sampling must continue when UI notifications are unavailable
+            f"[Easy Media][Project] Unable to notify the frontend: {error}"
+        )
 
 
 def _require_minimax_h3_model(model: Any) -> None:
@@ -142,50 +178,54 @@ def _h3_image_resize_inputs(
 
 def _h3_latent_upscale_inputs(
     latent: Any,
-    upscale_model: Any,
+    model_name: str,
     width: int,
     height: int,
 ) -> dict[str, Any]:
     node_id = "MinimaxH3LatentUpscaler3D"
-    node_class = _h3_node_mapping(node_id)
-    if node_class is None:
+    if _h3_node_mapping(node_id) is None:
         raise RuntimeError(f"{node_id} is not installed")
-    inputs = _h3_required_node_defaults(node_id)
-    required = {}
-    input_types = getattr(node_class, "INPUT_TYPES", None)
-    if callable(input_types):
-        schema = input_types()
-        required = schema.get("required", {}) if isinstance(schema, dict) else {}
-
-    def assign(candidates: tuple[str, ...], value: Any) -> None:
-        target = next((name for name in candidates if name in required), candidates[0])
-        inputs[target] = value
-
-    assign(("latent", "samples"), latent)
-    assign(("upscale_model", "model"), upscale_model)
-    assign(("width", "target_width"), width)
-    assign(("height", "target_height"), height)
-    assign(("mode", "upscale_mode"), "target dimensions")
-    assign(("align", "alignment"), 2)
-    return inputs
-
-
-def _h3_motion_context_inputs(
-    conditioning: Any,
-    vae: Any,
-    latent: Any,
-    context_frames: Any,
-    context_latent: Any,
-) -> dict[str, Any]:
     return {
-        "conditioning": conditioning,
-        "vae": vae,
         "latent": latent,
-        "context_frames": context_frames,
-        "context_latent": context_latent,
-        "context_length": "22",
-        "audio_context_length": 48,
+        "model_name": model_name,
+        "mode": "target dimensions",
+        "mode.width": width,
+        "mode.height": height,
+        "align": 32,
+        "keep_proportion": False,
+        "enable_chunking": True,
+        "device": "cuda",
+        "precision": "fp16",
     }
+
+
+def _h3_encode_context_media(
+    graph: GraphBuilder,
+    images: Any,
+    audio: Any,
+    vae: Any,
+    audio_vae: Any,
+    node_prefix: str,
+) -> Any:
+    """Encode an already-trimmed clip into a clean H3 AV context latent."""
+    encoded_video = graph.node(
+        "VAEEncode",
+        id=f"{node_prefix}_video_encode",
+        pixels=images,
+        vae=vae,
+    )
+    encoded_audio = graph.node(
+        "VAEEncodeAudio",
+        id=f"{node_prefix}_audio_encode",
+        audio=audio,
+        vae=audio_vae,
+    )
+    return graph.node(
+        "LTXVConcatAVLatent",
+        id=f"{node_prefix}_concat",
+        video_latent=encoded_video.out(0),
+        audio_latent=encoded_audio.out(0),
+    ).out(0)
 
 
 def _h3_project_source_path(video_path: str, output_dir: Path) -> Path:
@@ -829,6 +869,138 @@ class EasyMiniMaxH3MotionContext(io.ComfyNode):
         return io.NodeOutput(output, trim_frames)
 
 
+class EasyMiniMaxH3MotionContextHard(io.ComfyNode):
+    """Apply H3 context conditioning and hard video/audio latent continuity."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy MiniMaxH3MotionContextHard",
+            display_name="Easy MiniMax H3 Motion Context Hard",
+            category=CATEGORY_MINIMAX,
+            description=(
+                "Copy the previous H3 video and audio latent tails into the "
+                "current sampling seed with independent release masks."
+            ),
+            inputs=[
+                io.Conditioning.Input("conditioning"),
+                io.Vae.Input("vae"),
+                io.Latent.Input("latent"),
+                io.Latent.Input("context_latent"),
+                io.Combo.Input(
+                    "context_length",
+                    options=["22", "5", "39", "56"],
+                    default="22",
+                    tooltip="Previous-clip video context length in frames.",
+                ),
+                io.Int.Input(
+                    "audio_context_length",
+                    default=22,
+                    min=0,
+                    max=240,
+                    tooltip=(
+                        "Previous-clip audio context length in video-frame units. "
+                        "Set 0 to follow context_length."
+                    ),
+                ),
+                io.Int.Input(
+                    "video_transition_steps",
+                    default=4,
+                    min=0,
+                    max=32,
+                    tooltip="Video denoise-release steps inside the copied prefix.",
+                ),
+                io.Int.Input(
+                    "audio_transition_steps",
+                    default=4,
+                    min=0,
+                    max=80,
+                    tooltip="Audio denoise-release steps inside the copied prefix.",
+                ),
+            ],
+            outputs=[
+                io.Conditioning.Output("conditioning"),
+                io.Int.Output("trim_frames"),
+                io.Latent.Output("latent"),
+            ],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        conditioning: Any,
+        vae: Any,
+        latent: dict[str, Any],
+        context_latent: dict[str, Any],
+        context_length: str = "22",
+        audio_context_length: int = 22,
+        video_transition_steps: int = 4,
+        audio_transition_steps: int = 4,
+    ) -> io.NodeOutput:
+        output, trim_frames, hard_latent = apply_hard_motion_context(
+            conditioning=conditioning,
+            vae=vae,
+            latent=latent,
+            context_latent=context_latent,
+            context_length=context_length,
+            audio_context_length=audio_context_length,
+            video_transition_steps=video_transition_steps,
+            audio_transition_steps=audio_transition_steps,
+        )
+        return io.NodeOutput(output, trim_frames, hard_latent)
+
+
+class EasyMiniMaxH3HiResContinuity(io.ComfyNode):
+    """Prepare a context-linked high-resolution H3 second-pass latent."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy MiniMaxH3HiResContinuity",
+            display_name="Easy MiniMax H3 HiRes Continuity",
+            category=CATEGORY_MINIMAX,
+            description=(
+                "Copy the previous final high-resolution video tail into the "
+                "current upscaled latent and freeze current audio during pass two."
+            ),
+            inputs=[
+                io.Latent.Input("current_hires_latent"),
+                io.Latent.Input("previous_hires_latent"),
+                io.Combo.Input(
+                    "context_length",
+                    options=["22", "5", "39", "56"],
+                    default="22",
+                ),
+                io.Int.Input(
+                    "video_transition_steps",
+                    default=4,
+                    min=0,
+                    max=32,
+                ),
+            ],
+            outputs=[
+                io.Latent.Output("latent"),
+                io.Int.Output("trim_frames"),
+            ],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        current_hires_latent: dict[str, Any],
+        previous_hires_latent: dict[str, Any],
+        context_length: str = "22",
+        video_transition_steps: int = 4,
+    ) -> io.NodeOutput:
+        output, trim_frames = apply_hires_continuity(
+            current_hires_latent=current_hires_latent,
+            previous_hires_latent=previous_hires_latent,
+            context_length=context_length,
+            video_transition_steps=video_transition_steps,
+        )
+        return io.NodeOutput(output, trim_frames)
+
+
 class EasyH3ProjectContextLatentLoad(io.ComfyNode):
     """Load the active context latent for a previously rendered segment."""
 
@@ -842,12 +1014,25 @@ class EasyH3ProjectContextLatentLoad(io.ComfyNode):
             inputs=[
                 io.String.Input("project_name"),
                 io.Int.Input("segment_index", min=0),
+                io.Combo.Input(
+                    "resolution",
+                    options=["high", "low"],
+                    default="high",
+                ),
             ],
             outputs=[io.Latent.Output("context_latent")],
+            not_idempotent=True,
         )
 
     @classmethod
-    def execute(cls, project_name: str, segment_index: int) -> io.NodeOutput:
+    def execute(
+        cls,
+        project_name: str,
+        segment_index: int,
+        resolution: str = "high",
+    ) -> io.NodeOutput:
+        if resolution not in {"high", "low"}:
+            raise ValueError("resolution must be 'high' or 'low'")
         safe_name = safe_h3_project_name(project_name)
         output_dir = Path(folder_paths.get_output_directory()).resolve()
         project_dir = output_dir / "easy_media" / "projects" / safe_name
@@ -856,10 +1041,18 @@ class EasyH3ProjectContextLatentLoad(io.ComfyNode):
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             segment = manifest["segments"][str(int(segment_index))]
             generation = str(int(segment["active_generation"]))
-            filename = segment["generations"][generation]["context_latent"]
+            generation_data = segment["generations"][generation]
+            if resolution == "low":
+                filename = (
+                    generation_data.get("context_latent_low")
+                    or generation_data["context_latent"]
+                )
+            else:
+                filename = generation_data["context_latent"]
         except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as error:
             raise FileNotFoundError(
-                f"No active H3 context latent for segment {int(segment_index)} "
+                f"No active H3 {resolution}-resolution context latent for "
+                f"segment {int(segment_index)} "
                 f"in project {safe_name}."
             ) from error
         latent_path = (project_dir / str(filename)).resolve()
@@ -869,17 +1062,214 @@ class EasyH3ProjectContextLatentLoad(io.ComfyNode):
             raise ValueError("H3 context latent path escaped the project directory") from error
         if not latent_path.is_file():
             raise FileNotFoundError(f"H3 context latent was not found: {latent_path}")
-        try:
-            latent = torch.load(
-                latent_path,
-                map_location="cpu",
-                weights_only=False,
+        return io.NodeOutput(load_h3_latent(latent_path))
+
+
+class EasyH3SegmentSamplingStart(io.ComfyNode):
+    """Notify and log immediately before a project sampling pass starts."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy h3SegmentSamplingStart",
+            display_name="H3 Segment Sampling Start",
+            category="_EasyUse/H3",
+            inputs=[
+                io.Noise.Input("noise"),
+                io.Guider.Input("guider"),
+                io.Sampler.Input("sampler"),
+                io.Sigmas.Input("sigmas"),
+                io.Latent.Input("latent_image"),
+                io.String.Input("project_name"),
+                io.Int.Input("segment_index", min=0),
+                io.String.Input("sampling_pass"),
+                io.AnyType.Input("previous", optional=True),
+            ],
+            outputs=[
+                io.Noise.Output("noise"),
+                io.Guider.Output("guider"),
+                io.Sampler.Output("sampler"),
+                io.Sigmas.Output("sigmas"),
+                io.Latent.Output("latent_image"),
+            ],
+            not_idempotent=True,
+            is_dev_only=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        noise: Any,
+        guider: Any,
+        sampler: Any,
+        sigmas: Any,
+        latent_image: dict[str, Any],
+        project_name: str,
+        segment_index: int,
+        sampling_pass: str,
+        previous: Any | None = None,
+    ) -> io.NodeOutput:
+        del previous
+        _notify_multitrack_project_refresh(
+            project_name,
+            "before",
+            segment_index,
+            sampling_pass,
+        )
+        # 获取 sampler_name
+        sampler_name = getattr(sampler, "sampler_name", None) if sampler is not None else None
+        log_node_info(
+            "MultiTrack Project",
+            f"Sampling segment {segment_index} ({sampling_pass}): "
+            f"sampler_name={sampler_name}, sigmas={sigmas}",
+        )
+        return io.NodeOutput(noise, guider, sampler, sigmas, latent_image)
+
+
+class EasyH3SegmentSaveEnd(io.ComfyNode):
+    """Notify after a project segment video has been saved."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy h3SegmentSaveEnd",
+            display_name="H3 Segment Save End",
+            category="_EasyUse/H3",
+            inputs=[
+                io.String.Input("video_path"),
+                io.String.Input("project_name"),
+                io.Int.Input("segment_index", min=0),
+            ],
+            outputs=[io.String.Output("video_path")],
+            not_idempotent=True,
+            is_dev_only=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        video_path: str,
+        project_name: str,
+        segment_index: int,
+    ) -> io.NodeOutput:
+        _notify_multitrack_project_refresh(
+            project_name,
+            "after_save",
+            segment_index,
+        )
+        return io.NodeOutput(video_path)
+
+
+class EasyH3SegmentEncodingStart(io.ComfyNode):
+    """Log when a project segment's decoded media enters video encoding."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy h3SegmentEncodingStart",
+            display_name="H3 Segment Encoding Start",
+            category="_EasyUse/H3",
+            inputs=[
+                io.Image.Input("images"),
+                io.Audio.Input("audio"),
+                io.Int.Input("segment_index", min=0),
+            ],
+            outputs=[
+                io.Image.Output("images"),
+                io.Audio.Output("audio"),
+            ],
+            not_idempotent=True,
+            is_dev_only=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        images: torch.Tensor,
+        audio: dict[str, Any],
+        segment_index: int,
+    ) -> io.NodeOutput:
+        log_node_info("MultiTrack Project", f"Encoding segment {segment_index}")
+        return io.NodeOutput(images, audio)
+
+
+class EasyH3ContextMediaTrim(io.ComfyNode):
+    """Remove an H3 context head and its temporal-grid tail together."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy h3ContextMediaTrim",
+            display_name="H3 Context Media Trim",
+            category="_EasyUse/H3",
+            description=(
+                "Internal exact-duration trim for context-linked H3 project clips."
+            ),
+            inputs=[
+                io.Image.Input("images"),
+                io.Audio.Input("audio"),
+                io.Int.Input("trim_frames", min=0),
+                io.Int.Input("output_frames", min=1),
+                io.Float.Input(
+                    "fps",
+                    default=24.0,
+                    min=1.0,
+                    max=240.0,
+                    step=0.001,
+                ),
+            ],
+            outputs=[
+                io.Image.Output("images"),
+                io.Audio.Output("audio"),
+            ],
+            is_dev_only=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        images: torch.Tensor,
+        audio: dict[str, Any],
+        trim_frames: int,
+        output_frames: int,
+        fps: float = 24.0,
+    ) -> io.NodeOutput:
+        prefix = max(0, int(trim_frames))
+        wanted_frames = max(1, int(output_frames))
+        frame_rate = float(fps)
+        if not math.isfinite(frame_rate) or frame_rate <= 0:
+            raise ValueError("fps must be a positive finite number")
+        if not isinstance(images, torch.Tensor) or images.ndim < 1:
+            raise ValueError("images must be an IMAGE tensor")
+        if prefix + wanted_frames > int(images.shape[0]):
+            raise ValueError(
+                "H3 context trim exceeds decoded video length: "
+                f"need frames {prefix}:{prefix + wanted_frames}, "
+                f"but only {int(images.shape[0])} are available"
             )
-        except (OSError, RuntimeError, TypeError, ValueError) as error:
-            raise RuntimeError(f"Failed to load H3 context latent: {error}") from error
-        if not isinstance(latent, dict) or "samples" not in latent:
-            raise ValueError(f"Invalid H3 context latent: {latent_path}")
-        return io.NodeOutput(latent)
+
+        waveform = audio.get("waveform") if isinstance(audio, dict) else None
+        sample_rate = audio.get("sample_rate") if isinstance(audio, dict) else None
+        if not isinstance(waveform, torch.Tensor) or not isinstance(sample_rate, int):
+            raise ValueError(
+                "audio must contain a tensor waveform and integer sample_rate"
+            )
+        start_sample = max(0, round(prefix / frame_rate * sample_rate))
+        wanted_samples = max(1, round(wanted_frames / frame_rate * sample_rate))
+        end_sample = min(int(waveform.shape[-1]), start_sample + wanted_samples)
+        if start_sample >= int(waveform.shape[-1]):
+            raise ValueError("H3 context trim would remove all decoded audio")
+        output_waveform = waveform[..., start_sample:end_sample]
+        if output_waveform.shape[-1] < wanted_samples:
+            output_waveform = F.pad(
+                output_waveform,
+                (0, wanted_samples - int(output_waveform.shape[-1])),
+            )
+
+        return io.NodeOutput(
+            images[prefix : prefix + wanted_frames],
+            {"waveform": output_waveform, "sample_rate": sample_rate},
+        )
 
 
 class EasyH3ProjectArtifact(io.ComfyNode):
@@ -900,16 +1290,22 @@ class EasyH3ProjectArtifact(io.ComfyNode):
                     default="new",
                 ),
                 io.Int.Input("segment_index", min=0),
-                io.Latent.Input("latent"),
                 io.Latent.Input("context_latent"),
+                io.Latent.Input("context_latent_low", optional=True),
                 io.String.Input("video_path"),
                 TYPE_TRACKS_INFO.Input("tracks_info"),
-                io.String.Input("continuity_mode", default="shot"),
+                io.Combo.Input("continuity_mode", options=['shot', 'context'],default="shot"),
+                io.Combo.Input(
+                    "sampling_pass",
+                    options=["single", "first", "second"],
+                    default="single",
+                ),
                 io.AnyType.Input("previous", optional=True),
             ],
             outputs=[io.String.Output("project_name")],
             is_output_node=True,
             not_idempotent=True,
+            is_dev_only=True
         )
 
     @classmethod
@@ -918,11 +1314,12 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         project_name: str,
         project_save: str,
         segment_index: int,
-        latent: dict[str, Any],
         context_latent: dict[str, Any],
         video_path: str,
         tracks_info: dict[str, Any],
         continuity_mode: str = "shot",
+        sampling_pass: str = "single",
+        context_latent_low: dict[str, Any] | None = None,
         previous: Any | None = None,
     ) -> io.NodeOutput:
         del previous
@@ -932,6 +1329,8 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         project_dir.mkdir(parents=True, exist_ok=True)
         if project_save not in {"new", "override"}:
             raise ValueError("project_save must be 'new' or 'override'")
+        if sampling_pass not in {"single", "first", "second"}:
+            raise ValueError("sampling_pass must be 'single', 'first', or 'second'")
         generation = choose_h3_generation(
             project_dir,
             int(segment_index),
@@ -951,35 +1350,30 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         )
         source_video.replace(target_video)
 
-        target_latent = project_dir / f"latent_{int(segment_index)}_{generation}.pt"
-        temporary_latent = project_dir / (
-            f".latent_{int(segment_index)}_{generation}.tmp"
-        )
-        try:
-            torch.save(latent, temporary_latent)
-            temporary_latent.replace(target_latent)
-        except (OSError, RuntimeError, TypeError) as error:
-            if temporary_latent.exists():
-                temporary_latent.unlink()
-            raise RuntimeError(f"Failed to save H3 latent: {error}") from error
-
         target_context_latent = (
             project_dir
-            / f"context_latent_{int(segment_index)}_{generation}.pt"
+            / f"context_latent_{int(segment_index)}_{generation}.safetensors"
         )
-        temporary_context_latent = (
-            project_dir
-            / f".context_latent_{int(segment_index)}_{generation}.tmp"
-        )
-        try:
-            torch.save(context_latent, temporary_context_latent)
-            temporary_context_latent.replace(target_context_latent)
-        except (OSError, RuntimeError, TypeError) as error:
-            if temporary_context_latent.exists():
-                temporary_context_latent.unlink()
-            raise RuntimeError(
-                f"Failed to save H3 context latent: {error}"
-            ) from error
+        save_h3_latent(context_latent, target_context_latent)
+
+        target_context_latent_low: Path | None = None
+        if context_latent_low is not None:
+            target_context_latent_low = project_dir / (
+                f"context_latent_low_{int(segment_index)}_{generation}.safetensors"
+            )
+            save_h3_latent(context_latent_low, target_context_latent_low)
+        else:
+            stale_context_latent_low = project_dir / (
+                f"context_latent_low_{int(segment_index)}_{generation}.safetensors"
+            )
+            if stale_context_latent_low.is_file():
+                try:
+                    stale_context_latent_low.unlink()
+                except OSError as error:
+                    raise RuntimeError(
+                        "Failed to remove stale H3 low-resolution context "
+                        f"latent: {error}"
+                    ) from error
 
         manifest_path = project_dir / "project.json"
         if manifest_path.is_file():
@@ -1020,12 +1414,17 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         if not isinstance(versions, dict):
             versions = {}
             segment_manifest["generations"] = versions
-        versions[str(generation)] = {
-            "latent": target_latent.name,
+        generation_manifest = {
             "context_latent": target_context_latent.name,
             "video": target_video.name,
+            "sampling_pass": sampling_pass,
             "updated_at": time.time(),
         }
+        if target_context_latent_low is not None:
+            generation_manifest["context_latent_low"] = (
+                target_context_latent_low.name
+            )
+        versions[str(generation)] = generation_manifest
         segment_manifest["active_generation"] = generation
         segment_manifest["continuity_mode"] = (
             "context" if str(continuity_mode).lower() == "context" else "shot"
@@ -1136,6 +1535,11 @@ def _h3_second_pass_model(
 
 class EasyMultiTrackProject(io.ComfyNode):
     @classmethod
+    def _sampling_plan_options(cls) -> list[str]:
+        """Return sorted sampling plan keys: user presets first, then 'custom'."""
+        return get_h3_preset_keys()
+
+    @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
             node_id="easy multitrackProject",
@@ -1150,18 +1554,15 @@ class EasyMultiTrackProject(io.ComfyNode):
             is_output_node=True,
             not_idempotent=True,
             inputs=[
-                TYPE_FAST_MODEL_LOADER.Input("model_loader"),
                 TYPE_TRACKS_INFO.Input("tracks_info"),
-                io.Image.Input("images", optional=True),
-                io.Audio.Input("audio", optional=True),
-                io.Video.Input("video", optional=True),
+                TYPE_FAST_MODEL_LOADER.Input("model_loader"),
                 io.Sampler.Input("sampler", optional=True),
                 io.Sigmas.Input("sigmas", optional=True),
                 io.String.Input("project_name", default=""),
                 io.Combo.Input(
                     "project_save",
                     options=["new", "override"],
-                    default="new",
+                    default="override",
                 ),
                 io.Int.Input(
                     "segment_start_index",
@@ -1179,8 +1580,9 @@ class EasyMultiTrackProject(io.ComfyNode):
                     step=1,
                     tooltip=(
                         "Maximum task segments in this queue. When set to -1, "
-                        "saved segments from segment_start_index onward are "
-                        "deleted before regeneration."
+                        "override mode deletes saved segments from "
+                        "segment_start_index onward before regeneration; new "
+                        "mode preserves existing video and latent files."
                     ),
                 ),
                 io.Int.Input(
@@ -1192,9 +1594,9 @@ class EasyMultiTrackProject(io.ComfyNode):
                     control_after_generate=io.ControlAfterGenerate.fixed,
                 ),
                 io.Combo.Input(
-                    "sampling_presets",
-                    options=["custom", "fast", "medium"],
-                    default="medium",
+                    "sampling_plan",
+                    options=cls._sampling_plan_options(),
+                    default="light",
                 ),
                 io.DynamicCombo.Input(
                     "sampling_mode",
@@ -1213,7 +1615,15 @@ class EasyMultiTrackProject(io.ComfyNode):
                                         "components remain from the first-pass loader."
                                     ),
                                 ),
-                                io.Boolean.Input("1st_pass_only", default=False),
+                                io.Boolean.Input(
+                                    "1st_pass_only",
+                                    default=False,
+                                    tooltip=(
+                                        "Run and save only the first selected segment's "
+                                        "first pass. Turn this off on the next run to "
+                                        "resume directly from that checkpoint at pass two."
+                                    ),
+                                ),
                                 io.Boolean.Input("disable_noise", default=False),
                                 io.Float.Input(
                                     "upscale_by",
@@ -1244,16 +1654,15 @@ class EasyMultiTrackProject(io.ComfyNode):
         progress_bar = ProgressBar(progress_total)
         progress_value = 0
 
-        def report_step(message: str, target: float) -> None:
+        def report_step(target: float) -> None:
             nonlocal progress_value
             progress_value = max(
                 progress_value,
                 min(progress_total, int(round(target))),
             )
-            log_node_info(node_name, message)
             progress_bar.update_absolute(progress_value, progress_total)
 
-        report_step("Starting project graph construction", 0)
+        report_step(0)
         selected_model_loader = _first_input(kwargs.get("model_loader"))
         if not isinstance(selected_model_loader, dict):
             raise TypeError("model_loader must contain a FAST_MODEL_LOADER dictionary.")
@@ -1262,8 +1671,6 @@ class EasyMultiTrackProject(io.ComfyNode):
         clip = selected_model_loader.get("clip")
         vae = selected_model_loader.get("vae")
         audio_vae = selected_model_loader.get("audio_vae")
-        latent_upscale_model = selected_model_loader.get("latent_upscale_model")
-
         missing_components = [
             name
             for name, value in (("model", model), ("clip", clip), ("vae", vae))
@@ -1275,7 +1682,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                 + ", ".join(missing_components)
             )
         _require_minimax_h3_model(model)
-        report_step("Validated the first-pass model loader", 5)
+        report_step(5)
 
         sampling_mode, sampling_config = _h3_sampling_mode_config(
             kwargs.get("sampling_mode")
@@ -1305,11 +1712,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                 model=model,
             )
             _require_minimax_h3_model(second_model)
-        report_step(
-            f"Resolved sampling mode '{sampling_mode}' "
-            f"(second pass: {run_second_pass})",
-            10,
-        )
+        report_step(10)
 
         turbo_detection = detect_turbo_model(model)
         prompt_turbo_detection = None
@@ -1321,21 +1724,17 @@ class EasyMultiTrackProject(io.ComfyNode):
             )
             if prompt_turbo_detection is not None:
                 turbo_detection = prompt_turbo_detection
-        report_step(
-            f"First-pass Turbo detection: {turbo_detection.as_dict()}",
-            15,
-        )
+        report_step(15)
         second_turbo_detection = turbo_detection
         if run_second_pass and second_model is not model:
             second_turbo_detection = detect_turbo_model(second_model)
-            report_step(
-                f"Second-pass Turbo detection: "
-                f"{second_turbo_detection.as_dict()}",
-                16,
-            )
+            report_step(16)
 
         info = parse_tracks_info(kwargs.get("tracks_info"))
         safe_project_name = safe_h3_project_name(kwargs.get("project_name"))
+        project_save = str(_first_input(kwargs.get("project_save"), "new"))
+        if project_save not in {"new", "override"}:
+            raise ValueError("project_save must be 'new' or 'override'")
         initialize_h3_project(
             safe_project_name,
             info,
@@ -1354,24 +1753,39 @@ class EasyMultiTrackProject(io.ComfyNode):
                 "No H3 task segments are available from segment_start_index."
             )
 
-        if segment_count == -1:
-            removed_paths = clear_h3_project_segments_from(
+        resume_task_index: int | None = None
+        if run_second_pass and selected_entries:
+            first_selected_index = selected_entries[0][0]
+            if has_h3_first_pass_checkpoint(
                 safe_project_name,
-                segment_start_index,
+                first_selected_index,
+                folder_paths.get_output_directory(),
+            ):
+                resume_task_index = first_selected_index
+                log_node_info(
+                    node_name,
+                    f"Resuming segment {first_selected_index} from its first-pass checkpoint",
+                )
+
+        if project_save == "override" and segment_count == -1:
+            clear_h3_project_segments_from(
+                safe_project_name,
+                (
+                    resume_task_index + 1
+                    if resume_task_index is not None
+                    else segment_start_index
+                ),
                 folder_paths.get_output_directory(),
             )
-            report_step(
-                f"Cleared saved project segments from index "
-                f"{segment_start_index} ({len(removed_paths)} artifacts removed)",
-                19,
-            )
+            report_step(19)
 
         if first_pass_only and has_second_pass:
             selected_entries = selected_entries[:1]
-        report_step(
-            f"Selected {len(selected_entries)} of {len(all_entries)} project segments",
-            20,
+        log_node_info(
+            node_name,
+            f"Found {len(all_entries)} segments; processing {len(selected_entries)}",
         )
+        report_step(20)
         upscale_by = float(_first_input(sampling_config.get("upscale_by"), 1.5))
         if not math.isfinite(upscale_by) or upscale_by < 1:
             raise ValueError(
@@ -1389,9 +1803,6 @@ class EasyMultiTrackProject(io.ComfyNode):
         )
         first_pass_seed = int(_first_input(kwargs.get("seed"), 42))
         second_pass_seed = first_pass_seed
-        project_save = str(_first_input(kwargs.get("project_save"), "new"))
-        if project_save not in {"new", "override"}:
-            raise ValueError("project_save must be 'new' or 'override'")
         selected_upscale_model = str(
             _first_input(kwargs.get("upscale_model"), "None")
         )
@@ -1399,24 +1810,23 @@ class EasyMultiTrackProject(io.ComfyNode):
             raise ValueError(
                 "model_loader must include audio_vae to decode MiniMax H3 audio."
             )
-        report_step(
-            f"Resolved project '{safe_project_name}' at "
-            f"{target_width}x{target_height}, save mode '{project_save}'",
-            25,
-        )
+        report_step(25)
 
         graph = GraphBuilder()
-        report_step("Created the expandable project graph", 27)
-        preset_name = str(_first_input(kwargs.get("sampling_presets"), "medium"))
-        first_pass_sampler, first_pass_sigmas = _h3_resolve_pass_sampling(
-            graph,
-            pass_name="first_pass",
-            sampler=_first_input(kwargs.get("sampler")),
-            sigmas=_first_input(kwargs.get("sigmas")),
-            preset_name=preset_name,
-            has_second_pass=has_second_pass,
-            is_turbo=turbo_detection.is_turbo,
-        )
+        report_step(27)
+        preset_name = str(_first_input(kwargs.get("sampling_plan"), "medium"))
+        first_pass_sampler: Any | None = None
+        first_pass_sigmas: Any | None = None
+        if any(task_index != resume_task_index for task_index, _ in selected_entries):
+            first_pass_sampler, first_pass_sigmas = _h3_resolve_pass_sampling(
+                graph,
+                pass_name="first_pass",
+                sampler=_first_input(kwargs.get("sampler")),
+                sigmas=_first_input(kwargs.get("sigmas")),
+                preset_name=preset_name,
+                has_second_pass=has_second_pass,
+                is_turbo=turbo_detection.is_turbo,
+            )
         second_pass_sampler: Any | None = None
         second_pass_sigmas: Any | None = None
         if run_second_pass:
@@ -1435,42 +1845,35 @@ class EasyMultiTrackProject(io.ComfyNode):
                 has_second_pass=True,
                 is_turbo=second_turbo_detection.is_turbo,
             )
-        report_step(
-            f"Resolved '{preset_name}' sampling schedule(s)",
-            31,
-        )
+        report_step(31)
 
-        upscale_model_value = latent_upscale_model
-        if run_second_pass and selected_upscale_model != "None":
-            report_step(
-                f"Adding latent upscale model '{selected_upscale_model}'",
-                33,
+        if (
+            run_second_pass
+            and upscale_by > 1
+            and selected_upscale_model != "None"
+            and _h3_node_mapping("MinimaxH3LatentUpscaler3D") is None
+        ):
+            raise RuntimeError(
+                "MinimaxH3LatentUpscaler3D is required when an H3 upscale_model "
+                "is selected. Install Comfyui_Minimax_h3_latent_Upscaler."
             )
-            upscale_model_value = graph.node(
-                "LatentUpscaleModelLoader",
-                id="latent_upscale_model",
-                model_name=selected_upscale_model,
-            ).out(0)
-        else:
-            report_step("Using the model loader's latent upscale configuration", 33)
+        report_step(33)
 
-        previous_context_latent: Any | None = None
-        previous_context_frames: Any | None = None
+        previous_hires_context_latent: Any | None = None
+        previous_low_context_latent: Any | None = None
         previous_artifact: Any | None = None
         last_project_output: Any | None = None
-        report_step("Beginning per-segment graph construction", 35)
+        report_step(35)
 
         segment_total = len(selected_entries)
         for segment_position, (task_index, entry) in enumerate(selected_entries):
             def report_segment_step(
-                message: str,
                 phase: float,
                 *,
                 current_position: int = segment_position,
-                current_task_index: int = task_index,
             ) -> None:
                 target = 35 + 60 * (current_position + phase) / segment_total
-                report_step(f"Segment {current_task_index}: {message}", target)
+                report_step(target)
 
             task_type = h3_task_type(entry, info)
             generation_mode = h3_generation_mode(task_type)
@@ -1481,28 +1884,41 @@ class EasyMultiTrackProject(io.ComfyNode):
                 if isinstance(content, dict)
                 else "shot"
             )
-            report_segment_step(
-                f"Preparing '{generation_mode}' task",
-                0.0,
+
+            # 当 二采 衔接模式为 上下文 时 需要 使用降低的sigmas阈值 增强连续性 避免过高的sigmas导致画面细节变化过大
+            if run_second_pass and continuity_mode == 'context':
+                sigmas_2_context = sampling_config.get('sigmas_2_context', None)
+                if sigmas_2_context:
+                    second_pass_sigmas = sigmas_2_context
+
+            ref_image_size = (
+                str(content.get("ref_image_size", "match")).lower()
+                if isinstance(content, dict)
+                else "match"
             )
-            report_segment_step("Adding multi-track task output", 0.04)
+            report_segment_step(0.0)
+            report_segment_step(0.04)
             task_output = graph.node(
                 "easy multiTrackTaskOutput",
                 id=f"task_{task_index}",
                 tracks_info=info,
-                images=kwargs.get("images"),
-                audio=kwargs.get("audio"),
-                video=kwargs.get("video"),
                 task_index=task_index,
                 prompt_format="default",
             )
-            task_length: Any = task_output.out(3)
-            if continuity_mode == "context":
+            base_task_length: Any = task_output.out(3)
+            task_length: Any = base_task_length
+            will_have_context_continuity = (
+                continuity_mode == "context"
+                and (previous_hires_context_latent is not None or task_index > 0)
+            )
+            context_source_frames = 22
+            context_generation_frames = 34
+            if will_have_context_continuity:
                 task_length = graph.node(
                     "ComfyMathExpression",
                     id=f"context_length_{task_index}",
-                    expression="a + 34",
-                    a=task_length,
+                    expression=f"a + {context_generation_frames}",
+                    **{"values.a": task_length},
                 ).out(1)
             conditioning_inputs: dict[str, Any] = {
                 "clip": clip,
@@ -1514,192 +1930,294 @@ class EasyMultiTrackProject(io.ComfyNode):
                 "width": first_pass_width,
                 "height": first_pass_height,
                 "length": task_length,
-                "ref_image_size": "match",
+                "ref_image_size": ref_image_size,
             }
             if generation_mode == "reference":
                 conditioning_inputs["audios"] = task_output.out(5)
                 conditioning_inputs["videos"] = task_output.out(6)
-            report_segment_step("Adding MiniMax H3 conditioning", 0.10)
+            report_segment_step(0.10)
             conditioning = graph.node(
                 "easy minimaxH3ToVideo",
                 id=f"conditioning_{task_index}",
                 **conditioning_inputs,
             )
-            positive = conditioning.out(0)
+            base_positive = conditioning.out(0)
+            second_pass_positive = base_positive
+            if (
+                run_second_pass
+                and (first_pass_width, first_pass_height)
+                != (target_width, target_height)
+            ):
+                second_pass_conditioning_inputs = dict(conditioning_inputs)
+                second_pass_conditioning_inputs.update(
+                    {
+                        "width": target_width,
+                        "height": target_height,
+                    }
+                )
+                second_pass_conditioning = graph.node(
+                    "easy minimaxH3ToVideo",
+                    id=f"second_pass_conditioning_{task_index}",
+                    **second_pass_conditioning_inputs,
+                )
+                second_pass_positive = second_pass_conditioning.out(0)
+            positive = base_positive
             initial_latent = conditioning.out(1)
 
             if (
                 continuity_mode == "context"
-                and previous_context_latent is None
+                and previous_hires_context_latent is None
                 and task_index > 0
             ):
-                report_segment_step("Loading the previous context latent", 0.14)
-                loaded_context = graph.node(
+                report_segment_step(0.14)
+                loaded_hires_context = graph.node(
                     "easy h3ProjectContextLatentLoad",
-                    id=f"load_context_{task_index}",
+                    id=f"load_hires_context_{task_index}",
                     project_name=safe_project_name,
                     segment_index=task_index - 1,
+                    resolution="high",
                 )
-                previous_context_latent = loaded_context.out(0)
-                report_segment_step("Decoding the previous context latent", 0.18)
-                previous_context_frames = graph.node(
-                    "VAEDecode",
-                    id=f"decode_context_{task_index}",
-                    samples=previous_context_latent,
-                    vae=vae,
-                ).out(0)
+                previous_hires_context_latent = loaded_hires_context.out(0)
+                if has_second_pass:
+                    loaded_low_context = graph.node(
+                        "easy h3ProjectContextLatentLoad",
+                        id=f"load_low_context_{task_index}",
+                        project_name=safe_project_name,
+                        segment_index=task_index - 1,
+                        resolution="low",
+                    )
+                    previous_low_context_latent = loaded_low_context.out(0)
+                else:
+                    previous_low_context_latent = previous_hires_context_latent
+                report_segment_step(0.18)
             context_trim_frames: Any | None = None
-            if continuity_mode == "context" and previous_context_latent is not None:
-                report_segment_step("Adding motion-context conditioning", 0.22)
-                motion_context = graph.node(
-                    "easy MiniMaxH3MotionContext",
-                    id=f"motion_context_{task_index}",
-                    **_h3_motion_context_inputs(
-                        positive,
-                        vae,
-                        initial_latent,
-                        previous_context_frames,
-                        previous_context_latent,
+            first_pass_context_trim_frames: Any | None = None
+            first_pass_context_latent = (
+                previous_low_context_latent
+                if has_second_pass
+                else previous_hires_context_latent
+            )
+            has_context_continuity = (
+                continuity_mode == "context"
+                and first_pass_context_latent is not None
+            )
+            # Lock task audio after the context source is known so its timeline
+            # can be shifted behind the copied source prefix. The extra 12
+            # generated frames required by H3's temporal grid are removed from
+            # the tail after decoding, not from the task's opening frames.
+            if h3_locked_audio_track(entry, info) is not None:
+                report_segment_step(0.20)
+                initial_latent = graph.node(
+                    "easy minimaxH3AudioLock",
+                    id=f"audio_lock_{task_index}",
+                    latent=initial_latent,
+                    audio_vae=audio_vae,
+                    audio=task_output.out(8),
+                    remix_strength=1.0,
+                    short_audio_mode="silence",
+                    prepend_frames=(
+                        context_source_frames if has_context_continuity else 0
                     ),
+                    frame_rate=fps,
+                ).out(0)
+
+            # 使用优化后的 MotionContext
+            if has_context_continuity:
+                report_segment_step(0.22)
+                motion_context = graph.node(
+                    "easy MiniMaxH3MotionContextHard",
+                    id=f"hard_motion_context_{task_index}",
+                    conditioning=positive,
+                    vae=vae,
+                    latent=initial_latent,
+                    context_latent=first_pass_context_latent,
+                    context_length=str(context_source_frames),
+                    audio_context_length=context_source_frames,
+                    video_transition_steps=4,
+                    audio_transition_steps=4,
                 )
                 positive = motion_context.out(0)
-                context_trim_frames = motion_context.out(1)
+                first_pass_context_trim_frames = motion_context.out(1)
+                context_trim_frames = first_pass_context_trim_frames
+                initial_latent = motion_context.out(2)
             else:
-                report_segment_step("No motion-context conditioning required", 0.22)
+                report_segment_step(0.22)
 
-            report_segment_step("Adding the first-pass guider", 0.28)
+            report_segment_step(0.28)
             first_pass_guider = graph.node(
                 "BasicGuider",
                 id=f"first_pass_guider_{task_index}",
                 model=model,
                 conditioning=positive,
             )
-            report_segment_step("Adding first-pass noise", 0.32)
-            first_pass_noise = graph.node(
-                "RandomNoise",
-                id=f"first_pass_noise_{task_index}",
-                noise_seed=first_pass_seed,
-            )
-            report_segment_step("Adding the first-pass sampler", 0.38)
-            first_pass_sample = graph.node(
-                "SamplerCustomAdvanced",
-                id=f"first_pass_sample_{task_index}",
-                noise=first_pass_noise.out(0),
-                guider=first_pass_guider.out(0),
-                sampler=first_pass_sampler,
-                sigmas=first_pass_sigmas,
-                latent_image=initial_latent,
-            )
-            first_pass_latent = first_pass_sample.out(1)
+            if task_index == resume_task_index:
+                report_segment_step(0.38)
+                first_pass_latent = graph.node(
+                    "easy h3ProjectContextLatentLoad",
+                    id=f"resume_first_pass_{task_index}",
+                    project_name=safe_project_name,
+                    segment_index=task_index,
+                ).out(0)
+            else:
+                report_segment_step(0.32)
+                first_pass_noise = graph.node(
+                    "RandomNoise",
+                    id=f"first_pass_noise_{task_index}",
+                    noise_seed=first_pass_seed,
+                )
+                report_segment_step(0.38)
+                sampling_inputs: dict[str, Any] = {
+                    "noise": first_pass_noise.out(0),
+                    "guider": first_pass_guider.out(0),
+                    "sampler": first_pass_sampler,
+                    "sigmas": first_pass_sigmas,
+                    "latent_image": initial_latent,
+                    "project_name": safe_project_name,
+                    "segment_index": task_index,
+                }
+                if previous_artifact is not None:
+                    sampling_inputs["previous"] = previous_artifact
+                sampling_start = graph.node(
+                    "easy h3SegmentSamplingStart",
+                    id=f"sampling_start_{task_index}",
+                    sampling_pass="first",
+                    **sampling_inputs,
+                )
+                first_pass_sample = graph.node(
+                    "SamplerCustomAdvanced",
+                    id=f"first_pass_sample_{task_index}",
+                    noise=sampling_start.out(0),
+                    guider=sampling_start.out(1),
+                    sampler=sampling_start.out(2),
+                    sigmas=sampling_start.out(3),
+                    latent_image=sampling_start.out(4),
+                )
+                first_pass_latent = first_pass_sample.out(1)
             final_latent = first_pass_latent
-            report_segment_step("First-pass graph is ready", 0.42)
+            report_segment_step(0.42)
 
             if run_second_pass:
                 if upscale_by <= 1:
-                    report_segment_step(
-                        "Reusing the first-pass latent for the second pass",
-                        0.46,
-                    )
+                    report_segment_step(0.46)
                     upscaled_latent = final_latent
-                elif (
-                    upscale_model_value is not None
-                    and _h3_node_mapping("MinimaxH3LatentUpscaler3D") is not None
-                ):
-                    report_segment_step("Adding latent-model upscaling", 0.50)
-                    upscaled_latent = graph.node(
-                        "MinimaxH3LatentUpscaler3D",
-                        id=f"latent_upscale_{task_index}",
-                        **_h3_latent_upscale_inputs(
-                            final_latent,
-                            upscale_model_value,
-                            target_width,
-                            target_height,
-                        ),
-                    ).out(0)
                 else:
-                    report_segment_step("Separating the first-pass AV latent", 0.45)
+                    report_segment_step(0.45)
                     separated = graph.node(
                         "LTXVSeparateAVLatent",
                         id=f"separate_first_pass_{task_index}",
                         av_latent=final_latent,
                     )
-                    report_segment_step("Decoding first-pass video frames", 0.48)
-                    first_pass_images = graph.node(
-                        "VAEDecode",
-                        id=f"first_pass_decode_{task_index}",
-                        samples=separated.out(0),
-                        vae=vae,
-                    )
-                    report_segment_step("Resizing first-pass video frames", 0.51)
-                    resized = graph.node(
-                        "ImageResizeKJv2",
-                        id=f"first_pass_resize_{task_index}",
-                        **_h3_image_resize_inputs(
-                            first_pass_images.out(0),
-                            target_width,
-                            target_height,
-                        ),
-                    )
-                    report_segment_step("Re-encoding resized video frames", 0.54)
-                    encoded_video = graph.node(
-                        "VAEEncode",
-                        id=f"first_pass_reencode_{task_index}",
-                        pixels=resized.out(0),
-                        vae=vae,
-                    )
-                    report_segment_step("Recombining the video and audio latents", 0.57)
+                    if selected_upscale_model != "None":
+                        report_segment_step(0.50)
+                        upscaled_video = graph.node(
+                            "MinimaxH3LatentUpscaler3D",
+                            id=f"latent_upscale_{task_index}",
+                            **_h3_latent_upscale_inputs(
+                                separated.out(0),
+                                selected_upscale_model,
+                                target_width,
+                                target_height
+                            ),
+                        )
+                        video_latent = upscaled_video.out(0)
+                    else:
+                        report_segment_step(0.48)
+                        first_pass_images = graph.node(
+                            "VAEDecode",
+                            id=f"first_pass_decode_{task_index}",
+                            samples=separated.out(0),
+                            vae=vae,
+                        )
+                        report_segment_step(0.51)
+                        resized = graph.node(
+                            "ImageResizeKJv2",
+                            id=f"first_pass_resize_{task_index}",
+                            **_h3_image_resize_inputs(
+                                first_pass_images.out(0),
+                                target_width,
+                                target_height,
+                            ),
+                        )
+                        report_segment_step(0.54)
+                        encoded_video = graph.node(
+                            "VAEEncode",
+                            id=f"first_pass_reencode_{task_index}",
+                            pixels=resized.out(0),
+                            vae=vae,
+                        )
+                        video_latent = encoded_video.out(0)
+
+                    report_segment_step(0.57)
                     upscaled_latent = graph.node(
                         "LTXVConcatAVLatent",
                         id=f"first_pass_recombine_{task_index}",
-                        video_latent=encoded_video.out(0),
+                        video_latent=video_latent,
                         audio_latent=separated.out(1),
                     ).out(0)
 
-                report_segment_step("Adding second-pass noise", 0.62)
+                if (
+                    continuity_mode == "context"
+                    and previous_hires_context_latent is not None
+                ):
+                    report_segment_step(0.59)
+                    hires_continuity = graph.node(
+                        "easy MiniMaxH3HiResContinuity",
+                        id=f"hires_continuity_{task_index}",
+                        current_hires_latent=upscaled_latent,
+                        previous_hires_latent=previous_hires_context_latent,
+                        context_length="22",
+                        video_transition_steps=4,
+                    )
+                    upscaled_latent = hires_continuity.out(0)
+                    context_trim_frames = hires_continuity.out(1)
+
+                report_segment_step(0.62)
                 second_pass_noise = graph.node(
                     "DisableNoise" if disable_noise else "RandomNoise",
                     id=f"second_pass_noise_{task_index}",
                     **({} if disable_noise else {"noise_seed": second_pass_seed}),
                 )
-                second_pass_guider = first_pass_guider
-                if second_model is not model:
-                    report_segment_step("Adding the second-pass guider", 0.66)
-                    second_pass_guider = graph.node(
-                        "BasicGuider",
-                        id=f"second_pass_guider_{task_index}",
-                        model=second_model,
-                        conditioning=positive,
-                    )
-                else:
-                    report_segment_step(
-                        "Reusing the first-pass guider for the second pass",
-                        0.66,
-                    )
-                report_segment_step("Adding the second-pass sampler", 0.71)
-                second_pass_sample = graph.node(
-                    "SamplerCustomAdvanced",
-                    id=f"second_pass_sample_{task_index}",
+                report_segment_step(0.66)
+                second_pass_guider = graph.node(
+                    "BasicGuider",
+                    id=f"second_pass_guider_{task_index}",
+                    model=second_model,
+                    conditioning=second_pass_positive,
+                )
+                report_segment_step(0.71)
+                second_sampling_start = graph.node(
+                    "easy h3SegmentSamplingStart",
+                    id=f"second_sampling_start_{task_index}",
                     noise=second_pass_noise.out(0),
                     guider=second_pass_guider.out(0),
                     sampler=second_pass_sampler,
                     sigmas=second_pass_sigmas,
                     latent_image=upscaled_latent,
+                    project_name=safe_project_name,
+                    segment_index=task_index,
+                    sampling_pass="second",
+                )
+                second_pass_sample = graph.node(
+                    "SamplerCustomAdvanced",
+                    id=f"second_pass_sample_{task_index}",
+                    noise=second_sampling_start.out(0),
+                    guider=second_sampling_start.out(1),
+                    sampler=second_sampling_start.out(2),
+                    sigmas=second_sampling_start.out(3),
+                    latent_image=second_sampling_start.out(4),
                 )
                 final_latent = second_pass_sample.out(1)
             else:
-                report_segment_step(
-                    "Second pass is disabled; using the first-pass latent",
-                    0.71,
-                )
+                report_segment_step(0.71)
 
-            report_segment_step("Decoding the final video frames", 0.76)
+            report_segment_step(0.76)
             decoded_images = graph.node(
                 "VAEDecode",
                 id=f"decode_video_{task_index}",
                 samples=final_latent,
                 vae=vae,
             )
-            report_segment_step("Decoding the final audio", 0.80)
+            report_segment_step(0.80)
             decoded_audio = graph.node(
                 "VAEDecodeAudio",
                 id=f"decode_audio_{task_index}",
@@ -1709,33 +2227,86 @@ class EasyMultiTrackProject(io.ComfyNode):
             output_images = decoded_images.out(0)
             output_audio = decoded_audio.out(0)
             if context_trim_frames is not None:
-                if _h3_node_mapping("MiniMaxH3MotionContextTrim") is None:
-                    raise RuntimeError(
-                        "A context-linked H3 task requires "
-                        "MiniMaxH3MotionContextTrim."
-                    )
-                report_segment_step("Trimming motion-context overlap", 0.84)
+                report_segment_step(0.84)
                 trimmed = graph.node(
-                    "MiniMaxH3MotionContextTrim",
+                    "easy h3ContextMediaTrim",
                     id=f"motion_context_trim_{task_index}",
                     images=output_images,
                     audio=output_audio,
                     trim_frames=context_trim_frames,
+                    output_frames=base_task_length,
                     fps=fps,
-                    match_tail=True,
                 )
                 output_images = trimmed.out(0)
                 output_audio = trimmed.out(1)
             else:
-                report_segment_step("No motion-context trimming required", 0.84)
-            report_segment_step("Saving the generated video", 0.89)
+                report_segment_step(0.84)
+
+            project_hires_context_latent = final_latent
+            project_low_context_latent = (
+                first_pass_latent if has_second_pass else final_latent
+            )
+            if context_trim_frames is not None:
+                # A context generation contains both the copied head and H3's
+                # temporal-grid tail. The saved sampling latent still contains
+                # both even though the delivered media has been trimmed. Build
+                # the next segment's context from the exact delivered span so
+                # consecutive context tasks cannot copy the stale grid tail.
+                project_hires_context_latent = _h3_encode_context_media(
+                    graph,
+                    output_images,
+                    output_audio,
+                    vae,
+                    audio_vae,
+                    f"hires_context_{task_index}",
+                )
+                if has_second_pass and run_second_pass:
+                    low_context_images = graph.node(
+                        "VAEDecode",
+                        id=f"low_context_video_decode_{task_index}",
+                        samples=first_pass_latent,
+                        vae=vae,
+                    )
+                    low_context_audio = graph.node(
+                        "VAEDecodeAudio",
+                        id=f"low_context_audio_decode_{task_index}",
+                        samples=first_pass_latent,
+                        vae=audio_vae,
+                    )
+                    low_context_media = graph.node(
+                        "easy h3ContextMediaTrim",
+                        id=f"low_context_trim_{task_index}",
+                        images=low_context_images.out(0),
+                        audio=low_context_audio.out(0),
+                        trim_frames=first_pass_context_trim_frames,
+                        output_frames=base_task_length,
+                        fps=fps,
+                    )
+                    project_low_context_latent = _h3_encode_context_media(
+                        graph,
+                        low_context_media.out(0),
+                        low_context_media.out(1),
+                        vae,
+                        audio_vae,
+                        f"low_context_{task_index}",
+                    )
+                else:
+                    project_low_context_latent = project_hires_context_latent
+            report_segment_step(0.89)
+            encoding_start = graph.node(
+                "easy h3SegmentEncodingStart",
+                id=f"encoding_start_{task_index}",
+                images=output_images,
+                audio=output_audio,
+                segment_index=task_index,
+            )
             saved_video = graph.node(
                 "easy saveVideo",
                 id=f"save_video_{task_index}",
                 input_mode="images+audio",
                 **{
-                    "input_mode.images": output_images,
-                    "input_mode.audio": output_audio,
+                    "input_mode.images": encoding_start.out(0),
+                    "input_mode.audio": encoding_start.out(1),
                     "input_mode.fps": fps,
                     "output_mode": "hide&save",
                 },
@@ -1744,19 +2315,32 @@ class EasyMultiTrackProject(io.ComfyNode):
                     f".staging_video_{task_index}"
                 ),
             )
+            saved_video_end = graph.node(
+                "easy h3SegmentSaveEnd",
+                id=f"save_end_{task_index}",
+                video_path=saved_video.out(1),
+                project_name=safe_project_name,
+                segment_index=task_index,
+            )
             artifact_inputs: dict[str, Any] = {
                 "project_name": safe_project_name,
                 "project_save": project_save,
                 "segment_index": task_index,
-                "latent": final_latent,
-                "context_latent": first_pass_latent,
-                "video_path": saved_video.out(1),
+                "context_latent": project_hires_context_latent,
+                "video_path": saved_video_end.out(0),
                 "tracks_info": info,
                 "continuity_mode": continuity_mode,
+                "sampling_pass": (
+                    "first"
+                    if first_pass_only and has_second_pass
+                    else "second" if has_second_pass else "single"
+                ),
             }
+            if has_second_pass:
+                artifact_inputs["context_latent_low"] = project_low_context_latent
             if previous_artifact is not None:
                 artifact_inputs["previous"] = previous_artifact
-            report_segment_step("Writing the project artifact", 0.95)
+            report_segment_step(0.95)
             artifact = graph.node(
                 "easy h3ProjectArtifact",
                 id=f"artifact_{task_index}",
@@ -1764,14 +2348,14 @@ class EasyMultiTrackProject(io.ComfyNode):
             )
             previous_artifact = artifact.out(0)
             last_project_output = artifact.out(0)
-            previous_context_latent = first_pass_latent
-            previous_context_frames = output_images
-            report_segment_step("Segment graph is ready", 1.0)
+            previous_hires_context_latent = project_hires_context_latent
+            previous_low_context_latent = project_low_context_latent
+            report_segment_step(1.0)
 
         if last_project_output is None:
             log_node_info(node_name, "Project graph produced no task output")
             raise RuntimeError("H3 project graph produced no task output")
-        report_step("Project graph construction completed", 100)
+        report_step(100)
         return io.NodeOutput(last_project_output, expand=graph.finalize())
 
 

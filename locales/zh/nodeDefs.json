@@ -301,8 +301,7 @@
       "model": { "name": "模型" },
       "clip": { "name": "CLIP" },
       "vae": { "name": "VAE" },
-      "audio_vae": { "name": "音频 VAE" },
-      "latent_upscale_model": { "name": "潜空间放大模型" }
+      "audio_vae": { "name": "音频 VAE" }
     },
     "outputs": {
       "0": { "name": "模型加载器" }
@@ -776,7 +775,7 @@
       "images": { "name": "图像" },
       "audio": { "name": "音频" },
       "video": { "name": "视频" },
-      "task_index": { "name": "任务索引" },
+      "task_index": { "name": "任务片段索引" },
       "prompt_format": { "name": "提示词格式", "tooltip": "选择任务提示词的输出格式。" }
     },
     "outputs": {
@@ -810,6 +809,7 @@
       "return_async": { "name": "异步返回", "tooltip": "当前仅在 h3-context-ir 有效；开启时不进行任务查询。" },
       "apikey": { "name": "API 密钥", "tooltip": "服务 API 密钥。留空时从 config.yaml 或环境变量读取对应厂商的密钥。" },
       "max_size": { "name": "图片或视频最大尺寸", "tooltip": "本地 llama.cpp 模型会将其作为 max_size，限制所有推理模式的输入图片尺寸。" },
+      "max_tokens": { "name": "最大令牌数", "tooltip": "第三方模型最多生成的输出令牌数。" },
       "seed": { "name": "随机种", "tooltip": "ComfyUI 常规随机种，由兼容的第三方大模型接口使用。" },
       "enabled": { "name": "启用", "tooltip": "开启时增强提示词；关闭时不调用所选模型，直接原样输出用户提示词。" },
       "api_account": { "name": "API 账户", "tooltip": "显示当前厂商余额并提供余额页面和 API Key 管理入口，不参与提示词增强执行。" }
@@ -1109,6 +1109,7 @@
       "length": { "name": "视频帧数" },
       "ref_image_size": {
         "name": "参考图像尺寸",
+        "tooltip": "参考图像尺寸调整。“match”会将每张参考图像缩放（仅缩小，保持宽高比）至生成图像的像素区域；“max”的短边上限为 2048 像素（仅缩小，不放大），以实现最佳的身份保真度。参考词元会贯穿每个采样步骤，因此“max”的运行速度可能慢几倍。",
         "options": {
           "match": "匹配生成尺寸",
           "max": "最大参考尺寸"
@@ -1164,6 +1165,39 @@
       "1": { "name": "裁剪帧数" }
     }
   },
+  "easy MiniMaxH3MotionContextHard": {
+    "display_name": "简易 MiniMax H3 硬上下文",
+    "description": "将上一片段的视频与音频潜空间尾部复制到当前采样起点，并分别应用释放遮罩。",
+    "inputs": {
+      "conditioning": { "name": "条件" },
+      "vae": { "name": "VAE" },
+      "latent": { "name": "当前潜空间" },
+      "context_latent": { "name": "上一片段上下文潜空间" },
+      "context_length": { "name": "视频上下文长度" },
+      "audio_context_length": { "name": "音频上下文长度" },
+      "video_transition_steps": { "name": "视频过渡步数" },
+      "audio_transition_steps": { "name": "音频过渡步数" }
+    },
+    "outputs": {
+      "0": { "name": "条件" },
+      "1": { "name": "裁剪帧数" },
+      "2": { "name": "潜空间" }
+    }
+  },
+  "easy MiniMaxH3HiResContinuity": {
+    "display_name": "简易 MiniMax H3 高分辨率连续性",
+    "description": "用于二采上下文衔接：将上一片段最终高分辨率视频潜空间尾部复制到当前放大后的潜空间，并冻结当前音频。",
+    "inputs": {
+      "current_hires_latent": { "name": "当前高分辨率潜空间" },
+      "previous_hires_latent": { "name": "上一片段高分辨率潜空间" },
+      "context_length": { "name": "上下文长度" },
+      "video_transition_steps": { "name": "视频过渡步数" }
+    },
+    "outputs": {
+      "0": { "name": "潜空间" },
+      "1": { "name": "裁剪帧数" }
+    }
+  },
   "easy multitrackProject": {
     "display_name": "多轨工程",
     "description": "执行多轨 MiniMax H3 工程的一采与可选二采，并保存片段产物。",
@@ -1176,9 +1210,6 @@
         "name": "多轨信息",
         "tooltip": "多轨编辑器输出的完整工程数据。"
       },
-      "images": { "name": "图像" },
-      "audio": { "name": "音频" },
-      "video": { "name": "视频" },
       "sampler": { "name": "采样器" },
       "sigmas": { "name": "Sigmas" },
       "project_name": {
@@ -1187,20 +1218,23 @@
       },
       "project_save": {
         "name": "工程保存方式",
-        "tooltip": "new 为当前分段创建新视频或latent；override 覆盖当前已有视频或latent。",
+        "tooltip": "new 为当前片段创建新版本，并保留当前索引及后续已有的 video 和 latent；override 覆盖已有版本。",
         "options": {
           "new": "新建",
           "override": "覆盖"
         }
       },
 
-      "sampling_presets": {
-        "name": "采样预设",
-        "tooltip": "选择采样调度方案；外接采样器或 Sigmas 后，执行阶段会自动采用 custom。",
+      "sampling_plan": {
+        "name": "采样方案",
+        "tooltip": "选择采样调度方案，默认；外接采样器或 Sigmas 后，执行阶段会自动采用 custom。",
         "options": {
           "custom": "自定义",
-          "fast": "快速",
-          "medium": "均衡"
+          "light": "轻度",
+          "medium": "中等",
+          "high": "高",
+          "extra_high": "极高",
+          "ultra": "逆天"
         }
       },
       "sampling_mode": {
@@ -1224,7 +1258,7 @@
       "segment_start_index": { "name": "片段开始索引" },
       "segment_count": {
         "name": "片段最大数量",
-        "tooltip": "从片段开始索引起处理的片段数。-1 表示处理剩余全部片段，并在执行前删除开始索引及其后所有旧片段和产物；超出时自动在末尾停止。"
+        "tooltip": "从片段开始索引起处理的片段数。-1 表示处理剩余全部片段；仅 override 模式会在执行前删除开始索引及其后的旧片段和产物，new 模式会保留它们；超出时自动在末尾停止。"
       },
       "seed": {
         "name": "种子",
@@ -1249,6 +1283,22 @@
       "0": { "name": "视频" },
       "1": { "name": "文件名前缀" }
     }
+  },
+  "easy minimaxH3AudioLock": {
+    "display_name": "简易 MiniMax H3 音频锁定",
+    "description": "将原音频锁定或混合到 MiniMax H3 音视频联合潜空间中，并通过分流噪声遮罩控制音频保留强度。",
+    "inputs": {
+      "latent": { "name": "潜空间", "tooltip": "MiniMax H3 音视频联合潜空间。" },
+      "audio_vae": { "name": "音频 VAE", "tooltip": "MiniMax H3 音频 VAE。" },
+      "audio": { "name": "音频", "tooltip": "要锁定到 H3 潜空间的原音频，支持音频列表。" },
+      "remix_strength": { "name": "锁定强度", "tooltip": "0 表示完全重新生成音频；1 表示完整锁定原音频。" },
+      "short_audio_mode": {
+        "name": "短音频处理",
+        "tooltip": "编码前使用静音补齐或循环方式补足短音频。",
+        "options": { "silence": "静音补齐", "loop": "循环" }
+      }
+    },
+    "outputs": { "0": { "name": "潜空间" } }
   },
   "easy minimaxH3ToVideo": {
     "display_name": "简易 MiniMax H3 视频生成",
@@ -1305,7 +1355,7 @@
       },
       "ref_image_size": {
         "name": "参考图像尺寸",
-        "tooltip": "参考图像尺寸调整。“match”会将每张参考图像缩放（仅缩小，保持宽高比）至生成图像的像素区域；“max”的短边上限为 2048 像素（仅缩小，不放大），以实现最佳的身份保真度。参考令牌会贯穿每个采样步骤，因此“max”的运行速度可能慢几倍。",
+        "tooltip": "参考图像尺寸调整。“match”会将每张参考图像缩放（仅缩小，保持宽高比）至生成图像的像素区域；“max”的短边上限为 2048 像素（仅缩小，不放大），以实现最佳的身份保真度。参考词元会贯穿每个采样步骤，因此“max”的运行速度可能慢几倍。",
         "options": {
           "match": "匹配生成尺寸",
           "max": "最大参考尺寸"

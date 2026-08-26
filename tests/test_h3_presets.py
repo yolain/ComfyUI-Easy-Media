@@ -19,27 +19,29 @@ def test_load_h3_presets_uses_embedded_defaults_without_user_file(tmp_path):
 
     assert result == DEFAULT_H3_PRESETS
     assert result is not DEFAULT_H3_PRESETS
-    assert result["fast"]["dual"]["is_turbo"]["split_step"] == 4
+    assert result["light"]["dual"]["is_turbo"]["split_step"] == 4
 
 
 def test_load_h3_presets_reads_valid_user_override(tmp_path):
     custom = json.loads(json.dumps(DEFAULT_H3_PRESETS))
-    custom["fast"]["single"]["is_turbo"]["sampler"] = "heun"
-    (tmp_path / "h3_presets.json").write_text(json.dumps(custom))
+    custom["light"]["single"]["is_turbo"]["sampler"] = "heun"
+    preset_dir = tmp_path / "presets"
+    preset_dir.mkdir()
+    (preset_dir / "h3_sample.json").write_text(json.dumps(custom))
 
     result = load_h3_presets(tmp_path)
 
-    assert result["fast"]["single"]["is_turbo"]["sampler"] == "heun"
+    assert result["light"]["single"]["is_turbo"]["sampler"] == "heun"
 
 
 @pytest.mark.parametrize(
     "mutate",
     [
         lambda value: value.pop("medium"),
-        lambda value: value["fast"]["single"]["is_turbo"].update(
+        lambda value: value["light"]["single"]["is_turbo"].update(
             sigmas="1, 0.5"
         ),
-        lambda value: value["fast"]["dual"]["is_turbo"].update(
+        lambda value: value["light"]["dual"]["is_turbo"].update(
             split_step=99
         ),
         lambda value: value["medium"]["dual"]["is_turbo"].pop(
@@ -50,9 +52,11 @@ def test_load_h3_presets_reads_valid_user_override(tmp_path):
 def test_load_h3_presets_rejects_invalid_user_configuration(tmp_path, mutate):
     custom = json.loads(json.dumps(DEFAULT_H3_PRESETS))
     mutate(custom)
-    (tmp_path / "h3_presets.json").write_text(json.dumps(custom))
+    preset_dir = tmp_path / "presets"
+    preset_dir.mkdir()
+    (preset_dir / "h3_sample.json").write_text(json.dumps(custom))
 
-    with pytest.raises(ValueError, match="Invalid .*h3_presets.json"):
+    with pytest.raises(ValueError, match="Invalid .*h3_sample.json"):
         load_h3_presets(tmp_path)
 
 
@@ -64,6 +68,6 @@ def test_select_h3_preset_uses_json_dual_turbo_branch():
 
 
 def test_select_h3_preset_uses_non_turbo_for_unknown_detection():
-    result = select_h3_preset(DEFAULT_H3_PRESETS, "fast", "single", False)
+    result = select_h3_preset(DEFAULT_H3_PRESETS, "light", "single", False)
 
     assert len(result["sigmas"].split(",")) == 17

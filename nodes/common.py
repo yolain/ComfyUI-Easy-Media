@@ -19,10 +19,9 @@ class EasyModelLoaderPack(io.ComfyNode):
                 "FastUse nodes."
             ),
             inputs=[
-                TYPE_FAST_MODEL_LOADER.Input("model_loader", optional=True),
-                io.Model.Input("model", optional=True),
-                io.Clip.Input("clip", optional=True),
-                io.Vae.Input("vae", optional=True),
+                io.Model.Input("model"),
+                io.Clip.Input("clip"),
+                io.Vae.Input("vae"),
                 io.Vae.Input("audio_vae", optional=True),
             ],
             outputs=[TYPE_FAST_MODEL_LOADER.Output("model_loader")],
@@ -31,36 +30,15 @@ class EasyModelLoaderPack(io.ComfyNode):
     @classmethod
     def execute(
         cls,
-        model_loader: dict | None = None,
-        model: object | None = None,
-        clip: object | None = None,
-        vae: object | None = None,
+        model: object,
+        clip: object,
+        vae: object,
         audio_vae: object | None = None,
     ) -> io.NodeOutput:
-        if model_loader is not None:
-            # Case 1: model_loader exists - use it as base, replace provided keys
-            result = dict(model_loader)
-            if model is not None:
-                result["model"] = model
-            if clip is not None:
-                result["clip"] = clip
-            if vae is not None:
-                result["vae"] = vae
-            if audio_vae is not None:
-                result["audio_vae"] = audio_vae
-            return io.NodeOutput(result)
-        else:
-            # Case 2: model_loader does not exist - model, clip, vae are required
-            if model is None or clip is None or vae is None:
-                raise ValueError("model, clip, and vae are required when model_loader is not provided")
-            result = {
-                "model": model,
-                "clip": clip,
-                "vae": vae,
-            }
-            if audio_vae is not None:
-                result["audio_vae"] = audio_vae
-            return io.NodeOutput(result)
+        result = {"model": model, "clip": clip, "vae": vae}
+        if audio_vae is not None:
+            result["audio_vae"] = audio_vae
+        return io.NodeOutput(result)
 
 
 class MatchLine(io.ComfyNode):

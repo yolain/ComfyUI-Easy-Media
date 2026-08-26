@@ -39,7 +39,6 @@ def _load_common_module(monkeypatch):
         Custom=lambda **kwargs: _PortType,
         Hidden=types.SimpleNamespace(extra_pnginfo="EXTRA_PNGINFO"),
         Int=_PortType,
-        LatentUpscaleModel=_PortType,
         Model=_PortType,
         NodeOutput=_NodeOutput,
         Schema=_Schema,
@@ -73,10 +72,8 @@ def test_model_loader_pack_schema_uses_fastuse_compatible_type(monkeypatch):
         "clip",
         "vae",
         "audio_vae",
-        "latent_upscale_model",
     ]
     assert inputs["audio_vae"].kwargs["optional"] is True
-    assert inputs["latent_upscale_model"].kwargs["optional"] is True
     assert schema.outputs[0].name == "model_loader"
 
 
@@ -86,14 +83,11 @@ def test_model_loader_pack_builds_expected_dictionary(monkeypatch):
     clip = object()
     vae = object()
     audio_vae = object()
-    latent_upscale_model = object()
-
     result = module.EasyModelLoaderPack.execute(
         model,
         clip,
         vae,
         audio_vae,
-        latent_upscale_model,
     )
 
     assert result.values == (
@@ -102,7 +96,6 @@ def test_model_loader_pack_builds_expected_dictionary(monkeypatch):
             "clip": clip,
             "vae": vae,
             "audio_vae": audio_vae,
-            "latent_upscale_model": latent_upscale_model,
         },
     )
 
@@ -129,6 +122,5 @@ def test_model_loader_pack_has_matching_chinese_localization():
         "clip",
         "vae",
         "audio_vae",
-        "latent_upscale_model",
     }
     assert translation["outputs"] == {"0": {"name": "模型加载器"}}

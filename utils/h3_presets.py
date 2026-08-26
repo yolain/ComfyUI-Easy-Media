@@ -7,82 +7,59 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-
 DEFAULT_H3_PRESETS: dict[str, dict[str, dict[str, dict[str, Any]]]] = {
-    "fast": {
+    "light": {
         "single": {
-            "is_turbo": {
+            "is_turbo":{
                 "sampler": "euler",
-                "sigmas": (
-                    "1.0000, 0.9950, 0.9825, 0.9607, 0.9234, 0.8553, "
-                    "0.7207, 0.4249, 0.3005, 0.0000"
-                ),
+                "sigmas": "1.0000, 0.9950, 0.9825, 0.9607, 0.9234, 0.8553, 0.7207, 0.4249, 0.2125, 0.0000"
             },
-            "non_turbo": {
+            "non_turbo":{
                 "sampler": "euler",
-                "sigmas": (
-                    "1.0000, 0.9939, 0.9870, 0.9790, 0.9697, 0.9587, "
-                    "0.9455, 0.9293, 0.9091, 0.8831, 0.8485, 0.8000, "
-                    "0.6792, 0.4877, 0.2857, 0.0837, 0.0000"
-                ),
-            },
+                "sigmas": "1.0000, 0.9939, 0.9870, 0.9790, 0.9697, 0.9587, 0.9455, 0.9293, 0.9091, 0.8831, 0.8485, 0.8000, 0.6792, 0.4877, 0.2857, 0.0837, 0.0000"
+            }
         },
         "dual": {
-            "is_turbo": {
+            "is_turbo":{
                 "sampler": "euler",
-                "sigmas": (
-                    "1.0000, 0.9950, 0.9825, 0.9607, 0.9234, 0.8553, "
-                    "0.7207, 0.4249, 0.3005, 0.0000"
-                ),
-                "split_step": 4,
+                "sigmas": "1.0000, 0.9950, 0.9825, 0.9607, 0.9234, 0.8553, 0.7207, 0.4249, 0.2125, 0.0000",
+                "split_step":4,
             },
-            "non_turbo": {
+            "non_turbo":{
                 "sampler": "euler",
-                "sigmas": (
-                    "1.0000, 0.9939, 0.9870, 0.9790, 0.9697, 0.9587, "
-                    "0.9455, 0.9293, 0.9091, 0.8831, 0.8485, 0.8000, "
-                    "0.6792, 0.4877, 0.2857, 0.0837, 0.0000"
-                ),
-                "split_step": 10,
-            },
-        },
+                "sigmas": "1.0000, 0.9939, 0.9870, 0.9790, 0.9697, 0.9587, 0.9455, 0.9293, 0.9091, 0.8831, 0.8485, 0.8000, 0.6792, 0.4877, 0.2857, 0.0837, 0.0000",
+                "split_step":10,
+            }
+        }
     },
-    "medium": {
-        "single": {
-            "is_turbo": {
+    "medium":{
+        "single":{
+            "is_turbo":{
                 "sampler": "er_sde",
-                "sigmas": "1, .9882, .973, .9524, .9231, .878, .8, .6316, .4737, .1579, 0",
+                "sigmas": "1, .9882, .973, .9524, .9231, .878, .8, .6316, .4737, .1579, 0"
             },
-            "non_turbo": {
+            "non_turbo":{
                 "sampler": "er_sde",
-                "sigmas": (
-                    "1.0, 0.9956, 0.9908, 0.9855, 0.9796, 0.973, "
-                    "0.9655, 0.9571, 0.9474, 0.9362, 0.9231, 0.9076, "
-                    "0.8889, 0.866, 0.8372, 0.8, 0.75, 0.6792, 0.4877, "
-                    "0.2857, 0.0837, 0.0"
-                ),
-            },
+                "sigmas": "1.0, 0.9956, 0.9908, 0.9855, 0.9796, 0.973, 0.9655, 0.9571, 0.9474, 0.9362, 0.9231, 0.9076, 0.8889, 0.866, 0.8372, 0.8, 0.75, 0.6792, 0.4877, 0.2857, 0.0837, 0.0"
+            }
         },
-        "dual": {
-            "is_turbo": {
+        "dual":{
+            "is_turbo":{
                 "sampler": "er_sde",
                 "sigmas": "1, .9882, .973, .9524, .9231, .878, .8, .6316, .4737, .1579, 0",
                 "sampler_2": "sa_solver",
                 "sigmas_2": ".6316, .4877, .2857, .0837, 0",
+                "sigmas_2_context": "0.50, 0.30, 0.14, 0.06, 0.0",
             },
-            "non_turbo": {
+            "non_turbo":{
                 "sampler": "er_sde",
-                "sigmas": (
-                    "1.0, 0.9956, 0.9908, 0.9855, 0.9796, 0.973, "
-                    "0.9655, 0.9571, 0.9474, 0.9362, 0.9231, 0.9076, "
-                    "0.8889, 0.866, 0.8372, 0.8, 0.75, 0.6792, 0.4877, "
-                    "0.2857, 0.0837, 0.0"
-                ),
+                "sigmas": "1.0, 0.9956, 0.9908, 0.9855, 0.9796, 0.973, 0.9655, 0.9571, 0.9474, 0.9362, 0.9231, 0.9076, 0.8889, 0.866, 0.8372, 0.8, 0.75, 0.6792, 0.4877, 0.2857, 0.0837, 0.0",
                 "sampler_2": "sa_solver",
                 "sigmas_2": ".6316, .4877, .2857, .0837, 0",
-            },
-        },
-    },
+                "sigmas_2_context": "0.50, 0.30, 0.14, 0.06, 0.0",
+            }
+        }
+    }
 }
 
 _SIGMA_PATTERN = re.compile(r"[-+]?(?:\d*\.?\d+(?:[eE][-+]?\d+)?)")
@@ -141,19 +118,22 @@ def _validate_h3_preset_entry(entry: Any, path: str, *, dual: bool) -> None:
 
 def validate_h3_presets(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
-        raise ValueError("h3_presets.json root must be an object")
-    for preset_name in ("fast", "medium"):
+        raise ValueError("h3_sample.json root must be an object")
+    for required_name in ("light", "medium"):
+        if required_name not in value:
+            raise ValueError(f"h3_sample.json.{required_name} must be an object")
+    for preset_name in value:
         preset = value.get(preset_name)
         if not isinstance(preset, dict):
-            raise ValueError(f"h3_presets.json.{preset_name} must be an object")
+            raise ValueError(f"h3_sample.json.{preset_name} must be an object")
         for mode_name in ("single", "dual"):
             mode = preset.get(mode_name)
             if not isinstance(mode, dict):
                 raise ValueError(
-                    f"h3_presets.json.{preset_name}.{mode_name} must be an object"
+                    f"h3_sample.json.{preset_name}.{mode_name} must be an object"
                 )
             for turbo_name in ("is_turbo", "non_turbo"):
-                path = f"h3_presets.json.{preset_name}.{mode_name}.{turbo_name}"
+                path = f"h3_sample.json.{preset_name}.{mode_name}.{turbo_name}"
                 _validate_h3_preset_entry(
                     mode.get(turbo_name),
                     path,
@@ -164,9 +144,9 @@ def validate_h3_presets(value: Any) -> dict[str, Any]:
 
 def load_h3_presets(root: str | Path | None = None) -> dict[str, Any]:
     preset_path = (
-        Path(root) / "h3_presets.json"
+        Path(root) / "presets" / "h3_sample.json"
         if root is not None
-        else Path(__file__).resolve().parents[1] / "h3_presets.json"
+        else Path(__file__).resolve().parents[1] / "presets" / "h3_sample.json"
     )
     if not preset_path.is_file():
         return deepcopy(DEFAULT_H3_PRESETS)
@@ -180,15 +160,29 @@ def load_h3_presets(root: str | Path | None = None) -> dict[str, Any]:
         raise ValueError(f"Invalid {preset_path}: {error}") from error
 
 
+def get_h3_preset_keys(root: str | Path | None = None) -> list[str]:
+    """Return sorted list of available preset keys (light, medium, custom, ...)."""
+    presets = load_h3_presets(root)
+    keys = sorted(presets.keys())
+    if "custom" not in keys:
+        keys.insert(0, "custom")
+    return keys
+
+
 def select_h3_preset(
     presets: dict[str, Any],
     preset_name: str,
     sampling_mode: str,
     is_turbo: bool,
 ) -> dict[str, Any]:
-    if preset_name not in {"fast", "medium"}:
-        raise ValueError("sampling_presets must be 'fast' or 'medium'")
+    if preset_name == "custom":
+        raise ValueError(
+            "select_h3_preset cannot be used with 'custom' plan; "
+            "pass explicit sampler and sigmas instead"
+        )
     if sampling_mode not in {"single", "dual"}:
         raise ValueError("sampling_mode must be 'single' or 'dual'")
+    if preset_name not in presets:
+        raise ValueError(f"Unknown H3 sampling plan: {preset_name}")
     turbo_name = "is_turbo" if is_turbo else "non_turbo"
     return deepcopy(presets[preset_name][sampling_mode][turbo_name])

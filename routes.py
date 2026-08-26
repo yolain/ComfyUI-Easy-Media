@@ -37,7 +37,11 @@ import folder_paths
 
 from .utils.prompt_builder import get_system_prompt_options
 from .utils.llm_api import load_api_key_from_config
-from .utils.h3_project import load_h3_project_data
+from .utils.h3_project import (
+    delete_h3_project,
+    load_h3_project_data,
+    safe_h3_project_name,
+)
 from .utils.models import (
     MissingEasyMediaModelError,
     download_model,
@@ -103,6 +107,20 @@ async def handle_h3_projects(_request: web.Request) -> web.Response:
     except Exception as error:
         traceback.print_exc()
         return web.json_response({"error": f"Failed to list H3 projects: {error}"}, status=500)
+
+
+@PromptServer.instance.routes.delete("/easy-media/project")
+async def handle_delete_h3_project(request: web.Request) -> web.Response:
+    project_name = request.rel_url.query.get("project_name", "")
+    try:
+        safe_name = safe_h3_project_name(project_name)
+        deleted = delete_h3_project(safe_name)
+        return web.json_response({"project_name": safe_name, "deleted": deleted})
+    except (TypeError, ValueError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"Failed to delete H3 project: {error}"}, status=500)
 
 
 def _segment_source_audio_window(data: dict, fps: float) -> tuple[float, float]:

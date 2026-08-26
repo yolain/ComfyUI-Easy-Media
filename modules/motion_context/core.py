@@ -71,6 +71,63 @@ def _streams_from_latent(latent: dict[str, Any]) -> list[torch.Tensor]:
     return parts
 
 
+def _nested_tensor_like(value: Any, parts: tuple[torch.Tensor, ...]) -> Any:
+    """Rebuild an H3 nested value while keeping lightweight test containers."""
+    if isinstance(value, list):
+        return list(parts)
+    if isinstance(value, tuple):
+        return tuple(parts)
+    try:
+        import comfy.nested_tensor
+    except ImportError as error:
+        raise RuntimeError(
+            "easy h3 motion context: ComfyUI nested tensor support is unavailable"
+        ) from error
+    return comfy.nested_tensor.NestedTensor(parts)
+
+
+def _noise_mask_streams(
+    latent: dict[str, Any],
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    """Return optional video/audio masks, including legacy video-only masks."""
+    mask = latent.get("noise_mask")
+    if mask is None:
+        return None, None
+    if isinstance(mask, torch.Tensor):
+        return mask, None
+    if hasattr(mask, "unbind"):
+        parts = tuple(mask.unbind())
+    elif isinstance(mask, (tuple, list)):
+        parts = tuple(mask)
+    else:
+        raise ValueError(
+            "easy h3 context: noise_mask must be a tensor or nested streams"
+        )
+    if not parts or len(parts) > 2 or not all(
+        isinstance(part, torch.Tensor) for part in parts
+    ):
+        raise ValueError("easy h3 context: noise_mask contains invalid streams")
+    return parts[0], parts[1] if len(parts) > 1 else None
+
+
+def _merge_noise_mask(
+    generated: torch.Tensor,
+    existing: torch.Tensor | None,
+    stream_name: str,
+) -> torch.Tensor:
+    """Preserve existing locks while adding a context release mask."""
+    if existing is None:
+        return generated
+    existing = existing.to(device=generated.device, dtype=generated.dtype)
+    try:
+        return torch.minimum(generated, existing).contiguous()
+    except RuntimeError as error:
+        raise ValueError(
+            f"easy h3 context: existing {stream_name} noise_mask shape "
+            f"{tuple(existing.shape)} is incompatible with {tuple(generated.shape)}"
+        ) from error
+
+
 def _video_from_latent(latent: dict[str, Any]) -> torch.Tensor:
     video = _streams_from_latent(latent)[0]
     if video.ndim == 4:
@@ -213,6 +270,272 @@ def _encode_tail_audio(
         waveform = waveform[..., available - wanted :]
     encoded = audio_vae.encode(waveform[:1].movedim(1, -1))
     return encoded, int(encoded.shape[-1])
+
+
+def _release_mask_inside_prefix(
+    mask: torch.Tensor,
+    prefix_steps: int,
+    transition_steps: int,
+) -> tuple[int, list[float]]:
+    """Lock a copied prefix, then release it before generated latent begins."""
+    prefix_steps = int(prefix_steps)
+    ramp_steps = max(0, min(int(transition_steps), prefix_steps))
+    locked_steps = prefix_steps - ramp_steps
+    if locked_steps > 0:
+        mask[..., :locked_steps] = 0.0
+    ramp_values: list[float] = []
+    if ramp_steps > 0:
+        values = torch.arange(
+            1,
+            ramp_steps + 1,
+            device=mask.device,
+            dtype=mask.dtype,
+        ) / float(ramp_steps + 1)
+        shape = [1] * mask.ndim
+        shape[-1] = ramp_steps
+        mask[..., locked_steps:prefix_steps] = values.view(*shape)
+        ramp_values = [round(float(value), 4) for value in values.detach().cpu()]
+    return locked_steps, ramp_values
+
+
+def _strip_motion_context_audio_reference(conditioning: Any) -> Any:
+    """Remove only the seam-audio reference replaced by Hard AV latent copy."""
+    _, audio_key = _motion_context_symbols()
+    output = []
+    for embedding, metadata in conditioning:
+        values = metadata.copy()
+        references = values.get("minimax_refs")
+        if references:
+            values["minimax_refs"] = [
+                reference
+                for reference in references
+                if reference.get(audio_key) is None
+            ]
+        output.append([embedding, values])
+    return output
+
+
+def _hard_av_latent(
+    latent: dict[str, Any],
+    context_latent: dict[str, Any],
+    video_frames: int,
+    audio_frames: int,
+    video_transition_steps: int,
+    audio_transition_steps: int,
+) -> dict[str, Any]:
+    """Copy previous video/audio tails into the current H3 sampling seed."""
+    existing_video_mask, existing_audio_mask = _noise_mask_streams(latent)
+    target_parts = _streams_from_latent(latent)
+    if len(target_parts) < 2:
+        raise ValueError("easy h3 hard context: target latent has no audio stream")
+    target_video, target_audio = target_parts[:2]
+    if target_video.ndim == 4:
+        target_video = target_video.unsqueeze(0)
+    if target_audio.ndim == 3:
+        target_audio = target_audio.unsqueeze(0)
+    if target_video.ndim != 5 or target_audio.ndim != 4:
+        raise ValueError("easy h3 hard context: expected H3 video/audio latent streams")
+
+    video_blocks, _, covered = _video_tail_from_latent(
+        context_latent,
+        int(video_frames),
+    )
+    copied_video = torch.cat(video_blocks, dim=2)
+    video_steps = int(copied_video.shape[2])
+    if covered != int(video_frames):
+        raise RuntimeError("easy h3 hard context: video context span changed")
+    if video_steps < 1 or video_steps >= int(target_video.shape[2]):
+        raise ValueError(
+            "easy h3 hard context: copied video prefix must be shorter than target"
+        )
+    if (
+        copied_video.shape[0] != target_video.shape[0]
+        or copied_video.shape[1] != target_video.shape[1]
+        or copied_video.shape[3:] != target_video.shape[3:]
+    ):
+        raise ValueError(
+            "easy h3 hard context: context and target video latent shapes differ"
+        )
+    output_video = target_video.clone()
+    output_video[:, :, :video_steps] = copied_video.to(
+        device=output_video.device,
+        dtype=output_video.dtype,
+    )
+    video_mask = torch.ones_like(output_video[:, :1], dtype=torch.float32)
+    temporal_mask = video_mask.permute(0, 1, 3, 4, 2)
+    video_locked, video_ramp = _release_mask_inside_prefix(
+        temporal_mask,
+        video_steps,
+        video_transition_steps,
+    )
+    video_mask = temporal_mask.permute(0, 1, 4, 2, 3).contiguous()
+
+    copied_audio, audio_steps, overhang = _audio_tail_from_latent(
+        context_latent,
+        int(audio_frames),
+    )
+    if audio_steps < 1 or audio_steps >= int(target_audio.shape[-1]):
+        raise ValueError(
+            "easy h3 hard context: copied audio prefix must be shorter than target"
+        )
+    if copied_audio.shape[:3] != target_audio.shape[:3]:
+        raise ValueError(
+            "easy h3 hard context: context and target audio latent shapes differ"
+        )
+    output_audio = target_audio.clone()
+    output_audio[..., :audio_steps] = copied_audio.to(
+        device=output_audio.device,
+        dtype=output_audio.dtype,
+    )
+    audio_mask = torch.ones_like(output_audio[:, :1], dtype=torch.float32)
+    audio_locked, audio_ramp = _release_mask_inside_prefix(
+        audio_mask,
+        audio_steps,
+        audio_transition_steps,
+    )
+    video_mask = _merge_noise_mask(
+        video_mask,
+        existing_video_mask,
+        "video",
+    )
+    audio_mask = _merge_noise_mask(
+        audio_mask,
+        existing_audio_mask,
+        "audio",
+    )
+
+    samples = latent["samples"]
+    output = latent.copy()
+    output["samples"] = _nested_tensor_like(samples, (output_video, output_audio))
+    output["noise_mask"] = _nested_tensor_like(samples, (video_mask, audio_mask))
+    LOGGER.info(
+        "Hard AV context: video=%d steps/%d frames (lock=%d ramp=%s), "
+        "audio=%d steps/%d frames (overhang=%.3f lock=%d ramp=%s)",
+        video_steps,
+        covered,
+        video_locked,
+        video_ramp or "off",
+        audio_steps,
+        audio_frames,
+        overhang,
+        audio_locked,
+        audio_ramp or "off",
+    )
+    return output
+
+
+def apply_hard_motion_context(
+    conditioning: Any,
+    vae: Any,
+    latent: dict[str, Any],
+    context_latent: dict[str, Any],
+    context_length: int | str = "22",
+    audio_context_length: int = 22,
+    video_transition_steps: int = 4,
+    audio_transition_steps: int = 4,
+) -> tuple[Any, int, dict[str, Any]]:
+    """Apply normal H3 layout conditioning plus hard AV latent continuity."""
+    output, trim_frames = apply_motion_context(
+        conditioning=conditioning,
+        vae=vae,
+        latent=latent,
+        context_length=context_length,
+        audio_context_length=audio_context_length,
+        context_latent=context_latent,
+    )
+    audio_frames = int(audio_context_length) or int(trim_frames)
+    hard_latent = _hard_av_latent(
+        latent,
+        context_latent,
+        int(trim_frames),
+        audio_frames,
+        video_transition_steps,
+        audio_transition_steps,
+    )
+    return _strip_motion_context_audio_reference(output), trim_frames, hard_latent
+
+
+def apply_hires_continuity(
+    current_hires_latent: dict[str, Any],
+    previous_hires_latent: dict[str, Any],
+    context_length: int | str = "22",
+    video_transition_steps: int = 4,
+) -> tuple[dict[str, Any], int]:
+    """Build the masked high-resolution seed for an H3 second pass."""
+    current_parts = _streams_from_latent(current_hires_latent)
+    previous_parts = _streams_from_latent(previous_hires_latent)
+    if len(current_parts) < 2 or not previous_parts:
+        raise ValueError("easy h3 hires continuity: missing H3 AV latent streams")
+    current_video, current_audio = current_parts[:2]
+    previous_video = previous_parts[0]
+    if current_video.ndim == 4:
+        current_video = current_video.unsqueeze(0)
+    if previous_video.ndim == 4:
+        previous_video = previous_video.unsqueeze(0)
+    if current_audio.ndim == 3:
+        current_audio = current_audio.unsqueeze(0)
+    if current_video.ndim != 5 or previous_video.ndim != 5 or current_audio.ndim != 4:
+        raise ValueError("easy h3 hires continuity: invalid H3 latent dimensions")
+    if (
+        previous_video.shape[0] != current_video.shape[0]
+        or previous_video.shape[1] != current_video.shape[1]
+        or previous_video.shape[3:] != current_video.shape[3:]
+    ):
+        raise ValueError(
+            "easy h3 hires continuity: previous and current video resolutions differ"
+        )
+
+    blocks, _, covered = _video_tail_from_latent(
+        previous_hires_latent,
+        int(context_length),
+    )
+    copied_video = torch.cat(blocks, dim=2)
+    copied_steps = int(copied_video.shape[2])
+    if copied_steps < 1 or copied_steps >= int(current_video.shape[2]):
+        raise ValueError(
+            "easy h3 hires continuity: copied prefix must be shorter than target"
+        )
+    output_video = current_video.clone()
+    output_video[:, :, :copied_steps] = copied_video.to(
+        device=output_video.device,
+        dtype=output_video.dtype,
+    )
+    video_mask = torch.ones_like(output_video[:, :1], dtype=torch.float32)
+    temporal_mask = video_mask.permute(0, 1, 3, 4, 2)
+    locked_steps, ramp_values = _release_mask_inside_prefix(
+        temporal_mask,
+        copied_steps,
+        video_transition_steps,
+    )
+    video_mask = temporal_mask.permute(0, 1, 4, 2, 3).contiguous()
+    audio_mask = torch.zeros_like(current_audio[:, :1], dtype=torch.float32)
+    existing_video_mask, existing_audio_mask = _noise_mask_streams(
+        current_hires_latent
+    )
+    video_mask = _merge_noise_mask(
+        video_mask,
+        existing_video_mask,
+        "video",
+    )
+    audio_mask = _merge_noise_mask(
+        audio_mask,
+        existing_audio_mask,
+        "audio",
+    )
+
+    samples = current_hires_latent["samples"]
+    output = current_hires_latent.copy()
+    output["samples"] = _nested_tensor_like(samples, (output_video, current_audio))
+    output["noise_mask"] = _nested_tensor_like(samples, (video_mask, audio_mask))
+    LOGGER.info(
+        "HiRes continuity: video=%d steps/%d frames (lock=%d ramp=%s); "
+        "second-pass audio is frozen",
+        copied_steps,
+        covered,
+        locked_steps,
+        ramp_values or "off",
+    )
+    return output, int(covered)
 
 
 def apply_motion_context(

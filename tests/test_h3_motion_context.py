@@ -94,3 +94,77 @@ def test_h3_motion_context_rejects_latent_resolution_change(monkeypatch):
             context_length="5",
             context_latent=_av_latent(width=3),
         )
+
+
+def test_h3_hard_context_copies_independent_video_and_audio_windows():
+    target = _av_latent()
+    context = _av_latent()
+
+    output = core._hard_av_latent(
+        target,
+        context,
+        video_frames=5,
+        audio_frames=3,
+        video_transition_steps=1,
+        audio_transition_steps=2,
+    )
+
+    output_video, output_audio = output["samples"]
+    context_video, context_audio = context["samples"]
+    video_mask, audio_mask = output["noise_mask"]
+    assert torch.equal(output_video[:, :, :2], context_video[:, :, -2:])
+    assert torch.equal(output_audio[..., :5], context_audio[..., -5:])
+    assert torch.all(video_mask[:, :, 0] == 0)
+    assert torch.allclose(video_mask[:, :, 1], torch.full_like(video_mask[:, :, 1], 0.5))
+    assert torch.all(audio_mask[..., :3] == 0)
+    assert torch.all(audio_mask[..., 5:] == 1)
+
+
+def test_h3_hard_context_merges_existing_video_and_audio_noise_masks():
+    target = _av_latent()
+    target_video, target_audio = target["samples"]
+    target["noise_mask"] = [
+        torch.full_like(target_video, 0.25),
+        torch.full_like(target_audio, 0.4),
+    ]
+
+    output = core._hard_av_latent(
+        target,
+        _av_latent(),
+        video_frames=5,
+        audio_frames=3,
+        video_transition_steps=1,
+        audio_transition_steps=2,
+    )
+
+    video_mask, audio_mask = output["noise_mask"]
+    assert torch.all(video_mask[:, :, 0] == 0)
+    assert torch.all(video_mask[:, :, 1:] == 0.25)
+    assert torch.all(audio_mask[..., :3] == 0)
+    assert torch.allclose(
+        audio_mask[..., 3],
+        torch.full_like(audio_mask[..., 3], 1 / 3),
+    )
+    assert torch.all(audio_mask[..., 4:] == 0.4)
+
+
+def test_h3_hires_continuity_uses_previous_video_and_freezes_current_audio():
+    current = _av_latent()
+    previous = _av_latent()
+
+    output, trim_frames = core.apply_hires_continuity(
+        current,
+        previous,
+        context_length="5",
+        video_transition_steps=1,
+    )
+
+    output_video, output_audio = output["samples"]
+    previous_video, _ = previous["samples"]
+    _, current_audio = current["samples"]
+    video_mask, audio_mask = output["noise_mask"]
+    assert trim_frames == 5
+    assert torch.equal(output_video[:, :, :2], previous_video[:, :, -2:])
+    assert torch.equal(output_audio, current_audio)
+    assert torch.all(video_mask[:, :, 2:] == 1)
+    assert torch.all(audio_mask == 0)

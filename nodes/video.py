@@ -736,7 +736,7 @@ class EasyCompareVideos(io.ComfyNode):
             for _path, temp_files, _metadata in prepared.values():
                 _cleanup_compare_temp_files(temp_files)
 
-        standard_preview = output is not None or source is not None
+        standard_preview = payload["output"] or payload["source"]
         preview_ui = (
             ui.PreviewVideo([standard_preview]).as_dict()
             if standard_preview is not None
