@@ -1009,7 +1009,7 @@ class EasyH3ProjectContextLatentLoad(io.ComfyNode):
         return io.Schema(
             node_id="easy h3ProjectContextLatentLoad",
             display_name="H3 Project Context Latent Load",
-            category="EasyUse/H3",
+            category="EasyUse/MiniMax",
             description="Internal H3 project context latent loader.",
             inputs=[
                 io.String.Input("project_name"),
@@ -1556,8 +1556,22 @@ class EasyMultiTrackProject(io.ComfyNode):
             inputs=[
                 TYPE_TRACKS_INFO.Input("tracks_info"),
                 TYPE_FAST_MODEL_LOADER.Input("model_loader"),
+                TYPE_FAST_MODEL_LOADER.Input(
+                    "model_loader_2",
+                    optional=True,
+                    tooltip=(
+                        "Optional second-pass model. Encoding and VAE "
+                        "components remain from the first-pass loader."
+                    ),
+                ),
                 io.Sampler.Input("sampler", optional=True),
+                io.Sampler.Input("sampler_2", optional=True, tooltip=(
+                    "Optional second-pass sampler. "
+                )),
                 io.Sigmas.Input("sigmas", optional=True),
+                io.Sigmas.Input("sigmas_2", optional=True, tooltip=(
+                    "Optional second-pass sigmas. "
+                )),
                 io.String.Input("project_name", default=""),
                 io.Combo.Input(
                     "project_save",
@@ -1598,43 +1612,26 @@ class EasyMultiTrackProject(io.ComfyNode):
                     options=cls._sampling_plan_options(),
                     default="light",
                 ),
-                io.DynamicCombo.Input(
+                io.Combo.Input(
                     "sampling_mode",
-                    options=[
-                        io.DynamicCombo.Option("single", []),
-                        io.DynamicCombo.Option(
-                            "dual",
-                            [
-                                io.Sampler.Input("sampler_2", optional=True),
-                                io.Sigmas.Input("sigmas_2", optional=True),
-                                TYPE_FAST_MODEL_LOADER.Input(
-                                    "model_loader_2",
-                                    optional=True,
-                                    tooltip=(
-                                        "Optional second-pass model. Encoding and VAE "
-                                        "components remain from the first-pass loader."
-                                    ),
-                                ),
-                                io.Boolean.Input(
-                                    "1st_pass_only",
-                                    default=False,
-                                    tooltip=(
-                                        "Run and save only the first selected segment's "
-                                        "first pass. Turn this off on the next run to "
-                                        "resume directly from that checkpoint at pass two."
-                                    ),
-                                ),
-                                io.Boolean.Input("disable_noise", default=False),
-                                io.Float.Input(
-                                    "upscale_by",
-                                    default=1.5,
-                                    min=1.0,
-                                    max=8.0,
-                                    step=0.05,
-                                ),
-                            ],
-                        ),
-                    ],
+                    options=['single', 'dual'],
+                ),
+                io.Boolean.Input(
+                    "1st_pass_only",
+                    default=False,
+                    tooltip=(
+                        "Run and save only the first selected segment's "
+                        "first pass. Turn this off on the next run to "
+                        "resume directly from that checkpoint at pass two."
+                    ),
+                ),
+                io.Boolean.Input("disable_noise", default=False, tooltip="Disable noise in second-pass for dual-sampling"),
+                io.Float.Input(
+                    "upscale_by",
+                    default=1.5,
+                    min=1.0,
+                    max=8.0,
+                    step=0.05,
                 ),
                 io.Combo.Input(
                     "upscale_model",

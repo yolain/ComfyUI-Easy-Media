@@ -1241,19 +1241,19 @@
         "name": "采样模式",
         "tooltip": "选择 dual 后显示二采专用的模型、采样与噪声设置。"
       },
-      "sampling_mode.model_loader_2": {
+      "model_loader_2": {
         "name": "模型加载器2",
         "tooltip": "可选；仅替换二采模型，编码与 VAE 保持一采配置以确保 latent 兼容。"
       },
-      "sampling_mode.1st_pass_only": {
+      "1st_pass_only": {
         "name": "仅执行一采预览",
         "tooltip": "在二采模式下，仅执行首个选中片段的一采，用于快速预览。"
       },
-      "sampling_mode.disable_noise": {
+      "disable_noise": {
         "name": "禁用二采噪声",
         "tooltip": "在二采中禁用噪声。"
       },
-      "sampling_mode.upscale_by": { "name": "放大倍数" },
+      "upscale_by": { "name": "放大倍数" },
       "upscale_model": { "name": "放大模型" },
       "segment_start_index": { "name": "片段开始索引" },
       "segment_count": {
