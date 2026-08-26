@@ -44,7 +44,8 @@ interface AudioTrackProps {
   onDeleteSegment: (segmentId: string) => void
   onCloneSegment: (segmentId: string) => void
   onDeleteTrack: (trackId: string) => void
-  onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo'>>) => void
+  onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo' | 'audio_locked'>>) => void
+  onSpeakerReferenceChange?: (trackId: string, segmentId: string, enabled: boolean) => void
   onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
   onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
   onMoveSegment: (segmentId: string, nextStartTime: number, clientY: number) => void
@@ -54,6 +55,7 @@ interface AudioTrackProps {
   onRecognizeSubtitles?: (segmentId: string, method: SubtitleRecognitionMethod) => void
   cutMode: boolean
   onCutSegment: (segmentId: string, splitFrame: number) => void
+  audioLockEnabled?: boolean
 }
 
 function sourceTypeToTab(sourceType: MultiTrackSourceType | undefined): MediaTab {
@@ -80,6 +82,7 @@ export function AudioTrack({
   onCloneSegment,
   onDeleteTrack,
   onTrackAudioSettingsChange,
+  onSpeakerReferenceChange = () => {},
   onResizeSegment,
   onResizeSegmentPreview,
   onMoveSegment,
@@ -89,6 +92,7 @@ export function AudioTrack({
   onRecognizeSubtitles = () => {},
   cutMode,
   onCutSegment,
+  audioLockEnabled = false,
 }: Readonly<AudioTrackProps>) {
   const t = useT()
   const contentRef = useRef<HTMLDivElement>(null)
@@ -150,6 +154,15 @@ export function AudioTrack({
             onRecognizeSubtitles={onRecognizeSubtitles}
             cutMode={cutMode}
             onCut={onCutSegment}
+            audioLocked={audioLockEnabled && track.audio_locked === true}
+            audioLockEnabled={audioLockEnabled}
+            onAudioLockToggle={(locked) => {
+              onTrackAudioSettingsChange(track.id, { audio_locked: locked })
+            }}
+            speakerReference={segment.content.speaker_reference === true}
+            onSpeakerReferenceToggle={(enabled) => {
+              onSpeakerReferenceChange(track.id, segment.id, enabled)
+            }}
             onDoubleClick={(segmentId, event) => {
               const rect = contentRef.current?.getBoundingClientRect()
               if (!rect) return

@@ -26,6 +26,12 @@ vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
   ),
 }))
 
+vi.stubGlobal('ResizeObserver', class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+})
+
 function activateTab(name: string) {
   const tab = screen.getByRole('tab', { name })
   fireEvent.pointerDown(tab, { button: 0, ctrlKey: false })
@@ -128,7 +134,7 @@ describe('TaskSegmentEditor', () => {
     )
 
     const continuitySelect = screen.getByRole('combobox', { name: 'Continuity mode' })
-    expect(continuitySelect.className).toContain('w-24')
+    expect(continuitySelect.className).toContain('w-20')
     expect(screen.getByRole('combobox', { name: 'Task mode' }).className).toContain('w-24')
     fireEvent.click(continuitySelect)
     fireEvent.click(screen.getByRole('option', { name: 'Context' }))
@@ -153,6 +159,79 @@ describe('TaskSegmentEditor', () => {
       />,
     )
     expect(screen.queryByRole('combobox', { name: 'Continuity mode' })).toBeNull()
+  })
+
+  it('shows and stores reference image size only for reference tasks', () => {
+    const onContentChange = vi.fn()
+    const referenceSegment = taskSegment()
+    referenceSegment.content.task_mode = 'ref'
+    referenceSegment.content.ref_image_size = 'max'
+    const { rerender } = render(
+      <TaskSegmentEditor
+        segment={referenceSegment}
+        format="MiniMax"
+        onContentChange={onContentChange}
+      />,
+    )
+
+    const sizeSelect = screen.getByRole('combobox', { name: 'Reference image size' })
+    expect(sizeSelect.textContent).toContain('Max')
+    fireEvent.click(sizeSelect)
+    fireEvent.click(screen.getByRole('option', { name: 'Match' }))
+    expect(onContentChange).toHaveBeenCalledWith({ ref_image_size: 'match' })
+
+    rerender(
+      <TaskSegmentEditor
+        segment={taskSegment()}
+        format="MiniMax"
+        onContentChange={onContentChange}
+      />,
+    )
+    expect(screen.queryByRole('combobox', { name: 'Reference image size' })).toBeNull()
+  })
+
+  it('synchronizes dropdown changes across selected tasks while keeping the first continuity mode as shot', () => {
+    const onContentChange = vi.fn()
+    const onTrackSegmentsContentChange = vi.fn()
+    const first = taskSegment()
+    first.content.task_mode = 'ref'
+    first.content.continuity_mode = 'shot'
+    const second = secondTaskSegment()
+    second.content.task_mode = 'ref'
+    second.content.continuity_mode = 'shot'
+
+    render(
+      <TaskSegmentEditor
+        segment={first}
+        trackSegments={[first, second]}
+        selectedSegments={[first, second]}
+        format="MiniMax"
+        onContentChange={onContentChange}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Continuity mode' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Context' }))
+    expect(onTrackSegmentsContentChange).toHaveBeenLastCalledWith([
+      { segmentId: first.id, patch: { continuity_mode: 'shot' } },
+      { segmentId: second.id, patch: { continuity_mode: 'context' } },
+    ])
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Reference image size' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Max' }))
+    expect(onTrackSegmentsContentChange).toHaveBeenLastCalledWith([
+      { segmentId: first.id, patch: { ref_image_size: 'max' } },
+      { segmentId: second.id, patch: { ref_image_size: 'max' } },
+    ])
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Task mode' }))
+    fireEvent.click(screen.getByRole('option', { name: 'VI2V' }))
+    expect(onTrackSegmentsContentChange).toHaveBeenLastCalledWith([
+      { segmentId: first.id, patch: { task_mode: 'edit' } },
+      { segmentId: second.id, patch: { task_mode: 'edit' } },
+    ])
+    expect(onContentChange).not.toHaveBeenCalled()
   })
 
   it('stores the A/B prompt selection, edits B independently, and shows its tooltip on hover', async () => {
@@ -1048,12 +1127,12 @@ describe('TaskSegmentEditor', () => {
       />,
     )
 
-    expect(screen.getByText('Task 1').className).toContain('text-[10px]')
-    expect(screen.getByText('Task 1').className).toContain('text-primary')
+    expect(screen.getByText('Segment 1').className).toContain('text-[10px]')
+    expect(screen.getByText('Segment 1').className).toContain('text-primary')
     expect(screen.getByText('00:00:03').className).toContain('text-[10px]')
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit task duration' }))
-    expect(screen.queryByText('Task 1')).toBeNull()
+    expect(screen.queryByText('Segment 1')).toBeNull()
     expect(screen.queryByText('00:00:03')).toBeNull()
     const durationInput = screen.getByRole('textbox', { name: 'Duration' })
     expect(durationInput.className).toContain('tabular-nums')

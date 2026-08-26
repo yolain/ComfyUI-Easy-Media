@@ -42,10 +42,23 @@
   },
   "projectVideoCombine": {
     "selectProject": "选择工程",
+    "deleteProject": "删除项目",
+    "deleteProjectTitle": "删除项目？",
+    "deleteProjectConfirm": "确定删除项目 {project} 及其整个文件夹吗？其中的 latent、JSON 和媒体文件也会一并删除，且无法恢复。",
+    "deleteDefaultProjectConfirm": "确定清空 default 项目的所有 latent、JSON 和媒体文件吗？default 文件夹会保留，删除后无法恢复。",
+    "deleteProjectSuccess": "项目已删除",
+    "deleteProjectSuccessDetail": "项目 {project} 已删除。",
+    "deleteProjectFailed": "项目删除失败",
     "refresh": "刷新工程",
+    "mutePreview": "关闭预览声音",
+    "unmutePreview": "开启预览声音",
     "combine": "合并",
     "autoCombine": "自动合并",
     "clipLabel": "片段{index}",
+    "clipContinuity": "{mode}",
+    "selectClipFile": "选择片段{index}的视频文件",
+    "continuityShot": "分镜",
+    "continuityContext": "上下文",
     "emptyPreview": "请刷新工程以预览已生成的视频片段。",
     "refreshFailed": "工程刷新失败",
     "combineFailed": "工程合并失败",
@@ -83,7 +96,7 @@
     "edit": "编辑"
   },
   "multitrackSegment": {
-    "taskLabel": "片段{n} {mode}"
+    "taskLabel": "片段 {n} {mode}"
   },
   "multitrack": {
     "audio": "音频",
@@ -131,7 +144,18 @@
     "combinedEdit": "整体编辑",
     "taskNumber": "片段 {n}",
     "taskMode": "任务模式",
+    "taskModeTooltip": "选择当前片段的视频生成方式。",
     "continuityMode": "衔接模式",
+    "continuityModeTooltip": "选择当前片段开启新镜头，或承接上一片段的上下文。",
+    "refImageSize": "参考图像尺寸",
+    "refImageSizeTooltip": "匹配尺寸会按生成画面面积缩放参考图；最大尺寸会保留更大的参考图以提升主体一致性，但生成速度可能慢数倍。",
+    "lockAudio": "锁定音频",
+    "unlockAudio": "解除音频锁定",
+    "audioLockedMarker": "音频轨道已锁定",
+    "audioLockTooltip": "(仅多轨工程有效) 锁定音频后，视频生成将不再重新生成音频，而改用原音频协调视频画面生成。",
+    "enableSpeakerReference": "复用为说话人音频",
+    "disableSpeakerReference": "停止复用说话人音频",
+    "speakerReferenceTooltip": "（仅 MiniMax）在每个任务中将此片段复用为该音轨对应的 @音频 引用；超过 15 秒时只取开头 15 秒。",
     "previewTaskLabel": "任务{n}",
     "emptyPreviewTitle": "还没有可预览的片段",
     "emptyPreviewDescription": "请在下方轨道添加任务片段或视频片段。",
@@ -244,6 +268,10 @@
   "multitrackContinuityModes": {
     "shot": "分镜",
     "context": "上下文"
+  },
+  "multitrackRefImageSizes": {
+    "match": "匹配尺寸",
+    "max": "最大尺寸"
   },
   "modelDownload": {
     "title": "缺少 {name} 模型",

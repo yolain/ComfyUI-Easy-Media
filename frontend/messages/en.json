@@ -42,10 +42,23 @@
   },
   "projectVideoCombine": {
     "selectProject": "Select project",
+    "deleteProject": "Delete project",
+    "deleteProjectTitle": "Delete project?",
+    "deleteProjectConfirm": "Delete the {project} project and its entire folder, including latent, JSON, and media files? This cannot be undone.",
+    "deleteDefaultProjectConfirm": "Clear all latent, JSON, and media files from the default project? The default folder will be kept. This cannot be undone.",
+    "deleteProjectSuccess": "Project deleted",
+    "deleteProjectSuccessDetail": "The {project} project was deleted.",
+    "deleteProjectFailed": "Project deletion failed",
     "refresh": "Refresh project",
+    "mutePreview": "Mute preview audio",
+    "unmutePreview": "Unmute preview audio",
     "combine": "Combine",
     "autoCombine": "Auto combine",
     "clipLabel": "Segment {index}",
+    "clipContinuity": "{mode}",
+    "selectClipFile": "Select a file for segment {index}",
+    "continuityShot": "Shot",
+    "continuityContext": "Context",
     "emptyPreview": "Refresh the project to preview its generated clips.",
     "refreshFailed": "Project refresh failed",
     "combineFailed": "Project combine failed",
@@ -83,7 +96,7 @@
     "edit": "Edit"
   },
   "multitrackSegment": {
-    "taskLabel": "Segment{n} {mode}"
+    "taskLabel": "Segment {n} {mode}"
   },
   "multitrack": {
     "audio": "Audio",
@@ -131,7 +144,18 @@
     "combinedEdit": "Combined",
     "taskNumber": "Segment {n}",
     "taskMode": "Task mode",
+    "taskModeTooltip": "Choose how this segment generates video.",
     "continuityMode": "Continuity mode",
+    "continuityModeTooltip": "Choose whether this segment starts a new shot or continues with context from the previous segment.",
+    "refImageSize": "Reference image size",
+    "refImageSizeTooltip": "Match scales reference images to the generation area; Max keeps a larger reference for stronger identity fidelity but can be much slower.",
+    "lockAudio": "Lock audio",
+    "unlockAudio": "Unlock audio",
+    "audioLockedMarker": "Audio track locked",
+    "audioLockTooltip": "(Only effective in MultiTrack Project) After locking audio, video generation will no longer regenerate the audio and will instead coordinate the video visuals with the original audio.",
+    "enableSpeakerReference": "Reuse as speaker audio",
+    "disableSpeakerReference": "Stop reusing speaker audio",
+    "speakerReferenceTooltip": "(MiniMax only) Reuse this clip as this audio track's @Audio reference in every task. Audio longer than 15 seconds is truncated to its first 15 seconds.",
     "previewTaskLabel": "Task{n}",
     "emptyPreviewTitle": "No segments yet",
     "emptyPreviewDescription": "Add a task segment or video clip to the tracks below.",
@@ -244,6 +268,10 @@
   "multitrackContinuityModes": {
     "shot": "Shot",
     "context": "Context"
+  },
+  "multitrackRefImageSizes": {
+    "match": "Match",
+    "max": "Max"
   },
   "modelDownload": {
     "title": "{name} is missing",
@@ -381,8 +409,5 @@
     "slotImage": "Image {n}",
     "slotAudio": "Audio {n}",
     "addLocal": "Add local file"
-  },
-  "syncPlay": {
-    "menuLabel": "Sync Play"
   }
 }

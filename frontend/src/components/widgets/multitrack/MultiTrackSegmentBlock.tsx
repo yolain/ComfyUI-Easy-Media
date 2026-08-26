@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { Lock, MicVocal } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -8,6 +10,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { AudioWaveform } from '@/components/widgets/timeline/AudioWaveform'
 import { mediaContentToViewUrl } from '@/lib/media-url'
 import { useT } from '@/lib/i18n'
@@ -55,6 +58,11 @@ interface MultiTrackSegmentBlockProps {
   dimmed?: boolean
   showTaskIndex?: boolean
   taskOverview?: boolean
+  audioLocked?: boolean
+  audioLockEnabled?: boolean
+  onAudioLockToggle?: (locked: boolean) => void
+  speakerReference?: boolean
+  onSpeakerReferenceToggle?: (enabled: boolean) => void
 }
 
 function segmentRect(segment: MultiTrackSegment, totalLength: number, areaWidth: number) {
@@ -93,6 +101,11 @@ export function MultiTrackSegmentBlock({
   dimmed = false,
   showTaskIndex = true,
   taskOverview = false,
+  audioLocked = false,
+  audioLockEnabled = false,
+  onAudioLockToggle,
+  speakerReference = false,
+  onSpeakerReferenceToggle,
 }: Readonly<MultiTrackSegmentBlockProps>) {
   const t = useT()
   const didDragRef = useRef(false)
@@ -381,7 +394,7 @@ export function MultiTrackSegmentBlock({
           role="button"
           data-multitrack-segment=""
           tabIndex={0}
-          className={`absolute top-1 bottom-1 flex items-center overflow-hidden rounded select-none active:opacity-70 ${dimmed ? 'opacity-50' : ''}`}
+          className={`absolute top-1 bottom-1 flex items-center rounded select-none active:opacity-70 ${trackType === 'audio' ? 'overflow-visible' : 'overflow-hidden'} ${dimmed ? 'opacity-50' : ''}`}
           style={blockStyle}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
@@ -416,7 +429,7 @@ export function MultiTrackSegmentBlock({
             if (event.key === 'Delete' || event.key === 'Backspace') onDelete(segment.id)
           }}
         >
-          <div className="pointer-events-none relative flex h-full min-w-0 flex-1 flex-col gap-0.5">
+          <div className="pointer-events-none relative flex h-full min-w-0 flex-1 flex-col gap-0.5 overflow-hidden rounded-sm">
             {trackType === 'task' && taskOverview ? (
               <>
                 {tiledTaskImages.length > 0 ? (
@@ -506,6 +519,64 @@ export function MultiTrackSegmentBlock({
             className="absolute right-0 top-0 h-full w-0.5 cursor-ew-resize"
             style={{ background: isResizing || selected ? borderColor : 'transparent' }}
           />
+          {trackType === 'audio' && audioLockEnabled ? (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant={speakerReference ? 'secondary' : 'ghost'}
+                    data-testid="audio-speaker-reference"
+                    aria-label={speakerReference ? t('multitrack.disableSpeakerReference') : t('multitrack.enableSpeakerReference')}
+                    aria-pressed={speakerReference}
+                    className={`absolute right-8 top-0.5 z-20 h-5 w-5 cursor-pointer bg-background/80 shadow-sm [&_svg]:!size-2 ${speakerReference ? 'text-highlight' : 'text-muted-foreground'}`}
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                    }}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      onSpeakerReferenceToggle?.(!speakerReference)
+                    }}
+                  >
+                    <MicVocal />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-72">
+                  {t('multitrack.speakerReferenceTooltip')}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant={audioLocked ? 'secondary' : 'ghost'}
+                    data-testid="audio-segment-lock"
+                    aria-label={audioLocked ? t('multitrack.unlockAudio') : t('multitrack.lockAudio')}
+                    aria-pressed={audioLocked}
+                    className={`absolute right-2 top-0.5 z-20 h-5 w-5 cursor-pointer bg-background/80 shadow-sm [&_svg]:!size-2 ${audioLocked ? 'text-highlight' : 'text-muted-foreground'}`}
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                    }}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      onAudioLockToggle?.(!audioLocked)
+                    }}
+                  >
+                    <Lock />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-72">
+                  {t('multitrack.audioLockTooltip')}
+                </TooltipContent>
+              </Tooltip>
+            </>
+          ) : null}
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>

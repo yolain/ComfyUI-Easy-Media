@@ -74,7 +74,8 @@ interface TrackAreaProps {
   onDeleteTrack: (trackId: string) => void
   onReorderTrack?: (sourceTrackId: string, targetTrackId: string) => void
   onTrackVisibilityChange?: (trackId: string, visible: boolean) => void
-  onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo'>>) => void
+  onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo' | 'audio_locked'>>) => void
+  onSpeakerReferenceChange?: (trackId: string, segmentId: string, enabled: boolean) => void
   onDistributeTaskSegments: (trackId: string) => void
   onCloneTaskSegment: (trackId: string, segmentId: string) => void
   onSplitTaskSegment?: (segmentId: string) => void
@@ -87,6 +88,7 @@ interface TrackAreaProps {
   onEditSubtitleSegment?: (segmentId: string) => void
   cutMode: boolean
   onCutSegment: (segmentId: string, splitFrame: number) => void
+  format?: string
 }
 
 function TrackTypeIcon({ type }: Readonly<{ type: string }>) {
@@ -194,6 +196,7 @@ export function TrackArea({
   onReorderTrack = () => {},
   onTrackVisibilityChange = () => {},
   onTrackAudioSettingsChange,
+  onSpeakerReferenceChange = () => {},
   onDistributeTaskSegments,
   onCloneTaskSegment,
   onSplitTaskSegment = () => {},
@@ -206,6 +209,7 @@ export function TrackArea({
   onEditSubtitleSegment = () => {},
   cutMode,
   onCutSegment,
+  format,
 }: Readonly<TrackAreaProps>) {
   const t = useT()
   const trackAreaRef = useRef<HTMLDivElement>(null)
@@ -620,6 +624,7 @@ export function TrackArea({
               onCloneSegment={(segmentId) => onCloneTaskSegment(track.id, segmentId)}
               onDeleteTrack={onDeleteTrack}
               onTrackAudioSettingsChange={onTrackAudioSettingsChange}
+              onSpeakerReferenceChange={onSpeakerReferenceChange}
               onResizeSegment={onResizeSegment}
               onResizeSegmentPreview={onResizeSegmentPreview}
               onMoveSegment={(segmentId, nextStartTime, clientY) => handleMoveSegment(segmentId, track.id, nextStartTime, clientY)}
@@ -629,6 +634,7 @@ export function TrackArea({
               onRecognizeSubtitles={onRecognizeSubtitles}
               cutMode={cutMode}
               onCutSegment={onCutSegment}
+              audioLockEnabled={format === 'MiniMax'}
             />
           )
         }

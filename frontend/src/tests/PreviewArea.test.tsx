@@ -741,7 +741,7 @@ describe('PreviewArea', () => {
         currentTime={36}
         selectedSegment={null}
         isPlaying={false}
-        node={{ widgets: [] }}
+        node={{ widgets: [{ name: 'format', value: 'MiniMax' }] }}
         onGlobalSettingsChange={vi.fn()}
         onSelectedSegmentContentChange={vi.fn()}
         onTrackSegmentsContentChange={onTrackSegmentsContentChange}
@@ -750,8 +750,18 @@ describe('PreviewArea', () => {
     )
 
     const modeSelect = screen.getByTestId('task-mode-select')
+    const refImageSizeSelect = screen.getByTestId('task-ref-image-size-select')
     expect(modeSelect.textContent).toContain('R2V')
-    expect(screen.getByText('|').className).toContain('text-secondary')
+    expect(refImageSizeSelect.textContent).toContain('Match')
+    expect(screen.getAllByText('|').every((separator) => separator.className.includes('text-secondary'))).toBe(true)
+
+    fireEvent.click(refImageSizeSelect)
+    fireEvent.click(screen.getByRole('option', { name: 'Max' }))
+
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
+      segmentId: 'active-task',
+      patch: { ref_image_size: 'max' },
+    }])
 
     fireEvent.click(modeSelect)
     fireEvent.click(screen.getByRole('option', { name: 'Edit' }))

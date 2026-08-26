@@ -2,6 +2,7 @@ import { addInlineStyles } from "@/lib/add-stylesheet";
 import { getEasyMediaSyncPlayMenuItems, installEasyMediaSyncPlay } from "@/lib/sync-play";
 import { preserveTimelineEditorNodeSize } from "@/lib/timeline-node-size";
 import { preserveCompareVideoNodeSize } from "@/lib/compare-video-node-size";
+import { preserveVideoCombineNodeSize } from '@/lib/project-video-combine-node-size';
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 import type { TimelineData } from '@/types/timeline'
 import type { TrackData } from '@/types/multitrack'
@@ -52,6 +53,7 @@ comfyApp.registerExtension({
   beforeRegisterNodeDef(nodeType, nodeData) {
     preserveTimelineEditorNodeSize(nodeType, nodeData)
     preserveCompareVideoNodeSize(nodeType, nodeData)
+    preserveVideoCombineNodeSize(nodeType, nodeData)
     installEasyMediaSyncPlay(nodeType, nodeData)
     suppressCompareVideoDefaultPreview(nodeType, nodeData)
   },

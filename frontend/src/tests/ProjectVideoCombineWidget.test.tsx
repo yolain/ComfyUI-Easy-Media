@@ -29,6 +29,7 @@ const projectData: ProjectData = {
 
 function widgetProps(overrides: Partial<ReactWidgetProps<ProjectData>> = {}) {
   const toast = { add: vi.fn() }
+  const dialog = { confirm: vi.fn().mockResolvedValue(true) }
   const api = {
     fetchApi: vi.fn(),
     getQueue: vi.fn().mockResolvedValue({ Running: [], Pending: [] }),
@@ -66,11 +67,11 @@ function widgetProps(overrides: Partial<ReactWidgetProps<ProjectData>> = {}) {
       api,
       graphToPrompt,
       ui: { settings: { settingsValues: { 'Comfy.Locale': 'en' } } },
-      extensionManager: { toast },
+      extensionManager: { toast, dialog },
     },
     ...overrides,
   } as unknown as ReactWidgetProps<ProjectData>
-  return { props, api, toast, graphToPrompt }
+  return { props, api, toast, dialog, graphToPrompt }
 }
 
 beforeEach(() => {
@@ -94,6 +95,77 @@ describe('ProjectVideoCombineWidget', () => {
     expect(api.fetchApi).toHaveBeenCalledWith('/easy-media/project?project_name=demo')
   })
 
+  it('shows an externally assigned project name before the project list is loaded', () => {
+    const { props } = widgetProps({ value: { ...projectData, project_name: 'assigned-project' } })
+
+    render(<ProjectVideoCombineWidget {...props} />)
+
+    expect(screen.getByRole('combobox', { name: 'Select project' }).textContent).toContain('assigned-project')
+  })
+
+  it('confirms and deletes the selected project through the ComfyUI API', async () => {
+    const { props, api, toast, dialog } = widgetProps()
+    api.fetchApi.mockResolvedValue({
+      ok: true,
+      json: async () => ({ project_name: 'demo', deleted: true }),
+    })
+
+    render(<ProjectVideoCombineWidget {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete project' }))
+
+    await waitFor(() => expect(dialog.confirm).toHaveBeenCalledWith({
+      title: 'Delete project?',
+      message: expect.stringContaining('demo'),
+    }))
+    await waitFor(() => expect(api.fetchApi).toHaveBeenCalledWith(
+      '/easy-media/project?project_name=demo',
+      { method: 'DELETE' },
+    ))
+    expect(props.onChange).toHaveBeenCalledWith({
+      project_name: 'default',
+      width: 0,
+      height: 0,
+      frame_rate: 24,
+      clips: [],
+      auto_combine: true,
+    })
+    expect(toast.add).toHaveBeenCalledWith(expect.objectContaining({
+      severity: 'success',
+      summary: 'Project deleted',
+    }))
+  })
+
+  it('does not call the delete API when confirmation is declined', async () => {
+    const { props, api, dialog } = widgetProps()
+    dialog.confirm.mockResolvedValue(false)
+
+    render(<ProjectVideoCombineWidget {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete project' }))
+
+    await waitFor(() => expect(dialog.confirm).toHaveBeenCalledTimes(1))
+    expect(api.fetchApi).not.toHaveBeenCalled()
+  })
+
+  it('explains that deleting default clears its files but keeps the folder', async () => {
+    const defaultData = { ...projectData, project_name: 'default' }
+    const { props, api, dialog } = widgetProps({ value: defaultData })
+    api.fetchApi.mockResolvedValue({
+      ok: true,
+      json: async () => ({ project_name: 'default', deleted: true }),
+    })
+
+    render(<ProjectVideoCombineWidget {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete project' }))
+
+    await waitFor(() => expect(dialog.confirm).toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.stringContaining('default folder will be kept'),
+    })))
+    await waitFor(() => expect(api.fetchApi).toHaveBeenCalledWith(
+      '/easy-media/project?project_name=default',
+      { method: 'DELETE' },
+    ))
+  })
+
   it('keeps the current preview during same-project refresh and updates its revision', async () => {
     let successHandler: (() => void) | undefined
     const refreshedData: ProjectData = {
@@ -112,6 +184,33 @@ describe('ProjectVideoCombineWidget', () => {
     await act(async () => successHandler?.())
 
     expect(props.onChange).not.toHaveBeenCalledWith(expect.objectContaining({ clips: [] }))
+    await waitFor(() => expect(props.onChange).toHaveBeenCalledWith(refreshedData))
+  })
+
+  it('refreshes only when a sampling event belongs to the selected project', async () => {
+    let refreshHandler: ((event: CustomEvent<unknown>) => void) | undefined
+    const refreshedData: ProjectData = {
+      ...projectData,
+      clips: [{ ...projectData.clips[0], media_revision: '1000000002' }],
+    }
+    const { props, api } = widgetProps()
+    api.addCustomEventListener.mockImplementation((name: string, handler: () => void) => {
+      if (name === 'easy_multitrack_project_refresh') refreshHandler = handler
+    })
+    api.fetchApi.mockResolvedValue({ ok: true, json: async () => refreshedData })
+
+    render(<ProjectVideoCombineWidget {...props} />)
+    await act(async () => refreshHandler?.(new CustomEvent('easy_multitrack_project_refresh', {
+      detail: { project_name: 'next-project', phase: 'before', segment_index: 0 },
+    })))
+
+    expect(api.fetchApi).not.toHaveBeenCalled()
+
+    await act(async () => refreshHandler?.(new CustomEvent('easy_multitrack_project_refresh', {
+      detail: { project_name: 'demo', phase: 'before', segment_index: 0 },
+    })))
+
+    expect(api.fetchApi).toHaveBeenCalledWith('/easy-media/project?project_name=demo')
     await waitFor(() => expect(props.onChange).toHaveBeenCalledWith(refreshedData))
   })
 
@@ -143,6 +242,69 @@ describe('ProjectVideoCombineWidget', () => {
     expect(queued.output['10'].inputs).toEqual({ video: ['8', 0], filename_prefix: ['8', 1] })
   })
 
+  it('queues downstream nodes after a reloaded graph restores links as a Map', async () => {
+    const { props, api } = widgetProps()
+    const reloadedNode = {
+      id: 8,
+      graph: {
+        links: new Map([
+          [7, { origin_id: 3, target_id: 8 }],
+          [9, { origin_id: 8, target_id: 10 }],
+        ]),
+      },
+    }
+
+    render(<ProjectVideoCombineWidget {...props} node={reloadedNode} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Combine' }))
+
+    await waitFor(() => expect(api.queuePrompt).toHaveBeenCalledTimes(1))
+    expect(Object.keys(api.queuePrompt.mock.calls[0][1].output)).toEqual(['8', '10'])
+  })
+
+  it('removes stale external input links omitted from the API prompt after reload', async () => {
+    const { props, api, graphToPrompt } = widgetProps()
+    const reloadedNode = {
+      id: 8,
+      graph: {
+        links: new Map([
+          [7, { origin_id: 3, target_id: 8 }],
+          [9, { origin_id: 8, target_id: 10 }],
+          [11, { origin_id: 11, target_id: 10 }],
+        ]),
+        _nodes: [{ id: 3 }, { id: 8 }, { id: 10 }, { id: 11 }],
+      },
+    }
+    graphToPrompt.mockResolvedValue({
+      workflow: { nodes: [{ id: 3 }, { id: 8 }, { id: 10 }, { id: 11 }] },
+      output: {
+        '8': {
+          inputs: { project_name: ['3', 0], project_data: JSON.stringify(projectData) },
+          class_type: 'easy multitrackProjectVideoCombine',
+        },
+        '10': {
+          inputs: {
+            input_mode: {
+              input_mode: 'video',
+              video: ['8', 0],
+              audio: ['11', 0],
+            },
+            filename_prefix: ['8', 1],
+          },
+          class_type: 'easy saveVideo',
+        },
+      },
+    })
+
+    render(<ProjectVideoCombineWidget {...props} node={reloadedNode} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Combine' }))
+
+    await waitFor(() => expect(api.queuePrompt).toHaveBeenCalledTimes(1))
+    expect(api.queuePrompt.mock.calls[0][1].output['10'].inputs).toEqual({
+      input_mode: { input_mode: 'video', video: ['8', 0] },
+      filename_prefix: ['8', 1],
+    })
+  })
+
   it('serializes the auto combine checkbox through project data', () => {
     const { props } = widgetProps()
     render(<ProjectVideoCombineWidget {...props} />)
@@ -150,5 +312,182 @@ describe('ProjectVideoCombineWidget', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Auto combine' }))
 
     expect(props.onChange).toHaveBeenCalledWith({ ...projectData, auto_combine: false })
+  })
+
+  it('exposes project playback to the shared sync play action', async () => {
+    const { props } = widgetProps()
+    render(<ProjectVideoCombineWidget {...props} />)
+
+    await act(async () => {
+      await (props.node as typeof props.node & { __easyMediaSyncPlay?: (startAt: number) => void })
+        .__easyMediaSyncPlay?.(performance.now())
+    })
+
+    expect(screen.getByRole('button', { name: 'Pause' })).not.toBeNull()
+    expect(HTMLMediaElement.prototype.play).toHaveBeenCalled()
+  })
+
+  it('toggles preview audio without changing project data', () => {
+    const { props } = widgetProps()
+    const { container } = render(<ProjectVideoCombineWidget {...props} />)
+    const video = container.querySelector('video') as HTMLVideoElement
+
+    expect(video.muted).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Mute preview audio' }))
+
+    expect(video.muted).toBe(true)
+    expect(screen.getByRole('button', { name: 'Unmute preview audio' })).not.toBeNull()
+    expect(props.onChange).not.toHaveBeenCalled()
+  })
+
+  it('accepts the shared sync play mute decision', async () => {
+    const { props } = widgetProps()
+    const { container } = render(<ProjectVideoCombineWidget {...props} />)
+
+    await act(async () => {
+      await (props.node as typeof props.node & {
+        __easyMediaSyncPlay?: (startAt: number, muted?: boolean) => void
+      }).__easyMediaSyncPlay?.(performance.now(), true)
+    })
+
+    expect((container.querySelector('video') as HTMLVideoElement).muted).toBe(true)
+    expect(screen.getByRole('button', { name: 'Unmute preview audio' })).not.toBeNull()
+  })
+
+  it('seeks the preview video when the playhead moves within the same clip', () => {
+    const { props } = widgetProps()
+    const { container } = render(<ProjectVideoCombineWidget {...props} />)
+    const video = container.querySelector('video') as HTMLVideoElement
+    const ruler = container.querySelector('.cursor-col-resize') as HTMLDivElement
+    vi.spyOn(ruler, 'getBoundingClientRect').mockReturnValue({
+      left: 0,
+      width: 480,
+      right: 480,
+      top: 0,
+      bottom: 24,
+      height: 24,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    })
+
+    fireEvent.mouseDown(ruler, { clientX: 230 })
+
+    expect(video.currentTime).toBeGreaterThan(2)
+    fireEvent.mouseUp(window)
+  })
+
+  it('keeps the preloaded next video element mounted when crossing a clip boundary', () => {
+    const secondClip = {
+      ...projectData.clips[0],
+      id: 'segment-1',
+      index: 1,
+      file_path: 'easy_media/projects/demo/video_1_1.mp4',
+      file_name: 'video_1_1.mp4',
+      media_revision: '1000000002',
+      source_start_frame: 24,
+    }
+    const { props } = widgetProps({
+      value: { ...projectData, clips: [projectData.clips[0], secondClip] },
+    })
+    const { container } = render(<ProjectVideoCombineWidget {...props} />)
+    const videosBefore = [...container.querySelectorAll('video')]
+    const preloadedSecondVideo = videosBefore[1]
+    expect(preloadedSecondVideo.currentTime).toBeCloseTo(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Segment 1 Shot' }))
+
+    const videosAfter = [...container.querySelectorAll('video')]
+    expect(videosAfter[0]).toBe(preloadedSecondVideo)
+    expect(videosAfter[0].getAttribute('aria-hidden')).toBe('false')
+  })
+
+  it('loops playback back to frame zero after reaching the project end', () => {
+    let animationFrame: FrameRequestCallback | undefined
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      animationFrame = callback
+      return 1
+    }))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const { props } = widgetProps()
+    const { container } = render(<ProjectVideoCombineWidget {...props} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+    const clockStart = performance.now()
+    act(() => animationFrame?.(clockStart + 2000))
+    expect(container.querySelector('.text-gradient')?.textContent).not.toBe('00:00:00')
+
+    act(() => animationFrame?.(clockStart + 6000))
+
+    expect(container.querySelector('.text-gradient')?.textContent).toBe('00:00:00')
+    expect(screen.getByRole('button', { name: 'Pause' })).not.toBeNull()
+  })
+
+  it('uses zero-based labels and shows the continuity mode', () => {
+    const { props } = widgetProps()
+
+    render(<ProjectVideoCombineWidget {...props} />)
+
+    expect(screen.getByText('Segment 0')).not.toBeNull()
+    expect(screen.getByText('Shot')).not.toBeNull()
+    expect(screen.queryByRole('combobox', { name: 'Select a file for segment 0' })).toBeNull()
+  })
+
+  it('keeps timeline content mounted while hiding and showing the track area', () => {
+    const { props } = widgetProps()
+    render(<ProjectVideoCombineWidget {...props} />)
+    const segmentLabel = screen.getByText('Segment 0')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide timeline' }))
+
+    expect(segmentLabel.isConnected).toBe(true)
+    expect(screen.getByText('Segment 0')).toBe(segmentLabel)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show timeline' }))
+
+    expect(screen.getByText('Segment 0')).toBe(segmentLabel)
+  })
+
+  it('allows selecting another video when the same segment index has multiple files', () => {
+    const alternatePath = 'easy_media/projects/demo/video_0_2.mp4'
+    const data: ProjectData = {
+      ...projectData,
+      clips: [{
+        ...projectData.clips[0],
+        video_files: [
+          {
+            file_path: projectData.clips[0].file_path,
+            file_name: projectData.clips[0].file_name,
+            media_revision: projectData.clips[0].media_revision,
+            source_frame_count: 120,
+          },
+          {
+            file_path: alternatePath,
+            file_name: 'video_0_2.mp4',
+            media_revision: '1000000002',
+            source_frame_count: 96,
+          },
+        ],
+      }],
+    }
+    const { props } = widgetProps({ value: data })
+
+    render(<ProjectVideoCombineWidget {...props} />)
+    const fileSelect = screen.getByRole('combobox', { name: 'Select a file for segment 0' })
+    expect(fileSelect.className).toContain('justify-center')
+    expect(fileSelect.firstElementChild?.className).toContain('flex-col')
+    fireEvent.click(fileSelect)
+    fireEvent.click(screen.getByRole('option', { name: 'video_0_2.mp4' }))
+
+    expect(props.onChange).toHaveBeenCalledWith({
+      ...data,
+      clips: [expect.objectContaining({
+        file_path: alternatePath,
+        file_name: 'video_0_2.mp4',
+        media_revision: '1000000002',
+        source_end_frame: 96,
+        source_frame_count: 96,
+      })],
+    })
   })
 })

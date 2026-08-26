@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MultiTrackSegmentBlock } from '@/components/widgets/multitrack/MultiTrackSegmentBlock'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import type { MultiTrackSegment, MultiTrackType } from '@/types/multitrack'
 
 vi.mock('@/components/ui/context-menu', () => ({
@@ -75,6 +76,71 @@ describe('MultiTrackSegmentBlock context menu', () => {
       observe() {}
       disconnect() {}
     })
+  })
+  it('toggles the track lock from a highlighted audio-segment control while trimming', () => {
+    const onAudioLockToggle = vi.fn()
+    const { container } = render(
+      <TooltipProvider>
+        <MultiTrackSegmentBlock
+          trackType="audio"
+          segmentIndex={0}
+          segment={segment('audio')}
+          totalLength={1000}
+          frameRate={24}
+          areaWidth={20}
+          canvasScale={1}
+          selected
+          onSelect={vi.fn()}
+          onDelete={vi.fn()}
+          onResize={vi.fn()}
+          onResizePreview={vi.fn()}
+          onMove={vi.fn()}
+          audioLocked
+          audioLockEnabled
+          onAudioLockToggle={onAudioLockToggle}
+        />
+      </TooltipProvider>,
+    )
+
+    const lockButton = screen.getByTestId('audio-segment-lock')
+    expect(lockButton.className).toContain('text-highlight')
+    expect(container.querySelector('[data-multitrack-segment]')?.className).toContain('overflow-visible')
+    expect(lockButton.className).toContain('right-2')
+    fireEvent.click(lockButton)
+    expect(onAudioLockToggle).toHaveBeenCalledWith(false)
+  })
+
+  it('places the MiniMax speaker-reference control left of the smaller lock control', () => {
+    const onSpeakerReferenceToggle = vi.fn()
+    render(
+      <TooltipProvider>
+        <MultiTrackSegmentBlock
+          trackType="audio"
+          segmentIndex={0}
+          segment={segment('audio')}
+          totalLength={1000}
+          frameRate={24}
+          areaWidth={20}
+          canvasScale={1}
+          selected
+          onSelect={vi.fn()}
+          onDelete={vi.fn()}
+          onResize={vi.fn()}
+          onResizePreview={vi.fn()}
+          onMove={vi.fn()}
+          audioLockEnabled
+          speakerReference
+          onSpeakerReferenceToggle={onSpeakerReferenceToggle}
+        />
+      </TooltipProvider>,
+    )
+
+    const speakerButton = screen.getByTestId('audio-speaker-reference')
+    expect(speakerButton.className).toContain('right-8')
+    expect(speakerButton.className).toContain('h-5')
+    expect(screen.getByTestId('audio-segment-lock').className).toContain('h-5')
+    fireEvent.click(speakerButton)
+    expect(onSpeakerReferenceToggle).toHaveBeenCalledWith(false)
   })
   it('offers distribute, clone, split, and delete actions for task segments', () => {
     const { onDelete, onDistribute, onClone, onSplitTask } = renderBlock('task')

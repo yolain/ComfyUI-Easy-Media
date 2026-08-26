@@ -100,6 +100,7 @@ describe('VideoTrack', () => {
           onSmartSplitTasks={vi.fn()}
           cutMode={false}
           onCutSegment={vi.fn()}
+          onCloneSegment={vi.fn()}
         />
       </TooltipProvider>,
     )
@@ -136,6 +137,7 @@ describe('VideoTrack', () => {
         onSmartSplitTasks={vi.fn()}
         cutMode={false}
         onCutSegment={vi.fn()}
+        onCloneSegment={vi.fn()}
         />
       </TooltipProvider>,
     )

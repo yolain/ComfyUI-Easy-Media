@@ -31,6 +31,7 @@ import {
   remapTrackDataFrameRate,
   resizeTaskSegmentEnd,
   secondsToFrame,
+  setExclusiveMultiTrackAudioTrackLock,
   splitMultiTrackSegmentByFrames,
   snapMultiTrackMoveStartTime,
   snapMultiTrackResizeTime,
@@ -40,6 +41,58 @@ import {
 } from '@/lib/multitrack-utils'
 
 describe('multitrack utilities', () => {
+  it('locks one audio track and replaces the previous track lock', () => {
+    const data = createDefaultTrackData()
+    const audioTrack = (id: string, audioLocked: boolean) => ({
+      id,
+      name: id,
+      type: 'audio' as const,
+      color: 'var(--multitrack-audio-bg)',
+      muted: false,
+      locked: false,
+      audio_locked: audioLocked,
+      segments: [],
+    })
+    data.tracks.push(audioTrack('audio-a', true), audioTrack('audio-b', false))
+
+    const updated = setExclusiveMultiTrackAudioTrackLock(data, 'audio-b', true)
+    expect(updated.tracks.filter((track) => track.type === 'audio').map((track) => track.audio_locked)).toEqual([false, true])
+    expect(setExclusiveMultiTrackAudioTrackLock(data, 'missing', true)).toBe(data)
+  })
+
+  it('migrates a legacy segment lock to its audio track', () => {
+    const data = createDefaultTrackData()
+    data.tracks.push({
+      id: 'audio', name: 'Audio', type: 'audio', color: 'var(--multitrack-audio-bg)',
+      muted: false, locked: false,
+      segments: [{
+        id: 'clip', start_frame: 0, end_frame: 10, color: 'var(--multitrack-audio-bg)',
+        content: { media_type: 'audio', audio_locked: true } as never,
+      }],
+    })
+
+    const normalized = normalizeTrackData(data)
+    const track = normalized.tracks.find((item) => item.id === 'audio')!
+    expect(track.audio_locked).toBe(true)
+    expect(track.segments[0].content).not.toHaveProperty('audio_locked')
+  })
+
+  it('keeps only the first marked speaker clip on an audio track', () => {
+    const data = createDefaultTrackData()
+    data.tracks.push({
+      id: 'audio', name: 'Audio', type: 'audio', color: 'var(--multitrack-audio-bg)',
+      muted: false, locked: false,
+      segments: [
+        { id: 'first', start_frame: 0, end_frame: 24, color: 'var(--multitrack-audio-bg)', content: { media_type: 'audio', speaker_reference: true } },
+        { id: 'second', start_frame: 24, end_frame: 48, color: 'var(--multitrack-audio-bg)', content: { media_type: 'audio', speaker_reference: true } },
+      ],
+    })
+
+    const normalized = normalizeTrackData(data)
+    const track = normalized.tracks.find((item) => item.id === 'audio')!
+    expect(track.segments.map((segment) => segment.content.speaker_reference)).toEqual([true, false])
+  })
+
   it('applies combined prompt text to each task selected A/B variant', () => {
     const data = createDefaultTrackData()
     const first = {
@@ -414,6 +467,7 @@ describe('multitrack utilities', () => {
     expect(normalized.tracks[0].segments[0].content).toMatchObject({
       task_mode: 'default',
       continuity_mode: 'shot',
+      ref_image_size: 'match',
       user_prompt: 'Prompt',
       images: [],
     })
@@ -1230,6 +1284,8 @@ describe('multitrack utilities', () => {
       content: {
         media_type: 'none',
         task_mode: 'edit',
+        continuity_mode: 'context',
+        ref_image_size: 'max',
         system_prompt: 'Custom instructions',
       },
     }]
@@ -1239,7 +1295,8 @@ describe('multitrack utilities', () => {
     expect(updated[0].segments[1].content).toMatchObject({
       task_mode: 'edit',
       system_prompt: 'Custom instructions',
-      continuity_mode: 'shot',
+      continuity_mode: 'context',
+      ref_image_size: 'max',
     })
   })
 

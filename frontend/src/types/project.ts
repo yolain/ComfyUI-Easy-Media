@@ -1,5 +1,12 @@
 export type ProjectContinuityMode = 'shot' | 'context'
 
+export interface ProjectVideoFile {
+  file_path: string
+  file_name: string
+  media_revision?: string
+  source_frame_count: number
+}
+
 export interface ProjectClip {
   id: string
   index: number
@@ -11,6 +18,7 @@ export interface ProjectClip {
   source_frame_count: number
   continuity_mode: ProjectContinuityMode
   enabled: boolean
+  video_files?: ProjectVideoFile[]
 }
 
 export interface ProjectData {

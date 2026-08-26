@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Loader2, Maximize2, Minimize2, Pause, Play, RefreshCw, ZoomOut } from 'lucide-react'
+import { Loader2, Maximize2, Minimize2, Pause, Play, RefreshCw, Trash2, Volume2, VolumeX, ZoomOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -12,7 +12,7 @@ import { LocaleContext, translate } from '@/lib/i18n'
 import { addMediaRevision, mediaContentToViewUrl } from '@/lib/media-url'
 import { formatMultiTrackTime } from '@/lib/multitrack-utils'
 import { MultiTrackRuler, MULTITRACK_LEFT_GUTTER, MULTITRACK_RIGHT_RESERVE } from './multitrack/MultiTrackRuler'
-import { DEFAULT_PROJECT_DATA, type ProjectClip, type ProjectData } from '@/types/project'
+import { DEFAULT_PROJECT_DATA, type ProjectClip, type ProjectData, type ProjectVideoFile } from '@/types/project'
 
 const MIN_CLIP_FRAMES = 1
 const ICON_BUTTON_CLASS = 'h-6 w-6 shrink-0 [&_svg]:size-3.5'
@@ -24,8 +24,13 @@ interface GraphLink {
 
 interface ProjectNode {
   id?: number | string
-  graph?: { links?: Record<string, GraphLink> | GraphLink[] }
+  graph?: {
+    links?: Record<string, GraphLink> | GraphLink[] | Map<unknown, GraphLink>
+    _nodes?: Array<{ id?: number | string }>
+  }
 }
+
+const DROP_PROMPT_INPUT = Symbol('drop-prompt-input')
 
 function ensureProjectData(value: unknown): ProjectData {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return DEFAULT_PROJECT_DATA
@@ -44,7 +49,59 @@ function ensureProjectData(value: unknown): ProjectData {
 function graphLinks(node: ProjectNode): GraphLink[] {
   const links = node.graph?.links
   if (!links) return []
-  return (Array.isArray(links) ? links : Object.values(links)).filter(Boolean)
+  if (Array.isArray(links)) return links.filter(Boolean)
+  if (links instanceof Map) return [...links.values()].filter(Boolean)
+  return Object.values(links).filter(Boolean)
+}
+
+function promptGraphNodeIds(
+  node: ProjectNode,
+  workflow: unknown,
+  output: Record<string, unknown>,
+): Set<string> {
+  const ids = new Set(Object.keys(output))
+  for (const graphNode of node.graph?._nodes ?? []) {
+    if (graphNode.id != null) ids.add(String(graphNode.id))
+  }
+  if (workflow && typeof workflow === 'object' && 'nodes' in workflow && Array.isArray(workflow.nodes)) {
+    for (const workflowNode of workflow.nodes) {
+      if (workflowNode && typeof workflowNode === 'object' && 'id' in workflowNode && workflowNode.id != null) {
+        ids.add(String(workflowNode.id))
+      }
+    }
+  }
+  return ids
+}
+
+function pruneExternalPromptConnections(
+  value: unknown,
+  keepIds: Set<string>,
+  graphNodeIds: Set<string>,
+): unknown | typeof DROP_PROMPT_INPUT {
+  if (
+    Array.isArray(value)
+    && value.length === 2
+    && (typeof value[0] === 'string' || typeof value[0] === 'number')
+    && typeof value[1] === 'number'
+    && graphNodeIds.has(String(value[0]))
+  ) {
+    return keepIds.has(String(value[0])) ? value : DROP_PROMPT_INPUT
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => {
+      const pruned = pruneExternalPromptConnections(item, keepIds, graphNodeIds)
+      return pruned === DROP_PROMPT_INPUT ? [] : [pruned]
+    })
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).flatMap(([key, item]) => {
+        const pruned = pruneExternalPromptConnections(item, keepIds, graphNodeIds)
+        return pruned === DROP_PROMPT_INPUT ? [] : [[key, pruned]]
+      }),
+    )
+  }
+  return value
 }
 
 function downstreamNodeIds(node: ProjectNode): Set<string> {
@@ -106,6 +163,20 @@ function projectClipUrl(clip: ProjectClip): string | null {
   return url ? addMediaRevision(url, clip.media_revision) : null
 }
 
+function selectProjectVideoFile(clip: ProjectClip, file: ProjectVideoFile): ProjectClip {
+  const sourceFrameCount = Math.max(MIN_CLIP_FRAMES, file.source_frame_count)
+  const sourceStartFrame = Math.min(clip.source_start_frame, sourceFrameCount - 1)
+  return {
+    ...clip,
+    file_path: file.file_path,
+    file_name: file.file_name,
+    media_revision: file.media_revision,
+    source_start_frame: sourceStartFrame,
+    source_end_frame: Math.max(sourceStartFrame + 1, Math.min(clip.source_end_frame, sourceFrameCount)),
+    source_frame_count: sourceFrameCount,
+  }
+}
+
 export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readonly<ReactWidgetProps<ProjectData>>) {
   const data = ensureProjectData(value)
   const locale = app?.ui?.settings?.settingsValues?.['Comfy.Locale']
@@ -115,13 +186,20 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
   )
   const [currentFrame, setCurrentFrame] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
+  const [muted, setMuted] = useState(false)
   const [zoom, setZoom] = useState(1)
   const [timelineCollapsed, setTimelineCollapsed] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [isCombining, setIsCombining] = useState(false)
   const [projects, setProjects] = useState<string[]>(['default'])
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null)
-  const videoRef = useRef<HTMLVideoElement>(null)
+  const [playbackNonce, setPlaybackNonce] = useState(0)
+  const videoRefs = useRef(new Map<string, HTMLVideoElement>())
+  const currentFrameRef = useRef(0)
+  const playbackStartFrameRef = useRef(0)
+  const playbackStartedAtRef = useRef(0)
+  const playbackRafRef = useRef<number | null>(null)
   const timelineContainerRef = useRef<HTMLDivElement>(null)
   const refreshRequestRef = useRef(0)
   const canvasScale = useCanvasScale(app)
@@ -130,9 +208,28 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
   const total = totalFrames(data.clips)
   const active = clipAtFrame(data.clips, Math.min(currentFrame, Math.max(0, total - 1)))
   const activeUrl = active ? projectClipUrl(active.clip) : null
-  const activeIndex = active ? data.clips.findIndex((clip) => clip.id === active.clip.id) : -1
-  const nextClip = activeIndex >= 0 ? data.clips.slice(activeIndex + 1).find((clip) => clip.enabled !== false) : undefined
+  const enabledClips = data.clips.filter((clip) => clip.enabled !== false)
+  const activeIndex = active ? enabledClips.findIndex((clip) => clip.id === active.clip.id) : -1
+  const nextClip = activeIndex >= 0 && enabledClips.length > 1
+    ? enabledClips[(activeIndex + 1) % enabledClips.length]
+    : undefined
   const nextUrl = nextClip ? projectClipUrl(nextClip) : null
+  const projectOptions = projects.includes(data.project_name) || !data.project_name
+    ? projects
+    : [...projects, data.project_name]
+
+  function selectClip(clip: ProjectClip) {
+    seek(clipStartFrame(data.clips, clip.id))
+  }
+
+  function selectClipFile(clip: ProjectClip, filePath: string) {
+    const file = clip.video_files?.find((candidate) => candidate.file_path === filePath)
+    if (!file) return
+    onChange({
+      ...data,
+      clips: data.clips.map((item) => item.id === clip.id ? selectProjectVideoFile(item, file) : item),
+    })
+  }
 
   const refreshProject = useCallback(async (projectName: string, showError = true) => {
     if (!projectName) return
@@ -184,6 +281,62 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
     }
   }, [app, t])
 
+  async function deleteProject() {
+    const projectName = data.project_name || 'default'
+    let confirmed = false
+    try {
+      confirmed = await app.extensionManager.dialog.confirm({
+        title: t('projectVideoCombine.deleteProjectTitle'),
+        message: t(projectName === 'default'
+          ? 'projectVideoCombine.deleteDefaultProjectConfirm'
+          : 'projectVideoCombine.deleteProjectConfirm', { project: projectName }),
+      })
+    } catch (error) {
+      app.extensionManager.toast.add({
+        severity: 'error',
+        summary: t('projectVideoCombine.deleteProjectFailed'),
+        detail: error instanceof Error ? error.message : String(error),
+        life: 5000,
+      })
+      return
+    }
+    if (!confirmed) return
+
+    setIsDeleting(true)
+    setIsRefreshing(false)
+    ++refreshRequestRef.current
+    try {
+      const response = await app.api.fetchApi(
+        `/easy-media/project?project_name=${encodeURIComponent(projectName)}`,
+        { method: 'DELETE' },
+      )
+      const payload: unknown = await response.json()
+      if (!response.ok) throw new Error(errorMessage(payload, t('projectVideoCombine.deleteProjectFailed')))
+      setIsPlaying(false)
+      setCurrentFrame(0)
+      setSelectedClipId(null)
+      setProjects((names) => projectName === 'default'
+        ? names
+        : names.filter((name) => name !== projectName))
+      onChange({ ...DEFAULT_PROJECT_DATA, project_name: 'default', auto_combine: data.auto_combine })
+      app.extensionManager.toast.add({
+        severity: 'success',
+        summary: t('projectVideoCombine.deleteProjectSuccess'),
+        detail: t('projectVideoCombine.deleteProjectSuccessDetail', { project: projectName }),
+        life: 4000,
+      })
+    } catch (error) {
+      app.extensionManager.toast.add({
+        severity: 'error',
+        summary: t('projectVideoCombine.deleteProjectFailed'),
+        detail: error instanceof Error ? error.message : String(error),
+        life: 5000,
+      })
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   useEffect(() => {
     if (data.clips.length === 0) void refreshProject(data.project_name || 'default', false)
   }, [])
@@ -192,6 +345,20 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
     const handleSuccess = () => void refreshProject(data.project_name || 'default', false)
     app.api.addEventListener('execution_success', handleSuccess)
     return () => app.api.removeEventListener('execution_success', handleSuccess)
+  }, [app.api, data.project_name, refreshProject])
+
+  useEffect(() => {
+    const handleProjectRefresh = (event: CustomEvent<unknown>) => {
+      const payload = event.detail
+      const projectName = payload && typeof payload === 'object' && 'project_name' in payload
+        ? String(payload.project_name)
+        : ''
+      const currentProjectName = data.project_name || 'default'
+      if (projectName && projectName !== currentProjectName) return
+      void refreshProject(currentProjectName, false)
+    }
+    app.api.addCustomEventListener('easy_multitrack_project_refresh', handleProjectRefresh)
+    return () => app.api.removeCustomEventListener('easy_multitrack_project_refresh', handleProjectRefresh)
   }, [app.api, data.project_name, refreshProject])
 
   useEffect(() => {
@@ -208,26 +375,107 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
   }, [app.api, node, refreshProject])
 
   useEffect(() => {
-    const video = videoRef.current
+    const syncNode = node as ProjectNode & { __easyMediaSyncPlay?: (startAt: number, muted?: boolean) => void }
+    syncNode.__easyMediaSyncPlay = (_startAt, syncMuted) => {
+      if (typeof syncMuted === 'boolean') setMuted(syncMuted)
+      currentFrameRef.current = 0
+      setCurrentFrame(0)
+      setSelectedClipId(clipAtFrame(data.clips, 0)?.clip.id ?? null)
+      setPlaybackNonce((nonce) => nonce + 1)
+      setIsPlaying(true)
+    }
+    return () => {
+      delete syncNode.__easyMediaSyncPlay
+    }
+  }, [data.clips, node])
+
+  useEffect(() => {
+    currentFrameRef.current = currentFrame
+  }, [currentFrame])
+
+  useEffect(() => {
+    if (!isPlaying || total <= 0) {
+      if (playbackRafRef.current !== null) cancelAnimationFrame(playbackRafRef.current)
+      playbackRafRef.current = null
+      return
+    }
+
+    playbackStartedAtRef.current = performance.now()
+    playbackStartFrameRef.current = currentFrameRef.current >= total ? 0 : currentFrameRef.current
+
+    function tick(now: number) {
+      const elapsedFrames = Math.floor(((now - playbackStartedAtRef.current) / 1000) * data.frame_rate)
+      const nextFrame = playbackStartFrameRef.current + elapsedFrames
+      if (nextFrame >= total) {
+        currentFrameRef.current = 0
+        playbackStartFrameRef.current = 0
+        playbackStartedAtRef.current = now
+        setCurrentFrame(0)
+        setSelectedClipId(clipAtFrame(data.clips, 0)?.clip.id ?? null)
+        setPlaybackNonce((nonce) => nonce + 1)
+      } else if (nextFrame !== currentFrameRef.current) {
+        currentFrameRef.current = nextFrame
+        setCurrentFrame(nextFrame)
+      }
+      playbackRafRef.current = requestAnimationFrame(tick)
+    }
+
+    playbackRafRef.current = requestAnimationFrame(tick)
+    return () => {
+      if (playbackRafRef.current !== null) cancelAnimationFrame(playbackRafRef.current)
+      playbackRafRef.current = null
+    }
+  }, [data.clips, data.frame_rate, isPlaying, total])
+
+  useEffect(() => {
+    const video = active ? videoRefs.current.get(active.clip.id) : undefined
     if (!video || !active) return
     const localSeconds = (active.clip.source_start_frame + Math.max(0, currentFrame - active.start)) / data.frame_rate
-    if (Math.abs(video.currentTime - localSeconds) > 0.08) video.currentTime = localSeconds
-    if (isPlaying) void video.play().catch(() => setIsPlaying(false))
-    else video.pause()
-  }, [active?.clip.id, activeUrl, data.frame_rate, isPlaying])
+    const seekTolerance = isPlaying ? 0.08 : 0.001
+    try {
+      if (Math.abs(video.currentTime - localSeconds) > seekTolerance) video.currentTime = localSeconds
+    } catch (error) {
+      console.error('[ProjectVideoCombineWidget] failed to seek preview video:', error)
+    }
+  }, [active?.clip.id, activeUrl, currentFrame, data.frame_rate, isPlaying])
+
+  useEffect(() => {
+    const video = nextClip ? videoRefs.current.get(nextClip.id) : undefined
+    if (!video || !nextClip) return
+    const preloadTime = nextClip.source_start_frame / data.frame_rate
+    try {
+      if (Math.abs(video.currentTime - preloadTime) > 0.001) video.currentTime = preloadTime
+    } catch (error) {
+      console.error('[ProjectVideoCombineWidget] failed to preload the next preview video:', error)
+    }
+  }, [data.frame_rate, nextClip?.id, nextUrl])
+
+  useEffect(() => {
+    const video = active ? videoRefs.current.get(active.clip.id) : undefined
+    if (!video || !active) return
+    for (const [clipId, candidate] of videoRefs.current) {
+      if (clipId !== active.clip.id) candidate.pause()
+    }
+    if (isPlaying) {
+      void video.play().catch((error: unknown) => {
+        console.error('[ProjectVideoCombineWidget] failed to play preview video:', error)
+        setIsPlaying(false)
+      })
+    } else {
+      video.pause()
+    }
+  }, [active?.clip.id, activeUrl, isPlaying, playbackNonce])
 
   function seek(frame: number) {
     const nextFrame = Math.max(0, Math.min(total, Math.round(frame)))
+    currentFrameRef.current = nextFrame
+    if (isPlaying) {
+      playbackStartFrameRef.current = nextFrame >= total ? 0 : nextFrame
+      playbackStartedAtRef.current = performance.now()
+    }
     setCurrentFrame(nextFrame)
     const nextActive = clipAtFrame(data.clips, Math.min(nextFrame, Math.max(0, total - 1)))
     setSelectedClipId(nextActive?.clip.id ?? null)
-  }
-
-  function handleVideoTimeUpdate() {
-    const video = videoRef.current
-    if (!video || !active || !isPlaying) return
-    const localFrame = Math.round(video.currentTime * data.frame_rate) - active.clip.source_start_frame
-    setCurrentFrame(Math.min(total, active.start + Math.max(0, localFrame)))
   }
 
   async function combineProject() {
@@ -241,15 +489,13 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
       const prompt = await app.graphToPrompt()
       const keepIds = downstreamNodeIds(node as ProjectNode)
       const allOutput = prompt.output as Record<string, { inputs?: Record<string, unknown> }>
-      const allNodeIds = new Set(Object.keys(allOutput))
+      const graphNodeIds = promptGraphNodeIds(node as ProjectNode, prompt.workflow, allOutput)
       const filteredOutput = Object.fromEntries(
         Object.entries(allOutput).filter(([nodeId]) => keepIds.has(nodeId)).map(([nodeId, apiNode]) => {
-          const inputs = { ...(apiNode.inputs ?? {}) }
-          for (const [inputName, inputValue] of Object.entries(inputs)) {
-            if (Array.isArray(inputValue) && inputValue.length === 2 && allNodeIds.has(String(inputValue[0])) && !keepIds.has(String(inputValue[0]))) {
-              delete inputs[inputName]
-            }
-          }
+          const prunedInputs = pruneExternalPromptConnections(apiNode.inputs ?? {}, keepIds, graphNodeIds)
+          const inputs = prunedInputs === DROP_PROMPT_INPUT
+            ? {}
+            : prunedInputs as Record<string, unknown>
           if (nodeId === String((node as ProjectNode).id ?? '')) {
             inputs.project_name = projectName
             inputs.project_data = JSON.stringify({ ...data, auto_combine: true })
@@ -289,10 +535,17 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
       <TooltipProvider>
         <div className="flex h-full min-h-[520px] w-full flex-col overflow-hidden rounded-md border border-border bg-background text-foreground">
           <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-2">
-            <Select value={data.project_name || 'default'} onOpenChange={(open) => { if (open) void loadProjects() }} onValueChange={(name) => void refreshProject(name)}>
-              <SelectTrigger className="h-7 w-32 text-xs" aria-label={t('projectVideoCombine.selectProject')}><SelectValue /></SelectTrigger>
-              <SelectContent>{projects.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent>
-            </Select>
+            <div className="flex items-center gap-1">
+              <Select value={data.project_name || 'default'} onOpenChange={(open) => { if (open) void loadProjects() }} onValueChange={(name) => void refreshProject(name)}>
+                <SelectTrigger className="h-7 w-32 text-xs" aria-label={t('projectVideoCombine.selectProject')}><SelectValue /></SelectTrigger>
+                <SelectContent>{projectOptions.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent>
+              </Select>
+              {tooltip(t('projectVideoCombine.deleteProject'), (
+                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" disabled={isDeleting || isRefreshing} aria-label={t('projectVideoCombine.deleteProject')} onClick={() => void deleteProject()}>
+                  {isDeleting ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                </Button>
+              ))}
+            </div>
             <div className="flex items-center gap-2">
               {tooltip(t('projectVideoCombine.refresh'), (
                 <Button type="button" variant="ghost" size="icon" className="h-7 w-7" disabled={isRefreshing} onClick={() => void refreshProject(data.project_name || 'default')}>
@@ -312,45 +565,105 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
 
           <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black p-3">
             {activeUrl ? (
-              <video ref={videoRef} key={activeUrl} src={activeUrl} preload="auto" className="h-full max-h-full w-full object-contain" onTimeUpdate={handleVideoTimeUpdate} onEnded={() => seek(Math.min(total, (active?.start ?? 0) + clipDuration(active!.clip)))} />
+              [
+                { clip: active!.clip, url: activeUrl, visible: true },
+                ...(nextClip && nextUrl ? [{ clip: nextClip, url: nextUrl, visible: false }] : []),
+              ].map(({ clip, url, visible }) => (
+                <video
+                  ref={(element) => {
+                    if (element) videoRefs.current.set(clip.id, element)
+                    else videoRefs.current.delete(clip.id)
+                  }}
+                  key={clip.id}
+                  src={url}
+                  preload="auto"
+                  playsInline
+                  muted={!visible || muted}
+                  aria-hidden={!visible}
+                  className={visible
+                    ? 'h-full max-h-full w-full object-contain'
+                    : 'pointer-events-none absolute left-0 top-0 h-px w-px opacity-0'}
+                />
+              ))
             ) : <div className="text-xs text-muted-foreground">{t('projectVideoCombine.emptyPreview')}</div>}
-            {nextUrl && <video key={nextUrl} src={nextUrl} preload="auto" className="hidden" muted aria-hidden />}
           </div>
 
           <div className="grid h-9 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-y border-border px-1 text-[10px]">
-            <div />
+            <div className="flex items-center">
+              {tooltip(muted ? t('projectVideoCombine.unmutePreview') : t('projectVideoCombine.mutePreview'), (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className={ICON_BUTTON_CLASS}
+                  aria-label={muted ? t('projectVideoCombine.unmutePreview') : t('projectVideoCombine.mutePreview')}
+                  aria-pressed={muted}
+                  onClick={() => setMuted((current) => !current)}
+                >
+                  {muted ? <VolumeX /> : <Volume2 />}
+                </Button>
+              ))}
+            </div>
             <div className="flex items-center gap-2 text-muted-foreground">
               <span className="w-16 text-right tabular-nums text-gradient">{formatMultiTrackTime(currentFrame, { frameRate: data.frame_rate, showFrames: true })}</span>
               <Button type="button" variant="secondary" size="icon" className={`${ICON_BUTTON_CLASS} rounded-full`} disabled={total === 0} aria-label={isPlaying ? t('multitrack.pause') : t('multitrack.play')} onClick={() => setIsPlaying((playing) => !playing)}>{isPlaying ? <Pause /> : <Play />}</Button>
               <span className="w-16 tabular-nums">{formatMultiTrackTime(total, { frameRate: data.frame_rate, showFrames: true })}</span>
             </div>
             <div className="ml-auto flex items-center gap-1">
-              {tooltip(timelineCollapsed ? t('multitrack.showTimeline') : t('multitrack.hideTimeline'), <Button type="button" variant="ghost" size="icon" className={ICON_BUTTON_CLASS} onClick={() => setTimelineCollapsed((collapsed) => !collapsed)}>{timelineCollapsed ? <Maximize2 /> : <Minimize2 />}</Button>)}
+              {tooltip(timelineCollapsed ? t('multitrack.showTimeline') : t('multitrack.hideTimeline'), <Button type="button" variant="ghost" size="icon" className={ICON_BUTTON_CLASS} aria-label={timelineCollapsed ? t('multitrack.showTimeline') : t('multitrack.hideTimeline')} onClick={() => setTimelineCollapsed((collapsed) => !collapsed)}>{timelineCollapsed ? <Maximize2 /> : <Minimize2 />}</Button>)}
               <ZoomOut className="size-3.5 text-muted-foreground" />
               <Slider min={1} max={6} step={0.25} value={[zoom]} onValueChange={([next]) => setZoom(next)} className="h-3 w-12" aria-label={t('multitrack.timelineZoom')} />
             </div>
           </div>
 
-          {!timelineCollapsed && (
-            <div ref={timelineContainerRef} className="no-scrollbar h-[104px] shrink-0 overflow-x-auto overflow-y-hidden bg-muted/20">
-              <div style={{ width: scaledTimelineWidth, minWidth: '100%' }}>
-                <MultiTrackRuler totalLength={total} frameRate={data.frame_rate} width={scaledTimelineWidth} canvasScale={canvasScale} currentTime={currentFrame} taskMarkers={[]} selectedTaskMarkerId={null} onSeek={seek} onSelectTaskMarker={() => {}} onMoveTaskMarker={() => {}} onDeleteTaskMarker={() => {}} />
-                <div className="relative h-20" style={{ width: scaledTimelineWidth }}>
-                  <div className="absolute top-2 flex h-14 overflow-hidden rounded-sm border border-border bg-muted/40" style={{ left: MULTITRACK_LEFT_GUTTER, width: playableWidth }}>
-                    {data.clips.filter((clip) => clip.enabled !== false).map((clip) => {
+          <div
+            ref={timelineContainerRef}
+            className={`no-scrollbar h-[104px] shrink-0 overflow-x-auto overflow-y-hidden bg-muted/20 ${timelineCollapsed ? 'hidden' : ''}`}
+            aria-hidden={timelineCollapsed}
+          >
+            <div style={{ width: scaledTimelineWidth, minWidth: '100%' }}>
+              <MultiTrackRuler totalLength={total} frameRate={data.frame_rate} width={scaledTimelineWidth} canvasScale={canvasScale} currentTime={currentFrame} taskMarkers={[]} selectedTaskMarkerId={null} onSeek={seek} onSelectTaskMarker={() => {}} onMoveTaskMarker={() => {}} onDeleteTaskMarker={() => {}} />
+              <div className="relative h-20" style={{ width: scaledTimelineWidth }}>
+                <div className="absolute top-2 flex h-14 overflow-hidden rounded-sm border border-border bg-muted/40" style={{ left: MULTITRACK_LEFT_GUTTER, width: playableWidth }}>
+                  {data.clips.filter((clip) => clip.enabled !== false).map((clip) => {
                       const selected = selectedClipId === clip.id
+                      const blockClassName = `h-full min-w-0 shrink-0 rounded-none border-r border-border px-2 ${selected ? 'bg-primary/20 ring-1 ring-inset ring-primary' : 'bg-secondary/40 hover:bg-secondary/60'}`
+                      const blockStyle = { width: `${(clipDuration(clip) / Math.max(total, 1)) * 100}%` }
+                      const label = (
+                        <div className="flex min-w-0 flex-col items-center leading-tight">
+                          <span className="truncate text-[11px] font-medium">{t('projectVideoCombine.clipLabel', { index: clip.index })}</span>
+                          <span className="truncate text-[9px] text-muted-foreground">
+                            {t('projectVideoCombine.clipContinuity', {
+                              mode: t(clip.continuity_mode === 'context'
+                                ? 'projectVideoCombine.continuityContext'
+                                : 'projectVideoCombine.continuityShot'),
+                            })}
+                          </span>
+                        </div>
+                      )
+                      if ((clip.video_files?.length ?? 0) > 1) {
+                        return (
+                          <Select key={clip.id} value={clip.file_path} onOpenChange={(open) => { if (open) selectClip(clip) }} onValueChange={(filePath) => selectClipFile(clip, filePath)}>
+                            <SelectTrigger className={`${blockClassName} relative justify-center [&>svg]:absolute [&>svg]:right-2`} style={blockStyle} aria-label={t('projectVideoCombine.selectClipFile', { index: clip.index })}>
+                              {label}
+                            </SelectTrigger>
+                            <SelectContent>
+                              {clip.video_files?.map((file) => <SelectItem key={file.file_path} value={file.file_path}>{file.file_name}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        )
+                      }
                       return (
-                        <Button key={clip.id} type="button" variant="ghost" className={`h-full min-w-0 shrink-0 rounded-none border-r border-border px-2 ${selected ? 'bg-primary/20 ring-1 ring-inset ring-primary' : 'bg-secondary/40 hover:bg-secondary/60'}`} style={{ width: `${(clipDuration(clip) / Math.max(total, 1)) * 100}%` }} onClick={() => { setSelectedClipId(clip.id); setCurrentFrame(clipStartFrame(data.clips, clip.id)) }}>
-                          <span className="truncate text-[11px] font-medium">{t('projectVideoCombine.clipLabel', { index: clip.index + 1 })}</span>
+                        <Button key={clip.id} type="button" variant="ghost" className={blockClassName} style={blockStyle} onClick={() => selectClip(clip)}>
+                          {label}
                         </Button>
                       )
-                    })}
-                  </div>
-                  <div className="pointer-events-none absolute top-0 h-20 w-px bg-destructive" style={{ left: playheadLeft }} />
+                  })}
                 </div>
+                <div className="pointer-events-none absolute top-0 h-20 w-px bg-destructive" style={{ left: playheadLeft }} />
               </div>
             </div>
-          )}
+          </div>
         </div>
       </TooltipProvider>
     </LocaleContext.Provider>
