@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { Lock, MicVocal } from 'lucide-react'
+import { Lock, Speech, Unlock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   ContextMenu,
@@ -530,7 +530,7 @@ export function MultiTrackSegmentBlock({
                     data-testid="audio-speaker-reference"
                     aria-label={speakerReference ? t('multitrack.disableSpeakerReference') : t('multitrack.enableSpeakerReference')}
                     aria-pressed={speakerReference}
-                    className={`absolute right-8 top-0.5 z-20 h-5 w-5 cursor-pointer bg-background/80 shadow-sm [&_svg]:!size-2 ${speakerReference ? 'text-highlight' : 'text-muted-foreground'}`}
+                    className={`absolute right-8 top-0.5 z-20 h-5 w-5 cursor-pointer bg-background/80 shadow-sm [&_svg]:!size-3 ${speakerReference ? 'text-highlight' : 'text-muted-foreground'}`}
                     onMouseDown={(event) => {
                       event.preventDefault()
                       event.stopPropagation()
@@ -541,7 +541,7 @@ export function MultiTrackSegmentBlock({
                       onSpeakerReferenceToggle?.(!speakerReference)
                     }}
                   >
-                    <MicVocal />
+                    <Speech />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="max-w-72">
@@ -557,7 +557,7 @@ export function MultiTrackSegmentBlock({
                     data-testid="audio-segment-lock"
                     aria-label={audioLocked ? t('multitrack.unlockAudio') : t('multitrack.lockAudio')}
                     aria-pressed={audioLocked}
-                    className={`absolute right-2 top-0.5 z-20 h-5 w-5 cursor-pointer bg-background/80 shadow-sm [&_svg]:!size-2 ${audioLocked ? 'text-highlight' : 'text-muted-foreground'}`}
+                    className={`absolute right-2 top-0.5 z-20 h-5 w-5 cursor-pointer bg-background/80 shadow-sm [&_svg]:!size-3 ${audioLocked ? 'text-highlight' : 'text-muted-foreground'}`}
                     onMouseDown={(event) => {
                       event.preventDefault()
                       event.stopPropagation()
@@ -568,7 +568,7 @@ export function MultiTrackSegmentBlock({
                       onAudioLockToggle?.(!audioLocked)
                     }}
                   >
-                    <Lock />
+                    {audioLocked ? <Lock/> : <Unlock/>}
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="max-w-72">

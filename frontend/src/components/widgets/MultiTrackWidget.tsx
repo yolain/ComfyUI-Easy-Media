@@ -1374,6 +1374,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             isPlaying={isPlaying}
             playbackNonce={syncPlayNonce}
             node={node}
+            app={app}
             editingSubtitleSegmentId={editingSubtitleSegmentId}
             onSubtitleEditRequestHandled={() => setEditingSubtitleSegmentId(null)}
             onSelectSegment={(segmentId) => handleSelectSegment(segmentId)}

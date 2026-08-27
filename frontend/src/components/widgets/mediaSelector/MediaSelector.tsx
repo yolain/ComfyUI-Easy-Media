@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Link2,
   Plus,
+  RefreshCw,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -58,6 +59,7 @@ interface MediaSelectorSession {
 const mediaSelectorSessions = new Map<MediaType, MediaSelectorSession>()
 
 const MULTIPLE_MEDIA_SEPARATOR = '|MULTIPLE|'
+const MEDIA_REFRESH_COOLDOWN_MS = 2_000
 
 interface MediaSelectorChangeEvent {
   filePath: string
@@ -732,6 +734,9 @@ export function MediaSelector({
   const [multipleSelection, setMultipleSelection] = useState(false)
   const [draftSelectedValues, setDraftSelectedValues] = useState<Set<string>>(() => new Set())
   const [visibleFiles, setVisibleFiles] = useState<MediaFileEntry[]>([])
+  const [refreshCoolingDown, setRefreshCoolingDown] = useState(false)
+  const lastRefreshAtRef = useRef<number | null>(null)
+  const refreshCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const normalizedSelectionLimit = Math.max(1, Math.min(9, maxSelectionCount))
   const supportsMultipleSelection = mediaType === 'image'
     && allowMultipleSelection
@@ -750,6 +755,12 @@ export function MediaSelector({
     setActiveTab(defaultTab)
     setSearchQuery('')
   }, [defaultTab, historyOnly])
+
+  useEffect(() => () => {
+    if (refreshCooldownTimerRef.current !== null) {
+      clearTimeout(refreshCooldownTimerRef.current)
+    }
+  }, [])
 
   function rememberSession(nextTab: MediaTab, nextSubfolders = subfolders) {
     mediaSelectorSessions.set(mediaType, { activeTab: nextTab, subfolders: nextSubfolders })
@@ -779,6 +790,31 @@ export function MediaSelector({
       if (prev === 'date') return 'folders'
       return 'name'
     })
+  }
+
+  function handleRefresh() {
+    const now = Date.now()
+    if (
+      lastRefreshAtRef.current !== null
+      && now - lastRefreshAtRef.current < MEDIA_REFRESH_COOLDOWN_MS
+    ) return
+
+    lastRefreshAtRef.current = now
+    setRefreshCoolingDown(true)
+    const source = activeTab === 'outputs' || activeTab === 'history'
+      ? 'outputs'
+      : activeTab === 'local'
+        ? 'local'
+        : 'inputs'
+    invalidateMediaListCache(source)
+
+    if (refreshCooldownTimerRef.current !== null) {
+      clearTimeout(refreshCooldownTimerRef.current)
+    }
+    refreshCooldownTimerRef.current = setTimeout(() => {
+      refreshCooldownTimerRef.current = null
+      setRefreshCoolingDown(false)
+    }, MEDIA_REFRESH_COOLDOWN_MS)
   }
 
   function handleFileChange(
@@ -932,7 +968,7 @@ export function MediaSelector({
   }
 
   return (
-    <div data-media-selector="" className="flex flex-col w-72 h-80 text-xs select-none">
+    <div data-media-selector="" className="flex flex-col w-80 h-80 text-xs select-none">
       <Tabs value={activeTab} onValueChange={(v) => handleTabChange(v as MediaTab)} className="flex flex-col flex-1 overflow-hidden">
         {/* Tab header */}
         <TabsList className="w-full rounded-none rounded-t-md h-7 p-0.5 gap-0.5 shrink-0">
@@ -1043,6 +1079,17 @@ export function MediaSelector({
                   : <LayoutGrid className="w-3 h-3" />}
               </Button>
             )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              title={t('mediaSelector.refresh')}
+              aria-label={t('mediaSelector.refresh')}
+              disabled={refreshCoolingDown}
+              onClick={handleRefresh}
+            >
+              <RefreshCw className="w-3 h-3" />
+            </Button>
           </div>
         )}
 

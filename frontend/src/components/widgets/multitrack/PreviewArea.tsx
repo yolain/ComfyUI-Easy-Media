@@ -30,6 +30,7 @@ import {
 import { useMultiTrackResolutionInput } from '@/hooks/use-multitrack-resolution-input'
 import { useT } from '@/lib/i18n'
 import { mediaContentToViewUrl } from '@/lib/media-url'
+import { computeSlotItems } from '@/lib/timeline-utils'
 import {
   DEFAULT_SUBTITLE_SPEECH_SETTINGS,
   type SubtitleSpeechSettings,
@@ -64,6 +65,7 @@ interface PreviewAreaProps {
   isPlaying: boolean
   playbackNonce?: number
   node: unknown
+  app?: unknown
   editingSubtitleSegmentId?: string | null
   onSubtitleEditRequestHandled?: () => void
   onSelectSegment?: (segmentId: string) => void
@@ -235,6 +237,7 @@ export function PreviewArea({
   isPlaying,
   playbackNonce = 0,
   node,
+  app,
   editingSubtitleSegmentId,
   onSubtitleEditRequestHandled,
   onSelectSegment,
@@ -265,6 +268,10 @@ export function PreviewArea({
   const [editingSubtitle, setEditingSubtitle] = useState<{ segmentId: string; text: string } | null>(null)
   const [firstVideoMetadata, setFirstVideoMetadata] = useState<MultiTrackVideoMetadata | null>(null)
   const resolutionInput = useMultiTrackResolutionInput(node)
+  const imageSlotItems = useMemo(
+    () => computeSlotItems(node, app, 'image'),
+    [node, app, activeTaskMediaSelectorOpen],
+  )
   const videoSegments = useMemo(() => (
     data.tracks
       .filter((track) => track.type === 'video')
@@ -618,6 +625,7 @@ export function PreviewArea({
             mediaType="image"
             allowMultipleSelection
             maxSelectionCount={MAX_TASK_IMAGES - activeTaskImages.allImages.length}
+            slotItems={imageSlotItems}
             onChange={handleActiveTaskSelectedMedia}
           />
         </PopoverContent>
@@ -1245,6 +1253,8 @@ export function PreviewArea({
         ) : (
           <TaskSegmentEditor
             segment={selectedSegment.segment}
+            node={node}
+            app={app}
             trackSegments={taskSegments}
             selectedSegments={selectedTaskSegments}
             videoSegments={videoSegments}

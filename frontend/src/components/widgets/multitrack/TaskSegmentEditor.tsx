@@ -11,6 +11,7 @@ import type { MediaTab } from '@/components/widgets/mediaSelector/MediaSelector'
 import { useT } from '@/lib/i18n'
 import { mediaContentToViewUrl } from '@/lib/media-url'
 import { getSegmentTrackPresentation } from '@/lib/multitrack-segment-style'
+import { computeSlotItems } from '@/lib/timeline-utils'
 import {
   applyCombinedTaskTexts,
   formatMultiTrackDurationTimecode,
@@ -60,6 +61,8 @@ interface TrackSegmentContentUpdate {
 
 interface TaskSegmentEditorProps {
   segment: MultiTrackSegment
+  node?: unknown
+  app?: unknown
   trackSegments?: MultiTrackSegment[]
   selectedSegments?: MultiTrackSegment[]
   videoSegments?: MultiTrackSegment[]
@@ -185,6 +188,8 @@ async function loadSystemPromptOptions(): Promise<SystemPromptOption[]> {
 
 export function TaskSegmentEditor({
   segment,
+  node,
+  app,
   trackSegments,
   selectedSegments,
   videoSegments = [],
@@ -213,6 +218,10 @@ export function TaskSegmentEditor({
   const formattedDuration = formatMultiTrackDurationTimecode(duration, frameRate)
   const [durationInput, setDurationInput] = useState(formattedDuration)
   const images = taskImages(segment)
+  const slotItems = useMemo(
+    () => computeSlotItems(node, app, 'image'),
+    [node, app, mediaSelectorOpen],
+  )
   const reselectImage = images.find((image) => image.id === reselectImageId)
   const mode = segment.content.task_mode ?? 'default'
   const continuityMode = segment.content.continuity_mode ?? MULTITRACK_DEFAULT_CONTINUITY_MODE
@@ -662,6 +671,7 @@ export function TaskSegmentEditor({
                   defaultTab={imageSelectorTab(reselectImage)}
                   allowMultipleSelection={!reselectImageId}
                   maxSelectionCount={reselectImageId ? 1 : MAX_TASK_IMAGES - images.length}
+                  slotItems={slotItems}
                   onChange={handleSelectedMedia}
                 />
               </PopoverContent>
