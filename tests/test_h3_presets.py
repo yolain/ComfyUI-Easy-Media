@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from utils.h3_presets import (  # noqa: E402
     DEFAULT_H3_PRESETS,
+    get_h3_preset_keys,
     load_h3_presets,
     select_h3_preset,
 )
@@ -19,7 +20,7 @@ def test_load_h3_presets_uses_embedded_defaults_without_user_file(tmp_path):
 
     assert result == DEFAULT_H3_PRESETS
     assert result is not DEFAULT_H3_PRESETS
-    assert result["light"]["dual"]["is_turbo"]["split_step"] == 4
+    assert result["light"]["dual"]["is_turbo"]["sampler_2nd"] == "sa_solver"
 
 
 def test_load_h3_presets_reads_valid_user_override(tmp_path):
@@ -32,6 +33,24 @@ def test_load_h3_presets_reads_valid_user_override(tmp_path):
     result = load_h3_presets(tmp_path)
 
     assert result["light"]["single"]["is_turbo"]["sampler"] == "heun"
+
+
+def test_get_h3_preset_keys_preserves_json_declaration_order(tmp_path):
+    custom = {
+        name: DEFAULT_H3_PRESETS[name]
+        for name in ("high", "medium", "ultra_light", "light")
+    }
+    preset_dir = tmp_path / "presets"
+    preset_dir.mkdir()
+    (preset_dir / "h3_sample.json").write_text(json.dumps(custom))
+
+    assert get_h3_preset_keys(tmp_path) == [
+        "custom",
+        "high",
+        "medium",
+        "ultra_light",
+        "light",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -70,4 +89,4 @@ def test_select_h3_preset_uses_json_dual_turbo_branch():
 def test_select_h3_preset_uses_non_turbo_for_unknown_detection():
     result = select_h3_preset(DEFAULT_H3_PRESETS, "light", "single", False)
 
-    assert len(result["sigmas"].split(",")) == 17
+    assert len(result["sigmas"].split(",")) == 13

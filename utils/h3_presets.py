@@ -68,7 +68,7 @@ DEFAULT_H3_PRESETS: dict[str, dict[str, dict[str, dict[str, Any]]]] = {
         "single": {
             "is_turbo": {
                 "sampler": "er_sde",
-                "sigmas": "1.0000, 0.9730, 0.9231, 0.8780, 0.8000, 0.6316, 0.4737, 0.1579, 0.0000"
+                "sigmas": "1, .9882, .973, .9524, .9231, .878, .8, .6316, .4737, .1579, 0"
             },
             "non_turbo": {
                 "sampler": "er_sde",
@@ -78,7 +78,7 @@ DEFAULT_H3_PRESETS: dict[str, dict[str, dict[str, dict[str, Any]]]] = {
         "dual": {
             "is_turbo": {
                 "sampler": "er_sde",
-                "sigmas": "1.0000, 0.9730, 0.9231, 0.8780, 0.8000, 0.6316, 0.4737, 0.1579, 0.0000",
+                "sigmas": "1, .9882, .973, .9524, .9231, .878, .8, .6316, .4737, .1579, 0",
                 "sampler_2nd": "sa_solver",
                 "sigmas_2nd": "0.6316, 0.4877, 0.2857, 0.0837, 0.0000",
                 "sigmas_2nd_context": "0.50, 0.30, 0.14, 0.06, 0.0"
@@ -96,7 +96,7 @@ DEFAULT_H3_PRESETS: dict[str, dict[str, dict[str, dict[str, Any]]]] = {
         "single": {
             "is_turbo": {
                 "sampler": "er_sde",
-                "sigmas": "1.0000, 0.9730, 0.9231, 0.8780, 0.8000, 0.6316, 0.4737, 0.1579, 0.0000"
+                "sigmas": "1, .9882, .973, .9524, .9231, .878, .8, .6316, .4737, .1579, 0"
             },
             "non_turbo": {
                 "sampler": "res_multistep",
@@ -106,7 +106,7 @@ DEFAULT_H3_PRESETS: dict[str, dict[str, dict[str, dict[str, Any]]]] = {
         "dual": {
             "is_turbo": {
                 "sampler": "er_sde",
-                "sigmas": "1.0000, 0.9730, 0.9231, 0.8780, 0.8000, 0.6316, 0.4737, 0.1579, 0.0000",
+                "sigmas": "1, .9882, .973, .9524, .9231, .878, .8, .6316, .4737, .1579, 0",
                 "sampler_2nd": "sa_solver",
                 "sigmas_2nd": "0.6316, 0.4877, 0.2857, 0.0837, 0.0000",
                 "sigmas_2nd_context": "0.50, 0.30, 0.14, 0.06, 0.0"
@@ -221,9 +221,9 @@ def load_h3_presets(root: str | Path | None = None) -> dict[str, Any]:
 
 
 def get_h3_preset_keys(root: str | Path | None = None) -> list[str]:
-    """Return sorted list of available preset keys (light, medium, custom, ...)."""
+    """Return available preset keys in their JSON declaration order."""
     presets = load_h3_presets(root)
-    keys = sorted(presets.keys())
+    keys = list(presets)
     if "custom" not in keys:
         keys.insert(0, "custom")
     return keys

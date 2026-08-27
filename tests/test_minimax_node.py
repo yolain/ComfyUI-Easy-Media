@@ -538,8 +538,10 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
     sampling_plan_options = inputs["sampling_plan"].kwargs["options"]
     assert sampling_plan_options == [
         "custom",
+        "ultra_light",
         "light",
         "medium",
+        "high",
     ]
     assert json.loads(json.dumps(sampling_plan_options)) == sampling_plan_options
     assert inputs["sampling_plan"].kwargs["default"] == "light"
@@ -1090,7 +1092,7 @@ def test_multitrack_h3_project_locks_task_audio_before_sampling(monkeypatch):
 
 
 
-def test_multitrack_h3_fast_dual_non_turbo_uses_split_sigmas_and_pixel_upscale(
+def test_multitrack_h3_fast_dual_non_turbo_uses_preset_sigmas_and_pixel_upscale(
     monkeypatch,
 ):
     module = _load_minimax_node(monkeypatch)
@@ -1107,7 +1109,6 @@ def test_multitrack_h3_fast_dual_non_turbo_uses_split_sigmas_and_pixel_upscale(
     )
 
     nodes = list(result.expand.values())
-    split = next(node for node in nodes if node["class_type"] == "SplitSigmas")
     conditioning = next(
         node for node in nodes if node["class_type"] == "easy minimaxH3ToVideo"
     )
@@ -1123,7 +1124,15 @@ def test_multitrack_h3_fast_dual_non_turbo_uses_split_sigmas_and_pixel_upscale(
         node for node in nodes if node["class_type"] == "SamplerCustomAdvanced"
     ]
 
-    assert split["inputs"]["step"] == 10
+    assert not any(node["class_type"] == "SplitSigmas" for node in nodes)
+    sigma_schedules = [
+        node["inputs"]["sigmas"]
+        for node in nodes
+        if node["class_type"] == "ManualSigmas"
+    ]
+    assert len(sigma_schedules) == 2
+    assert sigma_schedules[0].startswith("1.0000, 0.9901")
+    assert sigma_schedules[1].startswith("0.6316, 0.4877")
     assert (conditioning["inputs"]["width"], conditioning["inputs"]["height"]) == (
         896,
         512,
@@ -1144,7 +1153,7 @@ def test_multitrack_h3_fast_dual_non_turbo_uses_split_sigmas_and_pixel_upscale(
         for node in nodes
         if node["class_type"] == "KSamplerSelect"
     ]
-    assert sampler_names == ["euler", "euler"]
+    assert sampler_names == ["euler", "sa_solver"]
     assert any(node["class_type"] == "DisableNoise" for node in nodes)
 
 
