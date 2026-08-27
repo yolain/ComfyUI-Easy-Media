@@ -407,8 +407,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
         ? String(payload.project_name)
         : ''
       const currentProjectName = data.project_name || 'default'
-      if (projectName && projectName !== currentProjectName) return
-      void refreshProject(currentProjectName, false)
+      void refreshProject(projectName || currentProjectName, false)
     }
     app.api.addCustomEventListener('easy_multitrack_project_refresh', handleProjectRefresh)
     return () => app.api.removeCustomEventListener('easy_multitrack_project_refresh', handleProjectRefresh)

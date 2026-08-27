@@ -188,10 +188,11 @@ describe('ProjectVideoCombineWidget', () => {
     await waitFor(() => expect(props.onChange).toHaveBeenCalledWith(refreshedData))
   })
 
-  it('refreshes only when a sampling event belongs to the selected project', async () => {
+  it('switches to the project from a sampling refresh event', async () => {
     let refreshHandler: ((event: CustomEvent<unknown>) => void) | undefined
     const refreshedData: ProjectData = {
       ...projectData,
+      project_name: 'next-project',
       clips: [{ ...projectData.clips[0], media_revision: '1000000002' }],
     }
     const { props, api } = widgetProps()
@@ -205,13 +206,11 @@ describe('ProjectVideoCombineWidget', () => {
       detail: { project_name: 'next-project', phase: 'before', segment_index: 0 },
     })))
 
-    expect(api.fetchApi).not.toHaveBeenCalled()
-
-    await act(async () => refreshHandler?.(new CustomEvent('easy_multitrack_project_refresh', {
-      detail: { project_name: 'demo', phase: 'before', segment_index: 0 },
-    })))
-
-    expect(api.fetchApi).toHaveBeenCalledWith('/easy-media/project?project_name=demo')
+    expect(api.fetchApi).toHaveBeenCalledWith('/easy-media/project?project_name=next-project')
+    expect(props.onChange).toHaveBeenCalledWith(expect.objectContaining({
+      project_name: 'next-project',
+      clips: [],
+    }))
     await waitFor(() => expect(props.onChange).toHaveBeenCalledWith(refreshedData))
   })
 
