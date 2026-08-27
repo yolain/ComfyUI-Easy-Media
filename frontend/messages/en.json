@@ -57,6 +57,8 @@
     "clipLabel": "Segment {index}",
     "clipContinuity": "{mode}",
     "selectClipFile": "Select a file for segment {index}",
+    "selectClipFiles": "Select up to two videos for segment {index}",
+    "selectClipFilesHint": "Select one video for the project, or two to compare.",
     "continuityShot": "Shot",
     "continuityContext": "Context",
     "emptyPreview": "Refresh the project to preview its generated clips.",

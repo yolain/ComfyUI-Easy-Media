@@ -57,6 +57,8 @@
     "clipLabel": "片段{index}",
     "clipContinuity": "{mode}",
     "selectClipFile": "选择片段{index}的视频文件",
+    "selectClipFiles": "为片段{index}选择最多两个视频",
+    "selectClipFilesHint": "选择一个视频用于工程，选择两个视频进行对比。",
     "continuityShot": "分镜",
     "continuityContext": "上下文",
     "emptyPreview": "请刷新工程以预览已生成的视频片段。",

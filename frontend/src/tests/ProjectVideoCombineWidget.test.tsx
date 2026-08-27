@@ -6,6 +6,7 @@ import type { ProjectData } from '@/types/project'
 
 vi.mock('@/hooks/use-canvas-scale', () => ({ useCanvasScale: () => 1 }))
 vi.mock('@/hooks/use-element-width', () => ({ useElementWidth: () => 480 }))
+vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({ MediaSelector: () => null }))
 
 const projectData: ProjectData = {
   project_name: 'demo',
@@ -448,7 +449,7 @@ describe('ProjectVideoCombineWidget', () => {
     expect(screen.getByText('Segment 0')).toBe(segmentLabel)
   })
 
-  it('allows selecting another video when the same segment index has multiple files', () => {
+  it('allows selecting two videos for comparison and promotes the remaining video for output', () => {
     const alternatePath = 'easy_media/projects/demo/video_0_2.mp4'
     const data: ProjectData = {
       ...projectData,
@@ -467,17 +468,36 @@ describe('ProjectVideoCombineWidget', () => {
             media_revision: '1000000002',
             source_frame_count: 96,
           },
+          {
+            file_path: 'easy_media/projects/demo/video_0_3.mp4',
+            file_name: 'video_0_3.mp4',
+            media_revision: '1000000003',
+            source_frame_count: 72,
+          },
         ],
       }],
     }
     const { props } = widgetProps({ value: data })
 
-    render(<ProjectVideoCombineWidget {...props} />)
-    const fileSelect = screen.getByRole('combobox', { name: 'Select a file for segment 0' })
+    const { container } = render(<ProjectVideoCombineWidget {...props} />)
+    const fileSelect = screen.getByRole('button', { name: 'Select up to two videos for segment 0' })
     expect(fileSelect.className).toContain('justify-center')
     expect(fileSelect.firstElementChild?.className).toContain('flex-col')
     fireEvent.click(fileSelect)
-    fireEvent.click(screen.getByRole('option', { name: 'video_0_2.mp4' }))
+    const original = screen.getByRole('checkbox', { name: 'video_0_1.mp4' })
+    const alternate = screen.getByRole('checkbox', { name: 'video_0_2.mp4' })
+    expect(original.getAttribute('aria-checked')).toBe('true')
+    expect(alternate.getAttribute('aria-checked')).toBe('false')
+
+    fireEvent.click(alternate)
+
+    expect(container.querySelectorAll('video')).toHaveLength(2)
+    expect((screen.getByRole('checkbox', { name: 'video_0_3.mp4' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByRole('button', { name: 'Select source' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Select output' })).toBeNull()
+    expect(props.onChange).not.toHaveBeenCalled()
+
+    fireEvent.click(original)
 
     expect(props.onChange).toHaveBeenCalledWith({
       ...data,

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Loader2, Maximize2, Minimize2, Pause, Play, RefreshCw, Trash2, Volume2, VolumeX, ZoomOut } from 'lucide-react'
+import { Check, ChevronDown, Loader2, Maximize2, Minimize2, Pause, Play, RefreshCw, Trash2, Volume2, VolumeX, ZoomOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -11,10 +12,13 @@ import type { ReactWidgetProps } from '@/lib/create-react-widget'
 import { LocaleContext, translate } from '@/lib/i18n'
 import { addMediaRevision, mediaContentToViewUrl } from '@/lib/media-url'
 import { formatMultiTrackTime } from '@/lib/multitrack-utils'
+import { cn } from '@/lib/utils'
+import { CompareVideo } from '@/components/widgets/compareVideoWidget'
 import { MultiTrackRuler, MULTITRACK_LEFT_GUTTER, MULTITRACK_RIGHT_RESERVE } from './multitrack/MultiTrackRuler'
 import { DEFAULT_PROJECT_DATA, type ProjectClip, type ProjectData, type ProjectVideoFile } from '@/types/project'
 
 const MIN_CLIP_FRAMES = 1
+const PLAYBACK_UI_UPDATE_INTERVAL_MS = 100
 const ICON_BUTTON_CLASS = 'h-6 w-6 shrink-0 [&_svg]:size-3.5'
 
 interface GraphLink {
@@ -163,6 +167,30 @@ function projectClipUrl(clip: ProjectClip): string | null {
   return url ? addMediaRevision(url, clip.media_revision) : null
 }
 
+function projectVideoFileUrl(file: ProjectVideoFile): string | null {
+  const url = mediaContentToViewUrl({ source_type: 'output', file_path: file.file_path })
+  return url ? addMediaRevision(url, file.media_revision) : null
+}
+
+function projectVideoFiles(clip: ProjectClip): ProjectVideoFile[] {
+  const files = clip.video_files?.length
+    ? clip.video_files
+    : [{
+        file_path: clip.file_path,
+        file_name: clip.file_name,
+        media_revision: clip.media_revision,
+        source_frame_count: clip.source_frame_count,
+      }]
+  return files.some((file) => file.file_path === clip.file_path)
+    ? files
+    : [{
+        file_path: clip.file_path,
+        file_name: clip.file_name,
+        media_revision: clip.media_revision,
+        source_frame_count: clip.source_frame_count,
+      }, ...files]
+}
+
 function selectProjectVideoFile(clip: ProjectClip, file: ProjectVideoFile): ProjectClip {
   const sourceFrameCount = Math.max(MIN_CLIP_FRAMES, file.source_frame_count)
   const sourceStartFrame = Math.min(clip.source_start_frame, sourceFrameCount - 1)
@@ -194,11 +222,13 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
   const [isCombining, setIsCombining] = useState(false)
   const [projects, setProjects] = useState<string[]>(['default'])
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null)
+  const [previewFilePaths, setPreviewFilePaths] = useState<Record<string, string[]>>({})
   const [playbackNonce, setPlaybackNonce] = useState(0)
   const videoRefs = useRef(new Map<string, HTMLVideoElement>())
   const currentFrameRef = useRef(0)
   const playbackStartFrameRef = useRef(0)
   const playbackStartedAtRef = useRef(0)
+  const playbackUiUpdatedAtRef = useRef(0)
   const playbackRafRef = useRef<number | null>(null)
   const timelineContainerRef = useRef<HTMLDivElement>(null)
   const refreshRequestRef = useRef(0)
@@ -218,6 +248,12 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
     ? projects
     : [...projects, data.project_name]
 
+  function selectedFilePaths(clip: ProjectClip): string[] {
+    const availablePaths = new Set(projectVideoFiles(clip).map((file) => file.file_path))
+    const storedPaths = previewFilePaths[clip.id]?.filter((path) => availablePaths.has(path)).slice(0, 2)
+    return storedPaths?.includes(clip.file_path) ? storedPaths : [clip.file_path]
+  }
+
   function selectClip(clip: ProjectClip) {
     seek(clipStartFrame(data.clips, clip.id))
   }
@@ -231,6 +267,21 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
     })
   }
 
+  function toggleClipFile(clip: ProjectClip, filePath: string) {
+    const currentPaths = selectedFilePaths(clip)
+    const selected = currentPaths.includes(filePath)
+    if (selected && currentPaths.length === 1) return
+    if (!selected && currentPaths.length >= 2) return
+
+    const nextPaths = selected
+      ? currentPaths.filter((path) => path !== filePath)
+      : [...currentPaths, filePath]
+    setPreviewFilePaths((current) => ({ ...current, [clip.id]: nextPaths }))
+    setIsPlaying(false)
+    selectClip(clip)
+    if (nextPaths[0] !== clip.file_path) selectClipFile(clip, nextPaths[0])
+  }
+
   const refreshProject = useCallback(async (projectName: string, showError = true) => {
     if (!projectName) return
     const requestId = ++refreshRequestRef.current
@@ -240,6 +291,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
       setIsPlaying(false)
       setCurrentFrame(0)
       setSelectedClipId(null)
+      setPreviewFilePaths({})
       onChange({ ...DEFAULT_PROJECT_DATA, project_name: projectName, auto_combine: data.auto_combine })
     }
     try {
@@ -315,6 +367,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
       setIsPlaying(false)
       setCurrentFrame(0)
       setSelectedClipId(null)
+      setPreviewFilePaths({})
       setProjects((names) => projectName === 'default'
         ? names
         : names.filter((name) => name !== projectName))
@@ -401,6 +454,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
     }
 
     playbackStartedAtRef.current = performance.now()
+    playbackUiUpdatedAtRef.current = playbackStartedAtRef.current
     playbackStartFrameRef.current = currentFrameRef.current >= total ? 0 : currentFrameRef.current
 
     function tick(now: number) {
@@ -415,7 +469,10 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
         setPlaybackNonce((nonce) => nonce + 1)
       } else if (nextFrame !== currentFrameRef.current) {
         currentFrameRef.current = nextFrame
-        setCurrentFrame(nextFrame)
+        if (now - playbackUiUpdatedAtRef.current >= PLAYBACK_UI_UPDATE_INTERVAL_MS) {
+          playbackUiUpdatedAtRef.current = now
+          setCurrentFrame(nextFrame)
+        }
       }
       playbackRafRef.current = requestAnimationFrame(tick)
     }
@@ -430,12 +487,25 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
   useEffect(() => {
     const video = active ? videoRefs.current.get(active.clip.id) : undefined
     if (!video || !active) return
-    const localSeconds = (active.clip.source_start_frame + Math.max(0, currentFrame - active.start)) / data.frame_rate
-    const seekTolerance = isPlaying ? 0.08 : 0.001
+    const localSeconds = (
+      active.clip.source_start_frame + Math.max(0, currentFrameRef.current - active.start)
+    ) / data.frame_rate
     try {
-      if (Math.abs(video.currentTime - localSeconds) > seekTolerance) video.currentTime = localSeconds
+      if (Math.abs(video.currentTime - localSeconds) > 0.001) video.currentTime = localSeconds
     } catch (error) {
       console.error('[ProjectVideoCombineWidget] failed to seek preview video:', error)
+    }
+  }, [active?.clip.id, activeUrl, data.frame_rate, playbackNonce])
+
+  useEffect(() => {
+    if (isPlaying) return
+    const video = active ? videoRefs.current.get(active.clip.id) : undefined
+    if (!video || !active) return
+    const localSeconds = (active.clip.source_start_frame + Math.max(0, currentFrame - active.start)) / data.frame_rate
+    try {
+      if (Math.abs(video.currentTime - localSeconds) > 0.001) video.currentTime = localSeconds
+    } catch (error) {
+      console.error('[ProjectVideoCombineWidget] failed to seek paused preview video:', error)
     }
   }, [active?.clip.id, activeUrl, currentFrame, data.frame_rate, isPlaying])
 
@@ -476,6 +546,13 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
     setCurrentFrame(nextFrame)
     const nextActive = clipAtFrame(data.clips, Math.min(nextFrame, Math.max(0, total - 1)))
     setSelectedClipId(nextActive?.clip.id ?? null)
+  }
+
+  function togglePlayback() {
+    setIsPlaying((playing) => {
+      if (playing) setCurrentFrame(currentFrameRef.current)
+      return !playing
+    })
   }
 
   async function combineProject() {
@@ -529,6 +606,15 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
 
   const playableWidth = Math.max(1, scaledTimelineWidth - MULTITRACK_LEFT_GUTTER - MULTITRACK_RIGHT_RESERVE)
   const playheadLeft = MULTITRACK_LEFT_GUTTER + (Math.min(currentFrame, total) / Math.max(total, 1)) * playableWidth
+  const activeSelectedFiles = active
+    ? selectedFilePaths(active.clip)
+        .map((filePath) => projectVideoFiles(active.clip).find((file) => file.file_path === filePath))
+        .filter((file): file is ProjectVideoFile => Boolean(file))
+    : []
+  const compareUrls = activeSelectedFiles.length === 2
+    ? activeSelectedFiles.map(projectVideoFileUrl)
+    : []
+  const isComparing = compareUrls.length === 2 && compareUrls.every(Boolean)
 
   return (
     <LocaleContext.Provider value={locale}>
@@ -564,7 +650,9 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
           </div>
 
           <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black p-3">
-            {activeUrl ? (
+            {isComparing ? (
+              <CompareVideo app={app} sourceUrl={compareUrls[0]!} outputUrl={compareUrls[1]!} />
+            ) : activeUrl ? (
               [
                 { clip: active!.clip, url: activeUrl, visible: true },
                 ...(nextClip && nextUrl ? [{ clip: nextClip, url: nextUrl, visible: false }] : []),
@@ -606,7 +694,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
             </div>
             <div className="flex items-center gap-2 text-muted-foreground">
               <span className="w-16 text-right tabular-nums text-gradient">{formatMultiTrackTime(currentFrame, { frameRate: data.frame_rate, showFrames: true })}</span>
-              <Button type="button" variant="secondary" size="icon" className={`${ICON_BUTTON_CLASS} rounded-full`} disabled={total === 0} aria-label={isPlaying ? t('multitrack.pause') : t('multitrack.play')} onClick={() => setIsPlaying((playing) => !playing)}>{isPlaying ? <Pause /> : <Play />}</Button>
+              <Button type="button" variant="secondary" size="icon" className={`${ICON_BUTTON_CLASS} rounded-full`} disabled={total === 0 || isComparing} aria-label={isPlaying ? t('multitrack.pause') : t('multitrack.play')} onClick={togglePlayback}>{isPlaying ? <Pause /> : <Play />}</Button>
               <span className="w-16 tabular-nums">{formatMultiTrackTime(total, { frameRate: data.frame_rate, showFrames: true })}</span>
             </div>
             <div className="ml-auto flex items-center gap-1">
@@ -642,15 +730,43 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
                         </div>
                       )
                       if ((clip.video_files?.length ?? 0) > 1) {
+                        const selectedPaths = selectedFilePaths(clip)
                         return (
-                          <Select key={clip.id} value={clip.file_path} onOpenChange={(open) => { if (open) selectClip(clip) }} onValueChange={(filePath) => selectClipFile(clip, filePath)}>
-                            <SelectTrigger className={`${blockClassName} relative justify-center [&>svg]:absolute [&>svg]:right-2`} style={blockStyle} aria-label={t('projectVideoCombine.selectClipFile', { index: clip.index })}>
-                              {label}
-                            </SelectTrigger>
-                            <SelectContent>
-                              {clip.video_files?.map((file) => <SelectItem key={file.file_path} value={file.file_path}>{file.file_name}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
+                          <Popover key={clip.id} onOpenChange={(open) => { if (open) selectClip(clip) }}>
+                            <PopoverTrigger asChild>
+                              <Button type="button" variant="ghost" className={`${blockClassName} relative justify-center`} style={blockStyle} aria-label={t('projectVideoCombine.selectClipFiles', { index: clip.index })}>
+                                {label}
+                                <span className="absolute right-2 flex items-center gap-0.5 text-[9px] text-muted-foreground">
+                                  {selectedPaths.length > 1 ? selectedPaths.length : null}
+                                  <ChevronDown className="size-3" />
+                                </span>
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-64 p-1" align="center">
+                              <div className="px-2 py-1 text-[10px] text-muted-foreground">{t('projectVideoCombine.selectClipFilesHint')}</div>
+                              {projectVideoFiles(clip).map((file) => {
+                                const checked = selectedPaths.includes(file.file_path)
+                                const disabled = !checked && selectedPaths.length >= 2
+                                return (
+                                  <Button
+                                    key={file.file_path}
+                                    type="button"
+                                    variant="ghost"
+                                    role="checkbox"
+                                    aria-checked={checked}
+                                    disabled={disabled}
+                                    className={cn('h-8 w-full justify-start gap-2 px-2 text-xs', disabled && 'opacity-50')}
+                                    onClick={() => toggleClipFile(clip, file.file_path)}
+                                  >
+                                    <span className={cn('flex size-4 shrink-0 items-center justify-center rounded-sm border border-border', checked && 'border-primary bg-primary text-primary-foreground')}>
+                                      {checked ? <Check className="size-3" /> : null}
+                                    </span>
+                                    <span className="truncate">{file.file_name}</span>
+                                  </Button>
+                                )
+                              })}
+                            </PopoverContent>
+                          </Popover>
                         )
                       }
                       return (

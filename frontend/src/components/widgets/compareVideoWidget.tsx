@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
   Columns2,
@@ -86,6 +86,14 @@ interface CompareVideoInnerProps {
   node: CompareVideoNode
   settings: CompareVideoSettings
   onSettingsChange: (settings: CompareVideoSettings) => void
+  allowMediaSelection?: boolean
+  bindNodeEvents?: boolean
+}
+
+export interface CompareVideoProps {
+  app: ComfyApp
+  sourceUrl: string
+  outputUrl: string
 }
 
 type ExecutedHandler = (output: unknown) => void
@@ -386,6 +394,35 @@ export function CompareVideoWidget({ app, node, value, onChange }: Readonly<Reac
   )
 }
 
+/** Compare two externally selected videos without exposing the media pickers. */
+export const CompareVideo = memo(function CompareVideo({
+  app,
+  sourceUrl,
+  outputUrl,
+}: Readonly<CompareVideoProps>) {
+  const locale = app?.ui?.settings?.settingsValues?.['Comfy.Locale']
+  const [compareMode, setCompareMode] = useState<CompareMode>('compare')
+  const settings = useMemo<CompareVideoSettings>(() => ({
+    ...DEFAULT_COMPARE_VIDEO_SETTINGS,
+    compare_mode: compareMode,
+    source: { source_type: 'url', url: sourceUrl },
+    output: { source_type: 'url', url: outputUrl },
+  }), [compareMode, outputUrl, sourceUrl])
+
+  return (
+    <LocaleContext.Provider value={locale}>
+      <CompareVideoWidgetInner
+        app={app}
+        node={{}}
+        settings={settings}
+        onSettingsChange={(nextSettings) => setCompareMode(nextSettings.compare_mode ?? 'compare')}
+        allowMediaSelection={false}
+        bindNodeEvents={false}
+      />
+    </LocaleContext.Provider>
+  )
+})
+
 function CompareVideoSettingsFields({
   settings,
   onSettingsChange,
@@ -544,7 +581,14 @@ function CompareVideoMediaPicker({
   )
 }
 
-function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Readonly<CompareVideoInnerProps>) {
+function CompareVideoWidgetInner({
+  app,
+  node,
+  settings,
+  onSettingsChange,
+  allowMediaSelection = true,
+  bindNodeEvents = true,
+}: Readonly<CompareVideoInnerProps>) {
   const t = useT()
   const canvasScale = useCanvasScale(app)
   const sourceRef = useRef<HTMLVideoElement>(null)
@@ -588,6 +632,8 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
   const animateComparison = visibleMode !== 'compare' || !isPointerInside
 
   useEffect(() => {
+    if (!bindNodeEvents) return
+
     function applyExecutedOutput(output: unknown) {
       const nextPayload = parseCompareVideoPayload(output)
       if (!nextPayload) return
@@ -617,7 +663,7 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
       api?.removeEventListener?.('executed', handleExecuted)
       api?.removeCustomEventListener?.('executed', handleExecuted)
     }
-  }, [app.api, node])
+  }, [app.api, bindNodeEvents, node])
 
   useEffect(() => {
     if (sourceRef.current) {
@@ -763,6 +809,7 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
   }, [])
 
   useEffect(() => {
+    if (!bindNodeEvents) return
     node.__easyMediaSyncPlay = () => {
       syncVideos(0)
       setCurrentTime(0)
@@ -771,7 +818,7 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
     return () => {
       if (node.__easyMediaSyncPlay) delete node.__easyMediaSyncPlay
     }
-  }, [node, playVideos, syncVideos])
+  }, [bindNodeEvents, node, playVideos, syncVideos])
 
   function updateSplitFromPointer(event: React.PointerEvent<HTMLDivElement>) {
     if (!canCompare || visibleMode !== 'compare') return
@@ -955,24 +1002,28 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
             </div>
           ) : null}
 
-          <div className="absolute left-3 top-2 z-30">
-            <CompareVideoMediaPicker
-              slot="source"
-              selection={settings.source}
-              watchHistory={settings.watch_output_history}
-              onSelect={(filePath, source) => handleMediaSelect('source', filePath, source)}
-              onClear={() => handleMediaClear('source')}
-            />
-          </div>
-          <div className="absolute right-3 top-2 z-30">
-            <CompareVideoMediaPicker
-              slot="output"
-              selection={settings.output}
-              watchHistory={settings.watch_output_history}
-              onSelect={(filePath, source) => handleMediaSelect('output', filePath, source)}
-              onClear={() => handleMediaClear('output')}
-            />
-          </div>
+          {allowMediaSelection ? (
+            <>
+              <div className="absolute left-3 top-2 z-30">
+                <CompareVideoMediaPicker
+                  slot="source"
+                  selection={settings.source}
+                  watchHistory={settings.watch_output_history}
+                  onSelect={(filePath, source) => handleMediaSelect('source', filePath, source)}
+                  onClear={() => handleMediaClear('source')}
+                />
+              </div>
+              <div className="absolute right-3 top-2 z-30">
+                <CompareVideoMediaPicker
+                  slot="output"
+                  selection={settings.output}
+                  watchHistory={settings.watch_output_history}
+                  onSelect={(filePath, source) => handleMediaSelect('output', filePath, source)}
+                  onClear={() => handleMediaClear('output')}
+                />
+              </div>
+            </>
+          ) : null}
 
           {canCompare && (visibleMode === 'compare' || isSideBySide) ? (
             <div
@@ -1080,23 +1131,25 @@ function CompareVideoWidgetInner({ app, node, settings, onSettingsChange }: Read
               />
             </div>
 
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="cursor-pointer"
-                  aria-label={t('compareVideo.settings')}
-                >
-                  <Settings2 className="h-4 w-4" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-auto">
-                <CompareVideoSettingsFields settings={settings} onSettingsChange={onSettingsChange} />
-              </PopoverContent>
-            </Popover>
-            {hasOutput ? (
+            {allowMediaSelection ? (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="cursor-pointer"
+                    aria-label={t('compareVideo.settings')}
+                  >
+                    <Settings2 className="h-4 w-4" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-auto">
+                  <CompareVideoSettingsFields settings={settings} onSettingsChange={onSettingsChange} />
+                </PopoverContent>
+              </Popover>
+            ) : null}
+            {allowMediaSelection && hasOutput ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
