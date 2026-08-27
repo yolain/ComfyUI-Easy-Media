@@ -100,7 +100,7 @@
   },
   "multitrack": {
     "audio": "Audio",
-    "globalAudio": "Audio (GV)",
+    "globalAudio": "MainAudio",
     "audioSettings": "Audio settings",
     "speed": "Speed",
     "fpsSettings": "fps settings",
@@ -394,6 +394,7 @@
     "sortFolders": "folders first",
     "viewList": "List view",
     "viewGrid": "Grid view",
+    "refresh": "Refresh",
     "localPathPlaceholder": "Absolute folder path...",
     "urlHint": "Paste an http(s) URL to a media file.",
     "urlConfirm": "Confirm URL",

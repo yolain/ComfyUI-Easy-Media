@@ -394,6 +394,7 @@
     "sortFolders": "文件夹优先",
     "viewList": "列表视图",
     "viewGrid": "网格视图",
+    "refresh": "刷新",
     "localPathPlaceholder": "本地文件夹绝对路径...",
     "urlHint": "粘贴媒体文件的 http(s) URL。",
     "urlConfirm": "确认 URL",

@@ -1140,41 +1140,15 @@
       "1": { "name": "已删除数量" }
     }
   },
-  "easy MiniMaxH3MotionContext": {
-    "display_name": "简易 MiniMax H3 运动上下文",
-    "description": "将上一段 H3 视频与音频的尾部作为上下文固定到新片段条件中；优先使用上下文潜空间以避免解码和重新编码损失。",
-    "inputs": {
-      "conditioning": { "name": "条件" },
-      "vae": { "name": "VAE" },
-      "latent": { "name": "目标潜空间" },
-      "context_length": {
-        "name": "视频上下文长度",
-        "tooltip": "固定的上一片段视频帧数；选项均与完整 MiniMax H3 潜空间步对齐。"
-      },
-      "audio_context_length": {
-        "name": "音频上下文长度",
-        "tooltip": "固定的上一片段音频帧数；默认 48 帧，0 跟随视频窗口。"
-      },
-      "context_frames": { "name": "上下文帧" },
-      "context_latent": { "name": "上下文潜空间" },
-      "audio_vae": { "name": "音频 VAE" },
-      "context_audio": { "name": "上下文音频" }
-    },
-    "outputs": {
-      "0": { "name": "条件" },
-      "1": { "name": "裁剪帧数" }
-    }
-  },
   "easy MiniMaxH3MotionContextHard": {
     "display_name": "简易 MiniMax H3 硬上下文",
-    "description": "将上一片段的视频与音频潜空间尾部复制到当前采样起点，并分别应用释放遮罩。",
+    "description": "保留 Motion Context 0.4 原生视频与音频关键帧，同时将同一段上一片段音视频潜空间尾部复制到当前采样起点，并分别应用释放遮罩。",
     "inputs": {
       "conditioning": { "name": "条件" },
       "vae": { "name": "VAE" },
       "latent": { "name": "当前潜空间" },
       "context_latent": { "name": "上一片段上下文潜空间" },
       "context_length": { "name": "视频上下文长度" },
-      "audio_context_length": { "name": "音频上下文长度" },
       "video_transition_steps": { "name": "视频过渡步数" },
       "audio_transition_steps": { "name": "音频过渡步数" }
     },
@@ -1241,15 +1215,21 @@
         "name": "采样模式",
         "tooltip": "选择 dual 后显示二采专用的模型、采样与噪声设置。"
       },
-      "model_loader_2": {
-        "name": "模型加载器2",
+      "model_loader_2nd": {
+        "name": "模型加载器(二采)",
         "tooltip": "可选；仅替换二采模型，编码与 VAE 保持一采配置以确保 latent 兼容。"
+      },
+      "sampler_2nd":{
+        "name": "采样器(二采)"
+      },
+      "sigmas_2nd":{
+        "name": "Sigmas(二采)"
       },
       "1st_pass_only": {
         "name": "仅执行一采预览",
         "tooltip": "在二采模式下，仅执行首个选中片段的一采，用于快速预览。"
       },
-      "disable_noise": {
+      "disable_2nd_noise": {
         "name": "禁用二采噪声",
         "tooltip": "在二采中禁用噪声。"
       },
@@ -1266,7 +1246,8 @@
       }
     },
     "outputs": {
-      "0": { "name": "工程名称" }
+      "0": { "name": "工程名称" },
+      "1": { "name": "锁定音频" }
     }
   },
   "easy multitrackProjectVideoCombine": {
