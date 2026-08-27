@@ -66,6 +66,22 @@ def _lora_patch_rank(patch_value: Any) -> int | None:
         return None
 
 
+def _patch_has_type(patch_values: Any, patch_type: str) -> bool:
+    if not isinstance(patch_values, (list, tuple)):
+        return False
+    for patch_value in patch_values:
+        if not isinstance(patch_value, (list, tuple)) or len(patch_value) < 2:
+            continue
+        adapter = patch_value[1]
+        if (
+            isinstance(adapter, (list, tuple))
+            and len(adapter) > 0
+            and adapter[0] == patch_type
+        ):
+            return True
+    return False
+
+
 def _model_patch_evidence(
     model: Any,
 ) -> tuple[int, list[str], set[int]]:
@@ -207,20 +223,66 @@ def _find_sampler_steps(
     return None
 
 
+def _find_pdd_effective_steps(
+    value: Any,
+    path: str,
+    *,
+    depth: int = 0,
+    visited: set[int] | None = None,
+) -> tuple[str, int, int, int] | None:
+    if depth > 6 or not isinstance(value, Mapping):
+        return None
+    if visited is None:
+        visited = set()
+    value_id = id(value)
+    if value_id in visited:
+        return None
+    visited.add(value_id)
+
+    normalized = {str(key).lower(): item for key, item in value.items()}
+    if "pdd_num_steps" in normalized and "pdd_block_size" in normalized:
+        try:
+            num_steps = int(normalized["pdd_num_steps"])
+            block_size = int(normalized["pdd_block_size"])
+        except (TypeError, ValueError):
+            pass
+        else:
+            if num_steps > 0 and block_size > 0 and num_steps % block_size == 0:
+                return path, num_steps, block_size, num_steps // block_size
+
+    for key, item in value.items():
+        match = _find_pdd_effective_steps(
+            item,
+            f"{path}.{key}",
+            depth=depth + 1,
+            visited=visited,
+        )
+        if match is not None:
+            return match
+    return None
+
+
 def detect_turbo_model(model: Any) -> TurboModelDetection:
     """Detect Turbo using only data retained on the ComfyUI model object."""
     patch_count, patch_keys, patch_ranks = _model_patch_evidence(model)
     if patch_count > 0:
-        patcher_keys = [
-            str(key).lower()
-            for patcher in _iter_model_patchers(model)
-            for key, values in (
-                getattr(patcher, "patches", {}).items()
-                if isinstance(getattr(patcher, "patches", None), Mapping)
-                else ()
-            )
-            if values is not None
-        ]
+        patcher_entries: dict[str, list[Any]] = {}
+        for patcher in _iter_model_patchers(model):
+            patches = getattr(patcher, "patches", None)
+            if not isinstance(patches, Mapping):
+                continue
+            for key, values in patches.items():
+                if values is None:
+                    continue
+                normalized_values = (
+                    list(values)
+                    if isinstance(values, (list, tuple))
+                    else [values]
+                )
+                patcher_entries.setdefault(str(key).lower(), []).extend(
+                    normalized_values
+                )
+        patcher_keys = list(patcher_entries)
         has_attention = any(
             ".attn.qkv_proj." in key or ".attn.out_proj." in key
             for key in patcher_keys
@@ -228,8 +290,19 @@ def detect_turbo_model(model: Any) -> TurboModelDetection:
         has_adaln = any(".adaln_proj." in key for key in patcher_keys)
         has_mlp_fc1 = any(".mlp.fc1." in key for key in patcher_keys)
         has_mlp_fc2 = any(".mlp.fc2." in key for key in patcher_keys)
+        pdd_output_targets = (
+            "diffusion_model.final_layer.audio_out.weight",
+            "diffusion_model.final_layer.video_out.weight",
+        )
+        has_pdd_output_heads = all(
+            _patch_has_type(patcher_entries.get(key), "set")
+            for key in pdd_output_targets
+        )
 
         has_shared_turbo_targets = has_attention and has_mlp_fc1 and has_mlp_fc2
+        matches_pdd_eight_step = (
+            has_shared_turbo_targets and has_adaln and has_pdd_output_heads
+        )
         matches_four_step = (
             has_shared_turbo_targets and has_adaln and 64 in patch_ranks
         )
@@ -238,12 +311,17 @@ def detect_turbo_model(model: Any) -> TurboModelDetection:
             and not has_adaln
             and {128, 384}.issubset(patch_ranks)
         )
-        if matches_four_step or matches_lightx2v_eight_step:
-            fingerprint_name = (
-                "4-step attention/MLP/AdaLN"
-                if matches_four_step
-                else "LightX2V 8-step attention/MLP"
-            )
+        if (
+            matches_pdd_eight_step
+            or matches_four_step
+            or matches_lightx2v_eight_step
+        ):
+            if matches_pdd_eight_step:
+                fingerprint_name = "PDD 8-step output-head/attention/MLP/AdaLN"
+            elif matches_four_step:
+                fingerprint_name = "4-step attention/MLP/AdaLN"
+            else:
+                fingerprint_name = "LightX2V 8-step attention/MLP"
             return TurboModelDetection(
                 status="turbo",
                 source="model_patches",
@@ -272,6 +350,20 @@ def detect_turbo_model(model: Any) -> TurboModelDetection:
             )
 
     for path, metadata in _model_metadata_sources(model):
+        pdd_steps = _find_pdd_effective_steps(metadata, path)
+        if pdd_steps is not None:
+            pdd_path, num_steps, block_size, effective_steps = pdd_steps
+            if effective_steps <= 8:
+                return TurboModelDetection(
+                    status="turbo",
+                    source="model_metadata",
+                    evidence=(
+                        f"PDD Turbo metadata found at {pdd_path}: "
+                        f"pdd_num_steps={num_steps}, pdd_block_size={block_size}, "
+                        f"effective_steps={effective_steps}"
+                    ),
+                    patch_count=patch_count,
+                )
         sampler_steps = _find_sampler_steps(metadata, path)
         if sampler_steps is not None:
             steps_path, steps = sampler_steps
@@ -375,7 +467,9 @@ def _upstream_nodes(
 
 
 def _has_turbo_name(value: Any) -> bool:
-    return isinstance(value, (str, Path)) and "turbo" in str(value).lower()
+    if not isinstance(value, (str, Path)):
+        return False
+    return "turbo" in str(value).lower() or "Acc" in value
 
 
 def _is_enabled(value: Any) -> bool:

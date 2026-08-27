@@ -47,16 +47,16 @@ DEFAULT_H3_PRESETS: dict[str, dict[str, dict[str, dict[str, Any]]]] = {
             "is_turbo":{
                 "sampler": "er_sde",
                 "sigmas": "1, .9882, .973, .9524, .9231, .878, .8, .6316, .4737, .1579, 0",
-                "sampler_2": "sa_solver",
-                "sigmas_2": ".6316, .4877, .2857, .0837, 0",
-                "sigmas_2_context": "0.50, 0.30, 0.14, 0.06, 0.0",
+                "sampler_2nd": "sa_solver",
+                "sigmas_2nd": ".6316, .4877, .2857, .0837, 0",
+                "sigmas_2nd_context": "0.50, 0.30, 0.14, 0.06, 0.0",
             },
             "non_turbo":{
                 "sampler": "er_sde",
                 "sigmas": "1.0, 0.9956, 0.9908, 0.9855, 0.9796, 0.973, 0.9655, 0.9571, 0.9474, 0.9362, 0.9231, 0.9076, 0.8889, 0.866, 0.8372, 0.8, 0.75, 0.6792, 0.4877, 0.2857, 0.0837, 0.0",
-                "sampler_2": "sa_solver",
-                "sigmas_2": ".6316, .4877, .2857, .0837, 0",
-                "sigmas_2_context": "0.50, 0.30, 0.14, 0.06, 0.0",
+                "sampler_2nd": "sa_solver",
+                "sigmas_2nd": ".6316, .4877, .2857, .0837, 0",
+                "sigmas_2nd_context": "0.50, 0.30, 0.14, 0.06, 0.0",
             }
         }
     }
@@ -94,10 +94,10 @@ def _validate_h3_preset_entry(entry: Any, path: str, *, dual: bool) -> None:
         return
 
     has_split = "split_step" in entry
-    has_second_schedule = "sampler_2" in entry or "sigmas_2" in entry
+    has_second_schedule = "sampler_2nd" in entry or "sigmas_2nd" in entry
     if has_split and has_second_schedule:
         raise ValueError(
-            f"{path} must use either split_step or sampler_2/sigmas_2, not both"
+            f"{path} must use either split_step or sampler_2nd/sigmas_2nd, not both"
         )
     if has_split:
         split_step = entry.get("split_step")
@@ -110,10 +110,10 @@ def _validate_h3_preset_entry(entry: Any, path: str, *, dual: bool) -> None:
         return
     if not has_second_schedule:
         raise ValueError(
-            f"{path} must define split_step or sampler_2 and sigmas_2"
+            f"{path} must define split_step or sampler_2nd and sigmas_2nd"
         )
-    _validate_sampler(entry.get("sampler_2"), f"{path}.sampler_2")
-    parse_h3_sigmas(entry.get("sigmas_2"), f"{path}.sigmas_2")
+    _validate_sampler(entry.get("sampler_2nd"), f"{path}.sampler_2nd")
+    parse_h3_sigmas(entry.get("sigmas_2nd"), f"{path}.sigmas_2nd")
 
 
 def validate_h3_presets(value: Any) -> dict[str, Any]:
