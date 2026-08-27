@@ -95,26 +95,6 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 
 ---
 
-**Prompt Example**:
-
-```
-@图片1 @音频1 镜头晃动，老者正望着光亮处神色慌张地喊话： 别学那玩意，别连线啊。 [0-120] | @图片2 @音频2 镜头缓慢推进，男人正在操作电脑，说道：有意思，这ComfyUI能火，我指定得学它 [120-240]
-```
-
-- [0-120] and [120-240] represent the start and end frame ranges of segments on the timeline, in frames (frame), also supports [0-5s] [5-10s] writing, in seconds. If no time range is specified, the total duration set on the original timeline editor will be equally distributed.
-- Segments are separated by `|`, representing different time periods. Each segment can contain `media placeholder`, `text prompt`, and `start-end frame range`.
-- Image injection: Supports `@image{n}`, `@img{n}`, `@图{n}`, `@图片{n}`, `@图像{n}` as placeholders to inject image resources, where `{n}` represents the n-th image in the image list (starting from 1). For example, `@image1` will inject the first image from the image list.
-- Video injection: Supports `@video{n}`, `@视频{n}` as placeholders to inject video resources, where `{n}` represents the n-th video in the video list (starting from 1). For example, `@video1` will inject the first video from the video list.
-- Audio injection: Supports `@audio{n}`, `@音频{n}` as placeholders to inject audio resources, where `{n}` represents the n-th audio in the audio list (starting from 1). For example, `@audio1` will inject the first audio from the audio list.
-
-
-**Adding Media via Timeline Editor Input Ports**:
-> If you only want to pass parameters via the `image` or `audio`, `video` input ports and do not want to use `prompt_override`, you can use the `slot` method to associate media in the image or audio adding section with the media from the corresponding input port. This way, when executing workflow tasks, the input media resources will automatically be associated with the corresponding segments in the timeline editor.
-(Note: The preview displayed on the timeline editor traces back to the resources of the corresponding nodes that initially loaded the images or audio. If you use cropping or truncation nodes between the loading and timeline editor workflow to process the original media, the backend will also execute this processing; however, the frontend preview display shows the initial state.)
-
-![dynamicInput2](https://github.com/user-attachments/assets/6dd84d52-1fd3-4b27-a890-2a0e22cecda4)
-</details>
-
 ### 🎞️ SaveVideo
 
 ![SaveVideo](https://github.com/user-attachments/assets/30e2dcc3-9ed3-4d5f-bb15-69e50c3e8fca)
