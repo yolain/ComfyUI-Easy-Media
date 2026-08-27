@@ -1,0 +1,1268 @@
+{
+  "id": "1bc2f43c-330a-4246-96ba-c27de086b2ee",
+  "revision": 0,
+  "last_node_id": 25,
+  "last_link_id": 55,
+  "nodes": [
+    {
+      "id": 10,
+      "type": "CLIPLoader",
+      "pos": [
+        3421.6642940401966,
+        1754.0825993629335
+      ],
+      "size": [
+        292.5837703855441,
+        106
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "label": "CLIP",
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            22,
+            25
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.29.0",
+        "Node name for S&R": "CLIPLoader",
+        "models": [
+          {
+            "name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+            "directory": "text_encoders",
+            "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+          }
+        ],
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+        "minimax",
+        "default"
+      ],
+      "widgets_values_named": {
+        "clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+        "type": "minimax",
+        "device": "default"
+      },
+      "color": "#c09430",
+      "bgcolor": "rgba(24,24,27,.9)"
+    },
+    {
+      "id": 2,
+      "type": "VAELoader",
+      "pos": [
+        3427.6237507186083,
+        1909.5393435106525
+      ],
+      "size": [
+        284.6875,
+        58
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            21,
+            26
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.29.0",
+        "Node name for S&R": "VAELoader",
+        "models": [
+          {
+            "directory_invalid": true,
+            "name": "minimax_h3_video_vae_fp16.safetensors",
+            "directory": "vae",
+            "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors"
+          }
+        ],
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "minimax_h3_video_vae_fp16.safetensors"
+      ],
+      "widgets_values_named": {
+        "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+      },
+      "color": "#af3535",
+      "bgcolor": "rgba(24,24,27,.9)"
+    },
+    {
+      "id": 1,
+      "type": "VAELoader",
+      "pos": [
+        3421.1905231090627,
+        2021.111930639314
+      ],
+      "size": [
+        284.4346923828125,
+        58
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            20,
+            27
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.29.0",
+        "Node name for S&R": "VAELoader",
+        "models": [
+          {
+            "directory_invalid": true,
+            "name": "minimax_h3_audio_vae_fp32.safetensors",
+            "directory": "vae",
+            "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors"
+          }
+        ],
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "minimax_h3_audio_vae_fp32.safetensors"
+      ],
+      "widgets_values_named": {
+        "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+      },
+      "color": "#af3535",
+      "bgcolor": "rgba(24,24,27,.9)"
+    },
+    {
+      "id": 18,
+      "type": "easy modelLoaderPack",
+      "pos": [
+        3867.3637272846768,
+        1854.358256523479
+      ],
+      "size": [
+        210.2487077689966,
+        86
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 2,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 24
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 25
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 26
+        },
+        {
+          "name": "audio_vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": 27
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model_loader",
+          "type": "FAST_MODEL_LOADER",
+          "links": [
+            55
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-media",
+        "ver": "e1893122c0e5a26d3544e99e4b35124d64901e66",
+        "Node name for S&R": "easy modelLoaderPack"
+      }
+    },
+    {
+      "id": 16,
+      "type": "easy modelLoaderPack",
+      "pos": [
+        3534.5448948070675,
+        2175.4167733439376
+      ],
+      "size": [
+        177.87890625,
+        86
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 50
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 22
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 21
+        },
+        {
+          "name": "audio_vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": 20
+        }
+      ],
+      "outputs": [
+        {
+          "name": "model_loader",
+          "type": "FAST_MODEL_LOADER",
+          "links": [
+            18
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-media",
+        "ver": "e1893122c0e5a26d3544e99e4b35124d64901e66",
+        "Node name for S&R": "easy modelLoaderPack"
+      }
+    },
+    {
+      "id": 21,
+      "type": "ModelPreviewOverrideKJ",
+      "pos": [
+        4483.282110249992,
+        1707.0354679916343
+      ],
+      "size": [
+        498.4097479435004,
+        592.3205036222998
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 36
+        },
+        {
+          "name": "vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            50
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "3f20054214fec9f9234fd3841ae6f1e4287948f6",
+        "Node name for S&R": "ModelPreviewOverrideKJ",
+        "kjPovPanelH": 76
+      },
+      "widgets_values": [
+        1024,
+        80,
+        true,
+        48,
+        24,
+        "taeh3.safetensors",
+        ""
+      ],
+      "widgets_values_named": {
+        "max_resolution": 1024,
+        "jpeg_quality": 80,
+        "suppress_default_preview": true,
+        "preview_frames": 48,
+        "preview_fps": 24,
+        "tiny_vae": "taeh3.safetensors",
+        "preview": ""
+      }
+    },
+    {
+      "id": 20,
+      "type": "KSamplerSelect",
+      "pos": [
+        3846.1431190071453,
+        2096.0701989925774
+      ],
+      "size": [
+        210,
+        58
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 2,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "SAMPLER",
+          "type": "SAMPLER",
+          "links": [
+            29
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.0",
+        "Node name for S&R": "KSamplerSelect"
+      },
+      "widgets_values": [
+        "euler"
+      ],
+      "widgets_values_named": {
+        "sampler_name": "euler"
+      }
+    },
+    {
+      "id": 22,
+      "type": "BasicScheduler",
+      "pos": [
+        3851.2910990003547,
+        2187.3439506998907
+      ],
+      "size": [
+        210,
+        106
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 2,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 32
+        }
+      ],
+      "outputs": [
+        {
+          "name": "SIGMAS",
+          "type": "SIGMAS",
+          "links": [
+            33
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.0",
+        "Node name for S&R": "BasicScheduler"
+      },
+      "widgets_values": [
+        "beta",
+        8,
+        1
+      ],
+      "widgets_values_named": {
+        "scheduler": "beta",
+        "steps": 8,
+        "denoise": 1
+      }
+    },
+    {
+      "id": 13,
+      "type": "ModelAttentionBackend",
+      "pos": [
+        3110.8074162735365,
+        2071.304097432578
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 51
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            48
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.0",
+        "Node name for S&R": "ModelAttentionBackend"
+      },
+      "widgets_values": [
+        "comfy kitchen attention"
+      ],
+      "widgets_values_named": {
+        "attention": "comfy kitchen attention"
+      }
+    },
+    {
+      "id": 11,
+      "type": "MiniMaxH3HybridLoader",
+      "pos": [
+        3095.964804594309,
+        1745.6330325692797
+      ],
+      "size": [
+        303.171875,
+        250
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            51
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "scottmudge/ComfyUI_MinimaxH3HybridLoader",
+        "ver": "a44c69b02242e41fbd01e22abe2a492adc853038",
+        "Node name for S&R": "MiniMaxH3HybridLoader"
+      },
+      "widgets_values": [
+        "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+        "block_range_adaln",
+        25,
+        49,
+        false,
+        "",
+        "",
+        "default"
+      ],
+      "widgets_values_named": {
+        "base_model": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "overlay_model": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+        "overlay_preset": "block_range_adaln",
+        "block_range_start": 25,
+        "block_range_end": 49,
+        "final_adaln_from_overlay": false,
+        "custom_overlays": "",
+        "custom_base": "",
+        "weight_dtype": "default"
+      }
+    },
+    {
+      "id": 25,
+      "type": "easy saveVideo",
+      "pos": [
+        5105.473893390316,
+        2474.0609348018606
+      ],
+      "size": [
+        327.2890625,
+        126
+      ],
+      "flags": {},
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "video",
+          "name": "input_mode.video",
+          "type": "VIDEO",
+          "link": 39
+        },
+        {
+          "label": "audio",
+          "name": "input_mode.audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": null
+        },
+        {
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          },
+          "link": 40
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": null
+        },
+        {
+          "name": "file_path",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-media",
+        "ver": "e1893122c0e5a26d3544e99e4b35124d64901e66",
+        "Node name for S&R": "easy saveVideo"
+      },
+      "widgets_values": [
+        "video",
+        "preview_only",
+        "ComfyUI"
+      ],
+      "widgets_values_named": {
+        "input_mode": "video",
+        "output_mode": "preview_only",
+        "filename_prefix": "ComfyUI"
+      }
+    },
+    {
+      "id": 19,
+      "type": "UNETLoader",
+      "pos": [
+        3846.5530903798685,
+        1711.7050221009245
+      ],
+      "size": [
+        308.6822058626176,
+        82
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 2,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            24,
+            52
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.0",
+        "Node name for S&R": "UNETLoader"
+      },
+      "widgets_values": [
+        "FeiHou_MiniMax-H3_Remix_v0.6_fixed.safetensors",
+        "default"
+      ],
+      "widgets_values_named": {
+        "unet_name": "FeiHou_MiniMax-H3_Remix_v0.6_fixed.safetensors",
+        "weight_dtype": "default"
+      }
+    },
+    {
+      "id": 23,
+      "type": "BasicScheduler",
+      "pos": [
+        4156.111118451221,
+        2188.318974462267
+      ],
+      "size": [
+        210,
+        106
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 2,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 52
+        }
+      ],
+      "outputs": [
+        {
+          "name": "SIGMAS",
+          "type": "SIGMAS",
+          "links": [
+            53
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.0",
+        "Node name for S&R": "BasicScheduler"
+      },
+      "widgets_values": [
+        "beta",
+        4,
+        1
+      ],
+      "widgets_values_named": {
+        "scheduler": "beta",
+        "steps": 4,
+        "denoise": 1
+      }
+    },
+    {
+      "id": 24,
+      "type": "KSamplerSelect",
+      "pos": [
+        4158.186053973148,
+        2090.1343524336107
+      ],
+      "size": [
+        210,
+        58
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 2,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "SAMPLER",
+          "type": "SAMPLER",
+          "links": [
+            54
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.0",
+        "Node name for S&R": "KSamplerSelect"
+      },
+      "widgets_values": [
+        "euler"
+      ],
+      "widgets_values_named": {
+        "sampler_name": "euler"
+      }
+    },
+    {
+      "id": 6,
+      "type": "LoraLoaderModelOnly",
+      "pos": [
+        3108.531483078759,
+        2173.7286819406722
+      ],
+      "size": [
+        275.9622311829162,
+        85.57029587106808
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 48
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            32,
+            36
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.32.0",
+        "Node name for S&R": "LoraLoaderModelOnly"
+      },
+      "widgets_values": [
+        "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+        1
+      ],
+      "widgets_values_named": {
+        "lora_name": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+        "strength_model": 1
+      }
+    },
+    {
+      "id": 15,
+      "type": "easy multitrackProject",
+      "pos": [
+        3919.4801565117027,
+        2439.7605755738928
+      ],
+      "size": [
+        273.552734375,
+        442
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "tracks_info",
+          "type": "TRACKS_INFO",
+          "link": 38
+        },
+        {
+          "name": "model_loader",
+          "type": "FAST_MODEL_LOADER",
+          "link": 18
+        },
+        {
+          "name": "model_loader_2nd",
+          "shape": 7,
+          "type": "FAST_MODEL_LOADER",
+          "link": 55
+        },
+        {
+          "name": "sampler",
+          "shape": 7,
+          "type": "SAMPLER",
+          "link": 29
+        },
+        {
+          "name": "sampler_2nd",
+          "shape": 7,
+          "type": "SAMPLER",
+          "link": 54
+        },
+        {
+          "name": "sigmas",
+          "shape": 7,
+          "type": "SIGMAS",
+          "link": 33
+        },
+        {
+          "name": "sigmas_2nd",
+          "shape": 7,
+          "type": "SIGMAS",
+          "link": 53
+        }
+      ],
+      "outputs": [
+        {
+          "name": "PROJECT_NAME",
+          "type": "STRING",
+          "links": [
+            19
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-media",
+        "ver": "5739638c646a66a93d60c51714593b2b96a2a3b6",
+        "Node name for S&R": "easy multitrackProject"
+      },
+      "widgets_values": [
+        "",
+        "override",
+        0,
+        -1,
+        1011859974239154,
+        "randomize",
+        "medium",
+        "dual",
+        false,
+        false,
+        1.5,
+        "minimax_h3_latent_upscaler_3d_fp16.safetensors"
+      ],
+      "widgets_values_named": {
+        "project_name": "",
+        "project_save": "override",
+        "segment_start_index": 0,
+        "segment_count": -1,
+        "seed": 1011859974239154,
+        "fixed": "randomize",
+        "sampling_plan": "medium",
+        "sampling_mode": "dual",
+        "1st_pass_only": false,
+        "disable_2nd_noise": false,
+        "upscale_by": 1.5,
+        "upscale_model": "minimax_h3_latent_upscaler_3d_fp16.safetensors"
+      }
+    },
+    {
+      "id": 14,
+      "type": "easy multiTrackEditor",
+      "pos": [
+        3092.1976780518853,
+        2433.8234267650087
+      ],
+      "size": [
+        805.6005015780252,
+        827.078778067706
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "prompt_override",
+          "name": "prompt_override",
+          "shape": 7,
+          "type": "*",
+          "link": null
+        },
+        {
+          "label": "image",
+          "name": "image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "label": "audio",
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": null
+        },
+        {
+          "label": "video",
+          "name": "video",
+          "shape": 7,
+          "type": "VIDEO",
+          "link": null
+        },
+        {
+          "label": "resolution",
+          "name": "resolution",
+          "type": "COMFY_DYNAMICCOMBO_V3",
+          "widget": {
+            "name": "resolution"
+          },
+          "link": null
+        },
+        {
+          "label": "format",
+          "name": "format",
+          "type": "COMBO",
+          "widget": {
+            "name": "format"
+          },
+          "link": null
+        },
+        {
+          "label": "track_data",
+          "name": "track_data",
+          "type": "TRACK_DATA",
+          "widget": {
+            "name": "track_data"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "TRACKS_INFO",
+          "name": "TRACKS_INFO",
+          "type": "TRACKS_INFO",
+          "links": [
+            38
+          ]
+        },
+        {
+          "label": "IMAGES",
+          "name": "IMAGES",
+          "shape": 6,
+          "type": "IMAGE",
+          "links": []
+        },
+        {
+          "label": "AUDIO",
+          "name": "AUDIO",
+          "shape": 6,
+          "type": "AUDIO",
+          "links": []
+        },
+        {
+          "label": "VIDEO",
+          "name": "VIDEO",
+          "shape": 6,
+          "type": "VIDEO",
+          "links": []
+        }
+      ],
+      "properties": {
+        "easyMediaTimelineHeight": 827.078778067706,
+        "cnr_id": "comfyui-easy-media",
+        "ver": "1254e0e0afa9afee268027b9540fdc91c888ebc5",
+        "Node name for S&R": "easy multiTrackEditor",
+        "easyMediaTimelineSize": [
+          791.0493774414062,
+          851.7037963867188
+        ],
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "width x height (megapixels)",
+        "16:9 (Widescreen)",
+        0.8,
+        "MiniMax",
+        "{\"muted\":false,\"volume_db\":0,\"task_markers\":[],\"task_overview\":false,\"tracks\":[{\"id\":\"c64f6cef-34eb-4602-820a-defc4ced0f45\",\"name\":\"Task 0\",\"type\":\"task\",\"task_mode\":\"default\",\"color\":\"var(--multitrack-task-bg)\",\"muted\":false,\"solo\":false,\"volume_db\":0,\"locked\":false,\"segments\":[{\"id\":\"58cb6c2a-5ab2-4b49-9fdb-af95fd4b6209\",\"start_frame\":0,\"end_frame\":240,\"color\":\"var(--multitrack-task-bg)\",\"content\":{\"media_type\":\"none\",\"task_mode\":\"ref\",\"images\":[{\"id\":\"350427e2-738d-461c-b620-19b935005a08\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/57e083c42e3196aba443806a5936a85f33048c20df281f46ffcdadce6e533d8f.png\",\"file_name\":\"57e083c42e3196aba443806a5936a85f33048c20df281f46ffcdadce6e533d8f.png\"},{\"id\":\"a4c0de82-7fc4-490c-9c68-7a6b86b704a6\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/20807e0fbbee034341c359721ffa22efcf0d6c4aa5f6a799965561386efcb85c.png\",\"file_name\":\"20807e0fbbee034341c359721ffa22efcf0d6c4aa5f6a799965561386efcb85c.png\"},{\"id\":\"fb473ba6-afcd-43d8-9d43-a5fda032c7f5\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/afea438d7362489c3eb0bd527718e8d2f6a1a283d366313fce79f381dc3a0d86.png\",\"file_name\":\"afea438d7362489c3eb0bd527718e8d2f6a1a283d366313fce79f381dc3a0d86.png\"},{\"id\":\"be9fc741-9394-40a3-97f1-ac9cb9e2a0ae\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/4e308d79652e45b794edef049ef8c2c137f1df1d39e33c51e9b3d516611e9f2d.png\",\"file_name\":\"4e308d79652e45b794edef049ef8c2c137f1df1d39e33c51e9b3d516611e9f2d.png\"},{\"id\":\"f21745cb-dfb3-4359-8252-c5d03c8a026b\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/9ef12e738e51b20f0b02de4104a9b7646b742a37ce3f1b43a44c75b01462510f.png\",\"file_name\":\"9ef12e738e51b20f0b02de4104a9b7646b742a37ce3f1b43a44c75b01462510f.png\"}],\"muted\":false,\"volume_db\":0,\"user_prompt\":\"subject_definitions:\\n\\n<Subject 1> is Shen Zhi, the young female sword cultivator from <Picture 1>, preserving her refined youthful East Asian facial identity from <Picture 2>, long black half-up hairstyle with delicate pale ornaments, white-and-light-blue layered cultivation robes, slender proportions, and elegant flowing fabric.\\n\\nShe is a strict single-sword cultivator. She always uses exactly ONE slender straight sword shown in the reference and exactly ONE matching scabbard.\\n\\nThe sword identity is permanently locked:\\nthe same silver blade, the same blade length, the same hilt design, the same guard shape, and the same scabbard remain consistent throughout the entire video.\\n\\nShen Zhi uses only one sword during combat.\\nHer right hand is the only hand that holds the sword.\\n\\nBefore drawing:\\n- her right hand grips the single sword hilt.\\n- her left hand only stabilizes the single scabbard attached at her waist.\\n- the left hand contains no weapon.\\n\\nAfter drawing:\\n- the same single sword remains in her right hand.\\n- her left hand becomes completely empty.\\n- her left hand is only used for balance, robe movement, defensive gestures, or natural body motion.\\n\\nThe sword is one continuous physical object from the beginning of the draw until the final clash.\\n\\nNever create:\\n- a second sword,\\n- a mirrored sword,\\n- a duplicate blade,\\n- a hidden blade,\\n- an extra weapon,\\n- a sword appearing in the opposite hand.\\n\\nMaintain clear visual separation:\\nShen Zhi = one slender straight sword.\\nYan Qinghan = one long silver spear.\\n\\nHer combat identity is agile, determined, and precise, relying on evasive footwork, close-range entry, deflection, sliding contact along the opponent's weapon, and fast counter-thrusts.\\n\\n\\n<Subject 2> is Yan Qinghan, the senior female spear cultivator from <Picture 3>, preserving her cold refined East Asian facial identity from <Picture 4>, long black hair tied in a high traditional style, dark navy embroidered martial robes, black waist belt, slender athletic proportions, and stern commanding presence.\\n\\nShe always uses the same long silver spear shown in the reference.\\n\\nThe spear identity is permanently locked:\\nthe same long shaft, same silver spearhead, and same weapon proportions remain consistent throughout the entire video.\\n\\nThe spear must always remain visually different from Shen Zhi's sword:\\nlong shaft, large reach, pole weapon structure.\\n\\nHer combat identity is dominant and oppressive, using broad body-driven spear motions, long-range thrusting pressure, rotational recovery, sweeping control, and counter-lifting attacks.\\n\\n\\n<Subject 3> is the ancient mountain cultivation-sect gate environment from <Picture 5>, preserving the broad stone ceremonial courtyard, ascending stone stairways, large traditional timber halls, roofed gates, stone lanterns, mature trees, surrounding mountain terrain, drifting mist, and deep architectural perspective.\\n\\nThe target action takes place on the central open stone platform where both long weapons can move freely.\\n\\n\\n\\nsummary:\\n\\n[reference generation]\\n\\nThe target video is a ten-second vertical cinematic xianxia confrontation featuring <Subject 2> challenging <Subject 1> in <Subject 3>.\\n\\nThe sequence begins with hostile spoken dialogue and restrained character acting, then explodes into a seamless single-sword-versus-spear duel.\\n\\n<Subject 2> uses the spear's reach to initiate the attack, while <Subject 1> deflects, closes distance, and counters.\\n\\nShen Zhi remains a strict single-sword fighter throughout the entire sequence.\\n\\nHer complete weapon continuity:\\n- one sword only,\\n- one scabbard only,\\n- one continuous blade identity,\\n- one sword held by one hand.\\n\\nThe entire scene is presented as one uninterrupted ACT-style cinematic long take with strong backlighting, shallow depth of field, realistic weapon contact, brief impact slowdowns, environmental dust and leaves, and no subtitles or music.\\n\\n\\n\\nretention_analysis:\\n\\n<Subject 1> (appears throughout [Shot 1]):\\n\\nfully_preserved -\\n\\nShen Zhi's facial identity, black hairstyle, pale hair ornaments, white-and-light-blue layered robes, body proportions, single straight sword, single scabbard, and elegant youthful cultivation appearance remain consistent throughout dialogue and combat.\\n\\nHer determined expressions, evasive movement, close-range entry, sword deflections, and counter-thrusts are target-video actions rather than alterations to her referenced identity.\\n\\nWeapon continuity is strictly preserved:\\n\\n- Shen Zhi owns exactly one sword.\\n- The sword shown during combat is the same sword drawn at the beginning.\\n- The sword remains in her right hand.\\n- Her left hand remains empty after the draw.\\n- No additional sword appears.\\n- No weapon duplication occurs during motion blur, fast movement, or camera rotation.\\n\\n\\n<Subject 2> (appears throughout [Shot 1]):\\n\\nfully_preserved -\\n\\nYan Qinghan's facial identity, long black hairstyle, dark navy embroidered combat robes, black waist belt, silver long spear, proportions, and cold authoritative presence remain stable.\\n\\nHer contemptuous opening expression and forceful spear techniques extend the reference character without changing her defining appearance.\\n\\nHer weapon remains a single long spear throughout the sequence.\\n\\n\\n<Subject 3> (appears throughout [Shot 1]):\\n\\nfully_preserved -\\n\\nThe mountain sect's central stone courtyard, stairs, traditional halls, stone lanterns, trees, mountain mist, and architectural depth remain visually recognizable.\\n\\nAtmospheric sunlight, drifting leaves, dust, and combat-induced air movement are added without changing the core spatial structure.\\n\\ndetailed_description:\\n\\nThe target video uses a premium live-action female-oriented xianxia-drama aesthetic with photorealistic cinematic texture.\\n\\nIt has the visual character of Sony FX3 photography with an 85mm f/1.4 long lens, very shallow depth of field, a 1/2 black diffusion filter, gentle halation around bright edges, soft optical bloom, realistic skin texture, translucent fabric detail, and restrained high-end matte tonality.\\n\\nStrong hard side-backlight creates wide golden rims around hair, shoulders, embroidered cloth, sword edges, and the polished spear.\\n\\nSoft frontal bounce keeps both faces luminous and produces clear catchlights.\\n\\nThin mountain mist turns the intense backlight into visible volumetric rays.\\n\\n[Shot 1]\\n\\nA single seamless ten-second long take begins at low waist height on the central stone platform of <Subject 3>.\\n\\nThe camera slowly pushes between the two women rather than establishing a distant wide shot.\\n\\n<Subject 2> stands slightly higher on the stone paving, her silver spear planted loosely beside her, dark embroidered sleeves shifting in the mountain wind.\\n\\nThe camera rises into a medium close-up as she looks down at <Subject 1> with a faint contemptuous smile and narrowed eyes.\\n\\nIn a cold, dismissive tone, <Subject 2> says:\\n\\n<d>[Chinese] 沈栀，就凭你，今天怕是要交代在这了～</d>\\n\\n\\nWithout cutting, the camera arcs across the narrow space between them and settles into a close medium view of <Subject 1>.\\n\\nWind lifts loose strands of her black hair and the translucent outer layer of her pale-blue robe.\\n\\nHer expression changes from calm restraint to focused determination.\\n\\nHer eyes become sharp and controlled.\\n\\nThe camera clearly shows Shen Zhi's waist area:\\n\\none single sword,\\none single scabbard,\\nno other weapon.\\n\\n\\nShen Zhi begins the sword draw.\\n\\nHer right hand firmly grips the hilt of the only sword attached to her waist.\\n\\nHer left hand grips only the body of the same single scabbard to stabilize it.\\n\\nThe left hand contains no blade and no weapon.\\n\\n\\nThe sword draw is one continuous realistic motion:\\n\\nthe same single silver blade slowly slides out from the same single scabbard.\\n\\nThe camera clearly maintains:\\n\\nright hand = sword handle,\\nleft hand = empty scabbard.\\n\\nThe sword is never duplicated during the draw.\\n\\nNo second blade appears.\\nNo sword appears in the left hand.\\nNo mirrored weapon shape appears during fast movement.\\n\\n\\nThe same sword becomes fully unsheathed.\\n\\nThe empty scabbard remains attached at Shen Zhi's waist.\\n\\nHer left hand releases naturally and becomes empty.\\n\\nFrom this moment onward, Shen Zhi fights only with this one sword held in her right hand.\\n\\n\\nLooking directly toward <Subject 2>, <Subject 1> answers with controlled anger and firm conviction:\\n\\n<d>[Chinese] 晏清寒，你忤逆师门，今天我要替天行道！！</d>\\n\\n\\nAs the last syllable lands, the camera immediately accelerates into a third-person ACT-style tracking position behind and slightly beside <Subject 2>.\\n\\nShe drives from her rear leg and launches a direct long-range spear thrust toward <Subject 1>.\\n\\nThe lens follows the spear's forward momentum while keeping both faces and the weapon relationship readable.\\n\\n\\n<Subject 1> pivots diagonally away from the attack line.\\n\\nShe uses her one single sword to meet the spear shaft.\\n\\nThe sword does not block with brute force.\\n\\nInstead, the blade slides along the spear shaft and redirects the attack.\\n\\nThe same single sword remains visible in her right hand.\\n\\nHer left hand remains empty and assists only through body balance and robe movement.\\n\\n\\nMetal contact produces a sharp spark burst, a brief micro-slowdown, and one short controlled camera jolt.\\n\\n\\nThe camera swings behind <Subject 1>.\\n\\nShe immediately follows the deflected spear inward, using close-range footwork.\\n\\nHer single sword slides along Yan Qinghan's spear shaft as she enters the distance.\\n\\nShe turns through the opening and sends a fast precise counter-thrust toward <Subject 2>.\\n\\n\\nYan Qinghan retracts the spear with a strong waist rotation.\\n\\nShe rolls the long spear shaft into a defensive circular path and intercepts Shen Zhi's sword.\\n\\nThe impact creates a second metallic clash.\\n\\nSparks scatter laterally while their sleeves and hair whip outward from the force.\\n\\n\\nFor the final exchange, the camera drops to a low three-quarter angle while remaining in the same continuous move.\\n\\nShen Zhi advances with her single sword held in her right hand.\\n\\nYan Qinghan responds with an upward reverse spear lift.\\n\\n\\nThe final weapon interaction is a clear sword-versus-spear lock:\\n\\nShen Zhi's single sword presses diagonally against Yan Qinghan's spear shaft.\\n\\nYan Qinghan's weapon remains clearly a long spear with a visible shaft.\\n\\nThe composition clearly shows:\\n\\none sword,\\none spear.\\n\\nNever two swords.\\nNever crossed sword shapes.\\nNever duplicated blades.\\n\\n\\nThe impact sends dust upward from the stone paving.\\n\\nNearby dry leaves spiral around their legs.\\n\\nThe intense backlight catches the suspended particles.\\n\\nThe collision briefly slows time before both women recoil half a step.\\n\\n\\nThe camera makes a restrained partial orbit and ends in a tense medium framing:\\n\\nShen Zhi stands holding her single sword in her right hand.\\n\\nHer empty left hand remains visible.\\n\\nYan Qinghan holds her single long spear.\\n\\nTheir weapons remain locked in a final sword-versus-spear confrontation.\\n\\nNeither weapon lands a final blow.\\n\\n\\n\\nweapon_identity_lock:\\n\\nShen Zhi weapon rules:\\n\\n- Exactly one sword exists in the entire video.\\n- The sword shown during the draw is the same sword used during combat.\\n- The sword is always held by Shen Zhi's right hand.\\n- The left hand never holds a sword.\\n- The left hand never creates a weapon.\\n- The scabbard remains a separate empty object after the draw.\\n- No weapon duplication during camera movement.\\n- No duplicate sword caused by motion blur.\\n- No extra blade reflection that resembles another sword.\\n- No twin swords.\\n- No dual wielding.\\n\\n\\nYan Qinghan weapon rules:\\n\\n- Exactly one spear exists in the entire video.\\n- The spear remains a long pole weapon.\\n- The spear shaft must remain visually obvious.\\n- The spearhead must never resemble a second sword.\\n\\n\\nWeapon contrast:\\n\\nShen Zhi:\\nsingle slender straight sword,\\nshorter blade,\\nheld in right hand.\\n\\nYan Qinghan:\\nsingle long silver spear,\\nlong shaft,\\ntwo-handed spear techniques.\\n\\nThe final image must always communicate:\\n\\none sword versus one spear.\\n\\noverall_soundscape:\\nNo music.\\n\\nContinuous high-mountain wind, faint tree movement, distant open-air sect ambience, soft fabric flutter, hair ornaments moving lightly, controlled breathing, one continuous sword-unsheathing friction sound, spear shaft movement, rapid weapon whooshes, sharp metallic deflections, one heavier final sword-and-spear collision with resonant ringing, brief spark crackle, foot friction on stone, dust movement, and leaves stirred by the final shockwave.\\n\\nDialogue remains clean and foregrounded without excessive reverberation.\\n\\nnon_diegetic_music:\\nN/A\",\"system_prompt\":\"\",\"user_prompt_variant\":\"a\",\"user_prompt_b\":\"\",\"continuity_mode\":\"shot\",\"ref_image_size\":\"match\"}},{\"id\":\"4f9bdcf2-96a3-4248-b706-fe78adcb5771\",\"start_frame\":240,\"end_frame\":480,\"color\":\"var(--multitrack-task-bg)\",\"content\":{\"media_type\":\"none\",\"task_mode\":\"ref\",\"images\":[{\"id\":\"350427e2-738d-461c-b620-19b935005a08\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/57e083c42e3196aba443806a5936a85f33048c20df281f46ffcdadce6e533d8f.png\",\"file_name\":\"57e083c42e3196aba443806a5936a85f33048c20df281f46ffcdadce6e533d8f.png\"},{\"id\":\"0e855ddc-68b5-4672-aac3-9f57e83e5e54\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/20807e0fbbee034341c359721ffa22efcf0d6c4aa5f6a799965561386efcb85c.png\",\"file_name\":\"20807e0fbbee034341c359721ffa22efcf0d6c4aa5f6a799965561386efcb85c.png\"},{\"id\":\"fb473ba6-afcd-43d8-9d43-a5fda032c7f5\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/afea438d7362489c3eb0bd527718e8d2f6a1a283d366313fce79f381dc3a0d86.png\",\"file_name\":\"afea438d7362489c3eb0bd527718e8d2f6a1a283d366313fce79f381dc3a0d86.png\"},{\"id\":\"3edba04d-cbe5-4dc1-b1fd-a2c4d7dbf2d3\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/4e308d79652e45b794edef049ef8c2c137f1df1d39e33c51e9b3d516611e9f2d.png\",\"file_name\":\"4e308d79652e45b794edef049ef8c2c137f1df1d39e33c51e9b3d516611e9f2d.png\"},{\"id\":\"f21745cb-dfb3-4359-8252-c5d03c8a026b\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/9ef12e738e51b20f0b02de4104a9b7646b742a37ce3f1b43a44c75b01462510f.png\",\"file_name\":\"9ef12e738e51b20f0b02de4104a9b7646b742a37ce3f1b43a44c75b01462510f.png\"},{\"id\":\"fa150450-ef96-41f6-9dc8-99a4dd5e6d1b\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/dd45570e7f9787dcfdbba2c9deb6d3e094c70643b834feb1387a101c811280ce.png\",\"file_name\":\"dd45570e7f9787dcfdbba2c9deb6d3e094c70643b834feb1387a101c811280ce.png\"}],\"muted\":false,\"volume_db\":0,\"user_prompt\":\"subject_definitions:\\n<Subject 1> is Shen Zhi, the young female sword cultivator from <Picture 1>, preserving her refined youthful East Asian facial identity from <Picture 2>, long black half-up hairstyle with delicate pale ornaments, white inner robe, translucent pale-blue layered outer robes, light-blue waist sash, slender proportions, and elegant flowing fabric. She always uses the same slender straight sword shown in the reference. Her combat style is agile, precise, and high-risk, relying on evasive footwork, aerial repositioning, sudden close-range entries, descending cuts, recovery under pressure, and decisive counterattacks inside the spear's effective range.\\n\\n<Subject 2> is Yan Qinghan, the senior female spear cultivator from <Picture 3>, preserving her cold refined East Asian facial identity from <Picture 4>, long black hair tied in a traditional high style, dark navy near-black embroidered martial robes, silver-grey decorative patterns, black waist belt, slender athletic proportions, and severe commanding presence. She always uses the same long silver spear shown in the reference. Her combat style is forceful and oppressive, using the spear's full length, leverage, rotational momentum, butt-end strikes, low sweeping attacks, shaft control, weapon trapping, body-driven redirection, and heavy descending attacks.\\n\\n<Subject 3> is the ancient mountain cultivation-sect gate environment from <Picture 5>, preserving the broad central stone courtyard, ceremonial stone platform, ascending stairways, large traditional timber halls, roofed gate structures, stone lanterns, mature trees, surrounding mountains, drifting mist, and deep architectural perspective. The continuation fight remains on the central platform and its adjacent stone-step boundary without changing to another location.\\n\\n<Picture 6>is the six-panel storyboard reference for [Shot 1], defining the sequential action progression, character placement, camera direction, weapon interaction, and visual escalation for the ten-second seamless continuation. Its six panels correspond in reading order from upper-left to upper-right, middle-left to middle-right, and lower-left to lower-right to: spear-butt impact and forced retreat, low spear sweep with aerial evasion, descending sword strike against the spear shaft, spear-shaft control and destabilization, missed overhead spear strike against the stone platform, and the final close-range mutual-kill standoff.\\n\\nsummary:\\n[reference generation] The target video is a ten-second seamless continuation of the previous sword-versus-spear duel between <Subject 1> and <Subject 2> in <Subject 3>. Guided by the sequential action planning of <Picture 4>, the fight immediately escalates into a lethal second phase without repeating the earlier direct spear thrust, sword deflection, sliding entry, circular spear defense, or tip-to-tip clash. <Subject 2> uses the spear's leverage and rotational power to drive <Subject 1> toward the stone steps, while <Subject 1> survives through aerial evasion, a descending counterattack, and a dangerous final entry inside the spear's control radius. The entire scene is presented as one uninterrupted ACT-style cinematic long take with restrained effects, realistic weapon weight, readable spatial continuity, strong physical impact, and no dialogue, subtitles, or music.\\n\\nretention_analysis:\\n<Subject 1> (appears throughout [Shot 1]): fully_preserved - Shen Zhi's facial identity, black hairstyle, pale ornaments, white-and-light-blue layered robes, slender proportions, straight sword, and youthful cultivation appearance remain consistent. Her aerial evasion, descending sword attack, temporary shoulder injury, destabilized posture, and final desperate close-range counterattack are new target-video actions and do not alter her referenced identity.\\n\\n<Subject 2> (appears throughout [Shot 1]): fully_preserved - Yan Qinghan's facial identity, long black hairstyle, dark navy embroidered combat robes, black belt, long silver spear, proportions, and cold authoritative presence remain stable. Her butt-end strike, low sweep, shaft interception, weapon control, rotational throw, and descending finishing strike extend her combat behavior while preserving her referenced design.\\n\\n<Subject 3> (appears throughout [Shot 1]): fully_preserved - the central sect courtyard, stone platform, adjacent stairs, traditional halls, stone lanterns, trees, mountain mist, and architectural direction remain recognizable and spatially continuous. Dust, loose leaves, a cracked stone slab, and small fragments caused by weapon impacts are temporary physical reactions rather than changes to the environment's identity.\\n\\n<Picture 4> ([Shot 1] storyboard and action-planning reference): fully_preserved - the six-panel sequence establishes the intended progression from spear-butt impact through aerial evasion, descending sword pressure, spear-shaft control, a missed overhead finishing strike, and the final close-range mutual-kill composition. The target video converts these storyboard states into one continuous camera trajectory instead of treating them as six separate cuts.\\n\\ndetailed_description:\\nThe target video uses a premium live-action female-oriented xianxia action-drama aesthetic with photorealistic cinematic texture. The visual character resembles Sony FX3 photography through an 85mm f/1.4 lens with shallow depth of field, restrained 1/2 black-diffusion softness, gentle halation around metallic highlights and hair edges, realistic skin texture, translucent robe layers, and refined matte fabric detail. Strong side-backlight creates broad warm-gold rim light on hair, shoulders, sword edges, spear surfaces, and airborne dust, while soft frontal bounce keeps both faces readable. Thin mountain mist converts the backlight into visible volumetric rays without obscuring the action.\\n\\n[Shot 1] The ten-second sequence begins directly from the unresolved end state of the previous fight in <Subject 3>, with dust and loose leaves still suspended around <Subject 1> and <Subject 2>. The camera remains in motion and never cuts. Following the first phase of <Picture 4>, <Subject 2> instantly changes her spear grip and pivots through her hips, striking horizontally with the butt end of the long silver spear instead of attacking with the spearhead. <Subject 1> raises her straight sword vertically across her body and absorbs the blow against the blade. The impact creates a compact burst of sparks and a sharp metallic report. The camera travels backward with <Subject 1> as the force drives her several steps toward the platform's stone-step boundary, her pale-blue outer robes streaming behind her and her shoes scraping a visible dusty line across the paving.\\n\\nWithout pausing, <Subject 2> uses the retained rotational momentum to sink her stance and sweep the spear extremely low across the stone surface. The camera drops close to ground level and tracks laterally along the spear's direction. The spearhead passes close to the lens, lifting a thin ribbon of dust and leaves. With no room left to retreat, <Subject 1> plants one foot at the stone-step edge and jumps cleanly over the sweeping shaft. The camera rises with her, preserving the third-person ACT relationship and clearly revealing <Subject 2> below continuing the low rotational sweep.\\n\\nStill airborne, <Subject 1> turns her hips and shoulders and converts her downward momentum into a two-handed descending diagonal sword cut from <Subject 2>'s upper side. <Subject 2> cannot fully reset the spear and instead rotates toward the attack, raising the silver shaft across her upper body. The sword crashes into the spear shaft with a dense metallic impact. Fine sparks spread outward, and the camera gives one brief controlled impact jolt. For the first time in this continuation, <Subject 2> is forced back half a step, her rear foot pressing onto a slightly loose stone slab whose edge cracks under the load.\\n\\nAs <Subject 1> begins to recover the sword from the descending cut, <Subject 2> changes the force direction rather than simply knocking the blade away. She keeps the spear shaft tightly engaged against the sword, crosses the two weapons, rotates her torso, and uses the long shaft as leverage to drag <Subject 1>'s sword arm outward. The camera continues around to <Subject 1>'s rear three-quarter side so the destabilization remains visually readable. Her shoulder is pulled off-axis, her torso twists, and one foot stumbles forward as the spear forces her balance open. <Subject 2> follows the motion and the spearhead passes extremely close to <Subject 1>'s upper arm and shoulder, slicing only the outer pale-blue fabric and leaving a small, restrained blood mark rather than a graphic wound.\\n\\nThe camera drops with <Subject 1> as she catches herself near the stone platform edge in a very low stance. <Subject 2> immediately advances and raises the long spear high with both hands for a heavy descending finishing strike. From near <Subject 1>'s level, the camera looks upward as <Subject 2>'s dark robes and silver spear dominate the frame against intense backlight. At the last instant, <Subject 1> does not retreat. She lowers her body and drives forward into the most dangerous interior line of the descending attack. The spear passes just above her flowing rear robes and crashes into the stone behind her, breaking only the local surface and throwing outward a restrained burst of dust and small stone fragments.\\n\\nUsing the instant created by the missed heavy strike, <Subject 1> continues forward, pivots tightly around her planted foot, and brings the sword around from beside her body toward <Subject 2>'s neck line. <Subject 2> reacts immediately, rotating her wrists and dragging the grounded spear back from low position into a lateral counterline. The camera flows around them into a close side-on ACT composition that matches the final phase of <Picture 4>. <Subject 1>'s sword stops only a very short distance from <Subject 2>'s neck, while <Subject 2>'s spear blade simultaneously stops just short of <Subject 1>'s waist. Their weapons do not collide. Both women remain fully committed to attacks that could continue another few centimeters and seriously wound the other.\\n\\nThe camera slows but does not freeze. Shen Zhi's breathing is tight, the small shoulder mark darkens slightly through the pale fabric, and loose strands of her black hair whip across her face. Yan Qinghan's expression has lost its earlier contempt and becomes completely focused; one loose strand of her hair, cut by the sword's passage, drifts through the warm backlight. Dust, leaves, hair, and robe fabric move outward along the opposing attack directions while the camera continues a subtle forward creep between them. The long take ends before either weapon completes the final strike, leaving the fight unresolved and immediately continuable.\\n\\noverall_soundscape:\\nNo music. Continuous high-mountain wind, faint movement of distant trees, open-air stone-courtyard ambience, cloth flutter, quick controlled breathing, shoe friction on stone, spear-shaft rotation, heavy weapon whooshes, one blunt spear-butt impact against the sword, one low sweeping air rush, one sharp descending sword-versus-shaft collision, metallic scraping during the weapon lock, a brief fabric tear near Shen Zhi's shoulder, the heavy spear strike against stone, small fragments scattering across the paving, and the sustained low metallic resonance of weapons under tension near the final frame. All physical sounds remain clean, directional, and tightly synchronized to visible action.\\n\\nnon_diegetic_music:\\nN/A\",\"system_prompt\":\"\",\"user_prompt_variant\":\"a\",\"user_prompt_b\":\"\",\"continuity_mode\":\"context\",\"ref_image_size\":\"match\"}}]},{\"id\":\"d15f065c-25c4-4922-8570-01dde0d3caf0\",\"name\":\"Video 0\",\"type\":\"video\",\"color\":\"var(--primary)\",\"muted\":false,\"solo\":false,\"volume_db\":0,\"locked\":false,\"segments\":[]}],\"total_length\":480,\"frame_rate\":24}"
+      ],
+      "widgets_values_named": {
+        "resolution": "width x height (megapixels)",
+        "resolution.aspect_ratio": "16:9 (Widescreen)",
+        "resolution.megapixels": 0.8,
+        "format": "MiniMax",
+        "track_data": "{\"muted\":false,\"volume_db\":0,\"task_markers\":[],\"task_overview\":false,\"tracks\":[{\"id\":\"c64f6cef-34eb-4602-820a-defc4ced0f45\",\"name\":\"Task 0\",\"type\":\"task\",\"task_mode\":\"default\",\"color\":\"var(--multitrack-task-bg)\",\"muted\":false,\"solo\":false,\"volume_db\":0,\"locked\":false,\"segments\":[{\"id\":\"58cb6c2a-5ab2-4b49-9fdb-af95fd4b6209\",\"start_frame\":0,\"end_frame\":240,\"color\":\"var(--multitrack-task-bg)\",\"content\":{\"media_type\":\"none\",\"task_mode\":\"ref\",\"images\":[{\"id\":\"350427e2-738d-461c-b620-19b935005a08\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/57e083c42e3196aba443806a5936a85f33048c20df281f46ffcdadce6e533d8f.png\",\"file_name\":\"57e083c42e3196aba443806a5936a85f33048c20df281f46ffcdadce6e533d8f.png\"},{\"id\":\"a4c0de82-7fc4-490c-9c68-7a6b86b704a6\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/20807e0fbbee034341c359721ffa22efcf0d6c4aa5f6a799965561386efcb85c.png\",\"file_name\":\"20807e0fbbee034341c359721ffa22efcf0d6c4aa5f6a799965561386efcb85c.png\"},{\"id\":\"fb473ba6-afcd-43d8-9d43-a5fda032c7f5\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/afea438d7362489c3eb0bd527718e8d2f6a1a283d366313fce79f381dc3a0d86.png\",\"file_name\":\"afea438d7362489c3eb0bd527718e8d2f6a1a283d366313fce79f381dc3a0d86.png\"},{\"id\":\"be9fc741-9394-40a3-97f1-ac9cb9e2a0ae\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/4e308d79652e45b794edef049ef8c2c137f1df1d39e33c51e9b3d516611e9f2d.png\",\"file_name\":\"4e308d79652e45b794edef049ef8c2c137f1df1d39e33c51e9b3d516611e9f2d.png\"},{\"id\":\"f21745cb-dfb3-4359-8252-c5d03c8a026b\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/9ef12e738e51b20f0b02de4104a9b7646b742a37ce3f1b43a44c75b01462510f.png\",\"file_name\":\"9ef12e738e51b20f0b02de4104a9b7646b742a37ce3f1b43a44c75b01462510f.png\"}],\"muted\":false,\"volume_db\":0,\"user_prompt\":\"subject_definitions:\\n\\n<Subject 1> is Shen Zhi, the young female sword cultivator from <Picture 1>, preserving her refined youthful East Asian facial identity from <Picture 2>, long black half-up hairstyle with delicate pale ornaments, white-and-light-blue layered cultivation robes, slender proportions, and elegant flowing fabric.\\n\\nShe is a strict single-sword cultivator. She always uses exactly ONE slender straight sword shown in the reference and exactly ONE matching scabbard.\\n\\nThe sword identity is permanently locked:\\nthe same silver blade, the same blade length, the same hilt design, the same guard shape, and the same scabbard remain consistent throughout the entire video.\\n\\nShen Zhi uses only one sword during combat.\\nHer right hand is the only hand that holds the sword.\\n\\nBefore drawing:\\n- her right hand grips the single sword hilt.\\n- her left hand only stabilizes the single scabbard attached at her waist.\\n- the left hand contains no weapon.\\n\\nAfter drawing:\\n- the same single sword remains in her right hand.\\n- her left hand becomes completely empty.\\n- her left hand is only used for balance, robe movement, defensive gestures, or natural body motion.\\n\\nThe sword is one continuous physical object from the beginning of the draw until the final clash.\\n\\nNever create:\\n- a second sword,\\n- a mirrored sword,\\n- a duplicate blade,\\n- a hidden blade,\\n- an extra weapon,\\n- a sword appearing in the opposite hand.\\n\\nMaintain clear visual separation:\\nShen Zhi = one slender straight sword.\\nYan Qinghan = one long silver spear.\\n\\nHer combat identity is agile, determined, and precise, relying on evasive footwork, close-range entry, deflection, sliding contact along the opponent's weapon, and fast counter-thrusts.\\n\\n\\n<Subject 2> is Yan Qinghan, the senior female spear cultivator from <Picture 3>, preserving her cold refined East Asian facial identity from <Picture 4>, long black hair tied in a high traditional style, dark navy embroidered martial robes, black waist belt, slender athletic proportions, and stern commanding presence.\\n\\nShe always uses the same long silver spear shown in the reference.\\n\\nThe spear identity is permanently locked:\\nthe same long shaft, same silver spearhead, and same weapon proportions remain consistent throughout the entire video.\\n\\nThe spear must always remain visually different from Shen Zhi's sword:\\nlong shaft, large reach, pole weapon structure.\\n\\nHer combat identity is dominant and oppressive, using broad body-driven spear motions, long-range thrusting pressure, rotational recovery, sweeping control, and counter-lifting attacks.\\n\\n\\n<Subject 3> is the ancient mountain cultivation-sect gate environment from <Picture 5>, preserving the broad stone ceremonial courtyard, ascending stone stairways, large traditional timber halls, roofed gates, stone lanterns, mature trees, surrounding mountain terrain, drifting mist, and deep architectural perspective.\\n\\nThe target action takes place on the central open stone platform where both long weapons can move freely.\\n\\n\\n\\nsummary:\\n\\n[reference generation]\\n\\nThe target video is a ten-second vertical cinematic xianxia confrontation featuring <Subject 2> challenging <Subject 1> in <Subject 3>.\\n\\nThe sequence begins with hostile spoken dialogue and restrained character acting, then explodes into a seamless single-sword-versus-spear duel.\\n\\n<Subject 2> uses the spear's reach to initiate the attack, while <Subject 1> deflects, closes distance, and counters.\\n\\nShen Zhi remains a strict single-sword fighter throughout the entire sequence.\\n\\nHer complete weapon continuity:\\n- one sword only,\\n- one scabbard only,\\n- one continuous blade identity,\\n- one sword held by one hand.\\n\\nThe entire scene is presented as one uninterrupted ACT-style cinematic long take with strong backlighting, shallow depth of field, realistic weapon contact, brief impact slowdowns, environmental dust and leaves, and no subtitles or music.\\n\\n\\n\\nretention_analysis:\\n\\n<Subject 1> (appears throughout [Shot 1]):\\n\\nfully_preserved -\\n\\nShen Zhi's facial identity, black hairstyle, pale hair ornaments, white-and-light-blue layered robes, body proportions, single straight sword, single scabbard, and elegant youthful cultivation appearance remain consistent throughout dialogue and combat.\\n\\nHer determined expressions, evasive movement, close-range entry, sword deflections, and counter-thrusts are target-video actions rather than alterations to her referenced identity.\\n\\nWeapon continuity is strictly preserved:\\n\\n- Shen Zhi owns exactly one sword.\\n- The sword shown during combat is the same sword drawn at the beginning.\\n- The sword remains in her right hand.\\n- Her left hand remains empty after the draw.\\n- No additional sword appears.\\n- No weapon duplication occurs during motion blur, fast movement, or camera rotation.\\n\\n\\n<Subject 2> (appears throughout [Shot 1]):\\n\\nfully_preserved -\\n\\nYan Qinghan's facial identity, long black hairstyle, dark navy embroidered combat robes, black waist belt, silver long spear, proportions, and cold authoritative presence remain stable.\\n\\nHer contemptuous opening expression and forceful spear techniques extend the reference character without changing her defining appearance.\\n\\nHer weapon remains a single long spear throughout the sequence.\\n\\n\\n<Subject 3> (appears throughout [Shot 1]):\\n\\nfully_preserved -\\n\\nThe mountain sect's central stone courtyard, stairs, traditional halls, stone lanterns, trees, mountain mist, and architectural depth remain visually recognizable.\\n\\nAtmospheric sunlight, drifting leaves, dust, and combat-induced air movement are added without changing the core spatial structure.\\n\\ndetailed_description:\\n\\nThe target video uses a premium live-action female-oriented xianxia-drama aesthetic with photorealistic cinematic texture.\\n\\nIt has the visual character of Sony FX3 photography with an 85mm f/1.4 long lens, very shallow depth of field, a 1/2 black diffusion filter, gentle halation around bright edges, soft optical bloom, realistic skin texture, translucent fabric detail, and restrained high-end matte tonality.\\n\\nStrong hard side-backlight creates wide golden rims around hair, shoulders, embroidered cloth, sword edges, and the polished spear.\\n\\nSoft frontal bounce keeps both faces luminous and produces clear catchlights.\\n\\nThin mountain mist turns the intense backlight into visible volumetric rays.\\n\\n[Shot 1]\\n\\nA single seamless ten-second long take begins at low waist height on the central stone platform of <Subject 3>.\\n\\nThe camera slowly pushes between the two women rather than establishing a distant wide shot.\\n\\n<Subject 2> stands slightly higher on the stone paving, her silver spear planted loosely beside her, dark embroidered sleeves shifting in the mountain wind.\\n\\nThe camera rises into a medium close-up as she looks down at <Subject 1> with a faint contemptuous smile and narrowed eyes.\\n\\nIn a cold, dismissive tone, <Subject 2> says:\\n\\n<d>[Chinese] 沈栀，就凭你，今天怕是要交代在这了～</d>\\n\\n\\nWithout cutting, the camera arcs across the narrow space between them and settles into a close medium view of <Subject 1>.\\n\\nWind lifts loose strands of her black hair and the translucent outer layer of her pale-blue robe.\\n\\nHer expression changes from calm restraint to focused determination.\\n\\nHer eyes become sharp and controlled.\\n\\nThe camera clearly shows Shen Zhi's waist area:\\n\\none single sword,\\none single scabbard,\\nno other weapon.\\n\\n\\nShen Zhi begins the sword draw.\\n\\nHer right hand firmly grips the hilt of the only sword attached to her waist.\\n\\nHer left hand grips only the body of the same single scabbard to stabilize it.\\n\\nThe left hand contains no blade and no weapon.\\n\\n\\nThe sword draw is one continuous realistic motion:\\n\\nthe same single silver blade slowly slides out from the same single scabbard.\\n\\nThe camera clearly maintains:\\n\\nright hand = sword handle,\\nleft hand = empty scabbard.\\n\\nThe sword is never duplicated during the draw.\\n\\nNo second blade appears.\\nNo sword appears in the left hand.\\nNo mirrored weapon shape appears during fast movement.\\n\\n\\nThe same sword becomes fully unsheathed.\\n\\nThe empty scabbard remains attached at Shen Zhi's waist.\\n\\nHer left hand releases naturally and becomes empty.\\n\\nFrom this moment onward, Shen Zhi fights only with this one sword held in her right hand.\\n\\n\\nLooking directly toward <Subject 2>, <Subject 1> answers with controlled anger and firm conviction:\\n\\n<d>[Chinese] 晏清寒，你忤逆师门，今天我要替天行道！！</d>\\n\\n\\nAs the last syllable lands, the camera immediately accelerates into a third-person ACT-style tracking position behind and slightly beside <Subject 2>.\\n\\nShe drives from her rear leg and launches a direct long-range spear thrust toward <Subject 1>.\\n\\nThe lens follows the spear's forward momentum while keeping both faces and the weapon relationship readable.\\n\\n\\n<Subject 1> pivots diagonally away from the attack line.\\n\\nShe uses her one single sword to meet the spear shaft.\\n\\nThe sword does not block with brute force.\\n\\nInstead, the blade slides along the spear shaft and redirects the attack.\\n\\nThe same single sword remains visible in her right hand.\\n\\nHer left hand remains empty and assists only through body balance and robe movement.\\n\\n\\nMetal contact produces a sharp spark burst, a brief micro-slowdown, and one short controlled camera jolt.\\n\\n\\nThe camera swings behind <Subject 1>.\\n\\nShe immediately follows the deflected spear inward, using close-range footwork.\\n\\nHer single sword slides along Yan Qinghan's spear shaft as she enters the distance.\\n\\nShe turns through the opening and sends a fast precise counter-thrust toward <Subject 2>.\\n\\n\\nYan Qinghan retracts the spear with a strong waist rotation.\\n\\nShe rolls the long spear shaft into a defensive circular path and intercepts Shen Zhi's sword.\\n\\nThe impact creates a second metallic clash.\\n\\nSparks scatter laterally while their sleeves and hair whip outward from the force.\\n\\n\\nFor the final exchange, the camera drops to a low three-quarter angle while remaining in the same continuous move.\\n\\nShen Zhi advances with her single sword held in her right hand.\\n\\nYan Qinghan responds with an upward reverse spear lift.\\n\\n\\nThe final weapon interaction is a clear sword-versus-spear lock:\\n\\nShen Zhi's single sword presses diagonally against Yan Qinghan's spear shaft.\\n\\nYan Qinghan's weapon remains clearly a long spear with a visible shaft.\\n\\nThe composition clearly shows:\\n\\none sword,\\none spear.\\n\\nNever two swords.\\nNever crossed sword shapes.\\nNever duplicated blades.\\n\\n\\nThe impact sends dust upward from the stone paving.\\n\\nNearby dry leaves spiral around their legs.\\n\\nThe intense backlight catches the suspended particles.\\n\\nThe collision briefly slows time before both women recoil half a step.\\n\\n\\nThe camera makes a restrained partial orbit and ends in a tense medium framing:\\n\\nShen Zhi stands holding her single sword in her right hand.\\n\\nHer empty left hand remains visible.\\n\\nYan Qinghan holds her single long spear.\\n\\nTheir weapons remain locked in a final sword-versus-spear confrontation.\\n\\nNeither weapon lands a final blow.\\n\\n\\n\\nweapon_identity_lock:\\n\\nShen Zhi weapon rules:\\n\\n- Exactly one sword exists in the entire video.\\n- The sword shown during the draw is the same sword used during combat.\\n- The sword is always held by Shen Zhi's right hand.\\n- The left hand never holds a sword.\\n- The left hand never creates a weapon.\\n- The scabbard remains a separate empty object after the draw.\\n- No weapon duplication during camera movement.\\n- No duplicate sword caused by motion blur.\\n- No extra blade reflection that resembles another sword.\\n- No twin swords.\\n- No dual wielding.\\n\\n\\nYan Qinghan weapon rules:\\n\\n- Exactly one spear exists in the entire video.\\n- The spear remains a long pole weapon.\\n- The spear shaft must remain visually obvious.\\n- The spearhead must never resemble a second sword.\\n\\n\\nWeapon contrast:\\n\\nShen Zhi:\\nsingle slender straight sword,\\nshorter blade,\\nheld in right hand.\\n\\nYan Qinghan:\\nsingle long silver spear,\\nlong shaft,\\ntwo-handed spear techniques.\\n\\nThe final image must always communicate:\\n\\none sword versus one spear.\\n\\noverall_soundscape:\\nNo music.\\n\\nContinuous high-mountain wind, faint tree movement, distant open-air sect ambience, soft fabric flutter, hair ornaments moving lightly, controlled breathing, one continuous sword-unsheathing friction sound, spear shaft movement, rapid weapon whooshes, sharp metallic deflections, one heavier final sword-and-spear collision with resonant ringing, brief spark crackle, foot friction on stone, dust movement, and leaves stirred by the final shockwave.\\n\\nDialogue remains clean and foregrounded without excessive reverberation.\\n\\nnon_diegetic_music:\\nN/A\",\"system_prompt\":\"\",\"user_prompt_variant\":\"a\",\"user_prompt_b\":\"\",\"continuity_mode\":\"shot\",\"ref_image_size\":\"match\"}},{\"id\":\"4f9bdcf2-96a3-4248-b706-fe78adcb5771\",\"start_frame\":240,\"end_frame\":480,\"color\":\"var(--multitrack-task-bg)\",\"content\":{\"media_type\":\"none\",\"task_mode\":\"ref\",\"images\":[{\"id\":\"350427e2-738d-461c-b620-19b935005a08\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/57e083c42e3196aba443806a5936a85f33048c20df281f46ffcdadce6e533d8f.png\",\"file_name\":\"57e083c42e3196aba443806a5936a85f33048c20df281f46ffcdadce6e533d8f.png\"},{\"id\":\"0e855ddc-68b5-4672-aac3-9f57e83e5e54\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/20807e0fbbee034341c359721ffa22efcf0d6c4aa5f6a799965561386efcb85c.png\",\"file_name\":\"20807e0fbbee034341c359721ffa22efcf0d6c4aa5f6a799965561386efcb85c.png\"},{\"id\":\"fb473ba6-afcd-43d8-9d43-a5fda032c7f5\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/afea438d7362489c3eb0bd527718e8d2f6a1a283d366313fce79f381dc3a0d86.png\",\"file_name\":\"afea438d7362489c3eb0bd527718e8d2f6a1a283d366313fce79f381dc3a0d86.png\"},{\"id\":\"3edba04d-cbe5-4dc1-b1fd-a2c4d7dbf2d3\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/4e308d79652e45b794edef049ef8c2c137f1df1d39e33c51e9b3d516611e9f2d.png\",\"file_name\":\"4e308d79652e45b794edef049ef8c2c137f1df1d39e33c51e9b3d516611e9f2d.png\"},{\"id\":\"f21745cb-dfb3-4359-8252-c5d03c8a026b\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/9ef12e738e51b20f0b02de4104a9b7646b742a37ce3f1b43a44c75b01462510f.png\",\"file_name\":\"9ef12e738e51b20f0b02de4104a9b7646b742a37ce3f1b43a44c75b01462510f.png\"},{\"id\":\"fa150450-ef96-41f6-9dc8-99a4dd5e6d1b\",\"source_type\":\"url\",\"url\":\"https://rh-images-switch.xiaoyaoyou.com/input/dd45570e7f9787dcfdbba2c9deb6d3e094c70643b834feb1387a101c811280ce.png\",\"file_name\":\"dd45570e7f9787dcfdbba2c9deb6d3e094c70643b834feb1387a101c811280ce.png\"}],\"muted\":false,\"volume_db\":0,\"user_prompt\":\"subject_definitions:\\n<Subject 1> is Shen Zhi, the young female sword cultivator from <Picture 1>, preserving her refined youthful East Asian facial identity from <Picture 2>, long black half-up hairstyle with delicate pale ornaments, white inner robe, translucent pale-blue layered outer robes, light-blue waist sash, slender proportions, and elegant flowing fabric. She always uses the same slender straight sword shown in the reference. Her combat style is agile, precise, and high-risk, relying on evasive footwork, aerial repositioning, sudden close-range entries, descending cuts, recovery under pressure, and decisive counterattacks inside the spear's effective range.\\n\\n<Subject 2> is Yan Qinghan, the senior female spear cultivator from <Picture 3>, preserving her cold refined East Asian facial identity from <Picture 4>, long black hair tied in a traditional high style, dark navy near-black embroidered martial robes, silver-grey decorative patterns, black waist belt, slender athletic proportions, and severe commanding presence. She always uses the same long silver spear shown in the reference. Her combat style is forceful and oppressive, using the spear's full length, leverage, rotational momentum, butt-end strikes, low sweeping attacks, shaft control, weapon trapping, body-driven redirection, and heavy descending attacks.\\n\\n<Subject 3> is the ancient mountain cultivation-sect gate environment from <Picture 5>, preserving the broad central stone courtyard, ceremonial stone platform, ascending stairways, large traditional timber halls, roofed gate structures, stone lanterns, mature trees, surrounding mountains, drifting mist, and deep architectural perspective. The continuation fight remains on the central platform and its adjacent stone-step boundary without changing to another location.\\n\\n<Picture 6>is the six-panel storyboard reference for [Shot 1], defining the sequential action progression, character placement, camera direction, weapon interaction, and visual escalation for the ten-second seamless continuation. Its six panels correspond in reading order from upper-left to upper-right, middle-left to middle-right, and lower-left to lower-right to: spear-butt impact and forced retreat, low spear sweep with aerial evasion, descending sword strike against the spear shaft, spear-shaft control and destabilization, missed overhead spear strike against the stone platform, and the final close-range mutual-kill standoff.\\n\\nsummary:\\n[reference generation] The target video is a ten-second seamless continuation of the previous sword-versus-spear duel between <Subject 1> and <Subject 2> in <Subject 3>. Guided by the sequential action planning of <Picture 4>, the fight immediately escalates into a lethal second phase without repeating the earlier direct spear thrust, sword deflection, sliding entry, circular spear defense, or tip-to-tip clash. <Subject 2> uses the spear's leverage and rotational power to drive <Subject 1> toward the stone steps, while <Subject 1> survives through aerial evasion, a descending counterattack, and a dangerous final entry inside the spear's control radius. The entire scene is presented as one uninterrupted ACT-style cinematic long take with restrained effects, realistic weapon weight, readable spatial continuity, strong physical impact, and no dialogue, subtitles, or music.\\n\\nretention_analysis:\\n<Subject 1> (appears throughout [Shot 1]): fully_preserved - Shen Zhi's facial identity, black hairstyle, pale ornaments, white-and-light-blue layered robes, slender proportions, straight sword, and youthful cultivation appearance remain consistent. Her aerial evasion, descending sword attack, temporary shoulder injury, destabilized posture, and final desperate close-range counterattack are new target-video actions and do not alter her referenced identity.\\n\\n<Subject 2> (appears throughout [Shot 1]): fully_preserved - Yan Qinghan's facial identity, long black hairstyle, dark navy embroidered combat robes, black belt, long silver spear, proportions, and cold authoritative presence remain stable. Her butt-end strike, low sweep, shaft interception, weapon control, rotational throw, and descending finishing strike extend her combat behavior while preserving her referenced design.\\n\\n<Subject 3> (appears throughout [Shot 1]): fully_preserved - the central sect courtyard, stone platform, adjacent stairs, traditional halls, stone lanterns, trees, mountain mist, and architectural direction remain recognizable and spatially continuous. Dust, loose leaves, a cracked stone slab, and small fragments caused by weapon impacts are temporary physical reactions rather than changes to the environment's identity.\\n\\n<Picture 4> ([Shot 1] storyboard and action-planning reference): fully_preserved - the six-panel sequence establishes the intended progression from spear-butt impact through aerial evasion, descending sword pressure, spear-shaft control, a missed overhead finishing strike, and the final close-range mutual-kill composition. The target video converts these storyboard states into one continuous camera trajectory instead of treating them as six separate cuts.\\n\\ndetailed_description:\\nThe target video uses a premium live-action female-oriented xianxia action-drama aesthetic with photorealistic cinematic texture. The visual character resembles Sony FX3 photography through an 85mm f/1.4 lens with shallow depth of field, restrained 1/2 black-diffusion softness, gentle halation around metallic highlights and hair edges, realistic skin texture, translucent robe layers, and refined matte fabric detail. Strong side-backlight creates broad warm-gold rim light on hair, shoulders, sword edges, spear surfaces, and airborne dust, while soft frontal bounce keeps both faces readable. Thin mountain mist converts the backlight into visible volumetric rays without obscuring the action.\\n\\n[Shot 1] The ten-second sequence begins directly from the unresolved end state of the previous fight in <Subject 3>, with dust and loose leaves still suspended around <Subject 1> and <Subject 2>. The camera remains in motion and never cuts. Following the first phase of <Picture 4>, <Subject 2> instantly changes her spear grip and pivots through her hips, striking horizontally with the butt end of the long silver spear instead of attacking with the spearhead. <Subject 1> raises her straight sword vertically across her body and absorbs the blow against the blade. The impact creates a compact burst of sparks and a sharp metallic report. The camera travels backward with <Subject 1> as the force drives her several steps toward the platform's stone-step boundary, her pale-blue outer robes streaming behind her and her shoes scraping a visible dusty line across the paving.\\n\\nWithout pausing, <Subject 2> uses the retained rotational momentum to sink her stance and sweep the spear extremely low across the stone surface. The camera drops close to ground level and tracks laterally along the spear's direction. The spearhead passes close to the lens, lifting a thin ribbon of dust and leaves. With no room left to retreat, <Subject 1> plants one foot at the stone-step edge and jumps cleanly over the sweeping shaft. The camera rises with her, preserving the third-person ACT relationship and clearly revealing <Subject 2> below continuing the low rotational sweep.\\n\\nStill airborne, <Subject 1> turns her hips and shoulders and converts her downward momentum into a two-handed descending diagonal sword cut from <Subject 2>'s upper side. <Subject 2> cannot fully reset the spear and instead rotates toward the attack, raising the silver shaft across her upper body. The sword crashes into the spear shaft with a dense metallic impact. Fine sparks spread outward, and the camera gives one brief controlled impact jolt. For the first time in this continuation, <Subject 2> is forced back half a step, her rear foot pressing onto a slightly loose stone slab whose edge cracks under the load.\\n\\nAs <Subject 1> begins to recover the sword from the descending cut, <Subject 2> changes the force direction rather than simply knocking the blade away. She keeps the spear shaft tightly engaged against the sword, crosses the two weapons, rotates her torso, and uses the long shaft as leverage to drag <Subject 1>'s sword arm outward. The camera continues around to <Subject 1>'s rear three-quarter side so the destabilization remains visually readable. Her shoulder is pulled off-axis, her torso twists, and one foot stumbles forward as the spear forces her balance open. <Subject 2> follows the motion and the spearhead passes extremely close to <Subject 1>'s upper arm and shoulder, slicing only the outer pale-blue fabric and leaving a small, restrained blood mark rather than a graphic wound.\\n\\nThe camera drops with <Subject 1> as she catches herself near the stone platform edge in a very low stance. <Subject 2> immediately advances and raises the long spear high with both hands for a heavy descending finishing strike. From near <Subject 1>'s level, the camera looks upward as <Subject 2>'s dark robes and silver spear dominate the frame against intense backlight. At the last instant, <Subject 1> does not retreat. She lowers her body and drives forward into the most dangerous interior line of the descending attack. The spear passes just above her flowing rear robes and crashes into the stone behind her, breaking only the local surface and throwing outward a restrained burst of dust and small stone fragments.\\n\\nUsing the instant created by the missed heavy strike, <Subject 1> continues forward, pivots tightly around her planted foot, and brings the sword around from beside her body toward <Subject 2>'s neck line. <Subject 2> reacts immediately, rotating her wrists and dragging the grounded spear back from low position into a lateral counterline. The camera flows around them into a close side-on ACT composition that matches the final phase of <Picture 4>. <Subject 1>'s sword stops only a very short distance from <Subject 2>'s neck, while <Subject 2>'s spear blade simultaneously stops just short of <Subject 1>'s waist. Their weapons do not collide. Both women remain fully committed to attacks that could continue another few centimeters and seriously wound the other.\\n\\nThe camera slows but does not freeze. Shen Zhi's breathing is tight, the small shoulder mark darkens slightly through the pale fabric, and loose strands of her black hair whip across her face. Yan Qinghan's expression has lost its earlier contempt and becomes completely focused; one loose strand of her hair, cut by the sword's passage, drifts through the warm backlight. Dust, leaves, hair, and robe fabric move outward along the opposing attack directions while the camera continues a subtle forward creep between them. The long take ends before either weapon completes the final strike, leaving the fight unresolved and immediately continuable.\\n\\noverall_soundscape:\\nNo music. Continuous high-mountain wind, faint movement of distant trees, open-air stone-courtyard ambience, cloth flutter, quick controlled breathing, shoe friction on stone, spear-shaft rotation, heavy weapon whooshes, one blunt spear-butt impact against the sword, one low sweeping air rush, one sharp descending sword-versus-shaft collision, metallic scraping during the weapon lock, a brief fabric tear near Shen Zhi's shoulder, the heavy spear strike against stone, small fragments scattering across the paving, and the sustained low metallic resonance of weapons under tension near the final frame. All physical sounds remain clean, directional, and tightly synchronized to visible action.\\n\\nnon_diegetic_music:\\nN/A\",\"system_prompt\":\"\",\"user_prompt_variant\":\"a\",\"user_prompt_b\":\"\",\"continuity_mode\":\"context\",\"ref_image_size\":\"match\"}}]},{\"id\":\"d15f065c-25c4-4922-8570-01dde0d3caf0\",\"name\":\"Video 0\",\"type\":\"video\",\"color\":\"var(--primary)\",\"muted\":false,\"solo\":false,\"volume_db\":0,\"locked\":false,\"segments\":[]}],\"total_length\":480,\"frame_rate\":24}"
+      }
+    },
+    {
+      "id": 17,
+      "type": "easy multitrackProjectVideoCombine",
+      "pos": [
+        4210.661437143679,
+        2435.2267786526254
+      ],
+      "size": [
+        855.0587774977639,
+        709.3640005770053
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "project_name",
+          "type": "STRING",
+          "link": 19
+        }
+      ],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [
+            39
+          ]
+        },
+        {
+          "name": "FILENAME_PREFIX",
+          "type": "STRING",
+          "links": [
+            40
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-media",
+        "ver": "5739638c646a66a93d60c51714593b2b96a2a3b6",
+        "Node name for S&R": "easy multitrackProjectVideoCombine"
+      },
+      "widgets_values": [
+        "{\"project_name\":\"default\",\"width\":0,\"height\":0,\"frame_rate\":24,\"clips\":[],\"auto_combine\":false}"
+      ],
+      "widgets_values_named": {
+        "project_data": "{\"project_name\":\"default\",\"width\":0,\"height\":0,\"frame_rate\":24,\"clips\":[],\"auto_combine\":false}"
+      }
+    }
+  ],
+  "links": [
+    [
+      18,
+      16,
+      0,
+      15,
+      1,
+      "FAST_MODEL_LOADER"
+    ],
+    [
+      19,
+      15,
+      0,
+      17,
+      0,
+      "STRING"
+    ],
+    [
+      20,
+      1,
+      0,
+      16,
+      3,
+      "VAE"
+    ],
+    [
+      21,
+      2,
+      0,
+      16,
+      2,
+      "VAE"
+    ],
+    [
+      22,
+      10,
+      0,
+      16,
+      1,
+      "CLIP"
+    ],
+    [
+      24,
+      19,
+      0,
+      18,
+      0,
+      "MODEL"
+    ],
+    [
+      25,
+      10,
+      0,
+      18,
+      1,
+      "CLIP"
+    ],
+    [
+      26,
+      2,
+      0,
+      18,
+      2,
+      "VAE"
+    ],
+    [
+      27,
+      1,
+      0,
+      18,
+      3,
+      "VAE"
+    ],
+    [
+      29,
+      20,
+      0,
+      15,
+      3,
+      "SAMPLER"
+    ],
+    [
+      32,
+      6,
+      0,
+      22,
+      0,
+      "MODEL"
+    ],
+    [
+      33,
+      22,
+      0,
+      15,
+      5,
+      "SIGMAS"
+    ],
+    [
+      36,
+      6,
+      0,
+      21,
+      0,
+      "MODEL"
+    ],
+    [
+      38,
+      14,
+      0,
+      15,
+      0,
+      "TRACKS_INFO"
+    ],
+    [
+      39,
+      17,
+      0,
+      25,
+      0,
+      "VIDEO"
+    ],
+    [
+      40,
+      17,
+      1,
+      25,
+      2,
+      "STRING"
+    ],
+    [
+      48,
+      13,
+      0,
+      6,
+      0,
+      "MODEL"
+    ],
+    [
+      50,
+      21,
+      0,
+      16,
+      0,
+      "MODEL"
+    ],
+    [
+      51,
+      11,
+      0,
+      13,
+      0,
+      "MODEL"
+    ],
+    [
+      52,
+      19,
+      0,
+      23,
+      0,
+      "MODEL"
+    ],
+    [
+      53,
+      23,
+      0,
+      15,
+      6,
+      "SIGMAS"
+    ],
+    [
+      54,
+      24,
+      0,
+      15,
+      4,
+      "SAMPLER"
+    ],
+    [
+      55,
+      18,
+      0,
+      15,
+      2,
+      "FAST_MODEL_LOADER"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "title": "Load Diffusion Model 、Text encoder 、Vae",
+      "bounding": [
+        3070.5696487911023,
+        1669.6591979919785,
+        713.8042781259487,
+        622.444874583812
+      ],
+      "color": "#3f789e",
+      "flags": {}
+    },
+    {
+      "id": 2,
+      "title": "Replace 2nd Pass Model For Dual Sampling (Optional)",
+      "bounding": [
+        3826.5530903798694,
+        1633.7050221009245,
+        602.0039200254437,
+        351.24043034418946
+      ],
+      "color": "#8A8",
+      "flags": {}
+    },
+    {
+      "id": 3,
+      "title": "Custom Sampler and Scheduler (Optional)",
+      "bounding": [
+        3828.7549810379837,
+        2024.5592675481753,
+        602.1157451519593,
+        280.5751607050763
+      ],
+      "color": "#8A8",
+      "flags": {}
+    },
+    {
+      "id": 4,
+      "title": "Easy H3 Project with MultiTrack Editor (All-in-one)",
+      "bounding": [
+        3072.1976780518853,
+        2346.3870894933266,
+        2013.0943454052367,
+        935.3387266362752
+      ],
+      "color": "#A88",
+      "flags": {}
+    },
+    {
+      "id": 5,
+      "title": "Preview",
+      "bounding": [
+        4463.282110249992,
+        1629.0354679916343,
+        538.4097479435004,
+        690.3205036223001
+      ],
+      "color": "#a1309b",
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.6153848098499901,
+      "offset": [
+        -2516.1816149038964,
+        -1481.1837485989681
+      ]
+    },
+    "frontendVersion": "1.49.6",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}
