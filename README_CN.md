@@ -95,51 +95,6 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 > 预览源视频和输出视频的输入，支持交互式对比滑块进行左右对比。
 
-### 🎞️ API工作流阀门 APIWorkflowGate
-
-![APIWorkflowGate](https://github.com/user-attachments/assets/60a2f32b-d77b-4bf1-a1e3-99803de240c1)
-
-> **提示：** 在`APP模式`下，可以通过 `APIWorkflowGate` 节点判断只有为API调用的工作流才会透传前面的输入项，反之常规执行工作流队列会直接从后续节点开始执行。
-
----
-
-### 🎞️ 时间线编辑器 Timeline Editor
-
-![timelineEditor](https://github.com/user-attachments/assets/d7c9e894-6e7e-488c-90fb-d3aa8310419d)
-
-<details>
-<summary>动态参数注入</summary>
-
-> 如果你想通过`agents`或`app`方式动态地调用时间线编辑器，目前提供了一种方案，你可以将媒体素材输入到时间线编辑器的对应输入端口（`prompt_override`、`image`、`audio`、`video`）中。当`prompt_override`注入时，它会覆盖时间线编辑器中的片段数据。但相比于可视化界面直接编辑片段内容，动态参数注入的方式有局限性，例如无法很方便的控制音频时长和出现的范围，`prompt_override`提供了一种提示词格式化模板的规范写法，类似于 `promptRelay + seedance2.0` 动态提示词结合，具体可参考下方的示例。
-
-![dynamicInput](https://github.com/user-attachments/assets/eef6798e-a68d-4724-8e72-69b1a13825dd)
-
-**可选参数**：
-- `prompt_override`：由于ComfyUI存在force_input兼容性问题，当force_input存在时自定义部件将无法被获取，所以目前该参数的类型被设置为了`AnyType`，建议使用常规的字符串类型节点进行连入即可。
-- `image`：输入的图片资源列表，建议使用新增加的`easy makeImageList`节点来创建图片列表。
-- `video`: 输入的视频资源列表，若片段只需要一段视频直接将视频连接到video输入口即可，如需要多段视频则建议使用新增加的`easy makeVideoList`节点来创建视频列表。
-- `audio`：输入的音频资源列表，若片段只需要一段音频直接将音频连接到audio输入口即可，如需要多段音频则建议使用新增加的`easy makeAudioList`节点来创建音频列表。
-
-
-**提示词示例**：
-
-```
-@图片1 @音频1 镜头晃动，老者正望着光亮处神色慌张地喊话： 别学那玩意，别连线啊。 [0-120] | @图片2 @音频2 镜头缓慢推进，男人正在操作电脑，说道：有意思，这ComfyUI能火，我指定得学它 [121-241]
-```
-
-- [0-120] 和 [120-240] 表示时间轴上片段的起止帧范围，单位为帧（frame），也支持 [0-5s] [5-10s] 这种写法，单位为秒。如果不指定时间范围，默认会均分原先时间轴编辑器上设置的总时长。
-- 片段之间使用 `|` 分隔，表示不同的时间段。每个片段可以包含`媒体占位符`、`文本提示词`和`起止帧范围`。
-- 图片注入：支持 `@image{n}`、`@img{n}`、`@图{n}`、`@图片{n}`、`@图像{n}` 作为占位符来注入图片资源, 其中`{n}`表示图片列表中的第n张图（从1开始计数）。例如，`@image1`将注入图片列表中的第一张图。
-- 视频注入：支持 `@video{n}`、`@视频{n}` 作为占位符来注入视频资源, 其中`{n}`表示视频列表中的第n段视频（从1开始计数）。例如，`@video1`将注入视频列表中的第一段视频。
-- 音频注入：支持 `@audio{n}`、`@音频{n}` 作为占位符来注入音频资源, 其中`{n}`表示音频列表中的第n段音频（从1开始计数）。例如，`@audio1`将注入音频列表中的第一段音频。
-
-![dynamicInput2](https://github.com/user-attachments/assets/6dd84d52-1fd3-4b27-a890-2a0e22cecda4)
-
-**使用时间线编辑器添加输入口的媒体**：
-> 如果你只想通过`image`或`audio`、`video`输入端口传递参数，不想使用`prompt_override`，你也可以在添加图片或添加音频的地方使用`slot`方式关联到对应输入端口的媒体，这样在执行工作流任务时，便会自动将输入的媒体资源关联到时间线编辑器中对应的片段上。
-（注意：时间编辑器上显示的预览是溯源到最初加载图片或加载音频的节点中对应资源的，如果你在加载与时间编辑器流程之间使用了裁剪或者截断等节点对原始媒体进行处理，后端同样会执行这一块的处理，只是前端的预览显示是初始加载的状态。）
-</details>
-
 
 ### 🎞️ 保存视频 SaveVideo
 
@@ -205,13 +160,33 @@ bun run build:release
       <td>将字幕轨道添加到视频轨道中</td>
     </tr>
     <tr>
-      <td rowspan="2">🎬 MiniMax H3</td>
+      <td rowspan="7">🎬 MiniMax H3</td>
       <td>easy minimaxH3ToVideo</td>
       <td>构建 MiniMax H3 文生视频、参考生视频或首尾帧生视频的条件与潜空间输入</td>
     </tr>
     <tr>
+      <td>easy MiniMaxH3ReferenceToVideoBridge</td>
+      <td>用于 H3 参考条件构建的桥接节点，无需 Autogrow 展开</td>
+    </tr>
+    <tr>
+      <td>easy MiniMaxH3MotionContextHard</td>
+      <td>应用 H3 上下文条件并硬链接视频/音频潜空间连续性</td>
+    </tr>
+    <tr>
+      <td>easy MiniMaxH3HiResContinuity</td>
+      <td>将前一个高分辨率视频尾部复制到当前 upscale 潜空间中</td>
+    </tr>
+    <tr>
       <td>easy removeH3MotionContextLatent</td>
       <td>在循环结束后删除 H3 Motion Context 潜空间文件</td>
+    </tr>
+    <tr>
+      <td>easy multitrackProject</td>
+      <td>构建并执行多轨 MiniMax H3 项目，支持可选的第一/第二遍采样</td>
+    </tr>
+    <tr>
+      <td>easy multitrackProjectVideoCombine</td>
+      <td>预览并合并 MultiTrack 项目中的激活视频</td>
     </tr>
     <tr>
       <td rowspan="5">🎞️ LTX Video</td>

@@ -93,32 +93,7 @@ After installing, open ComfyUI and find the bundled example workflows in the **T
 
 ![CompareVideos](https://github.com/user-attachments/assets/3bad558c-c5f4-411d-ba4c-b2edee9b9f11)
 
-### 🎞️ APIWorkflowGate
-
-![APIWorkflowGate](https://github.com/user-attachments/assets/60a2f32b-d77b-4bf1-a1e3-99803de240c1)
-
-> **Note:** In `APP Mode`, you can use the `APIWorkflowGate` node to determine that only workflows intended for API calls will pass through the preceding input items; otherwise, regular workflow queues will begin execution directly from the subsequent nodes.
-
 ---
-
-### 🎞️ Timeline Editor
-
-![timelineEditor](https://github.com/user-attachments/assets/d7c9e894-6e7e-488c-90fb-d3aa8310419d)
-
-<details>
-<summary>Dynamic Parameter Injection</summary>
-
-> If you want to dynamically invoke the timeline editor via `agents` or `app`, a method is available: input media assets into the corresponding input ports of the timeline editor (`prompt_override`, `image`, `audio`, `video`). When `prompt_override` is injected, it will override the segment data in the timeline editor. However, compared to directly editing segment content via the visual interface, the dynamic parameter injection method has limitations—for example, it is not convenient to control audio duration and ranges. `prompt_override` provides a prompt formatting template specification, similar to `promptRelay + seedance2.0` dynamic prompts. See the example below for details.
-
-![dynamicInput](https://github.com/user-attachments/assets/eef6798e-a68d-4724-8e72-69b1a13825dd)
-
-**Optional Parameters**:
-
-- `prompt_override`: Due to ComfyUI's force_input compatibility issues, when force_input exists, custom widgets cannot be accessed. Therefore, the parameter type is currently set to `AnyType`. It is recommended to connect using a regular string type node.
-- `image`: Input image resource list; it is recommended to use the newly added `easy makeImageList` node to create image lists.
-- `video`: Input video resource list; if a segment only needs one video, connect the video directly to the video input port. If multiple video segments are needed, it is recommended to use the newly added `easy makeVideoList` node to create video lists.
-- `audio`: Input audio resource list; if a segment only needs one audio, connect the audio directly to the audio input port. If multiple audio segments are needed, it is recommended to use the newly added `easy makeAudioList` node to create audio lists.
-
 
 **Prompt Example**:
 
@@ -200,13 +175,33 @@ bun run build:release
       <td>Add subtitle track to video track</td>
     </tr>
     <tr>
-      <td rowspan="2">🎬 MiniMax H3</td>
+      <td rowspan="7">🎬 MiniMax H3</td>
       <td>easy minimaxH3ToVideo</td>
       <td>Build MiniMax H3 text-to-video, reference-to-video, or first/last-frame conditioning and latent inputs</td>
     </tr>
     <tr>
+      <td>easy MiniMaxH3ReferenceToVideoBridge</td>
+      <td>Bridge node for H3 reference conditioning without Autogrow expansion</td>
+    </tr>
+    <tr>
+      <td>easy MiniMaxH3MotionContextHard</td>
+      <td>Apply H3 context conditioning with hard video/audio latent continuity</td>
+    </tr>
+    <tr>
+      <td>easy MiniMaxH3HiResContinuity</td>
+      <td>Copy previous high-resolution video tail into current upscaled latent</td>
+    </tr>
+    <tr>
       <td>easy removeH3MotionContextLatent</td>
       <td>Remove H3 Motion Context latent files after a loop finishes</td>
+    </tr>
+    <tr>
+      <td>easy multitrackProject</td>
+      <td>Build and execute multi-track MiniMax H3 project with optional first/second-pass sampling</td>
+    </tr>
+    <tr>
+      <td>easy multitrackProjectVideoCombine</td>
+      <td>Preview and combine active videos from a MultiTrack project</td>
     </tr>
     <tr>
       <td rowspan="5">🎞️ LTX Video</td>
