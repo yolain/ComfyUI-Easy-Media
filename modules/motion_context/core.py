@@ -14,32 +14,6 @@ AUDIO_HZ = 40.0
 VIDEO_RUN_GRID = (124, 107, 90, 73, 56, 39, 22, 5, 1)
 
 
-def _motion_context_symbols() -> tuple[str, str]:
-    from .patch_layout import MC_AUDIO_KEY, MC_KEY
-
-    return MC_KEY, MC_AUDIO_KEY
-
-
-def _ensure_layout_patch() -> None:
-    from .patch_layout import apply_patch, is_applied
-
-    if not is_applied() and not apply_patch():
-        raise RuntimeError(
-            "easy h3 motion context: the layout patch could not be applied; "
-            "see the preceding ComfyUI log for the compatibility failure."
-        )
-
-
-def _ensure_payload_patch() -> None:
-    from .patch_payload import apply_patch, is_applied
-
-    if not is_applied() and not apply_patch():
-        raise RuntimeError(
-            "easy h3 motion context: the audio payload patch could not be "
-            "applied; see the preceding ComfyUI log for details."
-        )
-
-
 def _pixel_frames(latent_steps: int) -> int:
     return sum(FRAME_PER_TOKEN[index % 5] for index in range(latent_steps))
 
@@ -57,10 +31,12 @@ def _streams_from_latent(latent: dict[str, Any]) -> list[torch.Tensor]:
     if not isinstance(latent, dict) or "samples" not in latent:
         raise ValueError("easy h3 motion context: expected an H3 AV latent")
     samples = latent["samples"]
-    if hasattr(samples, "unbind"):
-        parts = list(samples.unbind())
-    elif isinstance(samples, (tuple, list)):
+    if isinstance(samples, (tuple, list)):
         parts = list(samples)
+    elif isinstance(getattr(samples, "tensors", None), (tuple, list)):
+        parts = list(samples.tensors)
+    elif getattr(samples, "is_nested", False) and hasattr(samples, "unbind"):
+        parts = list(samples.unbind())
     else:
         raise ValueError(
             "easy h3 motion context: expected a nested video/audio latent, "
@@ -71,12 +47,8 @@ def _streams_from_latent(latent: dict[str, Any]) -> list[torch.Tensor]:
     return parts
 
 
-def _nested_tensor_like(value: Any, parts: tuple[torch.Tensor, ...]) -> Any:
-    """Rebuild an H3 nested value while keeping lightweight test containers."""
-    if isinstance(value, list):
-        return list(parts)
-    if isinstance(value, tuple):
-        return tuple(parts)
+def _official_nested_tensor(parts: tuple[torch.Tensor, ...]) -> Any:
+    """Rebuild H3 AV data with ComfyUI's supported NestedTensor wrapper."""
     try:
         import comfy.nested_tensor
     except ImportError as error:
@@ -95,10 +67,12 @@ def _noise_mask_streams(
         return None, None
     if isinstance(mask, torch.Tensor):
         return mask, None
-    if hasattr(mask, "unbind"):
-        parts = tuple(mask.unbind())
-    elif isinstance(mask, (tuple, list)):
+    if isinstance(mask, (tuple, list)):
         parts = tuple(mask)
+    elif isinstance(getattr(mask, "tensors", None), (tuple, list)):
+        parts = tuple(mask.tensors)
+    elif getattr(mask, "is_nested", False) and hasattr(mask, "unbind"):
+        parts = tuple(mask.unbind())
     else:
         raise ValueError(
             "easy h3 context: noise_mask must be a tensor or nested streams"
@@ -298,28 +272,27 @@ def _release_mask_inside_prefix(
     return locked_steps, ramp_values
 
 
-def _strip_motion_context_audio_reference(conditioning: Any) -> Any:
-    """Remove only the seam-audio reference replaced by Hard AV latent copy."""
-    _, audio_key = _motion_context_symbols()
-    output = []
-    for embedding, metadata in conditioning:
-        values = metadata.copy()
-        references = values.get("minimax_refs")
-        if references:
-            values["minimax_refs"] = [
-                reference
-                for reference in references
-                if reference.get(audio_key) is None
-            ]
-        output.append([embedding, values])
-    return output
+def _native_keyframe_stats(conditioning: Any) -> tuple[int, int]:
+    """Count 0.4-style video/audio keyframes for compatibility checks."""
+    max_video = 0
+    max_audio = 0
+    for _embedding, metadata in conditioning:
+        video = 0
+        audio = 0
+        for keyframe in metadata.get("minimax_keyframes") or []:
+            if keyframe.get("latent") is not None:
+                video += 1
+            if keyframe.get("audio_latent") is not None:
+                audio += 1
+        max_video = max(max_video, video)
+        max_audio = max(max_audio, audio)
+    return max_video, max_audio
 
 
 def _hard_av_latent(
     latent: dict[str, Any],
     context_latent: dict[str, Any],
     video_frames: int,
-    audio_frames: int,
     video_transition_steps: int,
     audio_transition_steps: int,
 ) -> dict[str, Any]:
@@ -333,8 +306,16 @@ def _hard_av_latent(
         target_video = target_video.unsqueeze(0)
     if target_audio.ndim == 3:
         target_audio = target_audio.unsqueeze(0)
-    if target_video.ndim != 5 or target_audio.ndim != 4:
+    if (
+        target_video.ndim != 5
+        or target_audio.ndim != 4
+        or int(target_audio.shape[2]) != 2
+    ):
         raise ValueError("easy h3 hard context: expected H3 video/audio latent streams")
+    if int(target_video.shape[0]) != int(target_audio.shape[0]):
+        raise ValueError(
+            "easy h3 hard context: target video/audio batch sizes differ"
+        )
 
     video_blocks, _, covered = _video_tail_from_latent(
         context_latent,
@@ -372,7 +353,7 @@ def _hard_av_latent(
 
     copied_audio, audio_steps, overhang = _audio_tail_from_latent(
         context_latent,
-        int(audio_frames),
+        int(video_frames),
     )
     if audio_steps < 1 or audio_steps >= int(target_audio.shape[-1]):
         raise ValueError(
@@ -403,11 +384,9 @@ def _hard_av_latent(
         existing_audio_mask,
         "audio",
     )
-
-    samples = latent["samples"]
     output = latent.copy()
-    output["samples"] = _nested_tensor_like(samples, (output_video, output_audio))
-    output["noise_mask"] = _nested_tensor_like(samples, (video_mask, audio_mask))
+    output["samples"] = _official_nested_tensor((output_video, output_audio))
+    output["noise_mask"] = _official_nested_tensor((video_mask, audio_mask))
     LOGGER.info(
         "Hard AV context: video=%d steps/%d frames (lock=%d ramp=%s), "
         "audio=%d steps/%d frames (overhang=%.3f lock=%d ramp=%s)",
@@ -416,7 +395,7 @@ def _hard_av_latent(
         video_locked,
         video_ramp or "off",
         audio_steps,
-        audio_frames,
+        video_frames,
         overhang,
         audio_locked,
         audio_ramp or "off",
@@ -430,7 +409,6 @@ def apply_hard_motion_context(
     latent: dict[str, Any],
     context_latent: dict[str, Any],
     context_length: int | str = "22",
-    audio_context_length: int = 22,
     video_transition_steps: int = 4,
     audio_transition_steps: int = 4,
 ) -> tuple[Any, int, dict[str, Any]]:
@@ -440,19 +418,49 @@ def apply_hard_motion_context(
         vae=vae,
         latent=latent,
         context_length=context_length,
-        audio_context_length=audio_context_length,
+        audio_context_length=0,
         context_latent=context_latent,
     )
-    audio_frames = int(audio_context_length) or int(trim_frames)
+    return build_hard_motion_context(
+        conditioning=output,
+        trim_frames=trim_frames,
+        latent=latent,
+        context_latent=context_latent,
+        video_transition_steps=video_transition_steps,
+        audio_transition_steps=audio_transition_steps,
+    )
+
+
+def build_hard_motion_context(
+    conditioning: Any,
+    trim_frames: int,
+    latent: dict[str, Any],
+    context_latent: dict[str, Any],
+    video_transition_steps: int = 4,
+    audio_transition_steps: int = 4,
+) -> tuple[Any, int, dict[str, Any]]:
+    """Validate native conditioning and add hard continuity to its target."""
+    video_keyframes, audio_keyframes = _native_keyframe_stats(conditioning)
+    if video_keyframes < 1 or audio_keyframes < 1:
+        raise RuntimeError(
+            "easy h3 hard context requires Motion Context 0.4.0+ native "
+            "video/audio keyframes and ComfyUI 0.34.0+; got "
+            f"video_keyframes={video_keyframes}, audio_keyframes={audio_keyframes}"
+        )
     hard_latent = _hard_av_latent(
         latent,
         context_latent,
         int(trim_frames),
-        audio_frames,
         video_transition_steps,
         audio_transition_steps,
     )
-    return _strip_motion_context_audio_reference(output), trim_frames, hard_latent
+    LOGGER.info(
+        "Hard AV kept native conditioning (%d video keyframes, %d audio "
+        "keyframes); minimax_refs untouched",
+        video_keyframes,
+        audio_keyframes,
+    )
+    return conditioning, trim_frames, hard_latent
 
 
 def apply_hires_continuity(
@@ -509,24 +517,11 @@ def apply_hires_continuity(
     )
     video_mask = temporal_mask.permute(0, 1, 4, 2, 3).contiguous()
     audio_mask = torch.zeros_like(current_audio[:, :1], dtype=torch.float32)
-    existing_video_mask, existing_audio_mask = _noise_mask_streams(
-        current_hires_latent
-    )
-    video_mask = _merge_noise_mask(
-        video_mask,
-        existing_video_mask,
-        "video",
-    )
-    audio_mask = _merge_noise_mask(
-        audio_mask,
-        existing_audio_mask,
-        "audio",
-    )
-
-    samples = current_hires_latent["samples"]
     output = current_hires_latent.copy()
-    output["samples"] = _nested_tensor_like(samples, (output_video, current_audio))
-    output["noise_mask"] = _nested_tensor_like(samples, (video_mask, audio_mask))
+    if "noise_mask" in output:
+        LOGGER.info("HiRes continuity is replacing the incoming noise_mask")
+    output["samples"] = _official_nested_tensor((output_video, current_audio))
+    output["noise_mask"] = _official_nested_tensor((video_mask, audio_mask))
     LOGGER.info(
         "HiRes continuity: video=%d steps/%d frames (lock=%d ramp=%s); "
         "second-pass audio is frozen",
@@ -550,8 +545,6 @@ def apply_motion_context(
     context_audio: dict[str, Any] | None = None,
 ) -> tuple[Any, int]:
     """Attach previous-clip video/audio tails to MiniMax H3 conditioning."""
-    _ensure_layout_patch()
-    mc_key, mc_audio_key = _motion_context_symbols()
     target_video = _video_from_latent(latent)
     latent_steps = int(target_video.shape[2])
     width = int(target_video.shape[4]) * 16
@@ -630,18 +623,16 @@ def apply_motion_context(
 
     keyframes = [
         {
-            "resolved_frame_index": 0,
-            mc_key: position,
+            "resolved_frame_index": position,
             "latent": block,
         }
         for position, block in zip(offsets, blocks)
     ]
 
-    audio_reference: dict[str, Any] | None = None
+    audio_keyframe: dict[str, Any] | None = None
     audio_frames = 0
     audio_steps = 0
     if context_latent is not None or context_audio is not None:
-        _ensure_payload_patch()
         audio_frames = int(audio_context_length) or span
         if context_latent is not None:
             audio_latent, audio_steps, overhang = _audio_tail_from_latent(
@@ -661,56 +652,38 @@ def apply_motion_context(
             overhang = 0.0
         end_frame = float(span) + overhang / FRAME_RESCALE
         end_frame = round(FRAME_RESCALE * end_frame) / FRAME_RESCALE
-        audio_reference = {
-            "kind": "audio",
-            "ref_audio_t": audio_steps,
+        audio_keyframe = {
+            "resolved_frame_index": end_frame - audio_steps / FRAME_RESCALE,
             "audio_latent": audio_latent,
-            mc_audio_key: end_frame,
         }
 
     output = []
-    dropped_positions: list[int] = []
+    dropped_positions: list[int | float] = []
     for embedding, metadata in conditioning:
         values = metadata.copy()
         previous_keyframes = values.get("minimax_keyframes") or []
-        previous_frame_count = values.get("minimax_frame_count")
-        if (
-            previous_keyframes
-            and previous_frame_count is not None
-            and int(previous_frame_count) != target_frames
-        ):
-            raise ValueError(
-                "easy h3 motion context: conditioning and latent frame counts differ"
-            )
         kept_keyframes = []
         for keyframe in previous_keyframes:
-            position = int(
-                keyframe.get(mc_key, keyframe.get("resolved_frame_index", 0))
-            )
+            position = keyframe.get("resolved_frame_index", 0)
+            if position >= target_frames:
+                raise ValueError(
+                    "easy h3 motion context: conditioning keyframe at frame "
+                    f"{position} exceeds the {target_frames}-frame target"
+                )
             if position < span:
                 dropped_positions.append(position)
                 continue
-            copied_keyframe = dict(keyframe)
-            copied_keyframe[mc_key] = position
-            kept_keyframes.append(copied_keyframe)
-        values["minimax_keyframes"] = kept_keyframes + keyframes
-        values["minimax_frame_count"] = target_frames
+            kept_keyframes.append(dict(keyframe))
+        native_keyframes = keyframes + (
+            [audio_keyframe] if audio_keyframe is not None else []
+        )
+        values["minimax_keyframes"] = kept_keyframes + native_keyframes
         output.append([embedding, values])
 
     if dropped_positions:
         LOGGER.warning(
             "Dropped existing keyframe anchors inside the pinned head: %s",
             sorted(set(dropped_positions)),
-        )
-    if audio_reference is not None:
-        try:
-            import node_helpers
-        except ImportError as error:
-            raise RuntimeError("ComfyUI conditioning helpers are unavailable") from error
-        output = node_helpers.conditioning_set_values(
-            output,
-            {"minimax_refs": [audio_reference]},
-            append=True,
         )
     LOGGER.info(
         "Pinned %d H3 frames as %d blocks; trim=%d, audio=%d frames/%d steps",
