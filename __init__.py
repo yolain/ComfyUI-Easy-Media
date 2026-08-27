@@ -91,7 +91,6 @@ class EasyMediaExtension(ComfyExtension):
             MatchLine,
             APIWorkflowGate,
             # MiniMax
-            EasyMiniMaxH3MotionContext,
             EasyMiniMaxH3MotionContextHard,
             EasyMiniMaxH3HiResContinuity,
             EasyH3ProjectContextLatentLoad,

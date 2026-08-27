@@ -14,9 +14,9 @@ from comfy_execution.graph_utils import ExecutionBlocker, GraphBuilder
 from comfy.utils import ProgressBar
 
 from ..modules.motion_context.core import (
-    apply_hard_motion_context,
     apply_hires_continuity,
     apply_motion_context,
+    build_hard_motion_context,
 )
 from ..utils import log_node_info
 from ..utils.h3_presets import get_h3_preset_keys, load_h3_presets, select_h3_preset
@@ -795,80 +795,8 @@ def get_minimax_h3_fallback_nodes() -> list[type[io.ComfyNode]]:
     return fallbacks
 
 
-# code based on https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context
-class EasyMiniMaxH3MotionContext(io.ComfyNode):
-    @classmethod
-    def define_schema(cls) -> io.Schema:
-        return io.Schema(
-            node_id="easy MiniMaxH3MotionContext",
-            display_name="Easy MiniMax H3 Motion Context",
-            category=CATEGORY_MINIMAX,
-            description=(
-                "Pin the previous H3 clip's video and audio tails into the new "
-                "clip conditioning. Prefer context_latent to avoid decode and "
-                "re-encode quality loss."
-            ),
-            inputs=[
-                io.Conditioning.Input("conditioning"),
-                io.Vae.Input("vae"),
-                io.Latent.Input("latent"),
-                io.Combo.Input(
-                    "context_length",
-                    options=["22", "5", "39", "56"],
-                    default="22",
-                    tooltip=(
-                        "Previous-clip video frames to pin. These values align "
-                        "with complete MiniMax H3 latent steps."
-                    ),
-                ),
-                io.Int.Input(
-                    "audio_context_length",
-                    default=48,
-                    min=0,
-                    max=240,
-                    tooltip=(
-                        "Previous-clip audio frames to pin. 0 follows the video "
-                        "window; the default 48-frame context covers two seconds at 24 fps."
-                    ),
-                ),
-                io.Image.Input("context_frames", optional=True),
-                io.Latent.Input("context_latent", optional=True),
-                io.Vae.Input("audio_vae", optional=True),
-                io.Audio.Input("context_audio", optional=True),
-            ],
-            outputs=[
-                io.Conditioning.Output("conditioning"),
-                io.Int.Output("trim_frames"),
-            ],
-        )
-
-    @classmethod
-    def execute(
-        cls,
-        conditioning: Any,
-        vae: Any,
-        latent: dict[str, Any],
-        context_length: str,
-        audio_context_length: int,
-        context_frames: torch.Tensor | None = None,
-        context_latent: dict[str, Any] | None = None,
-        audio_vae: Any | None = None,
-        context_audio: dict[str, Any] | None = None,
-    ) -> io.NodeOutput:
-        output, trim_frames = apply_motion_context(
-            conditioning=conditioning,
-            vae=vae,
-            latent=latent,
-            context_length=context_length,
-            audio_context_length=audio_context_length,
-            context_frames=context_frames,
-            context_latent=context_latent,
-            audio_vae=audio_vae,
-            context_audio=context_audio,
-        )
-        return io.NodeOutput(output, trim_frames)
-
-
+# Conditioning logic is based on
+# https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context.
 class EasyMiniMaxH3MotionContextHard(io.ComfyNode):
     """Apply H3 context conditioning and hard video/audio latent continuity."""
 
@@ -879,8 +807,9 @@ class EasyMiniMaxH3MotionContextHard(io.ComfyNode):
             display_name="Easy MiniMax H3 Motion Context Hard",
             category=CATEGORY_MINIMAX,
             description=(
-                "Copy the previous H3 video and audio latent tails into the "
-                "current sampling seed with independent release masks."
+                "Keep Motion Context 0.4 native video/audio keyframes while "
+                "copying the same AV tail into the current sampling seed with "
+                "independent release masks."
             ),
             inputs=[
                 io.Conditioning.Input("conditioning"),
@@ -892,16 +821,6 @@ class EasyMiniMaxH3MotionContextHard(io.ComfyNode):
                     options=["22", "5", "39", "56"],
                     default="22",
                     tooltip="Previous-clip video context length in frames.",
-                ),
-                io.Int.Input(
-                    "audio_context_length",
-                    default=22,
-                    min=0,
-                    max=240,
-                    tooltip=(
-                        "Previous-clip audio context length in video-frame units. "
-                        "Set 0 to follow context_length."
-                    ),
                 ),
                 io.Int.Input(
                     "video_transition_steps",
@@ -933,17 +852,22 @@ class EasyMiniMaxH3MotionContextHard(io.ComfyNode):
         latent: dict[str, Any],
         context_latent: dict[str, Any],
         context_length: str = "22",
-        audio_context_length: int = 22,
         video_transition_steps: int = 4,
         audio_transition_steps: int = 4,
     ) -> io.NodeOutput:
-        output, trim_frames, hard_latent = apply_hard_motion_context(
+        output, trim_frames = apply_motion_context(
             conditioning=conditioning,
             vae=vae,
             latent=latent,
-            context_latent=context_latent,
             context_length=context_length,
-            audio_context_length=audio_context_length,
+            audio_context_length=0,
+            context_latent=context_latent,
+        )
+        output, trim_frames, hard_latent = build_hard_motion_context(
+            conditioning=output,
+            trim_frames=trim_frames,
+            latent=latent,
+            context_latent=context_latent,
             video_transition_steps=video_transition_steps,
             audio_transition_steps=audio_transition_steps,
         )
@@ -1475,8 +1399,8 @@ def _h3_resolve_pass_sampling(
         "dual" if has_second_pass else "single",
         is_turbo,
     )
-    sampler_key = "sampler_2" if pass_name == "second_pass" else "sampler"
-    sigmas_key = "sigmas_2" if pass_name == "second_pass" else "sigmas"
+    sampler_key = "sampler_2nd" if pass_name == "second_pass" else "sampler"
+    sigmas_key = "sigmas_2nd" if pass_name == "second_pass" else "sigmas"
     sampler = graph.node(
         "KSamplerSelect",
         id=f"{pass_name}_sampler",
@@ -1525,11 +1449,11 @@ def _h3_second_pass_model(
     if model_loader is None:
         return model
     if not isinstance(model_loader, dict):
-        raise TypeError("model_loader_2 must contain a FAST_MODEL_LOADER dictionary.")
+        raise TypeError("model_loader_2nd must contain a FAST_MODEL_LOADER dictionary.")
 
     second_model = model_loader.get("model")
     if second_model is None:
-        raise ValueError("model_loader_2 is missing required component: model")
+        raise ValueError("model_loader_2nd is missing required component: model")
     return second_model
 
 
@@ -1557,7 +1481,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                 TYPE_TRACKS_INFO.Input("tracks_info"),
                 TYPE_FAST_MODEL_LOADER.Input("model_loader"),
                 TYPE_FAST_MODEL_LOADER.Input(
-                    "model_loader_2",
+                    "model_loader_2nd",
                     optional=True,
                     tooltip=(
                         "Optional second-pass model. Encoding and VAE "
@@ -1565,11 +1489,11 @@ class EasyMultiTrackProject(io.ComfyNode):
                     ),
                 ),
                 io.Sampler.Input("sampler", optional=True),
-                io.Sampler.Input("sampler_2", optional=True, tooltip=(
+                io.Sampler.Input("sampler_2nd", optional=True, tooltip=(
                     "Optional second-pass sampler. "
                 )),
                 io.Sigmas.Input("sigmas", optional=True),
-                io.Sigmas.Input("sigmas_2", optional=True, tooltip=(
+                io.Sigmas.Input("sigmas_2nd", optional=True, tooltip=(
                     "Optional second-pass sigmas. "
                 )),
                 io.String.Input("project_name", default=""),
@@ -1625,7 +1549,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                         "resume directly from that checkpoint at pass two."
                     ),
                 ),
-                io.Boolean.Input("disable_noise", default=False, tooltip="Disable noise in second-pass for dual-sampling"),
+                io.Boolean.Input("disable_2nd_noise", default=False, tooltip="Disable noise in second-pass for dual-sampling"),
                 io.Float.Input(
                     "upscale_by",
                     default=1.5,
@@ -1641,7 +1565,10 @@ class EasyMultiTrackProject(io.ComfyNode):
                 ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.unique_id],
-            outputs=[io.String.Output("PROJECT_NAME")],
+            outputs=[
+                io.String.Output("PROJECT_NAME"),
+                io.Audio.Output("LOCKED_AUDIO"),
+            ],
         )
 
     @classmethod
@@ -1692,17 +1619,17 @@ class EasyMultiTrackProject(io.ComfyNode):
             )
         )
         run_second_pass = has_second_pass and not first_pass_only
-        disable_noise = bool(
+        disable_2nd_noise = bool(
             _first_input(
-                sampling_config.get("disable_noise"),
-                _first_input(kwargs.get("disable_noise"), False),
+                sampling_config.get("disable_2nd_noise"),
+                _first_input(kwargs.get("disable_2nd_noise"), False),
             )
         )
         second_model = model
         if run_second_pass:
             second_model_loader = _first_input(
-                sampling_config.get("model_loader_2"),
-                _first_input(kwargs.get("model_loader_2")),
+                sampling_config.get("model_loader_2nd"),
+                _first_input(kwargs.get("model_loader_2nd")),
             )
             second_model = _h3_second_pass_model(
                 second_model_loader,
@@ -1831,12 +1758,12 @@ class EasyMultiTrackProject(io.ComfyNode):
                 graph,
                 pass_name="second_pass",
                 sampler=_first_input(
-                    sampling_config.get("sampler_2"),
-                    _first_input(kwargs.get("sampler_2")),
+                    sampling_config.get("sampler_2nd"),
+                    _first_input(kwargs.get("sampler_2nd")),
                 ),
                 sigmas=_first_input(
-                    sampling_config.get("sigmas_2"),
-                    _first_input(kwargs.get("sigmas_2")),
+                    sampling_config.get("sigmas_2nd"),
+                    _first_input(kwargs.get("sigmas_2nd")),
                 ),
                 preset_name=preset_name,
                 has_second_pass=True,
@@ -1860,6 +1787,7 @@ class EasyMultiTrackProject(io.ComfyNode):
         previous_low_context_latent: Any | None = None
         previous_artifact: Any | None = None
         last_project_output: Any | None = None
+        last_locked_audio_output: Any | None = None
         report_step(35)
 
         segment_total = len(selected_entries)
@@ -1884,9 +1812,9 @@ class EasyMultiTrackProject(io.ComfyNode):
 
             # 当 二采 衔接模式为 上下文 时 需要 使用降低的sigmas阈值 增强连续性 避免过高的sigmas导致画面细节变化过大
             if run_second_pass and continuity_mode == 'context':
-                sigmas_2_context = sampling_config.get('sigmas_2_context', None)
-                if sigmas_2_context:
-                    second_pass_sigmas = sigmas_2_context
+                sigmas_2nd_context = sampling_config.get('sigmas_2nd_context', None)
+                if sigmas_2nd_context:
+                    second_pass_sigmas = sigmas_2nd_context
 
             ref_image_size = (
                 str(content.get("ref_image_size", "match")).lower()
@@ -2004,6 +1932,7 @@ class EasyMultiTrackProject(io.ComfyNode):
             # the tail after decoding, not from the task's opening frames.
             if h3_locked_audio_track(entry, info) is not None:
                 report_segment_step(0.20)
+                last_locked_audio_output = task_output.out(8)
                 initial_latent = graph.node(
                     "easy minimaxH3AudioLock",
                     id=f"audio_lock_{task_index}",
@@ -2029,7 +1958,6 @@ class EasyMultiTrackProject(io.ComfyNode):
                     latent=initial_latent,
                     context_latent=first_pass_context_latent,
                     context_length=str(context_source_frames),
-                    audio_context_length=context_source_frames,
                     video_transition_steps=4,
                     audio_transition_steps=4,
                 )
@@ -2170,9 +2098,9 @@ class EasyMultiTrackProject(io.ComfyNode):
 
                 report_segment_step(0.62)
                 second_pass_noise = graph.node(
-                    "DisableNoise" if disable_noise else "RandomNoise",
+                    "DisableNoise" if disable_2nd_noise else "RandomNoise",
                     id=f"second_pass_noise_{task_index}",
-                    **({} if disable_noise else {"noise_seed": second_pass_seed}),
+                    **({} if disable_2nd_noise else {"noise_seed": second_pass_seed}),
                 )
                 report_segment_step(0.66)
                 second_pass_guider = graph.node(
@@ -2353,7 +2281,11 @@ class EasyMultiTrackProject(io.ComfyNode):
             log_node_info(node_name, "Project graph produced no task output")
             raise RuntimeError("H3 project graph produced no task output")
         report_step(100)
-        return io.NodeOutput(last_project_output, expand=graph.finalize())
+        return io.NodeOutput(
+            last_project_output,
+            last_locked_audio_output,
+            expand=graph.finalize(),
+        )
 
 
 class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
