@@ -220,6 +220,10 @@ describe('PreviewArea', () => {
     fireEvent.click(screen.getByTestId('multitrack-black-frame'))
 
     expect(onParentClick).not.toHaveBeenCalled()
+    const previewArea = screen.getByTestId('multitrack-black-frame').closest('[data-multitrack-preview-area]')
+    expect(previewArea?.className).toContain('w-full')
+    expect(previewArea?.className).toContain('min-w-0')
+    expect(previewArea?.className).toContain('max-w-full')
   })
 
   it('saves subtitle speech settings into the selected subtitle segment', () => {
@@ -372,7 +376,11 @@ describe('PreviewArea', () => {
     expect(expandedPreview).not.toBeNull()
     expect(expandedImage.className).toContain('object-contain')
     expect(screen.queryByTestId('task-image-drop-zone')).toBeNull()
-    expect(screen.getByTestId('task-image-expanded-preview').closest('[data-multitrack-preview-area]')).not.toBeNull()
+    const previewArea = screen.getByTestId('task-image-expanded-preview').closest('[data-multitrack-preview-area]')
+    expect(previewArea).not.toBeNull()
+    expect(previewArea?.className).toContain('w-full')
+    expect(previewArea?.className).toContain('min-w-0')
+    expect(previewArea?.className).toContain('max-w-full')
 
     vi.spyOn(expandedImage, 'getBoundingClientRect').mockReturnValue({
       bottom: 250,
