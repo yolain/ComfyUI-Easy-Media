@@ -1364,7 +1364,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     <LocaleContext.Provider value={locale}>
       <TooltipProvider>
         <div
-          className="relative flex h-full w-full flex-col overflow-hidden rounded text-foreground font-sans text-xs select-none"
+          className="relative flex h-full w-full min-w-0 max-w-full flex-col overflow-hidden rounded text-foreground font-sans text-xs select-none"
           aria-busy={isSmartSplitting || isRecognizingSubtitles}
         >
           <PreviewArea

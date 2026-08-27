@@ -1245,7 +1245,7 @@ export function PreviewArea({
     return (
       <div
         data-multitrack-preview-area
-        className="relative flex min-h-24 flex-1 overflow-hidden rounded-sm bg-background"
+        className="relative flex min-h-24 w-full min-w-0 max-w-full flex-1 overflow-hidden rounded-sm bg-background"
         onClick={(event) => event.stopPropagation()}
       >
         {expandedTaskImage ? (
@@ -1281,7 +1281,7 @@ export function PreviewArea({
   return (
     <div
       data-multitrack-preview-area
-      className="relative flex min-h-24 flex-1 items-center justify-center overflow-hidden rounded-sm bg-black text-xs text-muted-foreground"
+      className="relative flex min-h-24 w-full min-w-0 max-w-full flex-1 items-center justify-center overflow-hidden rounded-sm bg-black text-xs text-muted-foreground"
       onClick={(event) => event.stopPropagation()}
     >
       {expandedTaskImage && expandedTaskImageTarget?.source === 'active'
@@ -1303,7 +1303,7 @@ export function PreviewArea({
       ) : null}
       <div className="flex h-full min-h-24 w-full flex-col items-center justify-center gap-0.5">
         {!hasSegments ? renderEmptyPreview() : null}
-        <div className={!hasSegments ? 'hidden' : previewMediaGroupClassName}>
+        <div className={!hasSegments ? 'hidden' : `min-w-0 ${previewMediaGroupClassName}`}>
           {usesTaskImageOnlyPreview && activeTaskImages ? (
             <>
               <div
