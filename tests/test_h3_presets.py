@@ -45,7 +45,7 @@ def test_load_h3_presets_reads_valid_user_override(tmp_path):
             split_step=99
         ),
         lambda value: value["medium"]["dual"]["is_turbo"].pop(
-            "sampler_2"
+            "sampler_2nd"
         ),
     ],
 )
@@ -64,7 +64,7 @@ def test_select_h3_preset_uses_json_dual_turbo_branch():
     result = select_h3_preset(DEFAULT_H3_PRESETS, "medium", "dual", True)
 
     assert result["sampler"] == "er_sde"
-    assert result["sampler_2"] == "sa_solver"
+    assert result["sampler_2nd"] == "sa_solver"
 
 
 def test_select_h3_preset_uses_non_turbo_for_unknown_detection():

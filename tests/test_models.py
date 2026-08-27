@@ -29,6 +29,10 @@ def _fake_lora_patch(rank: int):
     return (1.0, adapter, 1.0, None, None)
 
 
+def _fake_set_patch():
+    return (1.0, ("set", (object(),)), 1.0, None, None)
+
+
 def test_detect_turbo_model_matches_turbo_patch_fingerprint():
     model = _FakeModelPatcher(
         patches={
@@ -107,6 +111,25 @@ def test_detect_turbo_model_matches_lightx2v_eight_step_patch_fingerprint():
     assert "[128, 384]" in result.evidence
 
 
+def test_detect_turbo_model_matches_pdd_eight_step_patch_fingerprint():
+    patches = {
+        "diffusion_model.blocks.0.attn.qkv_proj.weight": [object()],
+        "diffusion_model.blocks.0.attn.out_proj.weight": [object()],
+        "diffusion_model.blocks.0.adaln_proj.linear.weight": [object()],
+        "diffusion_model.blocks.0.mlp.fc1.weight": [object()],
+        "diffusion_model.blocks.0.mlp.fc2.weight": [object()],
+        "diffusion_model.final_layer.audio_out.weight": [_fake_set_patch()],
+        "diffusion_model.final_layer.video_out.weight": [_fake_set_patch()],
+    }
+    model = _FakeModelPatcher(patches=patches)
+
+    result = models.detect_turbo_model(model)
+
+    assert result.status == "turbo"
+    assert result.source == "model_patches"
+    assert "PDD 8-step output-head/attention/MLP/AdaLN fingerprint" in result.evidence
+
+
 def test_detect_turbo_model_uses_model_metadata_without_patches():
     model = _FakeModelPatcher(
         attachments={
@@ -150,6 +173,42 @@ def test_detect_turbo_model_accepts_eight_step_metadata():
     assert result.status == "turbo"
     assert result.source == "model_metadata"
     assert "sampler_steps=8" in result.evidence
+
+
+def test_detect_turbo_model_uses_pdd_effective_step_metadata():
+    model = _FakeModelPatcher(
+        attachments={
+            "lora_metadata": {
+                "pdd_block_size": "4",
+                "pdd_num_steps": "32",
+                "lora_targets": (
+                    "to_q,to_k,to_v,to_out.0,ff.net.0.proj,ff.net.2,"
+                    "adaln_proj.linear"
+                ),
+            }
+        }
+    )
+
+    result = models.detect_turbo_model(model)
+
+    assert result.status == "turbo"
+    assert result.source == "model_metadata"
+    assert "pdd_num_steps=32" in result.evidence
+    assert "pdd_block_size=4" in result.evidence
+    assert "effective_steps=8" in result.evidence
+
+
+def test_detect_turbo_model_rejects_slow_pdd_metadata():
+    model = _FakeModelPatcher(
+        attachments={
+            "lora_metadata": {
+                "pdd_block_size": "2",
+                "pdd_num_steps": "32",
+            }
+        }
+    )
+
+    assert models.detect_turbo_model(model).status == "unknown"
 
 
 def test_detect_turbo_model_checks_model_options_and_model_config():

@@ -510,8 +510,11 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
     assert list(inputs) == [
         "tracks_info",
         "model_loader",
+        "model_loader_2nd",
         "sampler",
+        "sampler_2nd",
         "sigmas",
+        "sigmas_2nd",
         "project_name",
         "project_save",
         "segment_start_index",
@@ -519,6 +522,9 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
         "seed",
         "sampling_plan",
         "sampling_mode",
+        "1st_pass_only",
+        "disable_2nd_noise",
+        "upscale_by",
         "upscale_model",
     ]
     for name in (
@@ -538,25 +544,18 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
     assert json.loads(json.dumps(sampling_plan_options)) == sampling_plan_options
     assert inputs["sampling_plan"].kwargs["default"] == "light"
     sampling_mode_options = inputs["sampling_mode"].kwargs["options"]
-    assert sampling_mode_options[0] == ("single", [])
-    dual_mode, dual_inputs = sampling_mode_options[1]
-    assert dual_mode == "dual"
-    assert [port.name for port in dual_inputs] == [
-        "sampler_2",
-        "sigmas_2",
-        "model_loader_2",
-        "1st_pass_only",
-        "disable_noise",
-        "upscale_by",
-    ]
-    assert dual_inputs[0].kwargs["optional"] is True
-    assert dual_inputs[1].kwargs["optional"] is True
-    assert dual_inputs[2].kwargs["optional"] is True
-    assert dual_inputs[3].kwargs["default"] is False
-    assert dual_inputs[4].kwargs["default"] is False
+    assert sampling_mode_options == ["single", "dual"]
+    for name in ("sampler_2nd", "sigmas_2nd", "model_loader_2nd"):
+        assert inputs[name].kwargs["optional"] is True
+    assert inputs["1st_pass_only"].kwargs["default"] is False
+    assert inputs["disable_2nd_noise"].kwargs["default"] is False
+    assert inputs["upscale_by"].kwargs["default"] == 1.5
     assert inputs["segment_start_index"].kwargs["default"] == 0
     assert inputs["segment_count"].kwargs["default"] == -1
-    assert [output.name for output in schema.outputs] == ["PROJECT_NAME"]
+    assert [output.name for output in schema.outputs] == [
+        "PROJECT_NAME",
+        "LOCKED_AUDIO",
+    ]
 
 
 def test_multitrack_h3_project_loads_segment_media_from_tracks_info(monkeypatch):
@@ -574,6 +573,33 @@ def test_multitrack_h3_project_loads_segment_media_from_tracks_info(monkeypatch)
         "task_index",
         "prompt_format",
     }
+
+
+def test_multitrack_h3_project_outputs_locked_audio_used_by_generation(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    inputs = _h3_project_inputs()
+    inputs["tracks_info"][0]["tracks"].append({
+        "type": "audio",
+        "audio_locked": True,
+        "segments": [{
+            "start_frame": 0,
+            "end_frame": 120,
+            "content": {"media_type": "audio"},
+        }],
+    })
+
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    audio_lock = _graph_node(result, "easy minimaxH3AudioLock")
+
+    assert result.values[1] == audio_lock["inputs"]["audio"]
+
+
+def test_multitrack_h3_project_outputs_none_without_locked_audio(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+
+    result = module.EasyMultiTrackProject.execute(**_h3_project_inputs())
+
+    assert result.values[1] is None
 
 
 def test_multitrack_h3_project_does_not_log_execution_events_while_expanding(
@@ -797,88 +823,28 @@ def test_project_video_combine_blocks_both_outputs_when_auto_combine_is_disabled
     assert output.values[1] is output.values[0]
 
 
-def test_easy_h3_motion_context_schema_and_wrapper(monkeypatch):
-    module = _load_minimax_node(monkeypatch)
-    assert module is not None
-    schema = module.EasyMiniMaxH3MotionContext.define_schema()
-    inputs = {port.name: port for port in schema.inputs}
-
-    assert schema.node_id == "easy MiniMaxH3MotionContext"
-    assert list(inputs) == [
-        "conditioning",
-        "vae",
-        "latent",
-        "context_length",
-        "audio_context_length",
-        "context_frames",
-        "context_latent",
-        "audio_vae",
-        "context_audio",
-    ]
-    assert inputs["context_length"].kwargs["options"] == ["22", "5", "39", "56"]
-    assert inputs["audio_context_length"].kwargs["default"] == 48
-    assert inputs["context_frames"].kwargs["optional"] is True
-    assert inputs["context_latent"].kwargs["optional"] is True
-    assert [output.name for output in schema.outputs] == [
-        "conditioning",
-        "trim_frames",
-    ]
-
-    calls = []
-    monkeypatch.setattr(
-        module,
-        "apply_motion_context",
-        lambda **kwargs: calls.append(kwargs) or ("conditioned", 22),
-    )
-    output = module.EasyMiniMaxH3MotionContext.execute(
-        conditioning="conditioning",
-        vae="vae",
-        latent={"samples": "target"},
-        context_length="22",
-        audio_context_length=24,
-        context_latent={"samples": "context"},
-    )
-
-    assert output.values == ("conditioned", 22)
-    assert calls[0]["context_latent"] == {"samples": "context"}
-
-
-def test_easy_h3_motion_context_has_matching_chinese_localization():
-    node_defs = json.loads(
-        (Path(__file__).parents[1] / "locales" / "zh" / "nodeDefs.json").read_text()
-    )
-    translation = node_defs["easy MiniMaxH3MotionContext"]
-
-    assert translation["display_name"] == "简易 MiniMax H3 运动上下文"
-    assert set(translation["inputs"]) == {
-        "conditioning",
-        "vae",
-        "latent",
-        "context_length",
-        "audio_context_length",
-        "context_frames",
-        "context_latent",
-        "audio_vae",
-        "context_audio",
-    }
-    assert set(translation["outputs"]) == {"0", "1"}
-
-
 def test_easy_h3_hard_and_hires_context_schemas_and_wrappers(monkeypatch):
     module = _load_minimax_node(monkeypatch)
+    assert not hasattr(module, "EasyMiniMaxH3MotionContext")
     hard_schema = module.EasyMiniMaxH3MotionContextHard.define_schema()
     hard_inputs = {port.name: port for port in hard_schema.inputs}
     assert hard_schema.node_id == "easy MiniMaxH3MotionContextHard"
     assert hard_inputs["context_length"].kwargs["default"] == "22"
-    assert hard_inputs["audio_context_length"].kwargs["default"] == 22
+    assert "audio_context_length" not in hard_inputs
     assert [output.name for output in hard_schema.outputs] == [
         "conditioning",
         "trim_frames",
         "latent",
     ]
+    motion_context_calls = []
     monkeypatch.setattr(
         module,
-        "apply_hard_motion_context",
+        "apply_motion_context",
+        lambda **kwargs: motion_context_calls.append(kwargs) or ("conditioned", 22),
+    )
+    monkeypatch.setattr(
+        module,
+        "build_hard_motion_context",
         lambda **_kwargs: ("conditioned", 22, "hard-latent"),
     )
     hard_output = module.EasyMiniMaxH3MotionContextHard.execute(
@@ -888,6 +854,16 @@ def test_easy_h3_hard_and_hires_context_schemas_and_wrappers(monkeypatch):
         {"samples": "context"},
     )
     assert hard_output.values == ("conditioned", 22, "hard-latent")
+    assert motion_context_calls == [
+        {
+            "conditioning": "conditioning",
+            "vae": "vae",
+            "latent": {"samples": "target"},
+            "context_length": "22",
+            "audio_context_length": 0,
+            "context_latent": {"samples": "context"},
+        }
+    ]
 
     hires_schema = module.EasyMiniMaxH3HiResContinuity.define_schema()
     assert hires_schema.node_id == "easy MiniMaxH3HiResContinuity"
@@ -907,7 +883,16 @@ def test_easy_h3_hard_and_hires_context_have_chinese_localization():
     node_defs = json.loads(
         (Path(__file__).parents[1] / "locales" / "zh" / "nodeDefs.json").read_text()
     )
-    assert "easy MiniMaxH3MotionContextHard" in node_defs
+    hard_translation = node_defs["easy MiniMaxH3MotionContextHard"]
+    assert set(hard_translation["inputs"]) == {
+        "conditioning",
+        "vae",
+        "latent",
+        "context_latent",
+        "context_length",
+        "video_transition_steps",
+        "audio_transition_steps",
+    }
     assert "easy MiniMaxH3HiResContinuity" in node_defs
 
 
@@ -927,16 +912,21 @@ def test_multitrack_h3_project_has_matching_chinese_localization():
         "project_save",
         "sampling_plan",
         "sampling_mode",
-        "sampling_mode.model_loader_2",
-        "sampling_mode.1st_pass_only",
-        "sampling_mode.disable_noise",
-        "sampling_mode.upscale_by",
+        "model_loader_2nd",
+        "1st_pass_only",
+        "disable_2nd_noise",
+        "upscale_by",
         "upscale_model",
         "segment_start_index",
         "segment_count",
         "seed",
+        "sampler_2nd",
+        "sigmas_2nd",
     }
-    assert translation["outputs"] == {"0": {"name": "工程名称"}}
+    assert translation["outputs"] == {
+        "0": {"name": "工程名称"},
+        "1": {"name": "锁定音频"},
+    }
 
 
 def test_multitrack_h3_project_expands_single_task_sampling_pipeline(monkeypatch):
@@ -1111,7 +1101,7 @@ def test_multitrack_h3_fast_dual_non_turbo_uses_split_sigmas_and_pixel_upscale(
 
     result = module.EasyMultiTrackProject.execute(
         **_h3_project_inputs(
-            sampling_mode=_h3_sampling_mode("dual", disable_noise=[True]),
+            sampling_mode=_h3_sampling_mode("dual", disable_2nd_noise=[True]),
             sampling_plan=["light"],
         )
     )
@@ -1352,8 +1342,8 @@ def test_multitrack_h3_dynamic_dual_sampler_and_sigmas_override_each_preset(
             seed=[12],
                 sampling_mode=_h3_sampling_mode(
                     "dual",
-                    sampler_2=[second_pass_sampler],
-                    sigmas_2=[second_pass_sigmas],
+                    sampler_2nd=[second_pass_sampler],
+                    sigmas_2nd=[second_pass_sigmas],
                     upscale_by=[1.0],
                 ),
         )
@@ -1415,7 +1405,7 @@ def test_multitrack_h3_dynamic_dual_model_loader_uses_second_model_for_second_pa
             ],
                 sampling_mode=_h3_sampling_mode(
                     "dual",
-                    model_loader_2=[
+                    model_loader_2nd=[
                     {
                         "model": second_model,
                         "clip": object(),
@@ -1457,7 +1447,7 @@ def test_multitrack_h3_first_pass_preview_skips_second_model_loader(monkeypatch)
             sampling_mode=_h3_sampling_mode(
                 "dual",
                     **{"1st_pass_only": [True]},
-                model_loader_2=[{}],
+                model_loader_2nd=[{}],
             )
         )
     )
@@ -1630,7 +1620,7 @@ def test_multitrack_h3_context_chain_uses_previous_segment_latent(monkeypatch):
     ]
     first_sample_id = samples[0][0]
     assert motion["inputs"]["context_latent"] == [first_sample_id, 1]
-    assert motion["inputs"]["audio_context_length"] == 22
+    assert "audio_context_length" not in motion["inputs"]
     assert motion["inputs"]["context_length"] == "22"
     audio_locks = [
         (node_id, node)

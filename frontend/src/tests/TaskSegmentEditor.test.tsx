@@ -11,6 +11,7 @@ vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
     value: string
     allowMultipleSelection?: boolean
     maxSelectionCount?: number
+    slotItems?: Array<{ value: string }>
     onChange: (value: string, source: 'input') => void
   }) => (
     <div
@@ -18,6 +19,7 @@ vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
       data-value={props.value}
       data-multiple={String(props.allowMultipleSelection)}
       data-limit={String(props.maxSelectionCount)}
+      data-slot-items={props.slotItems?.map((item) => item.value).join(',') ?? ''}
     >
       <button type="button" onClick={() => props.onChange('replacement.png', 'input')}>
         choose replacement
@@ -1174,5 +1176,41 @@ describe('TaskSegmentEditor', () => {
     expect(screen.getByTestId('task-image-drop-zone').className).toContain('aspect-square')
     expect(screen.getByRole('button', { name: 'Task image drop zone' }).tagName).not.toBe('BUTTON')
     expect(screen.getByRole('textbox', { name: 'Prompt' }).className).toContain('text-[10px]')
+  })
+
+  it('shows connected image inputs in the media selector slot list', () => {
+    const emptyImageSegment = {
+      ...taskSegment(),
+      content: {
+        ...taskSegment().content,
+        images: [],
+      },
+    }
+    const sourceNode = {
+      outputs: [{ shape: 0 }],
+      imgs: [{ currentSrc: '/view?filename=reference.png&type=input' }],
+    }
+    const node = {
+      inputs: [{ name: 'image', type: 'IMAGE', link: 7 }],
+    }
+    const app = {
+      graph: {
+        links: { 7: { origin_id: 3, origin_slot: 0 } },
+        getNodeById: (id: number) => id === 3 ? sourceNode : null,
+      },
+    }
+
+    render(
+      <TaskSegmentEditor
+        segment={emptyImageSegment}
+        node={node}
+        app={app}
+        onContentChange={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Task image drop zone' }))
+    expect(screen.getByTestId('media-selector-mock').getAttribute('data-slot-items'))
+      .toBe('__slot__:image')
   })
 })

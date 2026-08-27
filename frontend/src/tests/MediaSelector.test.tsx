@@ -133,6 +133,30 @@ describe('MediaSelector', () => {
     expect(fetch).toHaveBeenCalledTimes(1)
   })
 
+  it('refreshes the current directory with a short cooldown', async () => {
+    render(<MediaSelector value="" mediaType="video" onChange={vi.fn()} />)
+    await screen.findByTitle('clip.mp4')
+
+    const selector = document.querySelector('[data-media-selector]')
+    expect(selector?.className).toContain('w-80')
+
+    vi.useFakeTimers()
+    const refreshButton = screen.getByRole('button', { name: 'mediaSelector.refresh' })
+    fireEvent.click(refreshButton)
+    await act(async () => Promise.resolve())
+
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect((refreshButton as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(refreshButton)
+    expect(fetch).toHaveBeenCalledTimes(2)
+
+    act(() => vi.advanceTimersByTime(2_000))
+    expect((refreshButton as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(refreshButton)
+    await act(async () => Promise.resolve())
+    expect(fetch).toHaveBeenCalledTimes(3)
+  })
+
   it('uses one inverse-icon button to toggle grid and list views', async () => {
     render(<MediaSelector value="" mediaType="video" onChange={vi.fn()} />)
     await screen.findByTitle('clip.mp4')
