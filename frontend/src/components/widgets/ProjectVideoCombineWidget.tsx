@@ -8,6 +8,7 @@ import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCanvasScale } from '@/hooks/use-canvas-scale'
 import { useElementWidth } from '@/hooks/use-element-width'
+import { usePauseMediaOnPageExit } from '@/hooks/use-pause-media-on-page-exit'
 import type { ReactWidgetProps } from '@/lib/create-react-widget'
 import { LocaleContext, translate } from '@/lib/i18n'
 import { addMediaRevision, mediaContentToViewUrl } from '@/lib/media-url'
@@ -224,6 +225,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null)
   const [previewFilePaths, setPreviewFilePaths] = useState<Record<string, string[]>>({})
   const [playbackNonce, setPlaybackNonce] = useState(0)
+  const [previewPauseNonce, setPreviewPauseNonce] = useState(0)
   const videoRefs = useRef(new Map<string, HTMLVideoElement>())
   const currentFrameRef = useRef(0)
   const playbackStartFrameRef = useRef(0)
@@ -445,6 +447,42 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
     currentFrameRef.current = currentFrame
   }, [currentFrame])
 
+  const pausePreviewMedia = useCallback(() => {
+    if (playbackRafRef.current !== null) {
+      cancelAnimationFrame(playbackRafRef.current)
+      playbackRafRef.current = null
+    }
+    for (const video of videoRefs.current.values()) video.pause()
+  }, [])
+
+  usePauseMediaOnPageExit(() => {
+    pausePreviewMedia()
+    setCurrentFrame(currentFrameRef.current)
+    setIsPlaying(false)
+    setPreviewPauseNonce((nonce) => nonce + 1)
+  })
+
+  useEffect(() => () => pausePreviewMedia(), [pausePreviewMedia])
+
+  useEffect(() => {
+    const workflowStore = app.extensionManager.workflow
+    let activeWorkflowKey = workflowStore.activeWorkflow?.key ?? null
+    return workflowStore.$subscribe((_mutation, state) => {
+      const nextWorkflowKey = state.activeWorkflow?.key ?? null
+      if (
+        activeWorkflowKey !== null
+        && nextWorkflowKey !== null
+        && nextWorkflowKey !== activeWorkflowKey
+      ) {
+        pausePreviewMedia()
+        setCurrentFrame(currentFrameRef.current)
+        setIsPlaying(false)
+        setPreviewPauseNonce((nonce) => nonce + 1)
+      }
+      activeWorkflowKey = nextWorkflowKey
+    })
+  }, [app.extensionManager.workflow, pausePreviewMedia])
+
   useEffect(() => {
     if (!isPlaying || total <= 0) {
       if (playbackRafRef.current !== null) cancelAnimationFrame(playbackRafRef.current)
@@ -650,7 +688,12 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
 
           <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black p-3">
             {isComparing ? (
-              <CompareVideo app={app} sourceUrl={compareUrls[0]!} outputUrl={compareUrls[1]!} />
+              <CompareVideo
+                app={app}
+                sourceUrl={compareUrls[0]!}
+                outputUrl={compareUrls[1]!}
+                pausePlaybackNonce={previewPauseNonce}
+              />
             ) : activeUrl ? (
               [
                 { clip: active!.clip, url: activeUrl, visible: true },

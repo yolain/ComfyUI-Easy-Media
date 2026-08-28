@@ -31,6 +31,10 @@ const projectData: ProjectData = {
 function widgetProps(overrides: Partial<ReactWidgetProps<ProjectData>> = {}) {
   const toast = { add: vi.fn() }
   const dialog = { confirm: vi.fn().mockResolvedValue(true) }
+  const workflow = {
+    activeWorkflow: { key: 'workflow-a' },
+    $subscribe: vi.fn().mockReturnValue(vi.fn()),
+  }
   const api = {
     fetchApi: vi.fn(),
     getQueue: vi.fn().mockResolvedValue({ Running: [], Pending: [] }),
@@ -68,14 +72,18 @@ function widgetProps(overrides: Partial<ReactWidgetProps<ProjectData>> = {}) {
       api,
       graphToPrompt,
       ui: { settings: { settingsValues: { 'Comfy.Locale': 'en' } } },
-      extensionManager: { toast, dialog },
+      extensionManager: { toast, dialog, workflow },
     },
     ...overrides,
   } as unknown as ReactWidgetProps<ProjectData>
-  return { props, api, toast, dialog, graphToPrompt }
+  return { props, api, toast, dialog, workflow, graphToPrompt }
 }
 
 beforeEach(() => {
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    value: 'visible',
+  })
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
     unobserve() {}
@@ -421,6 +429,46 @@ describe('ProjectVideoCombineWidget', () => {
 
     expect(container.querySelector('.text-gradient')?.textContent).toBe('00:00:00')
     expect(screen.getByRole('button', { name: 'Pause' })).not.toBeNull()
+  })
+
+  it('stops preview playback when the browser page becomes hidden', () => {
+    const { props } = widgetProps()
+    render(<ProjectVideoCombineWidget {...props} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+    expect(screen.getByRole('button', { name: 'Pause' })).not.toBeNull()
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    })
+    fireEvent(document, new Event('visibilitychange'))
+
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Play' })).not.toBeNull()
+  })
+
+  it('stops only this project preview when the active ComfyUI workflow tab changes', () => {
+    let workflowSubscriber: ((mutation: unknown, state: {
+      activeWorkflow: { key: string }
+    }) => void) | undefined
+    const { props, workflow } = widgetProps()
+    workflow.$subscribe.mockImplementation((subscriber) => {
+      workflowSubscriber = subscriber
+      return vi.fn()
+    })
+    render(<ProjectVideoCombineWidget {...props} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+    expect(screen.getByRole('button', { name: 'Pause' })).not.toBeNull()
+
+    act(() => {
+      workflow.activeWorkflow = { key: 'workflow-b' }
+      workflowSubscriber?.({}, { activeWorkflow: workflow.activeWorkflow })
+    })
+
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Play' })).not.toBeNull()
   })
 
   it('uses zero-based labels and shows the continuity mode', () => {

@@ -88,12 +88,14 @@ interface CompareVideoInnerProps {
   onSettingsChange: (settings: CompareVideoSettings) => void
   allowMediaSelection?: boolean
   bindNodeEvents?: boolean
+  pausePlaybackNonce?: number
 }
 
 export interface CompareVideoProps {
   app: ComfyApp
   sourceUrl: string
   outputUrl: string
+  pausePlaybackNonce?: number
 }
 
 type ExecutedHandler = (output: unknown) => void
@@ -399,6 +401,7 @@ export const CompareVideo = memo(function CompareVideo({
   app,
   sourceUrl,
   outputUrl,
+  pausePlaybackNonce,
 }: Readonly<CompareVideoProps>) {
   const locale = app?.ui?.settings?.settingsValues?.['Comfy.Locale']
   const [compareMode, setCompareMode] = useState<CompareMode>('side-by-side')
@@ -418,6 +421,7 @@ export const CompareVideo = memo(function CompareVideo({
         onSettingsChange={(nextSettings) => setCompareMode(nextSettings.compare_mode ?? 'side-by-side')}
         allowMediaSelection={false}
         bindNodeEvents={false}
+        pausePlaybackNonce={pausePlaybackNonce}
       />
     </LocaleContext.Provider>
   )
@@ -588,6 +592,7 @@ function CompareVideoWidgetInner({
   onSettingsChange,
   allowMediaSelection = true,
   bindNodeEvents = true,
+  pausePlaybackNonce,
 }: Readonly<CompareVideoInnerProps>) {
   const t = useT()
   const canvasScale = useCanvasScale(app)
@@ -804,6 +809,16 @@ function CompareVideoWidgetInner({
 
   const pauseVideos = useCallback(() => {
     setIsPlaying(false)
+    sourceRef.current?.pause()
+    outputRef.current?.pause()
+  }, [])
+
+  useEffect(() => {
+    if (pausePlaybackNonce === undefined) return
+    pauseVideos()
+  }, [pausePlaybackNonce, pauseVideos])
+
+  useEffect(() => () => {
     sourceRef.current?.pause()
     outputRef.current?.pause()
   }, [])
