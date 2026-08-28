@@ -1423,6 +1423,32 @@ def _h3_resolve_pass_sampling(
     return sampler, sigmas
 
 
+def _h3_resolve_context_second_pass_sigmas(
+    graph: GraphBuilder,
+    *,
+    preset_name: str,
+    is_turbo: bool,
+    has_custom_second_pass_sampling: bool,
+) -> Any | None:
+    """Build the preset-only sigma schedule used by context pass two."""
+    if has_custom_second_pass_sampling or preset_name == "custom":
+        return None
+    preset = select_h3_preset(
+        load_h3_presets(),
+        preset_name,
+        "dual",
+        is_turbo,
+    )
+    context_sigmas = preset.get("sigmas_2nd_context")
+    if context_sigmas is None:
+        return None
+    return graph.node(
+        "ManualSigmas",
+        id="second_pass_context_sigmas",
+        sigmas=context_sigmas,
+    ).out(0)
+
+
 def _h3_sampling_mode_config(value: Any) -> tuple[str, dict[str, Any]]:
     """Normalize the DynamicCombo value and accept a plain legacy mode value."""
     config = _first_input(value)
@@ -1757,22 +1783,49 @@ class EasyMultiTrackProject(io.ComfyNode):
             )
         second_pass_sampler: Any | None = None
         second_pass_sigmas: Any | None = None
+        context_second_pass_sigmas: Any | None = None
         if run_second_pass:
+            configured_second_pass_sampler = _first_input(
+                sampling_config.get("sampler_2nd"),
+                _first_input(kwargs.get("sampler_2nd")),
+            )
+            configured_second_pass_sigmas = _first_input(
+                sampling_config.get("sigmas_2nd"),
+                _first_input(kwargs.get("sigmas_2nd")),
+            )
+            has_custom_second_pass_sampling = (
+                configured_second_pass_sampler is not None
+                or configured_second_pass_sigmas is not None
+            )
             second_pass_sampler, second_pass_sigmas = _h3_resolve_pass_sampling(
                 graph,
                 pass_name="second_pass",
-                sampler=_first_input(
-                    sampling_config.get("sampler_2nd"),
-                    _first_input(kwargs.get("sampler_2nd")),
-                ),
-                sigmas=_first_input(
-                    sampling_config.get("sigmas_2nd"),
-                    _first_input(kwargs.get("sigmas_2nd")),
-                ),
+                sampler=configured_second_pass_sampler,
+                sigmas=configured_second_pass_sigmas,
                 preset_name=preset_name,
                 has_second_pass=True,
                 is_turbo=second_turbo_detection.is_turbo,
             )
+            has_context_second_pass = any(
+                task_index > 0
+                and isinstance(entry.get("task"), dict)
+                and isinstance(entry["task"].get("content"), dict)
+                and str(
+                    entry["task"]["content"].get("continuity_mode", "shot")
+                ).lower() == "context"
+                for task_index, entry in selected_entries
+            )
+            if has_context_second_pass:
+                context_second_pass_sigmas = (
+                    _h3_resolve_context_second_pass_sigmas(
+                        graph,
+                        preset_name=preset_name,
+                        is_turbo=second_turbo_detection.is_turbo,
+                        has_custom_second_pass_sampling=(
+                            has_custom_second_pass_sampling
+                        ),
+                    )
+                )
         report_step(31)
 
         if (
@@ -1812,12 +1865,6 @@ class EasyMultiTrackProject(io.ComfyNode):
                 if isinstance(content, dict)
                 else "shot"
             )
-
-            # 当 二采 衔接模式为 上下文 时 需要 使用降低的sigmas阈值 增强连续性 避免过高的sigmas导致画面细节变化过大
-            if run_second_pass and continuity_mode == 'context':
-                sigmas_2nd_context = sampling_config.get('sigmas_2nd_context', None)
-                if sigmas_2nd_context:
-                    second_pass_sigmas = sigmas_2nd_context
 
             ref_image_size = (
                 str(content.get("ref_image_size", "match")).lower()
@@ -2024,6 +2071,13 @@ class EasyMultiTrackProject(io.ComfyNode):
             report_segment_step(0.42)
 
             if run_second_pass:
+                segment_second_pass_sigmas = second_pass_sigmas
+                if (
+                    continuity_mode == "context"
+                    and previous_hires_context_latent is not None
+                    and context_second_pass_sigmas is not None
+                ):
+                    segment_second_pass_sigmas = context_second_pass_sigmas
                 if upscale_by <= 1:
                     report_segment_step(0.46)
                     upscaled_latent = final_latent
@@ -2118,7 +2172,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     noise=second_pass_noise.out(0),
                     guider=second_pass_guider.out(0),
                     sampler=second_pass_sampler,
-                    sigmas=second_pass_sigmas,
+                    sigmas=segment_second_pass_sigmas,
                     latent_image=upscaled_latent,
                     project_name=safe_project_name,
                     segment_index=task_index,

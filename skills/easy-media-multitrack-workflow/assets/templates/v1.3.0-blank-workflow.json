@@ -477,18 +477,18 @@
         "models": [
           {
             "directory_invalid": true,
-            "name": "minimax_h3_video_vae_fp16.safetensors",
+            "name": "minimax_h3_video_vae_int8_convrot.safetensors",
             "directory": "vae",
-            "url": "https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors"
+            "url": "https://huggingface.co/Kijai/MiniMax-H3-experimental/resolve/main/minimax_h3_video_vae_int8_convrot.safetensors"
           }
         ],
         "widget_ue_connectable": {}
       },
       "widgets_values": [
-        "minimax_h3_video_vae_fp16.safetensors"
+        "minimax_h3_video_vae_int8_convrot.safetensors"
       ],
       "widgets_values_named": {
-        "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+        "vae_name": "minimax_h3_video_vae_int8_convrot.safetensors"
       },
       "color": "#af3535",
       "bgcolor": "rgba(24,24,27,.9)"

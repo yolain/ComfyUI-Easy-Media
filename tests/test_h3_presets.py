@@ -66,6 +66,9 @@ def test_get_h3_preset_keys_preserves_json_declaration_order(tmp_path):
         lambda value: value["medium"]["dual"]["is_turbo"].pop(
             "sampler_2nd"
         ),
+        lambda value: value["medium"]["dual"]["is_turbo"].update(
+            sigmas_2nd_context="0.2, 0.4, 0"
+        ),
     ],
 )
 def test_load_h3_presets_rejects_invalid_user_configuration(tmp_path, mutate):

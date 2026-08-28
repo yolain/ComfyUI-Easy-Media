@@ -1762,6 +1762,18 @@ def test_multitrack_h3_dual_context_uses_separate_low_and_hires_latents(monkeypa
             },
         }
     )
+    info["tracks"][0]["segments"].append(
+        {
+            "start_frame": 240,
+            "end_frame": 360,
+            "content": {
+                "task_mode": "default",
+                "continuity_mode": "shot",
+                "images": [],
+                "user_prompt": "cut to another shot",
+            },
+        }
+    )
 
     result = module.EasyMultiTrackProject.execute(
         **_h3_project_inputs(
@@ -1832,6 +1844,31 @@ def test_multitrack_h3_dual_context_uses_separate_low_and_hires_latents(monkeypa
         and node["inputs"]["sampling_pass"] == "second"
         and node["inputs"]["segment_index"] == 1
     ][0]
+    first_second_pass_start = [
+        node
+        for node in result.expand.values()
+        if node["class_type"] == "easy h3SegmentSamplingStart"
+        and node["inputs"]["sampling_pass"] == "second"
+        and node["inputs"]["segment_index"] == 0
+    ][0]
+    final_second_pass_start = [
+        node
+        for node in result.expand.values()
+        if node["class_type"] == "easy h3SegmentSamplingStart"
+        and node["inputs"]["sampling_pass"] == "second"
+        and node["inputs"]["segment_index"] == 2
+    ][0]
+    normal_sigma_node = result.expand[first_second_pass_start["inputs"]["sigmas"][0]]
+    context_sigma_node = result.expand[second_sampling_start["inputs"]["sigmas"][0]]
+    assert normal_sigma_node["class_type"] == "ManualSigmas"
+    assert normal_sigma_node["inputs"]["sigmas"].startswith("0.6316, 0.4877")
+    assert context_sigma_node["class_type"] == "ManualSigmas"
+    assert context_sigma_node["inputs"]["sigmas"] == (
+        "0.50, 0.30, 0.14, 0.06, 0.0"
+    )
+    assert final_second_pass_start["inputs"]["sigmas"] == (
+        first_second_pass_start["inputs"]["sigmas"]
+    )
     assert first_context_guider[1]["inputs"]["conditioning"] == [motion_id, 0]
     assert second_sampling_start["inputs"]["guider"] == [
         second_context_guider[0],
@@ -1847,6 +1884,58 @@ def test_multitrack_h3_dual_context_uses_separate_low_and_hires_latents(monkeypa
     assert result.expand[hires_context_link[0]]["class_type"] == "LTXVConcatAVLatent"
     assert result.expand[low_context_link[0]]["class_type"] == "LTXVConcatAVLatent"
     assert hires_context_link != low_context_link
+
+
+def test_multitrack_h3_connected_second_pass_sampling_overrides_context_preset(
+    monkeypatch,
+):
+    module = _load_minimax_node(monkeypatch)
+    info = _h3_project_inputs()["tracks_info"][0]
+    info["tracks"][0]["segments"].append(
+        {
+            "start_frame": 120,
+            "end_frame": 240,
+            "content": {
+                "task_mode": "l2v",
+                "continuity_mode": "context",
+                "images": [{"media_index": 0}],
+                "user_prompt": "continue",
+            },
+        }
+    )
+    second_pass_sampler = object()
+    second_pass_sigmas = torch.tensor([0.4, 0.2, 0.0])
+
+    result = module.EasyMultiTrackProject.execute(
+        **_h3_project_inputs(
+            tracks_info=[info],
+            sampling_plan=["medium"],
+            sampling_mode=_h3_sampling_mode(
+                "dual",
+                sampler_2nd=[second_pass_sampler],
+                sigmas_2nd=[second_pass_sigmas],
+                upscale_by=[1.0],
+            ),
+        )
+    )
+
+    second_pass_starts = [
+        node
+        for node in result.expand.values()
+        if node["class_type"] == "easy h3SegmentSamplingStart"
+        and node["inputs"]["sampling_pass"] == "second"
+    ]
+    assert len(second_pass_starts) == 2
+    assert all(
+        node["inputs"]["sampler"] is second_pass_sampler
+        and node["inputs"]["sigmas"] is second_pass_sigmas
+        for node in second_pass_starts
+    )
+    assert not any(
+        node["class_type"] == "ManualSigmas"
+        and node["inputs"]["sigmas"] == "0.50, 0.30, 0.14, 0.06, 0.0"
+        for node in result.expand.values()
+    )
 
 
 def test_multitrack_h3_consecutive_context_uses_previous_trimmed_latent(monkeypatch):

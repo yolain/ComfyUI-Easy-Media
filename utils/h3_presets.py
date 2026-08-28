@@ -152,6 +152,9 @@ def _validate_h3_preset_entry(entry: Any, path: str, *, dual: bool) -> None:
     sigmas = parse_h3_sigmas(entry.get("sigmas"), f"{path}.sigmas")
     if not dual:
         return
+    context_sigmas = entry.get("sigmas_2nd_context")
+    if context_sigmas is not None:
+        parse_h3_sigmas(context_sigmas, f"{path}.sigmas_2nd_context")
 
     has_split = "split_step" in entry
     has_second_schedule = "sampler_2nd" in entry or "sigmas_2nd" in entry
