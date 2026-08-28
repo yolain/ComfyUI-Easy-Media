@@ -139,16 +139,36 @@ def track_data_widget(node: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     return candidates[0]
 
 
-def validate_track_data(data: dict[str, Any], *, recalculate: bool) -> None:
+def validate_track_data(
+    data: dict[str, Any],
+    *,
+    recalculate: bool,
+    segment_start_index: int = 0,
+    segment_count: int = -1,
+) -> None:
     tracks = data.get("tracks")
     frame_rate = data.get("frame_rate")
     if not isinstance(tracks, list):
         raise WorkflowError("track_data.tracks must be an array")
     if not isinstance(frame_rate, int) or isinstance(frame_rate, bool) or frame_rate < 1:
         raise WorkflowError("track_data.frame_rate must be a positive integer")
+    if (
+        not isinstance(segment_start_index, int)
+        or isinstance(segment_start_index, bool)
+        or segment_start_index < 0
+    ):
+        raise WorkflowError("segment_start_index must be a non-negative integer")
+    if (
+        not isinstance(segment_count, int)
+        or isinstance(segment_count, bool)
+        or segment_count < -1
+    ):
+        raise WorkflowError("segment_count must be -1 or a non-negative integer")
 
     track_ids: set[str] = set()
     segment_ids: set[str] = set()
+    locked_audio_tracks: list[tuple[str, int]] = []
+    task_ranges: list[tuple[int, int]] = []
     max_end = 0
     for track_index, track in enumerate(tracks):
         if not isinstance(track, dict):
@@ -162,6 +182,14 @@ def validate_track_data(data: dict[str, Any], *, recalculate: bool) -> None:
         track_type = track.get("type")
         if track_type not in {"task", "video", "audio", "subtitle"}:
             raise WorkflowError(f"Unsupported track type at tracks[{track_index}]: {track_type!r}")
+        if "audio_locked" in track and not isinstance(track.get("audio_locked"), bool):
+            raise WorkflowError(f"Track {track_id} audio_locked must be a boolean")
+        if track.get("audio_locked") is True:
+            if track_type != "audio":
+                raise WorkflowError(
+                    f"Only audio tracks may set audio_locked: true (track {track_id})"
+                )
+            locked_audio_tracks.append((track_id, track_index))
         segments = track.get("segments")
         if not isinstance(segments, list):
             raise WorkflowError(f"tracks[{track_index}].segments must be an array")
@@ -186,6 +214,8 @@ def validate_track_data(data: dict[str, Any], *, recalculate: bool) -> None:
                 raise WorkflowError(f"Segments overlap or are unsorted in track {track_id}")
             previous_end = end
             max_end = max(max_end, end)
+            if track_type == "task":
+                task_ranges.append((start, end))
             content = segment.get("content")
             if not isinstance(content, dict):
                 raise WorkflowError(f"{where}.content must be an object")
@@ -194,6 +224,38 @@ def validate_track_data(data: dict[str, Any], *, recalculate: bool) -> None:
             images = content.get("images", [])
             if track_type == "task" and (not isinstance(images, list) or len(images) > 9):
                 raise WorkflowError(f"{where}.content.images must contain at most 9 items")
+
+    if len(locked_audio_tracks) > 1:
+        locked_ids = [track_id for track_id, _ in locked_audio_tracks]
+        raise WorkflowError(f"Only one audio track may be locked; found {locked_ids}")
+    if locked_audio_tracks:
+        locked_id, locked_index = locked_audio_tracks[0]
+        locked_segments = tracks[locked_index].get("segments", [])
+        if not any(
+            isinstance(segment, dict)
+            and isinstance(segment.get("content"), dict)
+            and segment["content"].get("media_type") == "audio"
+            for segment in locked_segments
+        ):
+            raise WorkflowError(f"Locked audio track {locked_id} contains no audio segments")
+        selected_task_ranges = task_ranges[segment_start_index:]
+        if segment_count >= 0:
+            selected_task_ranges = selected_task_ranges[:segment_count]
+        uncovered_task_ranges = [
+            (task_start, task_end)
+            for task_start, task_end in selected_task_ranges
+            if not any(
+                int(audio_segment.get("start_frame", 0)) < task_end
+                and int(audio_segment.get("end_frame", 0)) > task_start
+                for audio_segment in locked_segments
+                if isinstance(audio_segment, dict)
+            )
+        ]
+        if uncovered_task_ranges:
+            raise WorkflowError(
+                f"Locked audio track {locked_id} does not overlap task segments: "
+                f"{uncovered_task_ranges}"
+            )
 
     if recalculate and max_end > 0:
         data["total_length"] = max_end
@@ -245,6 +307,24 @@ def apply_plan(
         int(node["id"]): copy.deepcopy(node.get("widgets_values"))
         for node in result.get("nodes", []) if node.get("id") in target_ids
     }
+    widgets = project.get("widgets_values")
+    if not isinstance(widgets, list) or len(widgets) < len(PROJECT_WIDGETS):
+        widget_count = len(widgets) if isinstance(widgets, list) else 0
+        raise WorkflowError(
+            f"Project {project.get('id')} widget schema is incompatible; found {widget_count} values"
+        )
+    selected_start_index = int(
+        project_patch.get(
+            "segment_start_index",
+            widgets[PROJECT_WIDGETS["segment_start_index"]],
+        )
+    )
+    selected_segment_count = int(
+        project_patch.get(
+            "segment_count",
+            widgets[PROJECT_WIDGETS["segment_count"]],
+        )
+    )
 
     track_index, current_track_data = track_data_widget(editor)
     if "track_data" in editor_patch:
@@ -254,22 +334,24 @@ def apply_plan(
         validate_track_data(
             next_track_data,
             recalculate=editor_patch.get("recalculate_total_length", True) is not False,
+            segment_start_index=selected_start_index,
+            segment_count=selected_segment_count,
         )
         editor["widgets_values"][track_index] = json.dumps(
             next_track_data, ensure_ascii=False, separators=(",", ":")
         )
     else:
-        validate_track_data(current_track_data, recalculate=False)
+        validate_track_data(
+            current_track_data,
+            recalculate=False,
+            segment_start_index=selected_start_index,
+            segment_count=selected_segment_count,
+        )
     if "format" in editor_patch:
         if track_index < 1 or not isinstance(editor_patch["format"], str):
             raise WorkflowError("Cannot safely locate editor format widget")
         editor["widgets_values"][track_index - 1] = editor_patch["format"]
 
-    widgets = project.get("widgets_values")
-    if not isinstance(widgets, list) or len(widgets) < len(PROJECT_WIDGETS):
-        raise WorkflowError(
-            f"Project {project.get('id')} widget schema is incompatible; found {len(widgets or [])} values"
-        )
     project_changes: dict[str, dict[str, Any]] = {}
     for field, index in PROJECT_WIDGETS.items():
         if field not in project_patch:
@@ -306,6 +388,34 @@ def apply_plan(
     return result, report
 
 
+def summarize_track(track: dict[str, Any]) -> dict[str, Any]:
+    segments = track.get("segments", [])
+    summary: dict[str, Any] = {
+        "id": track.get("id"),
+        "name": track.get("name"),
+        "type": track.get("type"),
+        "segments": len(segments) if isinstance(segments, list) else 0,
+    }
+    if track.get("type") != "audio":
+        return summary
+
+    summary["audio_locked"] = track.get("audio_locked") is True
+    summary["media"] = [
+        {
+            "file_name": content.get("file_name"),
+            "file_path": content.get("file_path"),
+            "source_type": content.get("source_type"),
+            "start_frame": segment.get("start_frame"),
+            "end_frame": segment.get("end_frame"),
+        }
+        for segment in segments
+        if isinstance(segment, dict)
+        and isinstance(segment.get("content"), dict)
+        and (content := segment["content"]).get("media_type") == "audio"
+    ]
+    return summary
+
+
 def inspect_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
     projects = nodes_by_type(workflow, PROJECT_TYPE)
     editors = nodes_by_type(workflow, EDITOR_TYPE)
@@ -327,12 +437,7 @@ def inspect_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
             "frame_rate": data.get("frame_rate"),
             "total_length": data.get("total_length"),
             "tracks": [
-                {
-                    "id": track.get("id"),
-                    "name": track.get("name"),
-                    "type": track.get("type"),
-                    "segments": len(track.get("segments", [])),
-                }
+                summarize_track(track)
                 for track in data.get("tracks", []) if isinstance(track, dict)
             ],
         })
