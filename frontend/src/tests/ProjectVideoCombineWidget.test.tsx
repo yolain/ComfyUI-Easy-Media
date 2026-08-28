@@ -491,6 +491,7 @@ describe('ProjectVideoCombineWidget', () => {
     fireEvent.click(alternate)
 
     expect(container.querySelectorAll('video')).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'A/B' })).not.toBeNull()
     expect((screen.getByRole('checkbox', { name: 'video_0_3.mp4' }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.queryByRole('button', { name: 'Select source' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Select output' })).toBeNull()

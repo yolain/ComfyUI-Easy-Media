@@ -401,7 +401,7 @@ export const CompareVideo = memo(function CompareVideo({
   outputUrl,
 }: Readonly<CompareVideoProps>) {
   const locale = app?.ui?.settings?.settingsValues?.['Comfy.Locale']
-  const [compareMode, setCompareMode] = useState<CompareMode>('compare')
+  const [compareMode, setCompareMode] = useState<CompareMode>('side-by-side')
   const settings = useMemo<CompareVideoSettings>(() => ({
     ...DEFAULT_COMPARE_VIDEO_SETTINGS,
     compare_mode: compareMode,
@@ -415,7 +415,7 @@ export const CompareVideo = memo(function CompareVideo({
         app={app}
         node={{}}
         settings={settings}
-        onSettingsChange={(nextSettings) => setCompareMode(nextSettings.compare_mode ?? 'compare')}
+        onSettingsChange={(nextSettings) => setCompareMode(nextSettings.compare_mode ?? 'side-by-side')}
         allowMediaSelection={false}
         bindNodeEvents={false}
       />
