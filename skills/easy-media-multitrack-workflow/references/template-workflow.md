@@ -2,7 +2,7 @@
 
 模板资产位于 `assets/templates/v1.3.0-blank-workflow.json`。它保留 v1.3.0 的完整节点、连线、分组和布局，用于用户明确要求“新建工作流”或没有可编辑工作流时。
 
-模板校验信息：ComfyUI workflow version `0.4`，21 个节点，26 条 links，SHA-256 `01fcd446e8c1837ff2f2c23a4b569244699c00bf919fe04b3d3ea0b0b01586cc`。
+模板校验信息：ComfyUI workflow version `0.4`，21 个节点，26 条 links，SHA-256 `6ac8498b5a60689f1919387cec960550bdadb4d9bc9459f4be264cfc3c52a470`。
 
 ## 两种工作模式
 

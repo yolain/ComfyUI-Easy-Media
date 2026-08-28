@@ -828,10 +828,10 @@
         "aux_id": "yolain/ComfyUI-Easy-Media"
       },
       "widgets_values": [
-        "{\"project_name\":\"default\",\"width\":0,\"height\":0,\"frame_rate\":24,\"clips\":[],\"auto_combine\":false}"
+        "{\"project_name\":\"default\",\"width\":0,\"height\":0,\"frame_rate\":24,\"clips\":[],\"auto_combine\":true}"
       ],
       "widgets_values_named": {
-        "project_data": "{\"project_name\":\"default\",\"width\":0,\"height\":0,\"frame_rate\":24,\"clips\":[],\"auto_combine\":false}"
+        "project_data": "{\"project_name\":\"default\",\"width\":0,\"height\":0,\"frame_rate\":24,\"clips\":[],\"auto_combine\":true}"
       }
     },
     {
