@@ -1665,6 +1665,10 @@ class EasyMultiTrackProject(io.ComfyNode):
             folder_paths.get_output_directory(),
         )
         all_entries = h3_task_entries(info)
+        has_locked_audio = any(
+            h3_locked_audio_track(entry, info) is not None
+            for entry in all_entries
+        )
         segment_start_index = int(_first_input(kwargs.get("segment_start_index"), 0))
         segment_count = int(_first_input(kwargs.get("segment_count"), -1))
         selected_entries = select_h3_task_entries(
@@ -1787,7 +1791,6 @@ class EasyMultiTrackProject(io.ComfyNode):
         previous_low_context_latent: Any | None = None
         previous_artifact: Any | None = None
         last_project_output: Any | None = None
-        last_locked_audio_output: Any | None = None
         report_step(35)
 
         segment_total = len(selected_entries)
@@ -1932,7 +1935,6 @@ class EasyMultiTrackProject(io.ComfyNode):
             # the tail after decoding, not from the task's opening frames.
             if h3_locked_audio_track(entry, info) is not None:
                 report_segment_step(0.20)
-                last_locked_audio_output = task_output.out(8)
                 initial_latent = graph.node(
                     "easy minimaxH3AudioLock",
                     id=f"audio_lock_{task_index}",
@@ -2280,10 +2282,19 @@ class EasyMultiTrackProject(io.ComfyNode):
         if last_project_output is None:
             log_node_info(node_name, "Project graph produced no task output")
             raise RuntimeError("H3 project graph produced no task output")
+        full_locked_audio: Any | None = None
+        if has_locked_audio:
+            full_locked_audio = graph.node(
+                "easy multiTrackTaskOutput",
+                id="full_locked_audio",
+                tracks_info=info,
+                task_index=-1,
+                prompt_format="default",
+            ).out(8)
         report_step(100)
         return io.NodeOutput(
             last_project_output,
-            last_locked_audio_output,
+            full_locked_audio,
             expand=graph.finalize(),
         )
 

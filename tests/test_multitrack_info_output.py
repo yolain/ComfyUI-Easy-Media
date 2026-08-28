@@ -3060,7 +3060,7 @@ def test_multitrack_task_output_minus_one_does_not_stop_at_the_next_minimax_task
                 {"start_frame": 0, "end_frame": 4, "content": {"user_prompt": "first"}},
                 {"start_frame": 4, "end_frame": 8, "content": {"user_prompt": "second"}},
             ]},
-            {"type": "audio", "segments": [{
+            {"type": "audio", "audio_locked": True, "segments": [{
                 "start_frame": 0,
                 "end_frame": 8,
                 "content": {"media_type": "audio"},
@@ -3071,6 +3071,7 @@ def test_multitrack_task_output_minus_one_does_not_stop_at_the_next_minimax_task
     result = module.MultiTrackTaskOutput.execute(tracks_info, task_index=-1)
 
     assert result.values[5][0]["waveform"].flatten().tolist() == list(range(8))
+    assert result.values[8]["waveform"].flatten().tolist() == list(range(8))
 
 
 def test_multitrack_audio_output_schema_is_basic_and_exposes_mode_and_two_tracks():

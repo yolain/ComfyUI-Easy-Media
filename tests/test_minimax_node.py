@@ -592,8 +592,25 @@ def test_multitrack_h3_project_outputs_locked_audio_used_by_generation(monkeypat
 
     result = module.EasyMultiTrackProject.execute(**inputs)
     audio_lock = _graph_node(result, "easy minimaxH3AudioLock")
+    task_outputs = [
+        (node_id, node)
+        for node_id, node in result.expand.items()
+        if node["class_type"] == "easy multiTrackTaskOutput"
+    ]
+    full_audio_id, full_audio = next(
+        (node_id, node)
+        for node_id, node in task_outputs
+        if node["inputs"]["task_index"] == -1
+    )
+    segment_audio_id, _segment_audio = next(
+        (node_id, node)
+        for node_id, node in task_outputs
+        if node["inputs"]["task_index"] == 0
+    )
 
-    assert result.values[1] == audio_lock["inputs"]["audio"]
+    assert result.values[1] == [full_audio_id, 8]
+    assert audio_lock["inputs"]["audio"] == [segment_audio_id, 8]
+    assert full_audio["inputs"]["prompt_format"] == "default"
 
 
 def test_multitrack_h3_project_outputs_none_without_locked_audio(monkeypatch):
