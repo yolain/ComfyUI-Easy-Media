@@ -2,6 +2,60 @@
 
 本参考用于创建或调整 `easy multiTrackEditor` 的 TRACK_DATA。当前项目的前端类型定义位于 `frontend/src/types/multitrack.ts`，实际执行逻辑位于 `nodes/basic.py`。
 
+## 动态分辨率
+
+`resolution` 是 `easy multiTrackEditor` 的 DynamicCombo widget。它不属于 TRACK_DATA；修改时必须按所选模式重建对应的子 widget，并同步工作流已有的 `widgets_values_named`。使用 `patch_workflow.py` 的 `editor.resolution` 写入，不要手工假设数组下标。
+
+| 需求 | `resolution` 标签 | 必需子字段 |
+| --- | --- | --- |
+| 输出固定预设尺寸 | 如 `1344 x 768 (16:9)` | 可选 `resize_method`，默认 `stretch` |
+| 明确自定义宽高 | `width x height (custom)` | `width`、`height`，可选 `resize_method` |
+| 跟随首个视频比例 | `width x height (auto)` | 可选 `resize_method` |
+| 固定短边或长边 | `width x height (shortest)` / `width x height (longest)` | `resize_to_pixel`，可选 `resize_method` |
+| 按比例和总像素预算 | `width x height (megapixels)` | `aspect_ratio`、`megapixels` |
+
+选择顺序：用户给出精确宽高时用已有 fixed preset，若没有对应预设则用 custom；只给横竖屏或画幅比例与质量/像素预算时用 megapixels；要求保持源视频比例时用 auto；要求“短边/长边为 N”时用 shortest/longest。用户没有表达分辨率意图时保留当前设置。模型 format 的默认尺寸只是参考，不能覆盖用户明确要求。
+
+### 自然语言中的 MP 与比例
+
+把不区分大小写的 `mp`、`Mpx`、`megapixel(s)` 或“百万像素”视为 megapixels 单位。`0.9mp`、`1 MP`、`0.8 megapixels` 等表达直接选择 megapixels 模式，并原样提取数值。同句中的比例映射为 DynamicCombo 的完整 `aspect_ratio` 值：
+
+| 用户比例 | `aspect_ratio` |
+| --- | --- |
+| `1:1` | `1:1 (Square)` |
+| `2:3` | `2:3 (Portrait Photo)` |
+| `3:2` | `3:2 (Photo)` |
+| `3:4` | `3:4 (Portrait Standard)` |
+| `4:3` | `4:3 (Standard)` |
+| `9:16` | `9:16 (Portrait Widescreen)` |
+| `16:9` | `16:9 (Widescreen)` |
+| `21:9` | `21:9 (Ultrawide)` |
+
+例如“生成 16:9 0.9mp 大小的视频”无需追问，直接规范化为：
+
+```json
+{
+  "resolution": "width x height (megapixels)",
+  "aspect_ratio": "16:9 (Widescreen)",
+  "megapixels": 0.9
+}
+```
+
+MP 数值不得换算为宽高或四舍五入。若只有 MP：当前已经是 megapixels 模式则保留其 `aspect_ratio`；否则可根据明确的横屏/竖屏语义选择 `16:9`/`9:16`，仍无法确定时询问。精确宽高、比例与 MP 互相矛盾时也应询问。
+
+custom 示例：
+
+```json
+{
+  "resolution": "width x height (custom)",
+  "width": 1024,
+  "height": 576,
+  "resize_method": "crop"
+}
+```
+
+可用 `resize_method` 为 `stretch`、`resize`、`pad`、`pad (white)`、`pad_edge`、`pad_edge_pixel`、`crop`、`pillarbox_blur`。需要保留完整画面时优先 pad/resize，需要铺满画布且允许裁边时选 crop；不要在用户未提出时擅自改变已有 resize method。
+
 ## 时间语义
 
 - `start_frame` 包含，`end_frame` 不包含；片段帧数为 `end_frame - start_frame`。
@@ -153,6 +207,34 @@
 - 作为主音频使用时通常保持 `muted: false`。不要为了“锁定”而修改无关的 solo、音量或轨道编辑锁状态。
 - 如果上下文明确不需要保留任何原音频，应确保所有 audio track 的 `audio_locked` 为 `false`。
 
+## 说话人参考音频
+
+`speaker_reference` 是音频片段 `content` 中的布尔字段。MiniMax 模式会提取被标记片段对应的源音频（从源文件开头起，最多 15 秒）作为声音/说话人参考，并让所有被处理的 task segment 沿用该参考；它不要求在时间线上与任务片段重叠。
+
+```json
+{
+  "id": "voice-reference-segment",
+  "start_frame": 0,
+  "end_frame": 120,
+  "content": {
+    "media_type": "audio",
+    "source_type": "input",
+    "file_path": "codex/voice/reference.wav",
+    "file_name": "reference.wav",
+    "speaker_reference": true
+  }
+}
+```
+
+决策规则：
+
+- 用户说“设为说话人”“所有片段沿用这个声音”“参考这个人的音色/语速/表达”时，标记其指定的音频片段。
+- 标记必须位于 audio track 的 audio segment 上。同一音轨最多一个；切换时把该音轨其他片段显式设为 `false`。常规单说话人工作流默认只保留一个全局候选；多说话人工作流只有在节点图确实支持且用户明确要求时才在不同音轨上保留多个。
+- 这是参考而不是时间线原声复用：不要仅因为设置了说话人就同时设置 `audio_locked`。只有用户还要求原样保留该音频并让它驱动时间线时，才分别评估 `audio_locked`。
+- MiniMax 的说话人参考会作为每个任务的参考音频处理，该音轨不再按普通时间线音轨语义混入对应任务。若用户既要音色参考又要可听的时间线音频，应使用独立音轨/片段表达两个角色，并在交付摘要中说明。
+- 非 MiniMax format 不应自动添加该标记；已有标记在用户未要求改变时保留，但要说明当前 format 不会消费它。
+- 多个候选无法消歧时，列出片段 ID、音轨名称、文件名、时长或帧范围，请用户指定；不要按第一段或最长片段选择。
+
 ## 自动编排决策
 
 - 用户给出明确镜头/片段长度时优先采用；否则按素材时长或提示词中的时间信息推导，并说明推导。
@@ -169,3 +251,28 @@
 - `project_save`: `new` 或 `override`。在 `override` 且 count 为 `-1` 时，执行逻辑会删除起始索引之后的已保存片段再生成；修改前向用户清楚说明。
 - `sampling_mode`: `single` 或 `dual`；`sampling_plan` 必须是当前节点可用预设。不要仅凭另一份流程中的值假设当前环境支持。
 - `1st_pass_only` 仅适用于显式的一阶段检查点流程；不要自动开启。
+
+## 补丁 Plan
+
+Plan 只包含实际变更。`node_id` 可省略并由拓扑定位；`editor.resolution` 是完整 DynamicCombo 设置，`editor.track_data` 是完整 TRACK_DATA。不要把整份节点或工作流放入 plan。
+
+```json
+{
+  "editor": {
+    "resolution": {
+      "resolution": "width x height (megapixels)",
+      "aspect_ratio": "16:9 (Widescreen)",
+      "megapixels": 0.9
+    },
+    "track_data": { "tracks": [], "total_length": 120, "frame_rate": 24 },
+    "format": "MiniMax"
+  },
+  "project": {
+    "project_save": "override",
+    "segment_start_index": 0,
+    "segment_count": -1,
+    "sampling_plan": "medium",
+    "sampling_mode": "single"
+  }
+}
+```

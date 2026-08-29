@@ -7,6 +7,7 @@ import argparse
 import copy
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -28,6 +29,26 @@ PROJECT_WIDGETS = {
     "disable_2nd_noise": 9,
     "upscale_by": 10,
     "upscale_model": 11,
+}
+RESIZE_METHODS = {
+    "stretch",
+    "resize",
+    "pad",
+    "pad (white)",
+    "pad_edge",
+    "pad_edge_pixel",
+    "crop",
+    "pillarbox_blur",
+}
+ASPECT_RATIOS = {
+    "1:1 (Square)",
+    "2:3 (Portrait Photo)",
+    "3:2 (Photo)",
+    "3:4 (Portrait Standard)",
+    "4:3 (Standard)",
+    "9:16 (Portrait Widescreen)",
+    "16:9 (Widescreen)",
+    "21:9 (Ultrawide)",
 }
 
 
@@ -139,6 +160,125 @@ def track_data_widget(node: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     return candidates[0]
 
 
+def validate_resolution_patch(value: Any) -> tuple[list[Any], dict[str, Any]]:
+    """Validate and flatten a DynamicCombo resolution value for workflow widgets."""
+    if isinstance(value, str):
+        patch = {"resolution": value}
+    elif isinstance(value, dict):
+        patch = copy.deepcopy(value)
+    else:
+        raise WorkflowError("editor.resolution must be a string or object")
+
+    allowed = {
+        "resolution",
+        "resize_method",
+        "resize_to_pixel",
+        "width",
+        "height",
+        "aspect_ratio",
+        "megapixels",
+    }
+    unknown = sorted(set(patch) - allowed)
+    if unknown:
+        raise WorkflowError(f"Unsupported resolution fields: {unknown}")
+    label = patch.get("resolution")
+    if not isinstance(label, str) or not label:
+        raise WorkflowError("editor.resolution.resolution must be a non-empty string")
+    named: dict[str, Any] = {"resolution": label}
+    flattened: list[Any] = [label]
+
+    def reject_unused(expected: set[str]) -> None:
+        unused = sorted(set(patch) - ({"resolution"} | expected))
+        if unused:
+            raise WorkflowError(
+                f"Resolution option {label!r} does not use fields: {unused}"
+            )
+
+    def resize_method() -> str:
+        method = patch.get("resize_method", "stretch")
+        if method not in RESIZE_METHODS:
+            raise WorkflowError(f"Unsupported resolution resize_method: {method!r}")
+        named["resolution.resize_method"] = method
+        return method
+
+    if label == "width x height (custom)":
+        reject_unused({"width", "height", "resize_method"})
+        for field in ("width", "height"):
+            dimension = patch.get(field)
+            if (
+                not isinstance(dimension, int)
+                or isinstance(dimension, bool)
+                or dimension < 64
+                or dimension > 8096
+            ):
+                raise WorkflowError(
+                    f"editor.resolution.{field} must be an integer from 64 to 8096"
+                )
+            named[f"resolution.{field}"] = dimension
+            flattened.append(dimension)
+        flattened.append(resize_method())
+    elif label in {"width x height (shortest)", "width x height (longest)"}:
+        reject_unused({"resize_to_pixel", "resize_method"})
+        pixels = patch.get("resize_to_pixel")
+        if (
+            not isinstance(pixels, int)
+            or isinstance(pixels, bool)
+            or pixels < 64
+            or pixels > 8096
+        ):
+            raise WorkflowError(
+                "editor.resolution.resize_to_pixel must be an integer from 64 to 8096"
+            )
+        named["resolution.resize_to_pixel"] = pixels
+        flattened.extend([pixels, resize_method()])
+    elif label == "width x height (megapixels)":
+        reject_unused({"aspect_ratio", "megapixels"})
+        aspect_ratio = patch.get("aspect_ratio")
+        megapixels = patch.get("megapixels")
+        if aspect_ratio not in ASPECT_RATIOS:
+            raise WorkflowError(
+                f"editor.resolution.aspect_ratio must be one of {sorted(ASPECT_RATIOS)}"
+            )
+        if (
+            not isinstance(megapixels, (int, float))
+            or isinstance(megapixels, bool)
+            or not 0.1 <= float(megapixels) <= 16.0
+        ):
+            raise WorkflowError("editor.resolution.megapixels must be from 0.1 to 16.0")
+        named["resolution.aspect_ratio"] = aspect_ratio
+        named["resolution.megapixels"] = megapixels
+        flattened.extend([aspect_ratio, megapixels])
+    else:
+        reject_unused({"resize_method"})
+        is_auto = label == "width x height (auto)"
+        is_fixed = re.fullmatch(r"\s*\d+\s*x\s*\d+\s*\([^()]+\)\s*", label) is not None
+        if not is_auto and not is_fixed:
+            raise WorkflowError(f"Unsupported resolution option: {label!r}")
+        flattened.append(resize_method())
+    return flattened, named
+
+
+def sync_named_editor_widgets(
+    editor: dict[str, Any],
+    *,
+    resolution_named: dict[str, Any] | None = None,
+    format_value: str | None = None,
+    track_data_value: str | None = None,
+) -> None:
+    named = editor.get("widgets_values_named")
+    if not isinstance(named, dict):
+        return
+    if resolution_named is not None:
+        for key in list(named):
+            if key == "resolution" or key.startswith("resolution."):
+                del named[key]
+        named.update(resolution_named)
+    if format_value is not None:
+        named["format"] = format_value
+    if track_data_value is not None:
+        named["track_data"] = track_data_value
+
+
 def validate_track_data(
     data: dict[str, Any],
     *,
@@ -168,6 +308,7 @@ def validate_track_data(
     track_ids: set[str] = set()
     segment_ids: set[str] = set()
     locked_audio_tracks: list[tuple[str, int]] = []
+    speaker_references: list[tuple[str, str]] = []
     task_ranges: list[tuple[int, int]] = []
     max_end = 0
     for track_index, track in enumerate(tracks):
@@ -221,6 +362,17 @@ def validate_track_data(
                 raise WorkflowError(f"{where}.content must be an object")
             if track_type in {"video", "audio"} and content.get("media_type") != track_type:
                 raise WorkflowError(f"{where}.content.media_type must be {track_type!r}")
+            if "speaker_reference" in content:
+                if not isinstance(content.get("speaker_reference"), bool):
+                    raise WorkflowError(
+                        f"{where}.content.speaker_reference must be a boolean"
+                    )
+                if track_type != "audio" or content.get("media_type") != "audio":
+                    raise WorkflowError(
+                        f"Only audio segments may contain speaker_reference ({where})"
+                    )
+            if content.get("speaker_reference") is True:
+                speaker_references.append((track_id, segment_id))
             images = content.get("images", [])
             if track_type == "task" and (not isinstance(images, list) or len(images) > 9):
                 raise WorkflowError(f"{where}.content.images must contain at most 9 items")
@@ -228,6 +380,15 @@ def validate_track_data(
     if len(locked_audio_tracks) > 1:
         locked_ids = [track_id for track_id, _ in locked_audio_tracks]
         raise WorkflowError(f"Only one audio track may be locked; found {locked_ids}")
+    speaker_tracks = [track_id for track_id, _ in speaker_references]
+    duplicate_speaker_tracks = sorted({
+        track_id for track_id in speaker_tracks if speaker_tracks.count(track_id) > 1
+    })
+    if duplicate_speaker_tracks:
+        raise WorkflowError(
+            "Each audio track may contain only one speaker reference; found multiple in "
+            f"{duplicate_speaker_tracks}"
+        )
     if locked_audio_tracks:
         locked_id, locked_index = locked_audio_tracks[0]
         locked_segments = tracks[locked_index].get("segments", [])
@@ -292,9 +453,13 @@ def apply_plan(
     unknown_top = sorted(set(plan) - {"editor", "project"})
     if unknown_top:
         raise WorkflowError(f"Unsupported top-level plan fields: {unknown_top}")
-    unknown_editor = sorted(
-        set(editor_patch) - {"node_id", "track_data", "format", "recalculate_total_length"}
-    )
+    unknown_editor = sorted(set(editor_patch) - {
+        "node_id",
+        "track_data",
+        "format",
+        "resolution",
+        "recalculate_total_length",
+    })
     if unknown_editor:
         raise WorkflowError(f"Unsupported editor fields: {unknown_editor}")
     validate_project_patch(project_patch)
@@ -304,7 +469,10 @@ def apply_plan(
     editor = choose_editor(result, project, editor_patch.get("node_id"))
     target_ids = {int(project["id"]), int(editor["id"])}
     before_widgets = {
-        int(node["id"]): copy.deepcopy(node.get("widgets_values"))
+        int(node["id"]): {
+            "widgets_values": copy.deepcopy(node.get("widgets_values")),
+            "widgets_values_named": copy.deepcopy(node.get("widgets_values_named")),
+        }
         for node in result.get("nodes", []) if node.get("id") in target_ids
     }
     widgets = project.get("widgets_values")
@@ -327,6 +495,21 @@ def apply_plan(
     )
 
     track_index, current_track_data = track_data_widget(editor)
+    editor_widgets = editor.get("widgets_values")
+    if not isinstance(editor_widgets, list) or track_index < 1:
+        raise WorkflowError("Cannot safely locate editor widgets")
+    current_format = editor_widgets[track_index - 1]
+    if not isinstance(current_format, str):
+        raise WorkflowError("Cannot safely locate editor format widget")
+    next_format = editor_patch.get("format", current_format)
+    if not isinstance(next_format, str):
+        raise WorkflowError("editor.format must be a string")
+    resolution_values: list[Any] | None = None
+    resolution_named: dict[str, Any] | None = None
+    if "resolution" in editor_patch:
+        resolution_values, resolution_named = validate_resolution_patch(
+            editor_patch["resolution"]
+        )
     if "track_data" in editor_patch:
         next_track_data = copy.deepcopy(editor_patch["track_data"])
         if not isinstance(next_track_data, dict):
@@ -337,20 +520,32 @@ def apply_plan(
             segment_start_index=selected_start_index,
             segment_count=selected_segment_count,
         )
-        editor["widgets_values"][track_index] = json.dumps(
+        serialized_track_data = json.dumps(
             next_track_data, ensure_ascii=False, separators=(",", ":")
         )
+        editor_widgets[track_index] = serialized_track_data
     else:
+        serialized_track_data = editor_widgets[track_index]
         validate_track_data(
             current_track_data,
             recalculate=False,
             segment_start_index=selected_start_index,
             segment_count=selected_segment_count,
         )
-    if "format" in editor_patch:
-        if track_index < 1 or not isinstance(editor_patch["format"], str):
-            raise WorkflowError("Cannot safely locate editor format widget")
-        editor["widgets_values"][track_index - 1] = editor_patch["format"]
+    if resolution_values is not None:
+        editor["widgets_values"] = (
+            resolution_values
+            + [next_format, serialized_track_data]
+            + editor_widgets[track_index + 1:]
+        )
+    elif "format" in editor_patch:
+        editor_widgets[track_index - 1] = next_format
+    sync_named_editor_widgets(
+        editor,
+        resolution_named=resolution_named,
+        format_value=next_format if "format" in editor_patch else None,
+        track_data_value=serialized_track_data if "track_data" in editor_patch else None,
+    )
 
     project_changes: dict[str, dict[str, Any]] = {}
     for field, index in PROJECT_WIDGETS.items():
@@ -368,11 +563,15 @@ def apply_plan(
         for node in candidate.get("nodes", []):
             if node.get("id") in target_ids:
                 node["widgets_values"] = "<target-widgets>"
+                node["widgets_values_named"] = "<target-named-widgets>"
     if original_without_targets != result_without_targets:
         raise WorkflowError("Invariant failed: data outside target widgets changed")
 
     after_widgets = {
-        int(node["id"]): copy.deepcopy(node.get("widgets_values"))
+        int(node["id"]): {
+            "widgets_values": copy.deepcopy(node.get("widgets_values")),
+            "widgets_values_named": copy.deepcopy(node.get("widgets_values_named")),
+        }
         for node in result.get("nodes", []) if node.get("id") in target_ids
     }
     changed_nodes = [node_id for node_id in sorted(target_ids) if before_widgets[node_id] != after_widgets[node_id]]
@@ -407,6 +606,7 @@ def summarize_track(track: dict[str, Any]) -> dict[str, Any]:
             "source_type": content.get("source_type"),
             "start_frame": segment.get("start_frame"),
             "end_frame": segment.get("end_frame"),
+            "speaker_reference": content.get("speaker_reference") is True,
         }
         for segment in segments
         if isinstance(segment, dict)
@@ -431,9 +631,22 @@ def inspect_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
     editor_items: list[dict[str, Any]] = []
     for editor in editors:
         index, data = track_data_widget(editor)
+        widgets = editor.get("widgets_values", [])
+        named = editor.get("widgets_values_named")
+        resolution = None
+        if isinstance(named, dict) and isinstance(named.get("resolution"), str):
+            resolution = {
+                key: value
+                for key, value in named.items()
+                if key == "resolution" or key.startswith("resolution.")
+            }
+        elif isinstance(widgets, list) and index >= 2:
+            resolution = {"resolution": widgets[0], "dynamic_values": widgets[1:index - 1]}
         editor_items.append({
             "id": editor.get("id"),
             "track_data_widget_index": index,
+            "resolution": resolution,
+            "format": widgets[index - 1] if isinstance(widgets, list) and index >= 1 else None,
             "frame_rate": data.get("frame_rate"),
             "total_length": data.get("total_length"),
             "tracks": [

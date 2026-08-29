@@ -1,4 +1,4 @@
 interface:
   display_name: "Easy Media MultiTrack Workflow"
-  short_description: "Safely arrange media and MultiTrack project settings"
-  default_prompt: "Use $easy-media-multitrack-workflow to safely edit this ComfyUI MultiTrack workflow from the current context."
+  short_description: "Create, edit, and run Easy Media MultiTrack workflows"
+  default_prompt: "Use $easy-media-multitrack-workflow to create or edit this MultiTrack workflow and run it if I explicitly request generation."
