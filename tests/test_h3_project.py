@@ -264,6 +264,7 @@ def test_clear_project_segments_from_removes_records_and_artifacts(tmp_path):
     project_dir = initialize_h3_project("demo", _tracks_info(), tmp_path)
     keep_video = project_dir / "video_0_1.mp4"
     removed_video = project_dir / "video_1_1.mp4"
+    removed_audio = project_dir / "locked_audio_1_1.wav"
     removed_context = project_dir / "context_latent_2_1.safetensors"
     removed_low_context = project_dir / "context_latent_low_2_1.safetensors"
     removed_staging = project_dir / ".staging_video_3_00001_.mp4"
@@ -271,6 +272,7 @@ def test_clear_project_segments_from_removes_records_and_artifacts(tmp_path):
     for path in (
         keep_video,
         removed_video,
+        removed_audio,
         removed_context,
         removed_low_context,
         removed_staging,
@@ -281,7 +283,10 @@ def test_clear_project_segments_from_removes_records_and_artifacts(tmp_path):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["segments"] = {
         "0": {"generations": {"1": {"video": keep_video.name}}},
-        "1": {"generations": {"1": {"video": removed_video.name}}},
+        "1": {"generations": {"1": {
+            "video": removed_video.name,
+            "locked_audio": removed_audio.name,
+        }}},
         "2": {"generations": {"1": {
             "context_latent": removed_context.name,
             "context_latent_low": removed_low_context.name,
@@ -296,11 +301,13 @@ def test_clear_project_segments_from_removes_records_and_artifacts(tmp_path):
     assert keep_video.is_file()
     assert unrelated.is_file()
     assert not removed_video.exists()
+    assert not removed_audio.exists()
     assert not removed_context.exists()
     assert not removed_low_context.exists()
     assert not removed_staging.exists()
     assert {path.name for path in removed} == {
         removed_video.name,
+        removed_audio.name,
         removed_context.name,
         removed_low_context.name,
         removed_staging.name,
@@ -324,17 +331,25 @@ def _write_render_project(tmp_path: Path) -> Path:
     project_dir.mkdir(parents=True)
     (project_dir / "video_0_1.mp4").write_bytes(b"video-0")
     (project_dir / "video_1_1.mp4").write_bytes(b"video-1")
+    (project_dir / "locked_audio_0_1.wav").write_bytes(b"original-audio-0")
     (project_dir / "project.json").write_text(
         json.dumps({
             "project_name": "demo",
             "width": 1280,
             "height": 720,
             "fps": 24,
+            "task_segments": [
+                {"index": 0, "audio_locked": True},
+                {"index": 1, "audio_locked": False},
+            ],
             "segments": {
                 "0": {
                     "active_generation": 1,
                     "continuity_mode": "shot",
-                    "generations": {"1": {"video": "video_0_1.mp4"}},
+                    "generations": {"1": {
+                        "video": "video_0_1.mp4",
+                        "locked_audio": "locked_audio_0_1.wav",
+                    }},
                 },
                 "1": {
                     "active_generation": 1,
@@ -360,6 +375,7 @@ def test_load_h3_project_data_marks_shot_and_context(monkeypatch, tmp_path):
 
     assert data["project_name"] == "demo"
     assert [clip["continuity_mode"] for clip in data["clips"]] == ["shot", "context"]
+    assert [clip["audio_locked"] for clip in data["clips"]] == [True, False]
     assert [clip["source_end_frame"] for clip in data["clips"]] == [120, 96]
     assert data["clips"][0]["file_path"] == str(
         (project_dir / "video_0_1.mp4").relative_to(tmp_path)
@@ -367,15 +383,23 @@ def test_load_h3_project_data_marks_shot_and_context(monkeypatch, tmp_path):
     assert data["clips"][0]["media_revision"] == str(
         (project_dir / "video_0_1.mp4").stat().st_mtime_ns
     )
+    assert data["clips"][0]["video_files"][0]["locked_audio_path"] == str(
+        (project_dir / "locked_audio_0_1.wav").relative_to(tmp_path)
+    )
 
 
 def test_load_h3_project_data_lists_all_video_files_for_the_same_index(monkeypatch, tmp_path):
     project_dir = _write_render_project(tmp_path)
     alternate = project_dir / "video_0_2.mp4"
     alternate.write_bytes(b"video-0-alternate")
+    alternate_audio = project_dir / "locked_audio_0_2.wav"
+    alternate_audio.write_bytes(b"original-audio-0-alternate")
     manifest_path = project_dir / "project.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["segments"]["0"]["generations"]["2"] = {"video": alternate.name}
+    manifest["segments"]["0"]["generations"]["2"] = {
+        "video": alternate.name,
+        "locked_audio": alternate_audio.name,
+    }
     manifest["segments"]["0"]["generations"]["3"] = {"video": alternate.name}
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     monkeypatch.setattr("utils.h3_project.folder_paths.get_output_directory", lambda: str(tmp_path))
@@ -397,9 +421,14 @@ def test_compose_h3_project_video_uses_selected_file_for_same_index(monkeypatch,
     project_dir = _write_render_project(tmp_path)
     alternate = project_dir / "video_0_2.mp4"
     alternate.write_bytes(b"video-0-alternate")
+    alternate_audio = project_dir / "locked_audio_0_2.wav"
+    alternate_audio.write_bytes(b"original-audio-0-alternate")
     manifest_path = project_dir / "project.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["segments"]["0"]["generations"]["2"] = {"video": alternate.name}
+    manifest["segments"]["0"]["generations"]["2"] = {
+        "video": alternate.name,
+        "locked_audio": alternate_audio.name,
+    }
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     monkeypatch.setattr("utils.h3_project.folder_paths.get_output_directory", lambda: str(tmp_path))
     monkeypatch.setattr("utils.video.ffprobe_info", lambda _path: {"frame_count": 120})
@@ -421,6 +450,8 @@ def test_compose_h3_project_video_uses_selected_file_for_same_index(monkeypatch,
     })
 
     assert captured["segments"][0]["source"] == str(alternate)
+    assert captured["segments"][0]["audio_locked"] is True
+    assert captured["segments"][0]["audio_source"] == str(alternate_audio)
 
 
 def test_compose_h3_project_video_uses_trimmed_sequential_segments(monkeypatch, tmp_path):
@@ -457,6 +488,11 @@ def test_compose_h3_project_video_uses_trimmed_sequential_segments(monkeypatch, 
         (0, 60, 10),
         (60, 100, 5),
     ]
+    assert [item["audio_locked"] for item in captured["segments"]] == [False, True]
+    assert "audio_source" not in captured["segments"][0]
+    assert captured["segments"][1]["audio_source"] == str(
+        tmp_path / "easy_media" / "projects" / "demo" / "locked_audio_0_1.wav"
+    )
 
 
 def test_compose_project_defaults_to_full_untrimmed_clip_lengths(monkeypatch, tmp_path):
@@ -475,6 +511,38 @@ def test_compose_project_defaults_to_full_untrimmed_clip_lengths(monkeypatch, tm
 
     assert captured["total_length"] == 240
     assert [segment["source_start_frame"] for segment in captured["segments"]] == [0, 0]
+
+
+def test_compose_project_falls_back_to_embedded_audio_for_legacy_generation(
+    monkeypatch,
+    tmp_path,
+):
+    project_dir = _write_render_project(tmp_path)
+    (project_dir / "locked_audio_0_1.wav").unlink()
+    manifest_path = project_dir / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    del manifest["segments"]["0"]["generations"]["1"]["locked_audio"]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(
+        "utils.h3_project.folder_paths.get_output_directory",
+        lambda: str(tmp_path),
+    )
+    monkeypatch.setattr(
+        "utils.video.ffprobe_info",
+        lambda _path: {"frame_count": 120},
+    )
+    captured = {}
+
+    def fake_merge(segments, total_length, frame_rate, width, height):
+        captured["segments"] = segments
+        return str(tmp_path / "combined.mp4")
+
+    monkeypatch.setattr("utils.video.merge_video_track_with_ffmpeg", fake_merge)
+
+    compose_h3_project_video("demo")
+
+    assert captured["segments"][0]["audio_locked"] is True
+    assert "audio_source" not in captured["segments"][0]
 
 
 def test_compose_project_appends_segments_created_after_snapshot(monkeypatch, tmp_path):

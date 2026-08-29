@@ -400,7 +400,7 @@ def choose_h3_generation(project_dir: Path, segment_index: int, override: bool) 
         return 1
     versions: dict[int, float] = {}
     pattern = re.compile(
-        rf"^(?:video|context_latent(?:_low)?)_{int(segment_index)}_"
+        rf"^(?:video|locked_audio|context_latent(?:_low)?)_{int(segment_index)}_"
         r"(\d+)(?:\.[^.]+)?$"
     )
     if project_dir.is_dir():
@@ -610,6 +610,7 @@ def clear_h3_project_segments_from(
                 continue
             for key in (
                 "video",
+                "locked_audio",
                 "latent",
                 "context_latent",
                 "context_latent_low",
@@ -640,7 +641,7 @@ def clear_h3_project_segments_from(
         raise RuntimeError(f"Failed to clear project segments: {error}") from error
 
     artifact_pattern = re.compile(
-        r"^\.?(?:video|latent|context_latent|context_latent_low|staging_video)_"
+        r"^\.?(?:video|locked_audio|latent|context_latent|context_latent_low|staging_video)_"
         r"(\d+)(?:_|\.)"
     )
     for path in project_dir.iterdir():
@@ -705,6 +706,13 @@ def load_h3_project_data(project_name: Any) -> dict[str, Any]:
     raw_segments = manifest.get("segments", {})
     if not isinstance(raw_segments, dict):
         raise ValueError("H3 project manifest segments must be an object")
+    raw_task_segments = manifest.get("task_segments", [])
+    task_segments = raw_task_segments if isinstance(raw_task_segments, list) else []
+    task_segments_by_index = {
+        _frame_value(task_segment.get("index"), position): task_segment
+        for position, task_segment in enumerate(task_segments)
+        if isinstance(task_segment, dict)
+    }
 
     clips: list[dict[str, Any]] = []
     for raw_index, segment in sorted(
@@ -747,6 +755,17 @@ def load_h3_project_data(project_name: Any) -> dict[str, Any]:
                 "file_name": candidate_source.name,
                 "media_revision": str(candidate_source.stat().st_mtime_ns),
                 "source_frame_count": candidate_frame_count,
+                **(
+                    {
+                        "locked_audio_path": _project_child_path(
+                            project_dir,
+                            candidate["locked_audio"],
+                        ).relative_to(output_dir).as_posix()
+                    }
+                    if candidate.get("locked_audio")
+                    and (project_dir / str(candidate["locked_audio"])).is_file()
+                    else {}
+                ),
             })
         active_file = next(
             (file for file in video_files if file["file_path"] == active_file_path),
@@ -758,6 +777,7 @@ def load_h3_project_data(project_name: Any) -> dict[str, Any]:
             index = int(raw_index)
         except (TypeError, ValueError):
             continue
+        task_segment = task_segments_by_index.get(index, {})
         clips.append({
             "id": f"segment-{index}",
             "index": index,
@@ -770,6 +790,7 @@ def load_h3_project_data(project_name: Any) -> dict[str, Any]:
             "continuity_mode": (
                 "context" if str(segment.get("continuity_mode", "shot")).lower() == "context" else "shot"
             ),
+            "audio_locked": task_segment.get("audio_locked") is True,
             "enabled": True,
             "video_files": video_files,
         })
@@ -851,7 +872,14 @@ def compose_h3_project_video(project_name: Any, project_data: Any = None) -> Pat
                 for file in source_clip.get("video_files", [])
                 if file.get("file_path") == requested_path
             ),
-            source_clip,
+            next(
+                (
+                    file
+                    for file in source_clip.get("video_files", [])
+                    if file.get("file_path") == source_clip.get("file_path")
+                ),
+                source_clip,
+            ),
         )
         source_count = int(selected_file["source_frame_count"])
         try:
@@ -866,6 +894,17 @@ def compose_h3_project_video(project_name: Any, project_data: Any = None) -> Pat
             "start_frame": cursor,
             "end_frame": cursor + duration,
             "source_start_frame": source_start,
+            "audio_locked": source_clip.get("audio_locked") is True,
+            **(
+                {
+                    "audio_source": str(
+                        output_dir / selected_file["locked_audio_path"]
+                    )
+                }
+                if source_clip.get("audio_locked") is True
+                and selected_file.get("locked_audio_path")
+                else {}
+            ),
         })
         cursor += duration
 

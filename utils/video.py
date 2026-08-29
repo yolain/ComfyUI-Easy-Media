@@ -190,6 +190,12 @@ def merge_video_track_with_ffmpeg(
         return None
     if any(not os.path.isfile(str(segment.get("source", ""))) for segment in segments):
         return None
+    if any(
+        segment.get("audio_source") is not None
+        and not os.path.isfile(str(segment["audio_source"]))
+        for segment in segments
+    ):
+        return None
 
     total_seconds = total_length / frame_rate
     output_fd, output_path = tempfile.mkstemp(
@@ -209,14 +215,26 @@ def merge_video_track_with_ffmpeg(
         "-i",
         f"anullsrc=r=44100:cl=stereo:d={total_seconds}",
     ]
+    input_indexes: list[tuple[int, int]] = []
+    next_input_index = 2
     for segment in segments:
+        video_input_index = next_input_index
         command.extend(["-i", str(segment["source"])])
+        next_input_index += 1
+        audio_source = segment.get("audio_source")
+        if audio_source is not None and str(audio_source) != str(segment["source"]):
+            audio_input_index = next_input_index
+            command.extend(["-i", str(audio_source)])
+            next_input_index += 1
+        else:
+            audio_input_index = video_input_index
+        input_indexes.append((video_input_index, audio_input_index))
 
     filters = ["[0:v]setpts=PTS-STARTPTS[basev]", "[1:a]asetpts=PTS-STARTPTS[basea]"]
     current_video = "basev"
     audio_labels = ["basea"]
     for index, segment in enumerate(segments):
-        input_index = index + 2
+        video_input_index, audio_input_index = input_indexes[index]
         start_frame = max(0, int(segment.get("start_frame", 0)))
         end_frame = min(total_length, max(start_frame, int(segment.get("end_frame", start_frame))))
         start_seconds = start_frame / frame_rate
@@ -245,7 +263,7 @@ def merge_video_track_with_ffmpeg(
             f"trim=end_frame={frame_count}",
         ])
         video_filters.append(f"setpts=PTS-STARTPTS+{start_seconds}/TB")
-        filters.append(f"[{input_index}:v]{','.join(video_filters)}[{clip_label}]")
+        filters.append(f"[{video_input_index}:v]{','.join(video_filters)}[{clip_label}]")
         # Use integer timeline frames for the overlay window. Comparing FFmpeg's
         # `t` against Python-generated fractional seconds can exclude the exact
         # boundary frame (for example, 260 / 24) because the two sides round the
@@ -256,9 +274,9 @@ def merge_video_track_with_ffmpeg(
         )
         current_video = output_label
 
-        if ffprobe_info(str(segment["source"])).get("has_audio"):
+        audio_source = str(segment.get("audio_source", segment["source"]))
+        if ffprobe_info(audio_source).get("has_audio"):
             audio_label = f"clipa{index}"
-            delay_ms = round(start_seconds * 1000)
             muted = segment.get("audio_muted") is True
             raw_volume_db = segment.get("audio_volume_db", 0.0)
             try:
@@ -268,10 +286,29 @@ def merge_video_track_with_ffmpeg(
             if not math.isfinite(volume_db):
                 volume_db = 0.0
             volume_filter = "volume=0" if muted else f"volume={volume_db:g}dB"
-            filters.append(
-                f"[{input_index}:a]atrim=start={source_start_seconds}:duration={duration},asetpts=PTS-STARTPTS,"
-                f"{volume_filter},adelay={delay_ms}:all=1[{audio_label}]"
-            )
+            if segment.get("audio_locked") is True:
+                timeline_sample_rate = 44100
+                source_start_sample = round(
+                    source_start_frame * timeline_sample_rate / frame_rate
+                )
+                source_end_sample = round(
+                    source_end_frame * timeline_sample_rate / frame_rate
+                )
+                timeline_start_sample = round(
+                    start_frame * timeline_sample_rate / frame_rate
+                )
+                filters.append(
+                    f"[{audio_input_index}:a]aresample={timeline_sample_rate}:first_pts=0,"
+                    f"atrim=start_sample={source_start_sample}:end_sample={source_end_sample},"
+                    f"asetpts=PTS-STARTPTS,{volume_filter},"
+                    f"adelay={timeline_start_sample}S:all=1[{audio_label}]"
+                )
+            else:
+                delay_ms = round(start_seconds * 1000)
+                filters.append(
+                    f"[{audio_input_index}:a]atrim=start={source_start_seconds}:duration={duration},asetpts=PTS-STARTPTS,"
+                    f"{volume_filter},adelay={delay_ms}:all=1[{audio_label}]"
+                )
             audio_labels.append(audio_label)
 
     if len(audio_labels) > 1:

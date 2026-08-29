@@ -247,6 +247,7 @@ def _load_minimax_node(monkeypatch):
     utils_package = types.ModuleType("easy_media.utils")
     utils_package.__path__ = []
     utils_package.log_node_info = lambda *_args, **_kwargs: None
+    utils_package.save_audio_to_temp_wav = lambda _audio: None
     models_module = types.ModuleType("easy_media.utils.models")
     models_module.detect_turbo_model = lambda model: types.SimpleNamespace(
         is_turbo=False,
@@ -607,9 +608,19 @@ def test_multitrack_h3_project_outputs_locked_audio_used_by_generation(monkeypat
         for node_id, node in task_outputs
         if node["inputs"]["task_index"] == 0
     )
+    align_id, align = next(
+        (node_id, node)
+        for node_id, node in result.expand.items()
+        if node["class_type"] == "easy h3LockedAudioDurationAlign"
+    )
+    encoding_start = _graph_node(result, "easy h3SegmentEncodingStart")
 
     assert result.values[1] == [full_audio_id, 8]
     assert audio_lock["inputs"]["audio"] == [segment_audio_id, 8]
+    artifact = _graph_node(result, "easy h3ProjectArtifact")
+    assert artifact["inputs"]["locked_audio"] == [segment_audio_id, 8]
+    assert align["inputs"]["fps"] == 24.0
+    assert encoding_start["inputs"]["audio"] == [align_id, 0]
     assert full_audio["inputs"]["prompt_format"] == "default"
 
 
@@ -619,6 +630,10 @@ def test_multitrack_h3_project_outputs_none_without_locked_audio(monkeypatch):
     result = module.EasyMultiTrackProject.execute(**_h3_project_inputs())
 
     assert result.values[1] is None
+    assert not any(
+        node["class_type"] == "easy h3LockedAudioDurationAlign"
+        for node in result.expand.values()
+    )
 
 
 def test_multitrack_h3_project_does_not_log_execution_events_while_expanding(
@@ -712,6 +727,64 @@ def test_h3_context_media_trim_removes_head_and_grid_tail_together(monkeypatch):
     assert output_audio["sample_rate"] == 48
 
 
+def test_h3_context_media_trim_can_leave_locked_audio_short_for_alignment(
+    monkeypatch,
+):
+    module = _load_minimax_node(monkeypatch)
+    images = torch.zeros(5, 1, 1, 3)
+    audio = {
+        "waveform": torch.arange(8, dtype=torch.float32).reshape(1, 1, 8),
+        "sample_rate": 2,
+    }
+
+    result = module.EasyH3ContextMediaTrim.execute(
+        images,
+        audio,
+        trim_frames=0,
+        output_frames=5,
+        pad_audio=False,
+        fps=1.0,
+    )
+
+    assert result.values[0].shape[0] == 5
+    assert result.values[1]["waveform"].shape[-1] == 8
+
+
+def test_h3_locked_audio_duration_align_matches_decoded_video_without_padding(
+    monkeypatch,
+):
+    module = _load_minimax_node(monkeypatch)
+    images = torch.zeros(209, 1, 1, 3)
+    waveform = torch.linspace(-1.0, 1.0, 417_600).reshape(1, 1, -1)
+
+    result = module.EasyH3LockedAudioDurationAlign.execute(
+        images,
+        {"waveform": waveform, "sample_rate": 48_000},
+        fps=24.0,
+    )
+    aligned = result.values[0]
+
+    assert aligned["sample_rate"] == 48_000
+    assert aligned["waveform"].shape == (1, 1, 418_000)
+    assert aligned["waveform"][..., 0].item() == pytest.approx(-1.0, abs=1e-4)
+    assert aligned["waveform"][..., -1].item() == pytest.approx(1.0, abs=1e-4)
+
+
+def test_h3_locked_audio_duration_align_rejects_more_than_one_audio_latent_hop(
+    monkeypatch,
+):
+    module = _load_minimax_node(monkeypatch)
+    images = torch.zeros(209, 1, 1, 3)
+    waveform = torch.zeros(1, 1, 416_000)
+
+    with pytest.raises(ValueError, match="mismatch is too large"):
+        module.EasyH3LockedAudioDurationAlign.execute(
+            images,
+            {"waveform": waveform, "sample_rate": 48_000},
+            fps=24.0,
+        )
+
+
 def test_multitrack_h3_project_waits_for_previous_artifact_before_sampling(
     monkeypatch,
 ):
@@ -760,12 +833,14 @@ def test_h3_project_artifact_schema(monkeypatch):
         "context_latent",
         "context_latent_low",
         "video_path",
+        "locked_audio",
         "tracks_info",
         "continuity_mode",
         "sampling_pass",
         "previous",
     ]
     assert artifact_inputs["context_latent_low"].kwargs["optional"] is True
+    assert artifact_inputs["locked_audio"].kwargs["optional"] is True
     assert artifact_inputs["project_save"].kwargs["options"] == [
         "new",
         "override",
@@ -1686,6 +1761,17 @@ def test_multitrack_h3_context_chain_uses_previous_segment_latent(monkeypatch):
     )
     assert trim["inputs"]["trim_frames"] == [motion_id, 1]
     assert trim["inputs"]["output_frames"] == [task_length_link[0], 3]
+    assert trim["inputs"]["pad_audio"] is False
+    trim_id = next(
+        node_id for node_id, node in result.expand.items() if node is trim
+    )
+    context_align = next(
+        node
+        for node in nodes
+        if node["class_type"] == "easy h3LockedAudioDurationAlign"
+        and node["inputs"]["audio"] == [trim_id, 1]
+    )
+    assert context_align["inputs"]["images"] == [trim_id, 0]
     artifacts = [
         (node_id, node)
         for node_id, node in result.expand.items()
@@ -2271,6 +2357,47 @@ def test_h3_project_artifact_override_reuses_generation_one(monkeypatch, tmp_pat
     ] == [
         "context_latent_3_1.safetensors"
     ]
+
+
+def test_h3_project_artifact_persists_original_locked_audio(monkeypatch, tmp_path):
+    module = _load_minimax_node(monkeypatch)
+    monkeypatch.setattr(
+        module.folder_paths,
+        "get_output_directory",
+        lambda: str(tmp_path),
+    )
+    serialized_audio = tmp_path / "serialized.wav"
+    serialized_audio.write_bytes(b"original-locked-audio")
+    monkeypatch.setattr(
+        module,
+        "save_audio_to_temp_wav",
+        lambda _audio: serialized_audio,
+    )
+    info = _h3_project_inputs()["tracks_info"][0]
+    project_dir = tmp_path / "easy_media" / "projects" / "demo"
+    project_dir.mkdir(parents=True)
+    staged = project_dir / ".staged.mp4"
+    staged.write_bytes(b"video")
+
+    module.EasyH3ProjectArtifact.execute(
+        project_name="demo",
+        project_save="new",
+        segment_index=0,
+        context_latent={"samples": torch.tensor([1])},
+        video_path=f"output/{staged.relative_to(tmp_path)}",
+        locked_audio={
+            "waveform": torch.ones(1, 1, 8),
+            "sample_rate": 32_000,
+        },
+        tracks_info=info,
+    )
+
+    manifest = json.loads((project_dir / "project.json").read_text())
+    generation = manifest["segments"]["0"]["generations"]["1"]
+    saved_audio = project_dir / generation["locked_audio"]
+    assert saved_audio.name == "locked_audio_0_1.wav"
+    assert saved_audio.read_bytes() == b"original-locked-audio"
+    assert not serialized_audio.exists()
 
 
 def test_reference_bridge_uses_fixed_inputs_instead_of_autogrow(monkeypatch):

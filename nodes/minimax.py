@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 import folder_paths
 import nodes as comfy_nodes
 import torch
+import torch.nn.functional as F
 from comfy_api.latest import InputImpl, io
 from comfy_execution.graph_utils import ExecutionBlocker, GraphBuilder
 from comfy.utils import ProgressBar
@@ -18,7 +20,7 @@ from ..modules.motion_context.core import (
     apply_motion_context,
     build_hard_motion_context,
 )
-from ..utils import log_node_info
+from ..utils import log_node_info, save_audio_to_temp_wav
 from ..utils.h3_presets import get_h3_preset_keys, load_h3_presets, select_h3_preset
 from ..utils.h3_project import (
     choose_h3_generation,
@@ -1134,6 +1136,7 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
                 io.Audio.Input("audio"),
                 io.Int.Input("trim_frames", min=0),
                 io.Int.Input("output_frames", min=1),
+                io.Boolean.Input("pad_audio", default=True),
                 io.Float.Input(
                     "fps",
                     default=24.0,
@@ -1156,6 +1159,7 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
         audio: dict[str, Any],
         trim_frames: int,
         output_frames: int,
+        pad_audio: bool = True,
         fps: float = 24.0,
     ) -> io.NodeOutput:
         prefix = max(0, int(trim_frames))
@@ -1184,7 +1188,7 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
         if start_sample >= int(waveform.shape[-1]):
             raise ValueError("H3 context trim would remove all decoded audio")
         output_waveform = waveform[..., start_sample:end_sample]
-        if output_waveform.shape[-1] < wanted_samples:
+        if bool(pad_audio) and output_waveform.shape[-1] < wanted_samples:
             output_waveform = F.pad(
                 output_waveform,
                 (0, wanted_samples - int(output_waveform.shape[-1])),
@@ -1194,6 +1198,97 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
             images[prefix : prefix + wanted_frames],
             {"waveform": output_waveform, "sample_rate": sample_rate},
         )
+
+
+class EasyH3LockedAudioDurationAlign(io.ComfyNode):
+    """Align locked H3 audio to decoded video duration without changing video."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy h3LockedAudioDurationAlign",
+            display_name="H3 Locked Audio Duration Align",
+            category="_EasyUse/H3",
+            description=(
+                "Internal sub-frame duration correction for locked H3 audio."
+            ),
+            inputs=[
+                io.Image.Input("images"),
+                io.Audio.Input("audio"),
+                io.Float.Input(
+                    "fps",
+                    default=24.0,
+                    min=1.0,
+                    max=240.0,
+                    step=0.001,
+                ),
+            ],
+            outputs=[io.Audio.Output("audio")],
+            is_dev_only=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        images: torch.Tensor,
+        audio: dict[str, Any],
+        fps: float = 24.0,
+    ) -> io.NodeOutput:
+        frame_rate = float(fps)
+        if not math.isfinite(frame_rate) or frame_rate <= 0:
+            raise ValueError("fps must be a positive finite number")
+        if not isinstance(images, torch.Tensor) or images.ndim < 1:
+            raise ValueError("images must be an IMAGE tensor")
+        frame_count = int(images.shape[0])
+        if frame_count <= 0:
+            raise ValueError("images must contain at least one decoded frame")
+
+        waveform = audio.get("waveform") if isinstance(audio, dict) else None
+        sample_rate = audio.get("sample_rate") if isinstance(audio, dict) else None
+        if (
+            not isinstance(waveform, torch.Tensor)
+            or waveform.ndim != 3
+            or not isinstance(sample_rate, int)
+            or sample_rate <= 0
+        ):
+            raise ValueError(
+                "audio must contain a [B, C, T] waveform and positive integer sample_rate"
+            )
+        source_samples = int(waveform.shape[-1])
+        if source_samples <= 0:
+            raise ValueError("locked audio waveform must contain at least one sample")
+
+        target_samples = max(1, round(frame_count * sample_rate / frame_rate))
+        correction_samples = target_samples - source_samples
+        max_correction_samples = max(1, math.ceil(sample_rate / AUDIO_LATENT_FPS))
+        if abs(correction_samples) > max_correction_samples:
+            correction_ms = correction_samples / sample_rate * 1000.0
+            max_correction_ms = max_correction_samples / sample_rate * 1000.0
+            raise ValueError(
+                "Locked H3 audio/video duration mismatch is too large to align safely: "
+                f"{correction_ms:+.3f} ms (limit {max_correction_ms:.3f} ms)."
+            )
+        if correction_samples == 0:
+            return io.NodeOutput(audio)
+
+        original_dtype = waveform.dtype
+        aligned = F.interpolate(
+            waveform.reshape(-1, 1, source_samples).float(),
+            size=target_samples,
+            mode="linear",
+            align_corners=False,
+        ).reshape(*waveform.shape[:-1], target_samples)
+        aligned = aligned.to(
+            device=waveform.device,
+            dtype=original_dtype,
+        ).contiguous()
+        correction_ms = correction_samples / sample_rate * 1000.0
+        log_node_info(
+            "H3 Locked Audio Duration Align",
+            f"Adjusted {source_samples} -> {target_samples} samples "
+            f"({correction_ms:+.3f} ms) for {frame_count} video frames.",
+        )
+        return io.NodeOutput({**audio, "waveform": aligned, "sample_rate": sample_rate})
 
 
 class EasyH3ProjectArtifact(io.ComfyNode):
@@ -1217,6 +1312,7 @@ class EasyH3ProjectArtifact(io.ComfyNode):
                 io.Latent.Input("context_latent"),
                 io.Latent.Input("context_latent_low", optional=True),
                 io.String.Input("video_path"),
+                io.Audio.Input("locked_audio", optional=True),
                 TYPE_TRACKS_INFO.Input("tracks_info"),
                 io.Combo.Input("continuity_mode", options=['shot', 'context'],default="shot"),
                 io.Combo.Input(
@@ -1241,6 +1337,7 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         context_latent: dict[str, Any],
         video_path: str,
         tracks_info: dict[str, Any],
+        locked_audio: dict[str, Any] | None = None,
         continuity_mode: str = "shot",
         sampling_pass: str = "single",
         context_latent_low: dict[str, Any] | None = None,
@@ -1273,6 +1370,39 @@ class EasyH3ProjectArtifact(io.ComfyNode):
             f"video_{int(segment_index)}_{generation}{source_video.suffix or '.mp4'}"
         )
         source_video.replace(target_video)
+
+        target_locked_audio: Path | None = None
+        if locked_audio is not None:
+            temporary_audio = save_audio_to_temp_wav(locked_audio)
+            if temporary_audio is None:
+                raise RuntimeError(
+                    "Failed to serialize the original locked audio for final muxing."
+                )
+            target_locked_audio = project_dir / (
+                f"locked_audio_{int(segment_index)}_{generation}.wav"
+            )
+            temporary_target = project_dir / f".{target_locked_audio.name}.tmp"
+            try:
+                shutil.copyfile(temporary_audio, temporary_target)
+                temporary_target.replace(target_locked_audio)
+            except OSError as error:
+                raise RuntimeError(
+                    f"Failed to save original locked audio: {error}"
+                ) from error
+            finally:
+                temporary_audio.unlink(missing_ok=True)
+                temporary_target.unlink(missing_ok=True)
+        else:
+            stale_locked_audio = project_dir / (
+                f"locked_audio_{int(segment_index)}_{generation}.wav"
+            )
+            if stale_locked_audio.is_file():
+                try:
+                    stale_locked_audio.unlink()
+                except OSError as error:
+                    raise RuntimeError(
+                        f"Failed to remove stale locked audio: {error}"
+                    ) from error
 
         target_context_latent = (
             project_dir
@@ -1348,6 +1478,8 @@ class EasyH3ProjectArtifact(io.ComfyNode):
             generation_manifest["context_latent_low"] = (
                 target_context_latent_low.name
             )
+        if target_locked_audio is not None:
+            generation_manifest["locked_audio"] = target_locked_audio.name
         versions[str(generation)] = generation_manifest
         segment_manifest["active_generation"] = generation
         segment_manifest["continuity_mode"] = (
@@ -1865,6 +1997,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                 if isinstance(content, dict)
                 else "shot"
             )
+            has_task_locked_audio = h3_locked_audio_track(entry, info) is not None
 
             ref_image_size = (
                 str(content.get("ref_image_size", "match")).lower()
@@ -1980,7 +2113,7 @@ class EasyMultiTrackProject(io.ComfyNode):
             # can be shifted behind the copied source prefix. The extra 12
             # generated frames required by H3's temporal grid are removed from
             # the tail after decoding, not from the task's opening frames.
-            if h3_locked_audio_track(entry, info) is not None:
+            if has_task_locked_audio:
                 report_segment_step(0.20)
                 initial_latent = graph.node(
                     "easy minimaxH3AudioLock",
@@ -2216,12 +2349,23 @@ class EasyMultiTrackProject(io.ComfyNode):
                     audio=output_audio,
                     trim_frames=context_trim_frames,
                     output_frames=base_task_length,
+                    pad_audio=not has_task_locked_audio,
                     fps=fps,
                 )
                 output_images = trimmed.out(0)
                 output_audio = trimmed.out(1)
             else:
                 report_segment_step(0.84)
+
+            if has_task_locked_audio:
+                locked_audio_align = graph.node(
+                    "easy h3LockedAudioDurationAlign",
+                    id=f"locked_audio_duration_align_{task_index}",
+                    images=output_images,
+                    audio=output_audio,
+                    fps=fps,
+                )
+                output_audio = locked_audio_align.out(0)
 
             project_hires_context_latent = final_latent
             project_low_context_latent = (
@@ -2319,6 +2463,8 @@ class EasyMultiTrackProject(io.ComfyNode):
             }
             if has_second_pass:
                 artifact_inputs["context_latent_low"] = project_low_context_latent
+            if has_task_locked_audio:
+                artifact_inputs["locked_audio"] = task_output.out(8)
             if previous_artifact is not None:
                 artifact_inputs["previous"] = previous_artifact
             report_segment_step(0.95)

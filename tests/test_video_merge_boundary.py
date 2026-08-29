@@ -71,6 +71,101 @@ def test_video_merge_pads_each_segment_to_its_exact_timeline_frame_count(
     assert "enable='between(n,24,47)'" in filter_graph
 
 
+def test_video_merge_uses_sample_boundaries_only_for_locked_audio(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = _load_video_utils_module(tmp_path)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    monkeypatch.setattr(module, "get_ffmpeg_path", lambda _name="ffmpeg": "ffmpeg")
+    monkeypatch.setattr(module, "ffprobe_info", lambda _source: {"has_audio": True})
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], capture_output: bool):
+        commands.append(command)
+        return types.SimpleNamespace(returncode=0, stderr=b"")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    output = module.merge_video_track_with_ffmpeg(
+        [
+            {
+                "source": str(source),
+                "start_frame": 0,
+                "end_frame": 209,
+                "source_start_frame": 0,
+                "audio_locked": True,
+            },
+            {
+                "source": str(source),
+                "start_frame": 209,
+                "end_frame": 350,
+                "source_start_frame": 0,
+                "audio_locked": False,
+            },
+        ],
+        total_length=350,
+        frame_rate=24,
+        width=320,
+        height=180,
+    )
+
+    assert output is not None
+    filter_graph = commands[0][commands[0].index("-filter_complex") + 1]
+    assert "aresample=44100:first_pts=0" in filter_graph
+    assert "atrim=start_sample=0:end_sample=384038" in filter_graph
+    assert "adelay=0S:all=1" in filter_graph
+    assert "atrim=start=0.0:duration=5.875" in filter_graph
+    assert "adelay=8708:all=1" in filter_graph
+
+
+def test_video_merge_uses_separate_original_audio_for_locked_segment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = _load_video_utils_module(tmp_path)
+    source = tmp_path / "source.mp4"
+    original_audio = tmp_path / "locked.wav"
+    source.write_bytes(b"video")
+    original_audio.write_bytes(b"audio")
+    monkeypatch.setattr(module, "get_ffmpeg_path", lambda _name="ffmpeg": "ffmpeg")
+    monkeypatch.setattr(module, "ffprobe_info", lambda _source: {"has_audio": True})
+    commands: list[list[str]] = []
+
+    def fake_run(command: list[str], capture_output: bool):
+        commands.append(command)
+        return types.SimpleNamespace(returncode=0, stderr=b"")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    output = module.merge_video_track_with_ffmpeg(
+        [{
+            "source": str(source),
+            "audio_source": str(original_audio),
+            "start_frame": 0,
+            "end_frame": 48,
+            "source_start_frame": 12,
+            "audio_locked": True,
+        }],
+        total_length=48,
+        frame_rate=24,
+        width=320,
+        height=180,
+    )
+
+    assert output is not None
+    command = commands[0]
+    assert command[command.index(str(source)) + 1:command.index("-filter_complex")] == [
+        "-i",
+        str(original_audio),
+    ]
+    filter_graph = command[command.index("-filter_complex") + 1]
+    assert "[2:v]trim=start_frame=12:end_frame=60" in filter_graph
+    assert "[3:a]aresample=44100:first_pts=0" in filter_graph
+    assert "atrim=start_sample=22050:end_sample=110250" in filter_graph
+
+
 @pytest.mark.skipif(
     shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
     reason="FFmpeg is required for the decoded-frame boundary regression test",
