@@ -246,7 +246,7 @@ custom 示例：
 
 ## MultiTrack Project 参数
 
-- `segment_start_index` 为从 0 开始的任务片段索引。
+- `segment_start_number` 为从 1 开始的任务片段编号；执行逻辑使用 `segment_start_number - 1` 转换为内部索引。
 - `segment_count = -1` 表示从起始索引处理到末尾；非负数限制本次任务片段数量。
 - `project_save`: `new` 或 `override`。在 `override` 且 count 为 `-1` 时，执行逻辑会删除起始索引之后的已保存片段再生成；修改前向用户清楚说明。
 - `sampling_mode`: `single` 或 `dual`；`sampling_plan` 必须是当前节点可用预设。不要仅凭另一份流程中的值假设当前环境支持。
@@ -269,7 +269,7 @@ Plan 只包含实际变更。`node_id` 可省略并由拓扑定位；`editor.res
   },
   "project": {
     "project_save": "override",
-    "segment_start_index": 0,
+    "segment_start_number": 1,
     "segment_count": -1,
     "sampling_plan": "medium",
     "sampling_mode": "single"

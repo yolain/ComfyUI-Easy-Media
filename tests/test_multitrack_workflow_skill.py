@@ -142,7 +142,7 @@ def test_locked_audio_must_overlap_every_task_segment(patch_workflow_module):
         _template_workflow(),
         {
             "editor": {"track_data": track_data},
-            "project": {"segment_start_index": 0, "segment_count": 1},
+            "project": {"segment_start_number": 1, "segment_count": 1},
         },
     )
     assert report["project_changes"]["segment_count"] == {"from": -1, "to": 1}
@@ -155,7 +155,20 @@ def test_template_metadata_matches_documented_asset():
     assert len(workflow["nodes"]) == 21
     assert len(workflow["links"]) == 26
     assert hashlib.sha256(TEMPLATE.read_bytes()).hexdigest() == (
-        "6ac8498b5a60689f1919387cec960550bdadb4d9bc9459f4be264cfc3c52a470"
+        "2ef2c9928026f3adea96762b9364bcd5eae50f60c58e6169d0e1212bd4a7fed3"
     )
     assert [51, 11, 0, 13, 0, "MODEL"] in workflow["links"]
     assert [56, 13, 0, 26, 0, "MODEL"] in workflow["links"]
+
+
+def test_project_start_number_updates_positional_and_named_widgets(
+    patch_workflow_module,
+):
+    result, report = patch_workflow_module.apply_plan(
+        _template_workflow(),
+        {"project": {"segment_start_number": 2}},
+    )
+
+    project = _node(result, report["project_node_id"])
+    assert project["widgets_values"][2] == 2
+    assert project["widgets_values_named"]["segment_start_number"] == 2

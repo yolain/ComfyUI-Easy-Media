@@ -832,7 +832,7 @@ export function TaskSegmentEditor({
           ) : (
             <div className="flex items-center gap-1 text-muted-foreground">
               <div className="flex flex-col items-center">
-                <span className="text-[10px] text-primary">{t('multitrack.taskNumber', { n: taskIndex })}</span>
+                <span className="text-[10px] text-primary">{t('multitrack.taskNumber', { n: taskIndex + 1 })}</span>
                 <span className="text-[10px] mt-0.5 tabular-nums">{formattedDuration}</span>
               </div>
               {onDurationChange && (

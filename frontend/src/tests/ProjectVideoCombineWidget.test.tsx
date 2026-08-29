@@ -446,7 +446,7 @@ describe('ProjectVideoCombineWidget', () => {
     const preloadedSecondVideo = videosBefore[1]
     expect(preloadedSecondVideo.currentTime).toBeCloseTo(1)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Segment 1 Shot' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Segment 2 Shot' }))
 
     const videosAfter = [...container.querySelectorAll('video')]
     expect(videosAfter[0]).toBe(preloadedSecondVideo)
@@ -514,29 +514,29 @@ describe('ProjectVideoCombineWidget', () => {
     expect(screen.getByRole('button', { name: 'Play' })).not.toBeNull()
   })
 
-  it('uses zero-based labels and shows the continuity mode', () => {
+  it('uses one-based labels and shows the continuity mode', () => {
     const { props } = widgetProps()
 
     render(<ProjectVideoCombineWidget {...props} />)
 
-    expect(screen.getByText('Segment 0')).not.toBeNull()
+    expect(screen.getByText('Segment 1')).not.toBeNull()
     expect(screen.getByText('Shot')).not.toBeNull()
-    expect(screen.queryByRole('combobox', { name: 'Select a file for segment 0' })).toBeNull()
+    expect(screen.queryByRole('combobox', { name: 'Select a file for segment 1' })).toBeNull()
   })
 
   it('keeps timeline content mounted while hiding and showing the track area', () => {
     const { props } = widgetProps()
     render(<ProjectVideoCombineWidget {...props} />)
-    const segmentLabel = screen.getByText('Segment 0')
+    const segmentLabel = screen.getByText('Segment 1')
 
     fireEvent.click(screen.getByRole('button', { name: 'Hide timeline' }))
 
     expect(segmentLabel.isConnected).toBe(true)
-    expect(screen.getByText('Segment 0')).toBe(segmentLabel)
+    expect(screen.getByText('Segment 1')).toBe(segmentLabel)
 
     fireEvent.click(screen.getByRole('button', { name: 'Show timeline' }))
 
-    expect(screen.getByText('Segment 0')).toBe(segmentLabel)
+    expect(screen.getByText('Segment 1')).toBe(segmentLabel)
   })
 
   it('allows selecting two videos for comparison and promotes the remaining video for output', () => {
@@ -570,7 +570,7 @@ describe('ProjectVideoCombineWidget', () => {
     const { props } = widgetProps({ value: data })
 
     const { container } = render(<ProjectVideoCombineWidget {...props} />)
-    const fileSelect = screen.getByRole('button', { name: 'Select up to two videos for segment 0' })
+    const fileSelect = screen.getByRole('button', { name: 'Select up to two videos for segment 1' })
     expect(fileSelect.className).toContain('justify-center')
     expect(fileSelect.firstElementChild?.className).toContain('flex-col')
     fireEvent.click(fileSelect)

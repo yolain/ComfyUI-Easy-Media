@@ -518,7 +518,7 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
         "sigmas_2nd",
         "project_name",
         "project_save",
-        "segment_start_index",
+        "segment_start_number",
         "segment_count",
         "seed",
         "sampling_plan",
@@ -553,7 +553,8 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
     assert inputs["1st_pass_only"].kwargs["default"] is False
     assert inputs["disable_2nd_noise"].kwargs["default"] is False
     assert inputs["upscale_by"].kwargs["default"] == 1.5
-    assert inputs["segment_start_index"].kwargs["default"] == 0
+    assert inputs["segment_start_number"].kwargs["default"] == 1
+    assert inputs["segment_start_number"].kwargs["min"] == 1
     assert inputs["segment_count"].kwargs["default"] == -1
     assert [output.name for output in schema.outputs] == [
         "PROJECT_NAME",
@@ -1011,7 +1012,7 @@ def test_multitrack_h3_project_has_matching_chinese_localization():
         "disable_2nd_noise",
         "upscale_by",
         "upscale_model",
-        "segment_start_index",
+        "segment_start_number",
         "segment_count",
         "seed",
         "sampler_2nd",
@@ -1277,7 +1278,7 @@ def test_multitrack_project_clears_remaining_old_segments_only_for_unlimited_ove
     module.EasyMultiTrackProject.execute(
         **_h3_project_inputs(
             project_save=["new"],
-            segment_start_index=[0],
+            segment_start_number=[1],
             segment_count=[-1],
         )
     )
@@ -1286,7 +1287,7 @@ def test_multitrack_project_clears_remaining_old_segments_only_for_unlimited_ove
     module.EasyMultiTrackProject.execute(
         **_h3_project_inputs(
             project_save=["override"],
-            segment_start_index=[0],
+            segment_start_number=[1],
             segment_count=[-1],
         )
     )
@@ -1296,11 +1297,20 @@ def test_multitrack_project_clears_remaining_old_segments_only_for_unlimited_ove
     module.EasyMultiTrackProject.execute(
         **_h3_project_inputs(
             project_save=["override"],
-            segment_start_index=[0],
+            segment_start_number=[1],
             segment_count=[1],
         )
     )
     assert clear_calls == []
+
+
+def test_multitrack_project_rejects_zero_start_number(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+
+    with pytest.raises(ValueError, match="segment_start_number must be at least 1"):
+        module.EasyMultiTrackProject.execute(
+            **_h3_project_inputs(segment_start_number=[0])
+        )
 
 
 def test_multitrack_h3_medium_dual_uses_selected_latent_upscale_model(monkeypatch):
@@ -2126,7 +2136,7 @@ def test_multitrack_h3_loop_start_loads_previous_project_context(monkeypatch):
     result = module.EasyMultiTrackProject.execute(
         **_h3_project_inputs(
             tracks_info=[info],
-            segment_start_index=[1],
+            segment_start_number=[2],
             segment_count=[1],
         )
     )

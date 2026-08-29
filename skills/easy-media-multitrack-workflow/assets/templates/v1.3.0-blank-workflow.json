@@ -290,7 +290,7 @@
       "widgets_values": [
         "",
         "override",
-        0,
+        1,
         -1,
         1011859974239154,
         "randomize",
@@ -304,7 +304,7 @@
       "widgets_values_named": {
         "project_name": "",
         "project_save": "override",
-        "segment_start_index": 0,
+        "segment_start_number": 1,
         "segment_count": -1,
         "seed": 1011859974239154,
         "fixed": "randomize",

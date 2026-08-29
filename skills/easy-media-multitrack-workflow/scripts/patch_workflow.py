@@ -19,7 +19,7 @@ PROJECT_TYPE = "easy multitrackProject"
 PROJECT_WIDGETS = {
     "project_name": 0,
     "project_save": 1,
-    "segment_start_index": 2,
+    "segment_start_number": 2,
     "segment_count": 3,
     "seed": 4,
     "control_after_generate": 5,
@@ -433,10 +433,10 @@ def validate_project_patch(patch: dict[str, Any]) -> None:
         raise WorkflowError("project_save must be 'new' or 'override'")
     if "sampling_mode" in patch and patch["sampling_mode"] not in {"single", "dual"}:
         raise WorkflowError("sampling_mode must be 'single' or 'dual'")
-    if "segment_start_index" in patch:
-        value = patch["segment_start_index"]
-        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-            raise WorkflowError("segment_start_index must be a non-negative integer")
+    if "segment_start_number" in patch:
+        value = patch["segment_start_number"]
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise WorkflowError("segment_start_number must be a positive integer")
     if "segment_count" in patch:
         value = patch["segment_count"]
         if not isinstance(value, int) or isinstance(value, bool) or value < -1:
@@ -481,12 +481,13 @@ def apply_plan(
         raise WorkflowError(
             f"Project {project.get('id')} widget schema is incompatible; found {widget_count} values"
         )
-    selected_start_index = int(
+    selected_start_number = int(
         project_patch.get(
-            "segment_start_index",
-            widgets[PROJECT_WIDGETS["segment_start_index"]],
+            "segment_start_number",
+            widgets[PROJECT_WIDGETS["segment_start_number"]],
         )
     )
+    selected_start_index = selected_start_number - 1
     selected_segment_count = int(
         project_patch.get(
             "segment_count",
@@ -548,12 +549,15 @@ def apply_plan(
     )
 
     project_changes: dict[str, dict[str, Any]] = {}
+    project_named = project.get("widgets_values_named")
     for field, index in PROJECT_WIDGETS.items():
         if field not in project_patch:
             continue
         old = widgets[index]
         new = project_patch[field]
         widgets[index] = new
+        if isinstance(project_named, dict):
+            project_named[field] = new
         if old != new:
             project_changes[field] = {"from": old, "to": new}
 

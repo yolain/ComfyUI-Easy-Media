@@ -37,7 +37,7 @@ description: "Create, edit, and optionally run ComfyUI Easy Media MultiTrack wor
 - **分辨率**：用户未表达意图时保留现值。`16:9 0.9mp` 等表达选择 megapixels 模式，并映射完整 `aspect_ratio`；精确尺寸、auto、短/长边和 custom 规则见 schema 参考。
 - **主音频**：需要原样沿用并驱动任务时长/节奏时，设置唯一轨道级 `audio_locked: true`。
 - **说话人参考**：需要所有 MiniMax 任务沿用某段声音特征时，在该音频片段设置 `content.speaker_reference: true`。它不等于 `audio_locked`；同一音轨最多一个。
-- **工程范围**：排队前复核 `segment_start_index`、`segment_count`、`project_save` 和 sampling 设置，尤其是 `override` 的覆盖范围。
+- **工程范围**：排队前复核 `segment_start_number`、`segment_count`、`project_save` 和 sampling 设置，尤其是 `override` 的覆盖范围。
 
 ## 可选：提交生成
 

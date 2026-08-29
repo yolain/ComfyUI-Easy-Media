@@ -1129,12 +1129,12 @@ describe('TaskSegmentEditor', () => {
       />,
     )
 
-    expect(screen.getByText('Segment 1').className).toContain('text-[10px]')
-    expect(screen.getByText('Segment 1').className).toContain('text-primary')
+    expect(screen.getByText('Segment 2').className).toContain('text-[10px]')
+    expect(screen.getByText('Segment 2').className).toContain('text-primary')
     expect(screen.getByText('00:00:03').className).toContain('text-[10px]')
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit task duration' }))
-    expect(screen.queryByText('Segment 1')).toBeNull()
+    expect(screen.queryByText('Segment 2')).toBeNull()
     expect(screen.queryByText('00:00:03')).toBeNull()
     const durationInput = screen.getByRole('textbox', { name: 'Duration' })
     expect(durationInput.className).toContain('tabular-nums')

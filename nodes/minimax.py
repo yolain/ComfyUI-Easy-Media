@@ -1661,12 +1661,12 @@ class EasyMultiTrackProject(io.ComfyNode):
                     default="override",
                 ),
                 io.Int.Input(
-                    "segment_start_index",
-                    default=0,
-                    min=0,
+                    "segment_start_number",
+                    default=1,
+                    min=1,
                     max=0x7FFFFFFF,
                     step=1,
-                    tooltip="The task segment start index."
+                    tooltip="The task segment start number."
                 ),
                 io.Int.Input(
                     "segment_count",
@@ -1677,7 +1677,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     tooltip=(
                         "Maximum task segments in this queue. When set to -1, "
                         "override mode deletes saved segments from "
-                        "segment_start_index onward before regeneration; new "
+                        "segment_start_number onward before regeneration; new "
                         "mode preserves existing video and latent files."
                     ),
                 ),
@@ -1827,7 +1827,10 @@ class EasyMultiTrackProject(io.ComfyNode):
             h3_locked_audio_track(entry, info) is not None
             for entry in all_entries
         )
-        segment_start_index = int(_first_input(kwargs.get("segment_start_index"), 0))
+        segment_start_number = int(_first_input(kwargs.get("segment_start_number"), 1))
+        if segment_start_number < 1:
+            raise ValueError("segment_start_number must be at least 1")
+        segment_start_index = segment_start_number - 1
         segment_count = int(_first_input(kwargs.get("segment_count"), -1))
         selected_entries = select_h3_task_entries(
             all_entries,
@@ -1836,7 +1839,7 @@ class EasyMultiTrackProject(io.ComfyNode):
         )
         if not selected_entries:
             raise ValueError(
-                "No H3 task segments are available from segment_start_index."
+                "No H3 task segments are available from segment_start_number."
             )
 
         resume_task_index: int | None = None

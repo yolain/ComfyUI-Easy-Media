@@ -1235,7 +1235,7 @@
       },
       "upscale_by": { "name": "放大倍数" },
       "upscale_model": { "name": "放大模型" },
-      "segment_start_index": { "name": "片段开始索引" },
+      "segment_start_number": { "name": "片段开始编号" },
       "segment_count": {
         "name": "片段最大数量",
         "tooltip": "从片段开始索引起处理的片段数。-1 表示处理剩余全部片段；仅 override 模式会在执行前删除开始索引及其后的旧片段和产物，new 模式会保留它们；超出时自动在末尾停止。"

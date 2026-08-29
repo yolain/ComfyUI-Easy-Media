@@ -766,7 +766,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
                       const blockStyle = { width: `${(clipDuration(clip) / Math.max(total, 1)) * 100}%` }
                       const label = (
                         <div className="flex min-w-0 flex-col items-center leading-tight">
-                          <span className="truncate text-[11px] font-medium">{t('projectVideoCombine.clipLabel', { index: clip.index })}</span>
+                          <span className="truncate text-[11px] font-medium">{t('projectVideoCombine.clipLabel', { number: clip.index + 1 })}</span>
                           <span className="truncate text-[9px] text-muted-foreground">
                             {t('projectVideoCombine.clipContinuity', {
                               mode: t(clip.continuity_mode === 'context'
@@ -781,7 +781,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
                         return (
                           <Popover key={clip.id} onOpenChange={(open) => { if (open) selectClip(clip) }}>
                             <PopoverTrigger asChild>
-                              <Button type="button" variant="ghost" className={`${blockClassName} relative justify-center`} style={blockStyle} aria-label={t('projectVideoCombine.selectClipFiles', { index: clip.index })}>
+                              <Button type="button" variant="ghost" className={`${blockClassName} relative justify-center`} style={blockStyle} aria-label={t('projectVideoCombine.selectClipFiles', { number: clip.index + 1 })}>
                                 {label}
                                 <span className="absolute right-2 flex items-center gap-0.5 text-[9px] text-muted-foreground">
                                   {selectedPaths.length > 1 ? selectedPaths.length : null}

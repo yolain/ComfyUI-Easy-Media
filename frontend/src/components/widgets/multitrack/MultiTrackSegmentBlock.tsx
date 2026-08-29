@@ -157,7 +157,7 @@ export function MultiTrackSegmentBlock({
   const label = trackType === 'task'
     ? showTaskIndex
       ? t('multitrackSegment.taskLabel', {
-          n: segmentIndex,
+          n: segmentIndex + 1,
           mode: taskModeLabel,
         })
       : taskModeLabel
