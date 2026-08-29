@@ -299,6 +299,11 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
     try {
       const response = await app.api.fetchApi(`/easy-media/project?project_name=${encodeURIComponent(projectName)}`)
       const payload: unknown = await response.json()
+      if (!response.ok && response.status === 404 && projectName === 'default') {
+        if (requestId !== refreshRequestRef.current) return
+        onChange({ ...DEFAULT_PROJECT_DATA, project_name: 'default', auto_combine: data.auto_combine })
+        return
+      }
       if (!response.ok) throw new Error(errorMessage(payload, t('projectVideoCombine.refreshFailed')))
       if (requestId !== refreshRequestRef.current) return
       onChange({ ...ensureProjectData(payload), auto_combine: data.auto_combine })
@@ -671,7 +676,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
             </div>
             <div className="flex items-center gap-2">
               {tooltip(t('projectVideoCombine.refresh'), (
-                <Button type="button" variant="ghost" size="icon" className="h-7 w-7" disabled={isRefreshing} onClick={() => void refreshProject(data.project_name || 'default')}>
+                <Button type="button" variant="ghost" size="icon" className="h-7 w-7" disabled={isRefreshing} aria-label={t('projectVideoCombine.refresh')} onClick={() => void refreshProject(data.project_name || 'default')}>
                   {isRefreshing ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
                 </Button>
               ))}

@@ -112,6 +112,49 @@ describe('ProjectVideoCombineWidget', () => {
     expect(screen.getByRole('combobox', { name: 'Select project' }).textContent).toContain('assigned-project')
   })
 
+  it('treats a missing default project manifest as an empty project without an error toast', async () => {
+    const defaultData = { ...projectData, project_name: 'default' }
+    const { props, api, toast } = widgetProps({ value: defaultData })
+    api.fetchApi.mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: 'H3 project manifest was not found' }),
+    })
+
+    render(<ProjectVideoCombineWidget {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh project' }))
+
+    await waitFor(() => expect(api.fetchApi).toHaveBeenCalledWith(
+      '/easy-media/project?project_name=default',
+    ))
+    await waitFor(() => expect(props.onChange).toHaveBeenCalledWith({
+      project_name: 'default',
+      width: 0,
+      height: 0,
+      frame_rate: 24,
+      clips: [],
+      auto_combine: true,
+    }))
+    expect(toast.add).not.toHaveBeenCalled()
+  })
+
+  it('still reports a missing manifest for a named project', async () => {
+    const { props, api, toast } = widgetProps()
+    api.fetchApi.mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: 'H3 project manifest was not found' }),
+    })
+
+    render(<ProjectVideoCombineWidget {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh project' }))
+
+    await waitFor(() => expect(toast.add).toHaveBeenCalledWith(expect.objectContaining({
+      severity: 'error',
+      summary: 'Project refresh failed',
+    })))
+  })
+
   it('confirms and deletes the selected project through the ComfyUI API', async () => {
     const { props, api, toast, dialog } = widgetProps()
     api.fetchApi.mockResolvedValue({
