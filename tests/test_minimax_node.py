@@ -609,19 +609,21 @@ def test_multitrack_h3_project_outputs_locked_audio_used_by_generation(monkeypat
         for node_id, node in task_outputs
         if node["inputs"]["task_index"] == 0
     )
-    align_id, align = next(
-        (node_id, node)
-        for node_id, node in result.expand.items()
-        if node["class_type"] == "easy h3LockedAudioDurationAlign"
-    )
+    align = _graph_node(result, "easy h3LockedAudioDurationAlign")
     encoding_start = _graph_node(result, "easy h3SegmentEncodingStart")
 
     assert result.values[1] == [full_audio_id, 8]
     assert audio_lock["inputs"]["audio"] == [segment_audio_id, 8]
     artifact = _graph_node(result, "easy h3ProjectArtifact")
-    assert artifact["inputs"]["locked_audio"] == [segment_audio_id, 8]
+    assert "locked_audio" not in artifact["inputs"]
     assert align["inputs"]["fps"] == 24.0
-    assert encoding_start["inputs"]["audio"] == [align_id, 0]
+    assert encoding_start["inputs"]["audio"] == [segment_audio_id, 8]
+    encoding_id = next(
+        node_id for node_id, node in result.expand.items() if node is encoding_start
+    )
+    assert _graph_node(result, "easy saveVideo")["inputs"]["input_mode.audio"] == [
+        encoding_id, 1,
+    ]
     assert full_audio["inputs"]["prompt_format"] == "default"
 
 
@@ -635,6 +637,9 @@ def test_multitrack_h3_project_outputs_none_without_locked_audio(monkeypatch):
         node["class_type"] == "easy h3LockedAudioDurationAlign"
         for node in result.expand.values()
     )
+    encoding_start = _graph_node(result, "easy h3SegmentEncodingStart")
+    audio_link = encoding_start["inputs"]["audio"]
+    assert result.expand[audio_link[0]]["class_type"] == "VAEDecodeAudio"
 
 
 def test_multitrack_h3_project_does_not_log_execution_events_while_expanding(
@@ -834,14 +839,12 @@ def test_h3_project_artifact_schema(monkeypatch):
         "context_latent",
         "context_latent_low",
         "video_path",
-        "locked_audio",
         "tracks_info",
         "continuity_mode",
         "sampling_pass",
         "previous",
     ]
     assert artifact_inputs["context_latent_low"].kwargs["optional"] is True
-    assert artifact_inputs["locked_audio"].kwargs["optional"] is True
     assert artifact_inputs["project_save"].kwargs["options"] == [
         "new",
         "override",
@@ -1782,6 +1785,13 @@ def test_multitrack_h3_context_chain_uses_previous_segment_latent(monkeypatch):
         and node["inputs"]["audio"] == [trim_id, 1]
     )
     assert context_align["inputs"]["images"] == [trim_id, 0]
+    context_encoding = next(
+        node for node in nodes
+        if node["class_type"] == "easy h3SegmentEncodingStart"
+        and node["inputs"]["segment_index"] == 1
+    )
+    # The task audio already excludes the context prefix; do not trim it again.
+    assert context_encoding["inputs"]["audio"] == [task_length_link[0], 8]
     artifacts = [
         (node_id, node)
         for node_id, node in result.expand.items()
@@ -2369,45 +2379,43 @@ def test_h3_project_artifact_override_reuses_generation_one(monkeypatch, tmp_pat
     ]
 
 
-def test_h3_project_artifact_persists_original_locked_audio(monkeypatch, tmp_path):
+@pytest.mark.parametrize("project_save", ["new", "override"])
+def test_h3_project_artifact_uses_embedded_audio_without_sidecar(
+    monkeypatch, tmp_path, project_save,
+):
     module = _load_minimax_node(monkeypatch)
     monkeypatch.setattr(
         module.folder_paths,
         "get_output_directory",
         lambda: str(tmp_path),
     )
-    serialized_audio = tmp_path / "serialized.wav"
-    serialized_audio.write_bytes(b"original-locked-audio")
-    monkeypatch.setattr(
-        module,
-        "save_audio_to_temp_wav",
-        lambda _audio: serialized_audio,
-    )
     info = _h3_project_inputs()["tracks_info"][0]
     project_dir = tmp_path / "easy_media" / "projects" / "demo"
     project_dir.mkdir(parents=True)
+    if project_save == "override":
+        (project_dir / "locked_audio_0_1.wav").write_bytes(b"legacy-audio")
+        (project_dir / "project.json").write_text(json.dumps({
+            "segments": {"0": {"generations": {"1": {
+                "locked_audio": "locked_audio_0_1.wav",
+            }}}},
+        }))
     staged = project_dir / ".staged.mp4"
     staged.write_bytes(b"video")
 
     module.EasyH3ProjectArtifact.execute(
         project_name="demo",
-        project_save="new",
+        project_save=project_save,
         segment_index=0,
         context_latent={"samples": torch.tensor([1])},
         video_path=f"output/{staged.relative_to(tmp_path)}",
-        locked_audio={
-            "waveform": torch.ones(1, 1, 8),
-            "sample_rate": 32_000,
-        },
         tracks_info=info,
     )
 
     manifest = json.loads((project_dir / "project.json").read_text())
     generation = manifest["segments"]["0"]["generations"]["1"]
-    saved_audio = project_dir / generation["locked_audio"]
-    assert saved_audio.name == "locked_audio_0_1.wav"
-    assert saved_audio.read_bytes() == b"original-locked-audio"
-    assert not serialized_audio.exists()
+    assert "locked_audio" not in generation
+    assert not list(project_dir.glob("locked_audio_*.wav"))
+    assert (project_dir / generation["video"]).read_bytes() == b"video"
 
 
 def test_reference_bridge_uses_fixed_inputs_instead_of_autogrow(monkeypatch):

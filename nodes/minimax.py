@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import math
-import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -20,7 +19,7 @@ from ..modules.motion_context.core import (
     apply_motion_context,
     build_hard_motion_context,
 )
-from ..utils import log_node_info, save_audio_to_temp_wav
+from ..utils import log_node_info
 from ..utils.h3_presets import get_h3_preset_keys, load_h3_presets, select_h3_preset
 from ..utils.h3_project import (
     choose_h3_generation,
@@ -1312,7 +1311,6 @@ class EasyH3ProjectArtifact(io.ComfyNode):
                 io.Latent.Input("context_latent"),
                 io.Latent.Input("context_latent_low", optional=True),
                 io.String.Input("video_path"),
-                io.Audio.Input("locked_audio", optional=True),
                 TYPE_TRACKS_INFO.Input("tracks_info"),
                 io.Combo.Input("continuity_mode", options=['shot', 'context'],default="shot"),
                 io.Combo.Input(
@@ -1337,7 +1335,6 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         context_latent: dict[str, Any],
         video_path: str,
         tracks_info: dict[str, Any],
-        locked_audio: dict[str, Any] | None = None,
         continuity_mode: str = "shot",
         sampling_pass: str = "single",
         context_latent_low: dict[str, Any] | None = None,
@@ -1371,38 +1368,18 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         )
         source_video.replace(target_video)
 
-        target_locked_audio: Path | None = None
-        if locked_audio is not None:
-            temporary_audio = save_audio_to_temp_wav(locked_audio)
-            if temporary_audio is None:
-                raise RuntimeError(
-                    "Failed to serialize the original locked audio for final muxing."
-                )
-            target_locked_audio = project_dir / (
-                f"locked_audio_{int(segment_index)}_{generation}.wav"
-            )
-            temporary_target = project_dir / f".{target_locked_audio.name}.tmp"
+        # New videos embed the original locked audio. Remove the legacy sidecar
+        # only when replacing its generation; other saved versions still use it.
+        stale_locked_audio = project_dir / (
+            f"locked_audio_{int(segment_index)}_{generation}.wav"
+        )
+        if stale_locked_audio.is_file():
             try:
-                shutil.copyfile(temporary_audio, temporary_target)
-                temporary_target.replace(target_locked_audio)
+                stale_locked_audio.unlink()
             except OSError as error:
                 raise RuntimeError(
-                    f"Failed to save original locked audio: {error}"
+                    f"Failed to remove stale locked audio: {error}"
                 ) from error
-            finally:
-                temporary_audio.unlink(missing_ok=True)
-                temporary_target.unlink(missing_ok=True)
-        else:
-            stale_locked_audio = project_dir / (
-                f"locked_audio_{int(segment_index)}_{generation}.wav"
-            )
-            if stale_locked_audio.is_file():
-                try:
-                    stale_locked_audio.unlink()
-                except OSError as error:
-                    raise RuntimeError(
-                        f"Failed to remove stale locked audio: {error}"
-                    ) from error
 
         target_context_latent = (
             project_dir
@@ -1478,8 +1455,6 @@ class EasyH3ProjectArtifact(io.ComfyNode):
             generation_manifest["context_latent_low"] = (
                 target_context_latent_low.name
             )
-        if target_locked_audio is not None:
-            generation_manifest["locked_audio"] = target_locked_audio.name
         versions[str(generation)] = generation_manifest
         segment_manifest["active_generation"] = generation
         segment_manifest["continuity_mode"] = (
@@ -2421,11 +2396,13 @@ class EasyMultiTrackProject(io.ComfyNode):
                 else:
                     project_low_context_latent = project_hires_context_latent
             report_segment_step(0.89)
+            # Keep decoded audio for latent continuity, but deliver the original
+            # task audio in the video so the project needs no separate WAV.
             encoding_start = graph.node(
                 "easy h3SegmentEncodingStart",
                 id=f"encoding_start_{task_index}",
                 images=output_images,
-                audio=output_audio,
+                audio=task_output.out(8) if has_task_locked_audio else output_audio,
                 segment_index=task_index,
             )
             saved_video = graph.node(
@@ -2466,8 +2443,6 @@ class EasyMultiTrackProject(io.ComfyNode):
             }
             if has_second_pass:
                 artifact_inputs["context_latent_low"] = project_low_context_latent
-            if has_task_locked_audio:
-                artifact_inputs["locked_audio"] = task_output.out(8)
             if previous_artifact is not None:
                 artifact_inputs["previous"] = previous_artifact
             report_segment_step(0.95)
