@@ -1003,7 +1003,7 @@ def test_multitrack_h3_project_has_matching_chinese_localization():
     )
     translation = node_defs["easy multitrackProject"]
 
-    assert translation["display_name"] == "多轨工程"
+    assert translation["display_name"] == "多轨项目"
     assert set(translation["inputs"]) == {
         "model_loader",
         "tracks_info",
@@ -1025,7 +1025,7 @@ def test_multitrack_h3_project_has_matching_chinese_localization():
         "sigmas_2nd",
     }
     assert translation["outputs"] == {
-        "0": {"name": "工程名称"},
+        "0": {"name": "项目名称"},
         "1": {"name": "锁定音频"},
     }
 

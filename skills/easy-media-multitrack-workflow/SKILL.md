@@ -18,7 +18,7 @@ description: "Create, edit, and optionally run ComfyUI Easy Media MultiTrack wor
 
 ## 编辑流程
 
-1. 保留源文件，运行 `scripts/patch_workflow.py inspect WORKFLOW.json`，确认连接的 `easy multiTrackEditor` / `easy multitrackProject`、分辨率、format、FPS、轨道和工程参数。
+1. 保留源文件，运行 `scripts/patch_workflow.py inspect WORKFLOW.json`，确认连接的 `easy multiTrackEditor` / `easy multitrackProject`、分辨率、format、FPS、轨道和项目参数。
 2. 需要时间线、分辨率或音频角色时阅读 [references/multitrack-schema.md](references/multitrack-schema.md)，生成完整的新 `track_data`。空模板必须用目标内容替换空 TRACK_DATA；已有对象保留 ID 和未知字段，只为新增对象生成 UUID。
 3. 仅当用户明确要求上传或执行时，阅读 [references/upload-api.md](references/upload-api.md) 并把本地/URL 素材交给 ComfyUI。使用用户地址，未给则使用 `http://127.0.0.1:8188`；TRACK_DATA 只写接口返回的媒体路径。
 4. 用户明确要求受支持的 loader/attention 替换时，按 [references/template-workflow.md](references/template-workflow.md) 原位处理；其他情况不改节点图。
@@ -37,7 +37,7 @@ description: "Create, edit, and optionally run ComfyUI Easy Media MultiTrack wor
 - **分辨率**：用户未表达意图时保留现值。`16:9 0.9mp` 等表达选择 megapixels 模式，并映射完整 `aspect_ratio`；精确尺寸、auto、短/长边和 custom 规则见 schema 参考。
 - **主音频**：需要原样沿用并驱动任务时长/节奏时，设置唯一轨道级 `audio_locked: true`。
 - **说话人参考**：需要所有 MiniMax 任务沿用某段声音特征时，在该音频片段设置 `content.speaker_reference: true`。它不等于 `audio_locked`；同一音轨最多一个。
-- **工程范围**：排队前复核 `segment_start_number`、`segment_count`、`project_save` 和 sampling 设置，尤其是 `override` 的覆盖范围。
+- **项目范围**：排队前复核 `segment_start_number`、`segment_count`、`project_save` 和 sampling 设置，尤其是 `override` 的覆盖范围。
 
 ## 可选：提交生成
 
@@ -47,4 +47,4 @@ description: "Create, edit, and optionally run ComfyUI Easy Media MultiTrack wor
 
 ## 交付
 
-说明基线路径、输出文件、目标节点 ID、分辨率、时间线摘要、媒体路径、锁定音轨/说话人参考、工程参数和图结构是否保持。若已执行，再报告 ComfyUI 地址、`prompt_id`、最终状态和输出摘要。
+说明基线路径、输出文件、目标节点 ID、分辨率、时间线摘要、媒体路径、锁定音轨/说话人参考、项目参数和图结构是否保持。若已执行，再报告 ComfyUI 地址、`prompt_id`、最终状态和输出摘要。

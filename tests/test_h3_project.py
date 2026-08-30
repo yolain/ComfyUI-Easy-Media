@@ -184,7 +184,7 @@ def test_safe_project_name_handles_windows_reserved_names_and_long_names():
     assert safe_h3_project_name("con.txt") == "_con.txt"
     assert safe_h3_project_name("LPT9") == "_LPT9"
 
-    long_name = "多轨工程" * 100
+    long_name = "多轨项目" * 100
     safe_name = safe_h3_project_name(long_name)
     assert len(safe_name.encode("utf-8")) <= 180
     assert safe_name == safe_h3_project_name(long_name)

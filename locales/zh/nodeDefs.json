@@ -1173,8 +1173,8 @@
     }
   },
   "easy multitrackProject": {
-    "display_name": "多轨工程",
-    "description": "执行多轨 MiniMax H3 工程的一采与可选二采，并保存片段产物。",
+    "display_name": "多轨项目",
+    "description": "执行多轨 MiniMax H3 项目的一采与可选二采，并保存片段产物。",
     "inputs": {
       "model_loader": {
         "name": "模型加载器",
@@ -1182,16 +1182,16 @@
       },
       "tracks_info": {
         "name": "多轨信息",
-        "tooltip": "多轨编辑器输出的完整工程数据。"
+        "tooltip": "多轨编辑器输出的完整项目数据。"
       },
       "sampler": { "name": "采样器" },
       "sigmas": { "name": "Sigmas" },
       "project_name": {
-        "name": "工程名称",
-        "tooltip": "工程目录位于 output/easy_media/projects/{工程名}/；留空时使用 default 工程目录。"
+        "name": "项目名称",
+        "tooltip": "项目目录位于 output/easy_media/projects/{项目名}/；留空时使用 default 项目目录。"
       },
       "project_save": {
-        "name": "工程保存方式",
+        "name": "项目保存方式",
         "tooltip": "new 为当前片段创建新版本，并保留当前索引及后续已有的 video 和 latent；override 覆盖已有版本。",
         "options": {
           "new": "新建",
@@ -1246,19 +1246,19 @@
       }
     },
     "outputs": {
-      "0": { "name": "工程名称" },
+      "0": { "name": "项目名称" },
       "1": { "name": "锁定音频" }
     }
   },
   "easy multitrackProjectVideoCombine": {
-    "display_name": "多轨工程视频合并",
-    "description": "预览并合并多轨工程中的活动视频片段。",
+    "display_name": "多轨项目视频合并",
+    "description": "预览并合并多轨项目中的活动视频片段。",
     "inputs": {
       "project_name": {
-        "name": "工程名称",
-        "tooltip": "连接多轨工程节点输出的工程名称。"
+        "name": "项目名称",
+        "tooltip": "连接多轨项目节点输出的项目名称。"
       },
-      "project_data": { "name": "工程数据" }
+      "project_data": { "name": "项目数据" }
     },
     "outputs": {
       "0": { "name": "视频" },
