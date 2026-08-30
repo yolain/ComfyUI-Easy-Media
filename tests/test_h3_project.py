@@ -688,3 +688,19 @@ def test_compose_project_ignores_stale_clips_removed_by_reset(monkeypatch, tmp_p
     assert [Path(segment["source"]).name for segment in captured["segments"]] == [
         "video_0_1.mp4"
     ]
+
+
+def test_audio_only_project_combine_reports_unsupported_mode(monkeypatch, tmp_path):
+    import utils.h3_project as module
+
+    monkeypatch.setattr(module.folder_paths, "get_output_directory", lambda: str(tmp_path))
+    info = _tracks_info()
+    info.update(width=32, height=32)
+    project_dir = initialize_h3_project("audio-only", info, tmp_path)
+    original_manifest = (project_dir / "project.json").read_bytes()
+
+    with pytest.raises(ValueError, match="Disconnect the Video Combine node"):
+        compose_h3_project_video("audio-only", {"clips": []})
+
+    assert (project_dir / "project.json").read_bytes() == original_manifest
+    assert not list(project_dir.glob("*.mp4"))

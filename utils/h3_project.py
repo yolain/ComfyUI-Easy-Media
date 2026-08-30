@@ -28,6 +28,66 @@ _WINDOWS_RESERVED_PROJECT_NAMES = {
     *(f"LPT{index}" for index in range(1, 10)),
 }
 _PROJECT_NAME_MAX_UTF8_BYTES = 180
+H3_AUDIO_ONLY_COMBINE_ERROR = (
+    "32x32 audio-only projects do not support MultiTrack Project Video Combine. "
+    "Project audio merging is not implemented yet. Disconnect the Video Combine "
+    "node to generate and save individual WAV segments."
+)
+
+
+def validate_h3_project_outputs(
+    info: dict[str, Any], prompt: Any, node_id: Any
+) -> None:
+    """Reject connected video-combine nodes before an audio project is changed."""
+    if (info["width"], info["height"]) != (32, 32):
+        return
+    prompt = unwrap_list_value(prompt)
+    node_id = unwrap_list_value(node_id)
+    if not isinstance(prompt, dict) or node_id is None:
+        return
+    for node in prompt.values():
+        if not isinstance(node, dict) or node.get("class_type") != "easy multitrackProjectVideoCombine":
+            continue
+        inputs = node.get("inputs", {})
+        source = inputs.get("project_name") if isinstance(inputs, dict) else None
+        if (
+            isinstance(source, (list, tuple))
+            and len(source) == 2
+            and str(source[0]) == str(node_id)
+            and source[1] == 0
+        ):
+            raise ValueError(H3_AUDIO_ONLY_COMBINE_ERROR)
+
+
+def save_h3_audio(audio: dict[str, Any] | None, path: Path) -> None:
+    """Atomically save a single H3 segment as a lossless PCM WAV."""
+    import soundfile as sf
+
+    waveform = audio.get("waveform") if isinstance(audio, dict) else None
+    sample_rate = audio.get("sample_rate") if isinstance(audio, dict) else None
+    if (
+        not isinstance(waveform, torch.Tensor)
+        or waveform.ndim != 3
+        or waveform.shape[0] != 1
+        or waveform.shape[1] == 0
+        or waveform.shape[-1] == 0
+        or not isinstance(sample_rate, int)
+        or sample_rate <= 0
+    ):
+        raise ValueError(
+            "H3 audio must contain one nonempty [1, C, T] waveform "
+            "and positive sample_rate"
+        )
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        sf.write(
+            str(temporary), waveform[0].detach().cpu().float().numpy().T,
+            sample_rate, format="WAV", subtype="PCM_24",
+        )
+        temporary.replace(path)
+    except (OSError, RuntimeError, TypeError, ValueError) as error:
+        temporary.unlink(missing_ok=True)
+        raise RuntimeError(f"Failed to save H3 audio: {error}") from error
 
 
 def save_h3_latent(latent: dict[str, Any], path: Path) -> None:
@@ -403,7 +463,7 @@ def choose_h3_generation(project_dir: Path, segment_index: int, override: bool) 
         return 1
     versions: dict[int, float] = {}
     pattern = re.compile(
-        rf"^(?:video|locked_audio|context_latent(?:_low)?)_{int(segment_index)}_"
+        rf"^(?:video|audio|locked_audio|context_latent(?:_low)?)_{int(segment_index)}_"
         r"(\d+)(?:\.[^.]+)?$"
     )
     if project_dir.is_dir():
@@ -613,6 +673,7 @@ def clear_h3_project_segments_from(
                 continue
             for key in (
                 "video",
+                "audio",
                 "locked_audio",
                 "latent",
                 "context_latent",
@@ -644,7 +705,7 @@ def clear_h3_project_segments_from(
         raise RuntimeError(f"Failed to clear project segments: {error}") from error
 
     artifact_pattern = re.compile(
-        r"^\.?(?:video|locked_audio|latent|context_latent|context_latent_low|staging_video)_"
+        r"^\.?(?:video|audio|locked_audio|latent|context_latent|context_latent_low|staging_video)_"
         r"(\d+)(?:_|\.)"
     )
     for path in project_dir.iterdir():
@@ -905,6 +966,8 @@ def compose_h3_project_video(project_name: Any, project_data: Any = None) -> Pat
 
     output_dir = Path(folder_paths.get_output_directory()).resolve()
     fresh_data = load_h3_project_data(project_name)
+    if (fresh_data["width"], fresh_data["height"]) == (32, 32):
+        raise ValueError(H3_AUDIO_ONLY_COMBINE_ERROR)
     requested = project_data
     if isinstance(requested, str):
         try:

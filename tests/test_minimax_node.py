@@ -1,4 +1,5 @@
 import importlib.util
+from io import BytesIO
 import json
 import sys
 import types
@@ -206,9 +207,10 @@ def _load_minimax_node(monkeypatch):
     comfy_utils.save_torch_file = (
         lambda state, path, metadata=None: torch.save(state, path)
     )
+    # The fixture writes torch archives; avoid suffix-based safetensors detection.
     comfy_utils.load_torch_file = (
         lambda path, safe_load=False, device=None: torch.load(
-            path,
+            BytesIO(Path(path).read_bytes()),
             map_location=device or torch.device("cpu"),
             weights_only=True,
         )
@@ -843,6 +845,7 @@ def test_h3_project_artifact_schema(monkeypatch):
         "continuity_mode",
         "sampling_pass",
         "previous",
+        "audio",
     ]
     assert artifact_inputs["context_latent_low"].kwargs["optional"] is True
     assert artifact_inputs["project_save"].kwargs["options"] == [
@@ -2964,3 +2967,150 @@ def test_remove_h3_motion_context_latent_rejects_unsafe_paths(
 
     with pytest.raises(ValueError, match="filename_path"):
         module.EasyRemoveH3MotionContextLatent.execute(object(), filename_path)
+
+
+@pytest.mark.parametrize("mode,first_only", [("single", False), ("dual", False), ("dual", True)])
+@pytest.mark.parametrize("with_context", [False, True])
+def test_audio_only_project_never_decodes_or_saves_video(monkeypatch, mode, first_only, with_context):
+    module = _load_minimax_node(monkeypatch)
+    inputs = _h3_project_inputs(
+        sampling_mode=_h3_sampling_mode(mode, **{"1st_pass_only": first_only}),
+        upscale_model=["unused-upscaler"],
+    )
+    info = inputs["tracks_info"][0]
+    info.update(width=32, height=32)
+    if with_context:
+        info["tracks"][0]["segments"].append({
+            "start_frame": 120, "end_frame": 240,
+            "content": {"continuity_mode": "context", "user_prompt": "continue"},
+        })
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    types_in_graph = {node["class_type"] for node in result.expand.values()}
+    assert "VAEDecodeAudio" in types_in_graph
+    assert not types_in_graph.intersection({
+        "VAEDecode", "VAEEncode", "ImageResizeKJv2", "MinimaxH3LatentUpscaler3D",
+        "easy saveVideo", "easy h3SegmentEncodingStart", "easy h3SegmentSaveEnd",
+        "easy h3LockedAudioDurationAlign",
+    })
+    artifacts = [n for n in result.expand.values() if n["class_type"] == "easy h3ProjectArtifact"]
+    for artifact in artifacts:
+        assert "audio" in artifact["inputs"]
+        assert "video_path" not in artifact["inputs"]
+    if with_context and not first_only:
+        assert "easy h3AudioContextLatent" in types_in_graph
+        trims = [n for n in result.expand.values() if n["class_type"] == "easy h3ContextMediaTrim"]
+        assert trims
+        assert all("images" not in n["inputs"] for n in trims)
+
+
+@pytest.mark.parametrize("dimensions", [(32, 64), (64, 32), (64, 64)])
+def test_audio_only_project_requires_both_dimensions_to_be_32(monkeypatch, dimensions):
+    module = _load_minimax_node(monkeypatch)
+    inputs = _h3_project_inputs(sampling_mode=_h3_sampling_mode("single"))
+    inputs["tracks_info"][0].update(width=dimensions[0], height=dimensions[1])
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    assert _graph_node(result, "VAEDecode")
+    assert _graph_node(result, "easy saveVideo")
+
+
+def test_audio_only_project_saves_original_locked_audio(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    inputs = _h3_project_inputs()
+    inputs["tracks_info"][0].update(width=32, height=32)
+    inputs["tracks_info"][0]["tracks"].append({
+        "type": "audio", "audio_locked": True,
+        "segments": [{"start_frame": 0, "end_frame": 120, "content": {"media_type": "audio"}}],
+    })
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    artifact = _graph_node(result, "easy h3ProjectArtifact")
+    source_id, output_index = artifact["inputs"]["audio"]
+    assert result.expand[source_id]["class_type"] == "easy multiTrackTaskOutput"
+    assert result.expand[source_id]["inputs"]["task_index"] == 0
+    assert output_index == 8
+
+
+def test_audio_only_context_trims_samples_and_retains_encoded_audio(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    audio = {"waveform": torch.arange(80).reshape(1, 1, 80).float(), "sample_rate": 48}
+    trimmed = module.EasyH3ContextMediaTrim.execute(
+        audio=audio, trim_frames=5, output_frames=22, fps=24,
+    )
+    assert trimmed.values[0] is None
+    assert trimmed.values[1]["waveform"].flatten().tolist() == list(range(10, 54))
+    encoded = torch.randn(1, 32, 2, 37)
+    context = module.EasyH3AudioContextLatent.execute({"samples": encoded}, 22)
+    video, retained_audio = context.values[0]["samples"].unbind()
+    assert video.shape == (1, 24, 7, 2, 2)
+    assert torch.count_nonzero(video) == 0
+    assert retained_audio is encoded
+
+
+def test_audio_only_artifact_writes_wav_manifest_and_cleans_up(monkeypatch, tmp_path):
+    import soundfile as sf
+
+    module = _load_minimax_node(monkeypatch)
+    monkeypatch.setattr(module.folder_paths, "get_output_directory", lambda: str(tmp_path))
+    info = _h3_project_inputs()["tracks_info"][0]
+    info.update(width=32, height=32)
+    audio = {"waveform": torch.linspace(-0.5, 0.5, 4800).reshape(1, 1, -1), "sample_rate": 48000}
+    project_dir = tmp_path / "easy_media" / "projects" / "audio-demo"
+    for mode in ("new", "new", "override"):
+        module.EasyH3ProjectArtifact.execute(
+            project_name="audio-demo", project_save=mode, segment_index=0,
+            context_latent={"samples": torch.zeros(1)}, tracks_info=info, audio=audio,
+        )
+    assert len(list(project_dir.glob("audio_0_*.wav"))) == 2
+    assert not list(project_dir.glob("*.mp4"))
+    manifest = json.loads((project_dir / "project.json").read_text())
+    active = manifest["segments"]["0"]["generations"]["1"]
+    assert "video" not in active
+    waveform, sr = sf.read(project_dir / active["audio"])
+    assert sr == 48000
+    assert len(waveform) == 4800
+    assert torch.allclose(torch.from_numpy(waveform), audio["waveform"].flatten().double(), atol=1e-6)
+    assert module.EasyH3ProjectContextLatentLoad.execute("audio-demo", 0).values[0]["samples"].shape == (1,)
+    module.clear_h3_project_segments_from("audio-demo", 0, tmp_path)
+    assert not list(project_dir.glob("*.wav"))
+    assert not list(project_dir.glob("*.safetensors"))
+
+
+@pytest.mark.parametrize("hidden_id", ["15", ["15"]])
+def test_audio_only_project_rejects_video_combine_before_any_project_changes(monkeypatch, hidden_id):
+    module = _load_minimax_node(monkeypatch)
+    inputs = _h3_project_inputs(project_save=["override"], segment_count=[-1])
+    inputs["tracks_info"][0].update(width=32, height=32)
+    module.EasyMultiTrackProject.hidden = types.SimpleNamespace(
+        unique_id=hidden_id,
+        prompt={"17": {
+            "class_type": "easy multitrackProjectVideoCombine",
+            "inputs": {"project_name": ["15", 0]},
+        }},
+    )
+    def unexpected_work(*args, **kwargs):
+        pytest.fail("Unsupported audio/video combination must fail before project or sampling work")
+
+    for name in ("initialize_h3_project", "clear_h3_project_segments_from", "GraphBuilder", "detect_turbo_model"):
+        monkeypatch.setattr(module, name, unexpected_work)
+    with pytest.raises(ValueError, match="Project audio merging is not implemented yet"):
+        module.EasyMultiTrackProject.execute(**inputs)
+
+
+@pytest.mark.parametrize("width,height,source", [
+    (32, 32, ["99", 0]),
+    (32, 32, "another-project"),
+    (32, 64, ["15", 0]),
+    (64, 32, ["15", 0]),
+])
+def test_audio_project_preflight_does_not_block_other_projects_or_video(monkeypatch, width, height, source):
+    module = _load_minimax_node(monkeypatch)
+    inputs = _h3_project_inputs(sampling_mode=_h3_sampling_mode("single"))
+    inputs["tracks_info"][0].update(width=width, height=height)
+    module.EasyMultiTrackProject.hidden = types.SimpleNamespace(
+        unique_id="15",
+        prompt={"17": {
+            "class_type": "easy multitrackProjectVideoCombine",
+            "inputs": {"project_name": source},
+        }},
+    )
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    assert _graph_node(result, "easy h3ProjectArtifact")

@@ -150,8 +150,8 @@ resolution_combo_options = [
     io.DynamicCombo.Option(
         s,
         [
-            io.Int.Input("width", default=544, min=64, max=8096, step=8),
-            io.Int.Input("height", default=960, min=64, max=8096, step=8),
+            io.Int.Input("width", default=544, min=32, max=8096, step=8),
+            io.Int.Input("height", default=960, min=32, max=8096, step=8),
             resize_method_input,
         ]
         if "custom" in s
@@ -1939,7 +1939,7 @@ class MultiTrackEditor(io.ComfyNode):
                 io.DynamicCombo.Input(
                     "resolution",
                     options=resolution_combo_options,
-                    tooltip="Select a resolution or choose 'Custom' to specify your own width and height.",
+                    tooltip="Select a resolution or choose 'Custom'. Width and height of 32 enable audio-only output in MultiTrack Project.",
                 ),
                 io.Combo.Input("format", options=list(VIDEO_FORMATS.keys()), default="Wan",  tooltip="Choose a video format to automatically set resolution and frame rate."),
                 TYPE_TRACK_DATA.Input("track_data"),

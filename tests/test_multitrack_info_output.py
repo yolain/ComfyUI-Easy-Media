@@ -4134,3 +4134,13 @@ def test_split_audios_rejects_an_empty_list():
 
     with pytest.raises(ValueError, match="at least one audio"):
         module.SplitAudios.execute([])
+
+
+def test_multitrack_editor_preserves_audio_only_custom_resolution():
+    module = _load_basic_module()
+    result = module.MultiTrackEditor.execute(
+        {"resolution": "width x height (custom)", "width": 32, "height": 32},
+        "MiniMax",
+        {"total_length": 120, "frame_rate": 24, "tracks": []},
+    )
+    assert (result.values[0]["width"], result.values[0]["height"]) == (32, 32)

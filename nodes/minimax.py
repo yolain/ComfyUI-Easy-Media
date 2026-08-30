@@ -38,7 +38,9 @@ from ..utils.h3_project import (
     parse_tracks_info,
     safe_h3_project_name,
     save_h3_latent,
+    save_h3_audio,
     select_h3_task_entries,
+    validate_h3_project_outputs,
 )
 from ..utils.models import detect_turbo_lora_from_prompt, detect_turbo_model
 from ..utils.minimax import (
@@ -230,6 +232,36 @@ def _h3_encode_context_media(
         video_latent=encoded_video.out(0),
         audio_latent=encoded_audio.out(0),
     ).out(0)
+
+
+def _h3_encode_audio_context(
+    graph: GraphBuilder,
+    audio: Any,
+    audio_vae: Any,
+    trim_frames: Any,
+    output_frames: Any,
+    fps: float,
+    pad_audio: bool,
+    prefix: str,
+) -> tuple[Any, Any]:
+    """Trim and encode an audio-only context without touching the video VAE."""
+    trimmed = graph.node(
+        "easy h3ContextMediaTrim",
+        id=f"{prefix}_trim",
+        audio=audio,
+        trim_frames=trim_frames,
+        output_frames=output_frames,
+        fps=fps,
+        pad_audio=pad_audio,
+    ).out(1)
+    encoded = graph.node(
+        "VAEEncodeAudio", id=f"{prefix}_encode", audio=trimmed, vae=audio_vae,
+    ).out(0)
+    context = graph.node(
+        "easy h3AudioContextLatent", id=f"{prefix}_latent",
+        audio_latent=encoded, output_frames=output_frames,
+    ).out(0)
+    return trimmed, context
 
 
 def _h3_project_source_path(video_path: str, output_dir: Path) -> Path:
@@ -1121,6 +1153,36 @@ class EasyH3SegmentEncodingStart(io.ComfyNode):
         return io.NodeOutput(images, audio)
 
 
+class EasyH3AudioContextLatent(io.ComfyNode):
+    """Build audio-only continuity without decoding or encoding video."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy h3AudioContextLatent",
+            display_name="H3 Audio Context Latent",
+            category="_EasyUse/H3",
+            inputs=[
+                io.Latent.Input("audio_latent"),
+                io.Int.Input("output_frames", min=1),
+            ],
+            outputs=[io.Latent.Output("latent")],
+            is_dev_only=True,
+        )
+
+    @classmethod
+    def execute(cls, audio_latent: dict[str, Any], output_frames: int) -> io.NodeOutput:
+        import comfy.nested_tensor
+
+        audio = audio_latent.get("samples")
+        if not isinstance(audio, torch.Tensor) or audio.ndim != 4:
+            raise ValueError("H3 audio latent must contain a four-dimensional tensor")
+        video = audio.new_zeros(
+            (audio.shape[0], 24, _temporal_shape(output_frames)[1], 2, 2)
+        )
+        return io.NodeOutput({"samples": comfy.nested_tensor.NestedTensor((video, audio))})
+
+
 class EasyH3ContextMediaTrim(io.ComfyNode):
     """Remove an H3 context head and its temporal-grid tail together."""
 
@@ -1134,7 +1196,7 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
                 "Internal exact-duration trim for context-linked H3 project clips."
             ),
             inputs=[
-                io.Image.Input("images"),
+                io.Image.Input("images", optional=True),
                 io.Audio.Input("audio"),
                 io.Int.Input("trim_frames", min=0),
                 io.Int.Input("output_frames", min=1),
@@ -1157,10 +1219,10 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
     @classmethod
     def execute(
         cls,
-        images: torch.Tensor,
-        audio: dict[str, Any],
-        trim_frames: int,
-        output_frames: int,
+        images: torch.Tensor | None = None,
+        audio: dict[str, Any] | None = None,
+        trim_frames: int = 0,
+        output_frames: int = 1,
         pad_audio: bool = True,
         fps: float = 24.0,
     ) -> io.NodeOutput:
@@ -1169,14 +1231,15 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
         frame_rate = float(fps)
         if not math.isfinite(frame_rate) or frame_rate <= 0:
             raise ValueError("fps must be a positive finite number")
-        if not isinstance(images, torch.Tensor) or images.ndim < 1:
-            raise ValueError("images must be an IMAGE tensor")
-        if prefix + wanted_frames > int(images.shape[0]):
-            raise ValueError(
-                "H3 context trim exceeds decoded video length: "
-                f"need frames {prefix}:{prefix + wanted_frames}, "
-                f"but only {int(images.shape[0])} are available"
-            )
+        if images is not None:
+            if not isinstance(images, torch.Tensor) or images.ndim < 1:
+                raise ValueError("images must be an IMAGE tensor")
+            if prefix + wanted_frames > int(images.shape[0]):
+                raise ValueError(
+                    "H3 context trim exceeds decoded video length: "
+                    f"need frames {prefix}:{prefix + wanted_frames}, "
+                    f"but only {int(images.shape[0])} are available"
+                )
 
         waveform = audio.get("waveform") if isinstance(audio, dict) else None
         sample_rate = audio.get("sample_rate") if isinstance(audio, dict) else None
@@ -1197,7 +1260,7 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
             )
 
         return io.NodeOutput(
-            images[prefix : prefix + wanted_frames],
+            images[prefix : prefix + wanted_frames] if images is not None else None,
             {"waveform": output_waveform, "sample_rate": sample_rate},
         )
 
@@ -1294,7 +1357,7 @@ class EasyH3LockedAudioDurationAlign(io.ComfyNode):
 
 
 class EasyH3ProjectArtifact(io.ComfyNode):
-    """Finalize one staged video and its sampled latent in an H3 project."""
+    """Save one video or audio segment and its continuity latent."""
 
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -1313,7 +1376,7 @@ class EasyH3ProjectArtifact(io.ComfyNode):
                 io.Int.Input("segment_index", min=0),
                 io.Latent.Input("context_latent"),
                 io.Latent.Input("context_latent_low", optional=True),
-                io.String.Input("video_path"),
+                io.String.Input("video_path", default="", optional=True),
                 TYPE_TRACKS_INFO.Input("tracks_info"),
                 io.Combo.Input("continuity_mode", options=['shot', 'context'],default="shot"),
                 io.Combo.Input(
@@ -1322,6 +1385,7 @@ class EasyH3ProjectArtifact(io.ComfyNode):
                     default="single",
                 ),
                 io.AnyType.Input("previous", optional=True),
+                io.Audio.Input("audio", optional=True),
             ],
             outputs=[io.String.Output("project_name")],
             is_output_node=True,
@@ -1336,12 +1400,13 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         project_save: str,
         segment_index: int,
         context_latent: dict[str, Any],
-        video_path: str,
         tracks_info: dict[str, Any],
         continuity_mode: str = "shot",
         sampling_pass: str = "single",
         context_latent_low: dict[str, Any] | None = None,
         previous: Any | None = None,
+        video_path: str = "",
+        audio: dict[str, Any] | None = None,
     ) -> io.NodeOutput:
         del previous
         safe_name = safe_h3_project_name(project_name)
@@ -1358,20 +1423,25 @@ class EasyH3ProjectArtifact(io.ComfyNode):
             project_save == "override",
         )
 
-        source_video = _h3_project_source_path(str(video_path), output_dir)
-        if not source_video.is_file():
-            raise FileNotFoundError(f"Staged H3 video was not found: {source_video}")
-        for old_video in project_dir.glob(
-            f"video_{int(segment_index)}_{generation}.*"
-        ):
-            if old_video.resolve() != source_video:
-                old_video.unlink()
-        target_video = project_dir / (
-            f"video_{int(segment_index)}_{generation}{source_video.suffix or '.mp4'}"
-        )
-        source_video.replace(target_video)
+        info = parse_tracks_info(tracks_info)
+        audio_only = (info["width"], info["height"]) == (32, 32)
+        if audio_only:
+            target_media = project_dir / f"audio_{int(segment_index)}_{generation}.wav"
+            save_h3_audio(audio, target_media)
+        else:
+            source_video = _h3_project_source_path(str(video_path), output_dir)
+            if not source_video.is_file():
+                raise FileNotFoundError(f"Staged H3 video was not found: {source_video}")
+            target_media = project_dir / (
+                f"video_{int(segment_index)}_{generation}{source_video.suffix or '.mp4'}"
+            )
+            source_video.replace(target_media)
+        for media_prefix in ("video", "audio"):
+            for old_media in project_dir.glob(f"{media_prefix}_{int(segment_index)}_{generation}.*"):
+                if old_media != target_media:
+                    old_media.unlink()
 
-        # New videos embed the original locked audio. Remove the legacy sidecar
+        # Media embeds the original locked audio. Remove the legacy sidecar
         # only when replacing its generation; other saved versions still use it.
         stale_locked_audio = project_dir / (
             f"locked_audio_{int(segment_index)}_{generation}.wav"
@@ -1422,7 +1492,6 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         else:
             manifest = {}
 
-        info = parse_tracks_info(tracks_info)
         manifest.update(
             {
                 "version": 2,
@@ -1450,7 +1519,7 @@ class EasyH3ProjectArtifact(io.ComfyNode):
             segment_manifest["generations"] = versions
         generation_manifest = {
             "context_latent": target_context_latent.name,
-            "video": target_video.name,
+            ("audio" if audio_only else "video"): target_media.name,
             "sampling_pass": sampling_pass,
             "updated_at": time.time(),
         }
@@ -1482,6 +1551,9 @@ class EasyH3ProjectArtifact(io.ComfyNode):
             if temporary_manifest.exists():
                 temporary_manifest.unlink()
             raise RuntimeError(f"Failed to save H3 project manifest: {error}") from error
+        if audio_only:
+            log_node_info("MultiTrack Project", f"Saved audio segment {segment_index}: {target_media.name}")
+            _notify_multitrack_project_refresh(safe_name, "after_save", segment_index)
         return io.NodeOutput(safe_name)
 
 
@@ -1742,6 +1814,13 @@ class EasyMultiTrackProject(io.ComfyNode):
                 + ", ".join(missing_components)
             )
         _require_minimax_h3_model(model)
+        info = parse_tracks_info(kwargs.get("tracks_info"))
+        hidden_inputs = getattr(cls, "hidden", None)
+        validate_h3_project_outputs(
+            info,
+            getattr(hidden_inputs, "prompt", None),
+            getattr(hidden_inputs, "unique_id", None),
+        )
         report_step(5)
 
         sampling_mode, sampling_config = _h3_sampling_mode_config(
@@ -1790,7 +1869,6 @@ class EasyMultiTrackProject(io.ComfyNode):
             second_turbo_detection = detect_turbo_model(second_model)
             report_step(16)
 
-        info = parse_tracks_info(kwargs.get("tracks_info"))
         safe_project_name = safe_h3_project_name(kwargs.get("project_name"))
         project_save = str(_first_input(kwargs.get("project_save"), "new"))
         if project_save not in {"new", "override"}:
@@ -1861,6 +1939,7 @@ class EasyMultiTrackProject(io.ComfyNode):
 
         target_width = int(info["width"])
         target_height = int(info["height"])
+        audio_only = (target_width, target_height) == (32, 32)
         fps = float(info["frame_rate"])
         first_pass_width, first_pass_height = h3_first_pass_dimensions(
             target_width,
@@ -1943,6 +2022,7 @@ class EasyMultiTrackProject(io.ComfyNode):
 
         if (
             run_second_pass
+            and not audio_only
             and upscale_by > 1
             and selected_upscale_model != "None"
             and _h3_node_mapping("MinimaxH3LatentUpscaler3D") is None
@@ -2192,7 +2272,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     and context_second_pass_sigmas is not None
                 ):
                     segment_second_pass_sigmas = context_second_pass_sigmas
-                if upscale_by <= 1:
+                if audio_only or upscale_by <= 1:
                     report_segment_step(0.46)
                     upscaled_latent = final_latent
                 else:
@@ -2305,137 +2385,170 @@ class EasyMultiTrackProject(io.ComfyNode):
             else:
                 report_segment_step(0.71)
 
-            report_segment_step(0.76)
-            decoded_images = graph.node(
-                "VAEDecode",
-                id=f"decode_video_{task_index}",
-                samples=final_latent,
-                vae=vae,
-            )
-            report_segment_step(0.80)
-            decoded_audio = graph.node(
-                "VAEDecodeAudio",
-                id=f"decode_audio_{task_index}",
-                samples=final_latent,
-                vae=audio_vae,
-            )
-            output_images = decoded_images.out(0)
-            output_audio = decoded_audio.out(0)
-            if context_trim_frames is not None:
-                report_segment_step(0.84)
-                trimmed = graph.node(
-                    "easy h3ContextMediaTrim",
-                    id=f"motion_context_trim_{task_index}",
-                    images=output_images,
-                    audio=output_audio,
-                    trim_frames=context_trim_frames,
-                    output_frames=base_task_length,
-                    pad_audio=not has_task_locked_audio,
-                    fps=fps,
-                )
-                output_images = trimmed.out(0)
-                output_audio = trimmed.out(1)
+            if audio_only:
+                output_audio = graph.node(
+                    "VAEDecodeAudio",
+                    id=f"decode_audio_{task_index}",
+                    samples=final_latent,
+                    vae=audio_vae,
+                ).out(0)
+                project_hires_context_latent = final_latent
+                project_low_context_latent = first_pass_latent if has_second_pass else final_latent
+                if context_trim_frames is not None:
+                    output_audio, project_hires_context_latent = _h3_encode_audio_context(
+                        graph, output_audio, audio_vae, context_trim_frames,
+                        base_task_length, fps, not has_task_locked_audio,
+                        f"hires_audio_context_{task_index}",
+                    )
+                    if has_second_pass and run_second_pass:
+                        low_audio = graph.node(
+                            "VAEDecodeAudio", id=f"low_audio_context_decode_{task_index}",
+                            samples=first_pass_latent, vae=audio_vae,
+                        ).out(0)
+                        _, project_low_context_latent = _h3_encode_audio_context(
+                            graph, low_audio, audio_vae, first_pass_context_trim_frames,
+                            base_task_length, fps, not has_task_locked_audio,
+                            f"low_audio_context_{task_index}",
+                        )
+                    else:
+                        project_low_context_latent = project_hires_context_latent
+                report_segment_step(0.89)
+                saved_media_inputs = {
+                    "audio": task_output.out(8) if has_task_locked_audio else output_audio,
+                }
             else:
-                report_segment_step(0.84)
-
-            if has_task_locked_audio:
-                locked_audio_align = graph.node(
-                    "easy h3LockedAudioDurationAlign",
-                    id=f"locked_audio_duration_align_{task_index}",
-                    images=output_images,
-                    audio=output_audio,
-                    fps=fps,
+                report_segment_step(0.76)
+                decoded_images = graph.node(
+                    "VAEDecode",
+                    id=f"decode_video_{task_index}",
+                    samples=final_latent,
+                    vae=vae,
                 )
-                output_audio = locked_audio_align.out(0)
-
-            project_hires_context_latent = final_latent
-            project_low_context_latent = (
-                first_pass_latent if has_second_pass else final_latent
-            )
-            if context_trim_frames is not None:
-                # A context generation contains both the copied head and H3's
-                # temporal-grid tail. The saved sampling latent still contains
-                # both even though the delivered media has been trimmed. Build
-                # the next segment's context from the exact delivered span so
-                # consecutive context tasks cannot copy the stale grid tail.
-                project_hires_context_latent = _h3_encode_context_media(
-                    graph,
-                    output_images,
-                    output_audio,
-                    vae,
-                    audio_vae,
-                    f"hires_context_{task_index}",
+                report_segment_step(0.80)
+                decoded_audio = graph.node(
+                    "VAEDecodeAudio",
+                    id=f"decode_audio_{task_index}",
+                    samples=final_latent,
+                    vae=audio_vae,
                 )
-                if has_second_pass and run_second_pass:
-                    low_context_images = graph.node(
-                        "VAEDecode",
-                        id=f"low_context_video_decode_{task_index}",
-                        samples=first_pass_latent,
-                        vae=vae,
-                    )
-                    low_context_audio = graph.node(
-                        "VAEDecodeAudio",
-                        id=f"low_context_audio_decode_{task_index}",
-                        samples=first_pass_latent,
-                        vae=audio_vae,
-                    )
-                    low_context_media = graph.node(
+                output_images = decoded_images.out(0)
+                output_audio = decoded_audio.out(0)
+                if context_trim_frames is not None:
+                    report_segment_step(0.84)
+                    trimmed = graph.node(
                         "easy h3ContextMediaTrim",
-                        id=f"low_context_trim_{task_index}",
-                        images=low_context_images.out(0),
-                        audio=low_context_audio.out(0),
-                        trim_frames=first_pass_context_trim_frames,
+                        id=f"motion_context_trim_{task_index}",
+                        images=output_images,
+                        audio=output_audio,
+                        trim_frames=context_trim_frames,
                         output_frames=base_task_length,
+                        pad_audio=not has_task_locked_audio,
                         fps=fps,
                     )
-                    project_low_context_latent = _h3_encode_context_media(
+                    output_images = trimmed.out(0)
+                    output_audio = trimmed.out(1)
+                else:
+                    report_segment_step(0.84)
+
+                if has_task_locked_audio:
+                    locked_audio_align = graph.node(
+                        "easy h3LockedAudioDurationAlign",
+                        id=f"locked_audio_duration_align_{task_index}",
+                        images=output_images,
+                        audio=output_audio,
+                        fps=fps,
+                    )
+                    output_audio = locked_audio_align.out(0)
+
+                project_hires_context_latent = final_latent
+                project_low_context_latent = (
+                    first_pass_latent if has_second_pass else final_latent
+                )
+                if context_trim_frames is not None:
+                    # A context generation contains both the copied head and H3's
+                    # temporal-grid tail. The saved sampling latent still contains
+                    # both even though the delivered media has been trimmed. Build
+                    # the next segment's context from the exact delivered span so
+                    # consecutive context tasks cannot copy the stale grid tail.
+                    project_hires_context_latent = _h3_encode_context_media(
                         graph,
-                        low_context_media.out(0),
-                        low_context_media.out(1),
+                        output_images,
+                        output_audio,
                         vae,
                         audio_vae,
-                        f"low_context_{task_index}",
+                        f"hires_context_{task_index}",
                     )
-                else:
-                    project_low_context_latent = project_hires_context_latent
-            report_segment_step(0.89)
-            # Keep decoded audio for latent continuity, but deliver the original
-            # task audio in the video so the project needs no separate WAV.
-            encoding_start = graph.node(
-                "easy h3SegmentEncodingStart",
-                id=f"encoding_start_{task_index}",
-                images=output_images,
-                audio=task_output.out(8) if has_task_locked_audio else output_audio,
-                segment_index=task_index,
-            )
-            saved_video = graph.node(
-                "easy saveVideo",
-                id=f"save_video_{task_index}",
-                input_mode="images+audio",
-                **{
-                    "input_mode.images": encoding_start.out(0),
-                    "input_mode.audio": encoding_start.out(1),
-                    "input_mode.fps": fps,
-                    "output_mode": "hide&save",
-                },
-                filename_prefix=(
-                    f"easy_media/projects/{safe_project_name}/"
-                    f".staging_video_{task_index}"
-                ),
-            )
-            saved_video_end = graph.node(
-                "easy h3SegmentSaveEnd",
-                id=f"save_end_{task_index}",
-                video_path=saved_video.out(1),
-                project_name=safe_project_name,
-                segment_index=task_index,
-            )
+                    if has_second_pass and run_second_pass:
+                        low_context_images = graph.node(
+                            "VAEDecode",
+                            id=f"low_context_video_decode_{task_index}",
+                            samples=first_pass_latent,
+                            vae=vae,
+                        )
+                        low_context_audio = graph.node(
+                            "VAEDecodeAudio",
+                            id=f"low_context_audio_decode_{task_index}",
+                            samples=first_pass_latent,
+                            vae=audio_vae,
+                        )
+                        low_context_media = graph.node(
+                            "easy h3ContextMediaTrim",
+                            id=f"low_context_trim_{task_index}",
+                            images=low_context_images.out(0),
+                            audio=low_context_audio.out(0),
+                            trim_frames=first_pass_context_trim_frames,
+                            output_frames=base_task_length,
+                            fps=fps,
+                        )
+                        project_low_context_latent = _h3_encode_context_media(
+                            graph,
+                            low_context_media.out(0),
+                            low_context_media.out(1),
+                            vae,
+                            audio_vae,
+                            f"low_context_{task_index}",
+                        )
+                    else:
+                        project_low_context_latent = project_hires_context_latent
+                report_segment_step(0.89)
+                # Keep decoded audio for latent continuity, but deliver the original
+                # task audio in the video so the project needs no separate WAV.
+                encoding_start = graph.node(
+                    "easy h3SegmentEncodingStart",
+                    id=f"encoding_start_{task_index}",
+                    images=output_images,
+                    audio=task_output.out(8) if has_task_locked_audio else output_audio,
+                    segment_index=task_index,
+                )
+                saved_video = graph.node(
+                    "easy saveVideo",
+                    id=f"save_video_{task_index}",
+                    input_mode="images+audio",
+                    **{
+                        "input_mode.images": encoding_start.out(0),
+                        "input_mode.audio": encoding_start.out(1),
+                        "input_mode.fps": fps,
+                        "output_mode": "hide&save",
+                    },
+                    filename_prefix=(
+                        f"easy_media/projects/{safe_project_name}/"
+                        f".staging_video_{task_index}"
+                    ),
+                )
+                saved_video_end = graph.node(
+                    "easy h3SegmentSaveEnd",
+                    id=f"save_end_{task_index}",
+                    video_path=saved_video.out(1),
+                    project_name=safe_project_name,
+                    segment_index=task_index,
+                )
+                saved_media_inputs = {"video_path": saved_video_end.out(0)}
             artifact_inputs: dict[str, Any] = {
                 "project_name": safe_project_name,
                 "project_save": project_save,
                 "segment_index": task_index,
                 "context_latent": project_hires_context_latent,
-                "video_path": saved_video_end.out(0),
+                **saved_media_inputs,
                 "tracks_info": info,
                 "continuity_mode": continuity_mode,
                 "sampling_pass": (
