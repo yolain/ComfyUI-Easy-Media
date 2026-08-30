@@ -14,6 +14,7 @@ from utils.h3_project import (  # noqa: E402
     compact_h3_task_segments,
     compose_h3_project_video,
     delete_h3_project,
+    delete_h3_project_video,
     h3_generation_mode,
     h3_locked_audio_track,
     h3_first_pass_dimensions,
@@ -361,6 +362,85 @@ def _write_render_project(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return project_dir
+
+
+def test_delete_video_saves_remaining_generation_and_preserves_other_segments(monkeypatch, tmp_path):
+    project_dir = _write_render_project(tmp_path)
+    monkeypatch.setattr("utils.h3_project.folder_paths.get_output_directory", lambda: str(tmp_path))
+    monkeypatch.setattr("utils.video.ffprobe_info", lambda _path: {"frame_count": 120})
+    manifest_path = project_dir / "project.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["segments"]["0"]["generations"]["2"] = {"video": "video_0_2.mp4"}
+    (project_dir / "video_0_2.mp4").write_bytes(b"remaining")
+    manifest_path.write_text(json.dumps(manifest))
+
+    result = delete_h3_project_video("demo", 0, "easy_media/projects/demo/video_0_1.mp4")
+
+    saved = json.loads(manifest_path.read_text())
+    assert saved["segments"]["0"]["active_generation"] == 2
+    assert set(saved["segments"]["0"]["generations"]) == {"2"}
+    assert saved["segments"]["1"] == manifest["segments"]["1"]
+    assert not (project_dir / "video_0_1.mp4").exists()
+    assert not (project_dir / "locked_audio_0_1.wav").exists()
+    assert (project_dir / "video_0_2.mp4").read_bytes() == b"remaining"
+    assert result["clips"][0]["file_name"] == "video_0_2.mp4"
+    assert result == load_h3_project_data("demo")
+
+
+def test_delete_last_video_removes_segment_and_keeps_shared_artifacts(monkeypatch, tmp_path):
+    project_dir = _write_render_project(tmp_path)
+    monkeypatch.setattr("utils.h3_project.folder_paths.get_output_directory", lambda: str(tmp_path))
+    monkeypatch.setattr("utils.video.ffprobe_info", lambda _path: {"frame_count": 120})
+    manifest_path = project_dir / "project.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["segments"]["1"]["generations"]["1"]["locked_audio"] = "locked_audio_0_1.wav"
+    manifest_path.write_text(json.dumps(manifest))
+
+    result = delete_h3_project_video("demo", 0, "easy_media/projects/demo/video_0_1.mp4")
+
+    assert [clip["index"] for clip in result["clips"]] == [1]
+    assert "0" not in json.loads(manifest_path.read_text())["segments"]
+    assert (project_dir / "locked_audio_0_1.wav").is_file()
+    result = delete_h3_project_video("demo", 1, "easy_media/projects/demo/video_1_1.mp4")
+    assert result["clips"] == []
+    assert result["updated_at"] > 0
+
+
+def test_delete_video_rolls_back_files_when_manifest_save_fails(monkeypatch, tmp_path):
+    project_dir = _write_render_project(tmp_path)
+    monkeypatch.setattr("utils.h3_project.folder_paths.get_output_directory", lambda: str(tmp_path))
+    monkeypatch.setattr("utils.video.ffprobe_info", lambda _path: {"frame_count": 120})
+    original_manifest = (project_dir / "project.json").read_bytes()
+    original_replace = Path.replace
+
+    def fail_manifest_replace(self, target):
+        if Path(target) == project_dir / "project.json":
+            raise OSError("disk full")
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", fail_manifest_replace)
+    with pytest.raises(RuntimeError, match="disk full"):
+        delete_h3_project_video("demo", 0, "easy_media/projects/demo/video_0_1.mp4")
+
+    assert (project_dir / "project.json").read_bytes() == original_manifest
+    assert (project_dir / "video_0_1.mp4").read_bytes() == b"video-0"
+    assert (project_dir / "locked_audio_0_1.wav").is_file()
+    assert not list(project_dir.glob(".delete-generation-*"))
+
+
+def test_delete_video_rejects_unrelated_files_and_escaping_artifacts(monkeypatch, tmp_path):
+    project_dir = _write_render_project(tmp_path)
+    monkeypatch.setattr("utils.h3_project.folder_paths.get_output_directory", lambda: str(tmp_path))
+    with pytest.raises(ValueError, match="does not belong"):
+        delete_h3_project_video("demo", 0, "easy_media/projects/demo/video_1_1.mp4")
+    manifest_path = project_dir / "project.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["segments"]["0"]["generations"]["1"]["context_latent"] = "../../../outside.safetensors"
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="escaped"):
+        delete_h3_project_video("demo", 0, "easy_media/projects/demo/video_0_1.mp4")
+    assert (project_dir / "video_0_1.mp4").is_file()
+    assert json.loads(manifest_path.read_text()) == manifest
 
 
 def test_load_h3_project_data_marks_shot_and_context(monkeypatch, tmp_path):

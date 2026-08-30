@@ -39,6 +39,7 @@ from .utils.prompt_builder import get_system_prompt_options
 from .utils.llm_api import load_api_key_from_config
 from .utils.h3_project import (
     delete_h3_project,
+    delete_h3_project_video,
     load_h3_project_data,
     safe_h3_project_name,
 )
@@ -121,6 +122,29 @@ async def handle_delete_h3_project(request: web.Request) -> web.Response:
     except Exception as error:
         traceback.print_exc()
         return web.json_response({"error": f"Failed to delete H3 project: {error}"}, status=500)
+
+
+@PromptServer.instance.routes.delete("/easy-media/project/video")
+async def handle_delete_h3_project_video(request: web.Request) -> web.Response:
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("Request must contain a JSON object")
+        project_name = payload.get("project_name")
+        segment_index = payload.get("segment_index")
+        file_path = payload.get("file_path")
+        if not isinstance(project_name, str) or not isinstance(file_path, str):
+            raise ValueError("project_name and file_path must be strings")
+        if type(segment_index) is not int or segment_index < 0:
+            raise ValueError("segment_index must be a non-negative integer")
+        return web.json_response(delete_h3_project_video(project_name, segment_index, file_path))
+    except FileNotFoundError as error:
+        return web.json_response({"error": str(error)}, status=404)
+    except (TypeError, ValueError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"Failed to delete project video: {error}"}, status=500)
 
 
 def _segment_source_audio_window(data: dict, fps: float) -> tuple[float, float]:

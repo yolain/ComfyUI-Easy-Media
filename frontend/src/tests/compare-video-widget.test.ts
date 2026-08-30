@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   CompareVideoWidget,
   mergeWatchOutputHistorySelections,
@@ -185,6 +185,10 @@ describe('compare video node preview', () => {
 })
 
 describe('CompareVideoWidget', () => {
+  beforeEach(() => {
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
+  })
   function widgetProps(
     node: object,
     onChange = vi.fn(),

@@ -220,6 +220,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
   const [timelineCollapsed, setTimelineCollapsed] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [deletingFilePath, setDeletingFilePath] = useState<string | null>(null)
   const [isCombining, setIsCombining] = useState(false)
   const [projects, setProjects] = useState<string[]>(['default'])
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null)
@@ -234,6 +235,9 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
   const playbackRafRef = useRef<number | null>(null)
   const timelineContainerRef = useRef<HTMLDivElement>(null)
   const refreshRequestRef = useRef(0)
+  const deletingFileRef = useRef(false)
+  const latestDataRef = useRef(data)
+  latestDataRef.current = data
   const canvasScale = useCanvasScale(app)
   const timelineWidth = Math.max(1, useElementWidth(timelineContainerRef))
   const scaledTimelineWidth = timelineWidth * zoom
@@ -252,9 +256,21 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
 
   function selectedFilePaths(clip: ProjectClip): string[] {
     const availablePaths = new Set(projectVideoFiles(clip).map((file) => file.file_path))
-    const storedPaths = previewFilePaths[clip.id]?.filter((path) => availablePaths.has(path)).slice(0, 2)
-    return storedPaths?.includes(clip.file_path) ? storedPaths : [clip.file_path]
+    if (availablePaths.size === 1) return [...availablePaths]
+    const storedPaths = [...new Set(previewFilePaths[clip.id] ?? [])]
+      .filter((path) => availablePaths.has(path)).slice(0, 2)
+    return storedPaths.includes(clip.file_path) ? storedPaths : [clip.file_path]
   }
+
+  const activeSelectedFiles = active
+    ? selectedFilePaths(active.clip)
+        .map((filePath) => projectVideoFiles(active.clip).find((file) => file.file_path === filePath))
+        .filter((file): file is ProjectVideoFile => Boolean(file))
+    : []
+  const compareUrls = activeSelectedFiles.length === 2
+    ? activeSelectedFiles.map(projectVideoFileUrl)
+    : []
+  const isComparing = compareUrls.length === 2 && compareUrls.every(Boolean)
 
   function selectClip(clip: ProjectClip) {
     seek(clipStartFrame(data.clips, clip.id))
@@ -285,7 +301,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
   }
 
   const refreshProject = useCallback(async (projectName: string, showError = true) => {
-    if (!projectName) return
+    if (!projectName || deletingFileRef.current) return
     const requestId = ++refreshRequestRef.current
     setIsRefreshing(true)
     const switchingProject = projectName !== data.project_name
@@ -339,6 +355,100 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
       })
     }
   }, [app, t])
+
+  async function deleteClipFile(clip: ProjectClip, file: ProjectVideoFile) {
+    if (deletingFileRef.current) return
+    deletingFileRef.current = true
+    setDeletingFilePath(file.file_path)
+    const projectName = data.project_name || 'default'
+    try {
+      const confirmed = await app.extensionManager.dialog.confirm({
+        title: t('projectVideoCombine.deleteClipFileTitle'),
+        message: t('projectVideoCombine.deleteClipFileConfirm', { file: file.file_name }),
+      })
+      if (!confirmed) return
+      ++refreshRequestRef.current
+      setIsRefreshing(false)
+      const response = await app.api.fetchApi('/easy-media/project/video', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_name: projectName, segment_index: clip.index, file_path: file.file_path }),
+      })
+      let payload: unknown
+      try {
+        payload = await response.json()
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error
+        if (response.status === 404 || response.status === 405) {
+          throw new Error(t('projectVideoCombine.deleteClipFileUnavailable'))
+        }
+        throw new Error(t('projectVideoCombine.deleteClipFileInvalidResponse', { status: response.status }))
+      }
+      if (!response.ok) throw new Error(errorMessage(payload, t('projectVideoCombine.deleteClipFileFailed')))
+      if (
+        !payload || typeof payload !== 'object'
+        || !('project_name' in payload) || payload.project_name !== projectName
+        || !('clips' in payload) || !Array.isArray(payload.clips)
+      ) {
+        throw new Error(t('projectVideoCombine.deleteClipFileInvalidResponse', { status: response.status }))
+      }
+      const current = latestDataRef.current
+      if ((current.project_name || 'default') !== projectName) return
+      const fresh = ensureProjectData(payload)
+      const replacement = fresh.clips.find((item) => item.id === clip.id)
+      const nextData = {
+        ...current,
+        updated_at: fresh.updated_at,
+        clips: current.clips.flatMap((item) => {
+          if (item.id !== clip.id) return [item]
+          if (!replacement) return []
+          const files = projectVideoFiles(replacement)
+          const preferredPaths = [item.file_path, ...(previewFilePaths[item.id] ?? [])]
+          const selectedFile = preferredPaths
+            .map((path) => files.find((candidate) => candidate.file_path === path))
+            .find((candidate) => candidate !== undefined)
+            ?? files.find((candidate) => candidate.file_path === replacement.file_path)!
+          return [selectProjectVideoFile({ ...item, video_files: files }, selectedFile)]
+        }),
+      }
+      setPreviewFilePaths((currentPaths) => {
+        const nextPaths = { ...currentPaths }
+        const remainingClip = nextData.clips.find((item) => item.id === clip.id)
+        if (!remainingClip) {
+          delete nextPaths[clip.id]
+          return nextPaths
+        }
+        const availablePaths = new Set(projectVideoFiles(remainingClip).map((item) => item.file_path))
+        const selectedPaths = [...new Set(currentPaths[clip.id] ?? [])]
+          .filter((path) => availablePaths.has(path))
+        // A comparison requires two surviving selections. Otherwise explicitly
+        // reset to the saved primary video instead of retaining comparison state.
+        nextPaths[clip.id] = availablePaths.size > 1 && selectedPaths.length === 2
+          && selectedPaths.includes(remainingClip.file_path)
+          ? selectedPaths
+          : [remainingClip.file_path]
+        return nextPaths
+      })
+      setIsPlaying(false)
+      setPreviewPauseNonce((nonce) => nonce + 1)
+      setPlaybackNonce((nonce) => nonce + 1)
+      const nextFrame = Math.min(currentFrameRef.current, Math.max(0, totalFrames(nextData.clips) - 1))
+      currentFrameRef.current = nextFrame
+      setCurrentFrame(nextFrame)
+      setSelectedClipId(clipAtFrame(nextData.clips, nextFrame)?.clip.id ?? null)
+      onChange(nextData)
+    } catch (error) {
+      app.extensionManager.toast.add({
+        severity: 'error',
+        summary: t('projectVideoCombine.deleteClipFileFailed'),
+        detail: error instanceof Error ? error.message : String(error),
+        life: 5000,
+      })
+    } finally {
+      deletingFileRef.current = false
+      setDeletingFilePath(null)
+    }
+  }
 
   async function deleteProject() {
     const projectName = data.project_name || 'default'
@@ -472,7 +582,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
   useEffect(() => {
     const workflowStore = app.extensionManager.workflow
     let activeWorkflowKey = workflowStore.activeWorkflow?.key ?? null
-    return workflowStore.$subscribe((_mutation, state) => {
+    return workflowStore.$subscribe((_mutation: unknown, state: { activeWorkflow?: { key: string } | null }) => {
       const nextWorkflowKey = state.activeWorkflow?.key ?? null
       if (
         activeWorkflowKey !== null
@@ -537,7 +647,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
     } catch (error) {
       console.error('[ProjectVideoCombineWidget] failed to seek preview video:', error)
     }
-  }, [active?.clip.id, activeUrl, data.frame_rate, playbackNonce])
+  }, [active?.clip.id, activeUrl, data.frame_rate, isComparing, playbackNonce])
 
   useEffect(() => {
     if (isPlaying) return
@@ -549,7 +659,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
     } catch (error) {
       console.error('[ProjectVideoCombineWidget] failed to seek paused preview video:', error)
     }
-  }, [active?.clip.id, activeUrl, currentFrame, data.frame_rate, isPlaying])
+  }, [active?.clip.id, activeUrl, currentFrame, data.frame_rate, isComparing, isPlaying])
 
   useEffect(() => {
     const video = nextClip ? videoRefs.current.get(nextClip.id) : undefined
@@ -576,7 +686,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
     } else {
       video.pause()
     }
-  }, [active?.clip.id, activeUrl, isPlaying, playbackNonce])
+  }, [active?.clip.id, activeUrl, isComparing, isPlaying, playbackNonce])
 
   function seek(frame: number) {
     const nextFrame = Math.max(0, Math.min(total, Math.round(frame)))
@@ -648,15 +758,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
 
   const playableWidth = Math.max(1, scaledTimelineWidth - MULTITRACK_LEFT_GUTTER - MULTITRACK_RIGHT_RESERVE)
   const playheadLeft = MULTITRACK_LEFT_GUTTER + (Math.min(currentFrame, total) / Math.max(total, 1)) * playableWidth
-  const activeSelectedFiles = active
-    ? selectedFilePaths(active.clip)
-        .map((filePath) => projectVideoFiles(active.clip).find((file) => file.file_path === filePath))
-        .filter((file): file is ProjectVideoFile => Boolean(file))
-    : []
-  const compareUrls = activeSelectedFiles.length === 2
-    ? activeSelectedFiles.map(projectVideoFileUrl)
-    : []
-  const isComparing = compareUrls.length === 2 && compareUrls.every(Boolean)
+
 
   return (
     <LocaleContext.Provider value={locale}>
@@ -664,19 +766,19 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
         <div className="flex h-full min-h-[520px] w-full flex-col overflow-hidden rounded-md border border-border bg-background text-foreground">
           <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-2">
             <div className="flex items-center gap-1">
-              <Select value={data.project_name || 'default'} onOpenChange={(open) => { if (open) void loadProjects() }} onValueChange={(name) => void refreshProject(name)}>
+              <Select disabled={deletingFilePath !== null} value={data.project_name || 'default'} onOpenChange={(open) => { if (open) void loadProjects() }} onValueChange={(name) => void refreshProject(name)}>
                 <SelectTrigger className="h-7 w-32 text-xs" aria-label={t('projectVideoCombine.selectProject')}><SelectValue /></SelectTrigger>
                 <SelectContent>{projectOptions.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent>
               </Select>
               {tooltip(t('projectVideoCombine.deleteProject'), (
-                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" disabled={isDeleting || isRefreshing} aria-label={t('projectVideoCombine.deleteProject')} onClick={() => void deleteProject()}>
+                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" disabled={isDeleting || isRefreshing || deletingFilePath !== null} aria-label={t('projectVideoCombine.deleteProject')} onClick={() => void deleteProject()}>
                   {isDeleting ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
                 </Button>
               ))}
             </div>
             <div className="flex items-center gap-2">
               {tooltip(t('projectVideoCombine.refresh'), (
-                <Button type="button" variant="ghost" size="icon" className="h-7 w-7" disabled={isRefreshing} aria-label={t('projectVideoCombine.refresh')} onClick={() => void refreshProject(data.project_name || 'default')}>
+                <Button type="button" variant="ghost" size="icon" className="h-7 w-7" disabled={isRefreshing || deletingFilePath !== null} aria-label={t('projectVideoCombine.refresh')} onClick={() => void refreshProject(data.project_name || 'default')}>
                   {isRefreshing ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
                 </Button>
               ))}
@@ -684,7 +786,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
                 <Checkbox checked={data.auto_combine} onCheckedChange={(checked) => onChange({ ...data, auto_combine: checked === true })} />
                 {t('projectVideoCombine.autoCombine')}
               </label>
-              <Button type="button" size="sm" className="h-7 gap-1.5 text-xs" disabled={isCombining || data.clips.length === 0} onClick={() => void combineProject()}>
+              <Button type="button" size="sm" className="h-7 gap-1.5 text-xs" disabled={isCombining || deletingFilePath !== null || data.clips.length === 0} onClick={() => void combineProject()}>
                 {isCombining ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
                 {t('projectVideoCombine.combine')}
               </Button>
@@ -698,6 +800,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
                 sourceUrl={compareUrls[0]!}
                 outputUrl={compareUrls[1]!}
                 pausePlaybackNonce={previewPauseNonce}
+
               />
             ) : activeUrl ? (
               [
@@ -776,33 +879,32 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
                           </span>
                         </div>
                       )
-                      if ((clip.video_files?.length ?? 0) > 1) {
-                        const selectedPaths = selectedFilePaths(clip)
-                        return (
-                          <Popover key={clip.id} onOpenChange={(open) => { if (open) selectClip(clip) }}>
-                            <PopoverTrigger asChild>
-                              <Button type="button" variant="ghost" className={`${blockClassName} relative justify-center`} style={blockStyle} aria-label={t('projectVideoCombine.selectClipFiles', { number: clip.index + 1 })}>
-                                {label}
-                                <span className="absolute right-2 flex items-center gap-0.5 text-[9px] text-muted-foreground">
-                                  {selectedPaths.length > 1 ? selectedPaths.length : null}
-                                  <ChevronDown className="size-3" />
-                                </span>
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-64 p-1" align="center">
-                              <div className="px-2 py-1 text-[10px] text-muted-foreground">{t('projectVideoCombine.selectClipFilesHint')}</div>
-                              {projectVideoFiles(clip).map((file) => {
-                                const checked = selectedPaths.includes(file.file_path)
-                                const disabled = !checked && selectedPaths.length >= 2
-                                return (
+                      const selectedPaths = selectedFilePaths(clip)
+                      return (
+                        <Popover key={clip.id} onOpenChange={(open) => { if (open) selectClip(clip) }}>
+                          <PopoverTrigger asChild>
+                            <Button type="button" variant="ghost" className={`${blockClassName} relative justify-center`} style={blockStyle} aria-label={t('projectVideoCombine.selectClipFiles', { number: clip.index + 1 })}>
+                              {label}
+                              <span className="absolute right-2 flex items-center gap-0.5 text-[9px] text-muted-foreground">
+                                {selectedPaths.length > 1 ? selectedPaths.length : null}
+                                <ChevronDown className="size-3" />
+                              </span>
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-64 p-1" align="center">
+                            <div className="px-2 py-1 text-[10px] text-muted-foreground">{t('projectVideoCombine.selectClipFilesHint')}</div>
+                            {projectVideoFiles(clip).map((file) => {
+                              const checked = selectedPaths.includes(file.file_path)
+                              const disabled = deletingFilePath !== null || (!checked && selectedPaths.length >= 2)
+                              return (
+                                <div key={file.file_path} className="flex items-center gap-1">
                                   <Button
-                                    key={file.file_path}
                                     type="button"
                                     variant="ghost"
                                     role="checkbox"
                                     aria-checked={checked}
                                     disabled={disabled}
-                                    className={cn('h-8 w-full justify-start gap-2 px-2 text-xs', disabled && 'opacity-50')}
+                                    className={cn('h-8 min-w-0 flex-1 justify-start gap-2 px-2 text-xs', disabled && 'opacity-50')}
                                     onClick={() => toggleClipFile(clip, file.file_path)}
                                   >
                                     <span className={cn('flex size-4 shrink-0 items-center justify-center rounded-sm border border-border', checked && 'border-primary bg-primary text-primary-foreground')}>
@@ -810,16 +912,29 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
                                     </span>
                                     <span className="truncate">{file.file_name}</span>
                                   </Button>
-                                )
-                              })}
-                            </PopoverContent>
-                          </Popover>
-                        )
-                      }
-                      return (
-                        <Button key={clip.id} type="button" variant="ghost" className={blockClassName} style={blockStyle} onClick={() => selectClip(clip)}>
-                          {label}
-                        </Button>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="size-7 shrink-0 text-destructive hover:text-destructive"
+                                    disabled={deletingFilePath !== null || isDeleting || isRefreshing}
+                                    aria-label={t('projectVideoCombine.deleteClipFile', { file: file.file_name })}
+                                    title={t('projectVideoCombine.deleteClipFile', { file: file.file_name })}
+                                    onPointerDown={(event) => event.stopPropagation()}
+                                    onKeyDown={(event) => event.stopPropagation()}
+                                    onClick={(event) => {
+                                      event.preventDefault()
+                                      event.stopPropagation()
+                                      void deleteClipFile(clip, file)
+                                    }}
+                                  >
+                                    {deletingFilePath === file.file_path ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                                  </Button>
+                                </div>
+                              )
+                            })}
+                          </PopoverContent>
+                        </Popover>
                       )
                   })}
                 </div>

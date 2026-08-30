@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import re
 import shutil
+import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -696,11 +699,96 @@ def _project_child_path(project_dir: Path, filename: Any) -> Path:
     return path
 
 
+def delete_h3_project_video(project_name: str, segment_index: int, file_path: str) -> dict[str, Any]:
+    """Delete one recorded generation and atomically persist the remaining project."""
+    project_dir = h3_project_directory(project_name)
+    if project_dir.is_symlink() or (project_dir / "project.json").is_symlink():
+        raise ValueError("Project paths must not be symbolic links")
+    project_dir, manifest = _load_h3_manifest(project_name)
+    output_dir = Path(folder_paths.get_output_directory()).resolve()
+    segments = manifest.get("segments", {})
+    segment = segments.get(str(segment_index)) if isinstance(segments, dict) else None
+    if not isinstance(segment, dict) or not isinstance(segment.get("generations"), dict):
+        raise ValueError("Project segment was not found")
+    generations = segment["generations"]
+    generation_keys = [
+        key for key, generation in generations.items()
+        if isinstance(generation, dict) and generation.get("video")
+        and (project_dir / generation["video"]).relative_to(output_dir).as_posix() == file_path
+    ]
+    if not generation_keys:
+        raise ValueError("Video does not belong to this project segment")
+
+    artifact_keys = ("video", "locked_audio", "latent", "context_latent", "context_latent_low")
+    artifacts: set[Path] = set()
+    for key in generation_keys:
+        for field in artifact_keys:
+            filename = generations[key].get(field)
+            if filename:
+                try:
+                    artifacts.add(_project_child_path(project_dir, filename))
+                except FileNotFoundError:
+                    # Missing artifacts should not prevent removing a stale record.
+                    continue
+        del generations[key]
+    # Keep artifacts still referenced by another generation or segment.
+    for other_segment in segments.values():
+        for generation in other_segment.get("generations", {}).values():
+            for field in artifact_keys:
+                if generation.get(field):
+                    artifacts.discard((project_dir / generation[field]).resolve())
+    now = time.time()
+    if not generations:
+        del segments[str(segment_index)]
+    elif str(segment.get("active_generation")) in generation_keys:
+        available = [
+            key for key, generation in generations.items()
+            if generation.get("video") and (project_dir / generation["video"]).is_file()
+        ]
+        candidates = available or list(generations)
+        segment["active_generation"] = int(max(
+            candidates,
+            key=lambda key: float(generations[key].get("updated_at", 0)),
+        ))
+    segment["updated_at"] = now
+    manifest["updated_at"] = now
+    manifest.pop("last_render", None)
+    project_data = _h3_project_data(project_name, project_dir, manifest)
+
+    # Stage files so a failed manifest write can restore the original project.
+    staging = Path(tempfile.mkdtemp(prefix=".delete-generation-", dir=project_dir))
+    moved: list[tuple[Path, Path]] = []
+    temporary = staging / "project.json"
+    try:
+        for index, artifact in enumerate(sorted(artifacts)):
+            staged = staging / str(index)
+            artifact.replace(staged)
+            moved.append((artifact, staged))
+        temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(project_dir / "project.json")
+    except (OSError, TypeError, ValueError) as error:
+        for original, staged in reversed(moved):
+            staged.replace(original)
+        shutil.rmtree(staging)
+        raise RuntimeError(f"Failed to delete project video: {error}") from error
+    try:
+        shutil.rmtree(staging)
+    except OSError:
+        logging.exception("Project updated, but staged deleted artifacts could not be cleaned up: %s", staging)
+    return project_data
+
+
 def load_h3_project_data(project_name: Any) -> dict[str, Any]:
     """Build the compact editor payload for the active H3 project generations."""
+    project_dir, manifest = _load_h3_manifest(project_name)
+    return _h3_project_data(project_name, project_dir, manifest)
+
+
+def _h3_project_data(
+    project_name: Any, project_dir: Path, manifest: dict[str, Any]
+) -> dict[str, Any]:
     from .video import ffprobe_info
 
-    project_dir, manifest = _load_h3_manifest(project_name)
     safe_name = safe_h3_project_name(project_name)
     output_dir = Path(folder_paths.get_output_directory()).resolve()
     raw_segments = manifest.get("segments", {})
@@ -802,8 +890,11 @@ def load_h3_project_data(project_name: Any) -> dict[str, Any]:
         "frame_rate": float(manifest.get("fps", 24) or 24),
         "clips": clips,
         "updated_at": max(
-            (float(segment.get("updated_at", 0) or 0) for segment in raw_segments.values() if isinstance(segment, dict)),
-            default=0,
+            float(manifest.get("updated_at", 0) or 0),
+            max(
+                (float(segment.get("updated_at", 0) or 0) for segment in raw_segments.values() if isinstance(segment, dict)),
+                default=0,
+            ),
         ),
     }
 

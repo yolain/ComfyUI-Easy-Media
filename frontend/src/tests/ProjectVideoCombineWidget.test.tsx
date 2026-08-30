@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ProjectVideoCombineWidget } from '@/components/widgets/ProjectVideoCombineWidget'
 import type { ReactWidgetProps } from '@/lib/create-react-widget'
@@ -446,7 +447,7 @@ describe('ProjectVideoCombineWidget', () => {
     const preloadedSecondVideo = videosBefore[1]
     expect(preloadedSecondVideo.currentTime).toBeCloseTo(1)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Segment 2 Shot' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Select up to two videos for segment 2' }))
 
     const videosAfter = [...container.querySelectorAll('video')]
     expect(videosAfter[0]).toBe(preloadedSecondVideo)
@@ -587,6 +588,7 @@ describe('ProjectVideoCombineWidget', () => {
     expect(screen.queryByRole('button', { name: 'Select source' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Select output' })).toBeNull()
     expect(props.onChange).not.toHaveBeenCalled()
+    expect((screen.getByRole('button', { name: 'Delete video_0_3.mp4' }) as HTMLButtonElement).disabled).toBe(false)
 
     fireEvent.click(original)
 
@@ -600,5 +602,175 @@ describe('ProjectVideoCombineWidget', () => {
         source_frame_count: 96,
       })],
     })
+  })
+
+  it('cancels deletion without changing selection or bubbling the delete click', async () => {
+    const { props, api, dialog } = widgetProps()
+    dialog.confirm.mockResolvedValue(false)
+    const bubbled = vi.fn()
+    render(<div onClick={bubbled}><ProjectVideoCombineWidget {...props} /></div>)
+    fireEvent.click(screen.getByRole('button', { name: 'Select up to two videos for segment 1' }))
+    bubbled.mockClear()
+
+    const deleteButton = screen.getByRole('button', { name: 'Delete video_0_1.mp4' })
+    fireEvent.pointerDown(deleteButton)
+    fireEvent.click(deleteButton)
+
+    await waitFor(() => expect(dialog.confirm).toHaveBeenCalledWith({
+      title: 'Delete generated clip?',
+      message: expect.stringContaining('video_0_1.mp4'),
+    }))
+    expect(bubbled).not.toHaveBeenCalled()
+    expect(api.fetchApi).not.toHaveBeenCalled()
+    expect(props.onChange).not.toHaveBeenCalled()
+    expect(screen.getByRole('checkbox', { name: 'video_0_1.mp4' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('deletes the selected version and keeps the remaining comparison video and trim', async () => {
+    const alternate = {
+      file_path: 'easy_media/projects/demo/video_0_2.mp4',
+      file_name: 'video_0_2.mp4',
+      source_frame_count: 96,
+    }
+    const clip = { ...projectData.clips[0], source_start_frame: 12, video_files: [projectData.clips[0], alternate] }
+    const { props, api } = widgetProps({ value: { ...projectData, clips: [clip], auto_combine: false } })
+    api.fetchApi.mockResolvedValue({
+      ok: true,
+      json: async () => ({ ...projectData, updated_at: 123, clips: [{ ...clip, ...alternate, video_files: [alternate] }] }),
+    })
+    const { rerender, container } = render(<ProjectVideoCombineWidget {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Select up to two videos for segment 1' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'video_0_2.mp4' }))
+    expect(container.querySelectorAll('video')).toHaveLength(2)
+    fireEvent.click(screen.getByRole('button', { name: 'Delete video_0_1.mp4' }))
+
+    await waitFor(() => expect(props.onChange).toHaveBeenCalledWith(expect.objectContaining({
+      auto_combine: false,
+      updated_at: 123,
+      clips: [expect.objectContaining({ ...alternate, source_start_frame: 12, source_end_frame: 96, video_files: [alternate] })],
+    })))
+    expect(api.fetchApi).toHaveBeenCalledWith('/easy-media/project/video', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_name: 'demo', segment_index: 0, file_path: clip.file_path }),
+    })
+    const nextData = vi.mocked(props.onChange).mock.calls.at(-1)![0]
+    rerender(<ProjectVideoCombineWidget {...props} value={nextData} />)
+    expect(screen.queryByRole('checkbox', { name: 'video_0_1.mp4' })).toBeNull()
+    expect(container.querySelectorAll('video')).toHaveLength(1)
+  })
+
+  it('removes the last generated clip after confirmation', async () => {
+    const { props, api } = widgetProps()
+    api.fetchApi.mockResolvedValue({ ok: true, json: async () => ({ ...projectData, clips: [], updated_at: 123 }) })
+    const { rerender } = render(<ProjectVideoCombineWidget {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Select up to two videos for segment 1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete video_0_1.mp4' }))
+
+    await waitFor(() => expect(props.onChange).toHaveBeenCalledWith({ ...projectData, clips: [], updated_at: 123 }))
+    rerender(<ProjectVideoCombineWidget {...props} value={{ ...projectData, clips: [], updated_at: 123 }} />)
+    expect(screen.queryByText('Segment 1')).toBeNull()
+  })
+
+  it.each([0, 1])('returns to normal preview after deleting comparison video %s', async (deletedIndex) => {
+    const files = [projectData.clips[0], {
+      file_path: 'easy_media/projects/demo/video_0_2.mp4',
+      file_name: 'video_0_2.mp4',
+      source_frame_count: 96,
+    }]
+    const initial = { ...projectData, clips: [{ ...projectData.clips[0], video_files: files }] }
+    const remaining = files[1 - deletedIndex]
+    const { props, api } = widgetProps({ value: initial })
+    api.fetchApi.mockResolvedValue({
+      ok: true,
+      json: async () => ({ ...initial, clips: [{ ...initial.clips[0], ...remaining, video_files: [remaining] }] }),
+    })
+    function Widget() {
+      const [value, setValue] = useState<ProjectData>(initial)
+      return <ProjectVideoCombineWidget {...props} value={value} onChange={(next) => {
+        props.onChange(next)
+        setValue(next)
+      }} />
+    }
+    const { container } = render(<Widget />)
+    fireEvent.click(screen.getByRole('button', { name: 'Select up to two videos for segment 1' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: files[1].file_name }))
+    const controls = container.querySelector('[data-compare-video-playback]') as HTMLElement
+    const comparisonVideos = [...container.querySelectorAll('video')]
+    fireEvent.click(within(controls).getByRole('button', { name: 'Play' }))
+    fireEvent.click(screen.getByRole('button', { name: `Delete ${files[deletedIndex].file_name}` }))
+
+    await waitFor(() => expect(props.onChange).toHaveBeenCalled())
+    await waitFor(() => expect(container.querySelector('[data-compare-video-playback]')).toBeNull())
+    expect(screen.queryByRole('button', { name: 'A/B' })).toBeNull()
+    expect(container.querySelectorAll('video')).toHaveLength(1)
+    const preview = container.querySelector('video')!
+    expect(preview.src).toContain(remaining.file_name)
+    expect(preview.getAttribute('aria-hidden')).toBe('false')
+    for (const video of comparisonVideos) {
+      expect(vi.mocked(HTMLMediaElement.prototype.pause).mock.contexts).toContain(video)
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Play' }))
+    expect(vi.mocked(HTMLMediaElement.prototype.play).mock.contexts).toContain(preview)
+    expect(screen.getByRole('button', { name: 'Pause' })).not.toBeNull()
+  })
+
+  it('keeps project data unchanged and reports a deletion failure', async () => {
+    const { props, api, toast } = widgetProps()
+    api.fetchApi.mockResolvedValue({ ok: false, json: async () => ({ error: 'Could not save project' }) })
+    render(<ProjectVideoCombineWidget {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Select up to two videos for segment 1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete video_0_1.mp4' }))
+
+    await waitFor(() => expect(toast.add).toHaveBeenCalledWith(expect.objectContaining({
+      severity: 'error', summary: 'Clip deletion failed', detail: 'Could not save project',
+    })))
+    expect(props.onChange).not.toHaveBeenCalled()
+    expect((screen.getByRole('button', { name: 'Delete video_0_1.mp4' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it.each([404, 405])('explains that the backend must be restarted for a plain-text HTTP %s response', async (status) => {
+    const { props, api, toast } = widgetProps()
+    api.fetchApi.mockResolvedValue(new Response(`${status}: Not Found`, { status }))
+    render(<ProjectVideoCombineWidget {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Select up to two videos for segment 1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete video_0_1.mp4' }))
+
+    await waitFor(() => expect(toast.add).toHaveBeenCalledWith(expect.objectContaining({
+      severity: 'error', detail: expect.stringContaining('Restart ComfyUI'),
+    })))
+    expect(props.onChange).not.toHaveBeenCalled()
+    expect(api.fetchApi).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    { body: '<html>Bad Gateway</html>', status: 502 },
+    { body: '<html>Fallback page</html>', status: 200 },
+    { body: '{"error":"Unexpected payload"}', status: 200 },
+    { body: '{"project_name":"other","clips":[]}', status: 200 },
+  ])('preserves project state for an invalid deletion response: $status $body', async ({ body, status }) => {
+    const { props, api, toast } = widgetProps()
+    api.fetchApi.mockResolvedValue(new Response(body, { status }))
+    render(<ProjectVideoCombineWidget {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Select up to two videos for segment 1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete video_0_1.mp4' }))
+
+    await waitFor(() => expect(toast.add).toHaveBeenCalledWith(expect.objectContaining({
+      severity: 'error', detail: expect.stringContaining(`invalid project response (HTTP ${status})`),
+    })))
+    expect(props.onChange).not.toHaveBeenCalled()
+  })
+
+  it('preserves a JSON 404 error from the registered deletion endpoint', async () => {
+    const { props, api, toast } = widgetProps()
+    api.fetchApi.mockResolvedValue(new Response(JSON.stringify({ error: 'Project manifest was not found' }), { status: 404 }))
+    render(<ProjectVideoCombineWidget {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Select up to two videos for segment 1' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete video_0_1.mp4' }))
+
+    await waitFor(() => expect(toast.add).toHaveBeenCalledWith(expect.objectContaining({
+      severity: 'error', detail: 'Project manifest was not found',
+    })))
+    expect(props.onChange).not.toHaveBeenCalled()
   })
 })

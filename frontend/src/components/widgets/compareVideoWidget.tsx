@@ -818,10 +818,14 @@ function CompareVideoWidgetInner({
     pauseVideos()
   }, [pausePlaybackNonce, pauseVideos])
 
-  useEffect(() => () => {
-    sourceRef.current?.pause()
-    outputRef.current?.pause()
-  }, [])
+  useEffect(() => {
+    const source = sourceRef.current
+    const output = outputRef.current
+    return () => {
+      source?.pause()
+      output?.pause()
+    }
+  }, [sourceUrl, outputUrl])
 
   useEffect(() => {
     if (!bindNodeEvents) return
