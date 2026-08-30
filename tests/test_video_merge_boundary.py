@@ -68,7 +68,8 @@ def test_video_merge_pads_each_segment_to_its_exact_timeline_frame_count(
     assert "trim=start_frame=12:end_frame=36" in filter_graph
     assert "setpts=PTS-STARTPTS,fps=fps=24:start_time=0" in filter_graph
     assert "tpad=stop_mode=clone:stop_duration=1.0,trim=end_frame=24" in filter_graph
-    assert "enable='between(n,24,47)'" in filter_graph
+    assert "setpts=PTS-STARTPTS+24" in filter_graph
+    assert "enable='between(round(t*24),24,47)'" in filter_graph
 
 
 def test_video_merge_uses_sample_boundaries_only_for_locked_audio(
@@ -234,6 +235,69 @@ def test_video_merge_clones_the_last_frame_when_source_decodes_two_frames_short(
     assert decode_result.stdout
     blue_channel = decode_result.stdout[2::3]
     assert sum(blue_channel) / len(blue_channel) > 200
+
+
+@pytest.mark.skipif(
+    shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
+    reason="FFmpeg is required for the full-timeline regression test",
+)
+@pytest.mark.parametrize("frame_rate", [24, 30, 30000 / 1001])
+@pytest.mark.parametrize("layout", ["sequential", "gaps-and-overlap"])
+def test_video_merge_preserves_every_frame_of_later_segments(
+    tmp_path: Path,
+    frame_rate: float,
+    layout: str,
+) -> None:
+    module = _load_video_utils_module(tmp_path)
+    ffmpeg = shutil.which("ffmpeg")
+    assert ffmpeg is not None
+    if layout == "sequential":
+        clips = [(0, 24, "red"), (24, 48, "blue"), (48, 72, "lime")]
+        total_length = 72
+    else:
+        clips = [(3, 29, "red"), (29, 53, "blue"), (55, 66, "lime"), (60, 64, "yellow")]
+        total_length = 70
+    colors = {
+        "black": (0, 0, 0),
+        "red": (255, 0, 0),
+        "blue": (0, 0, 255),
+        "lime": (0, 255, 0),
+        "yellow": (255, 255, 0),
+    }
+    expected = ["black"] * total_length
+    segments = []
+    for start, end, color in clips:
+        source = tmp_path / f"{color}.mp4"
+        created = subprocess.run(
+            [
+                ffmpeg, "-y", "-v", "error", "-f", "lavfi", "-i",
+                f"color=c={color}:s=64x64:r={frame_rate}",
+                "-frames:v", str(end - start), "-c:v", "libx264",
+                "-pix_fmt", "yuv420p", str(source),
+            ],
+            capture_output=True,
+        )
+        assert created.returncode == 0, created.stderr.decode(errors="replace")
+        segments.append({"source": str(source), "start_frame": start, "end_frame": end})
+        expected[start:end] = [color] * (end - start)
+
+    output = module.merge_video_track_with_ffmpeg(
+        segments, total_length, frame_rate, 64, 64,
+    )
+    assert output is not None
+    decoded = subprocess.run(
+        [ffmpeg, "-v", "error", "-i", output, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+        capture_output=True,
+    )
+    assert decoded.returncode == 0, decoded.stderr.decode(errors="replace")
+    frame_bytes = 64 * 64 * 3
+    assert len(decoded.stdout) == total_length * frame_bytes
+    for index, color in enumerate(expected):
+        frame = decoded.stdout[index * frame_bytes:(index + 1) * frame_bytes]
+        actual = tuple(sum(frame[channel::3]) / (64 * 64) for channel in range(3))
+        assert actual == pytest.approx(colors[color], abs=12), (
+            f"Frame {index}: expected {color}, got RGB {actual}"
+        )
 
 
 @pytest.mark.skipif(

@@ -262,15 +262,17 @@ def merge_video_track_with_ffmpeg(
             f"tpad=stop_mode=clone:stop_duration={duration}",
             f"trim=end_frame={frame_count}",
         ])
-        video_filters.append(f"setpts=PTS-STARTPTS+{start_seconds}/TB")
+        # fps sets the time base to one frame, so use an integer offset to
+        # avoid rounding a fractional-second start down to the previous frame.
+        video_filters.append(f"setpts=PTS-STARTPTS+{start_frame}")
         filters.append(f"[{video_input_index}:v]{','.join(video_filters)}[{clip_label}]")
-        # Use integer timeline frames for the overlay window. Comparing FFmpeg's
-        # `t` against Python-generated fractional seconds can exclude the exact
-        # boundary frame (for example, 260 / 24) because the two sides round the
-        # repeating decimal differently, exposing one frame of the black base.
+        # FFmpeg 4.4 evaluates enable on both overlay inputs: `n` can be the
+        # clip-local frame count rather than the main timeline's frame count.
+        # Both inputs have timeline timestamps, so derive the frame from `t`.
+        # Rounding also protects fractional-second boundaries (e.g. 260 / 24).
         filters.append(
             f"[{current_video}][{clip_label}]overlay=eof_action=pass:"
-            f"enable='between(n,{start_frame},{end_frame - 1})'[{output_label}]"
+            f"enable='between(round(t*{frame_rate}),{start_frame},{end_frame - 1})'[{output_label}]"
         )
         current_video = output_label
 
