@@ -1316,11 +1316,37 @@ def test_multitrack_project_rejects_zero_start_number(monkeypatch):
         )
 
 
-def test_multitrack_h3_medium_dual_uses_selected_latent_upscale_model(monkeypatch):
+@pytest.mark.parametrize(
+    "upscaler_defaults",
+    [
+        {},
+        {"enable_temporal_chunking": True, "force_unload": False},
+        {"enable_temporal_chunking": False, "force_unload": True},
+    ],
+)
+def test_multitrack_h3_medium_dual_uses_selected_latent_upscale_model(
+    monkeypatch, upscaler_defaults
+):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
+
+    class VersionedLatentUpscaler(_MiniMaxLatentUpscaler):
+        @classmethod
+        def INPUT_TYPES(cls):
+            return {
+                "required": {
+                    "latent": ("LATENT",),
+                    "model_name": (["default.safetensors"],),
+                    "align": ("INT", {"default": 2}),
+                    **{
+                        name: ("BOOLEAN", {"default": value})
+                        for name, value in upscaler_defaults.items()
+                    },
+                }
+            }
+
     module.comfy_nodes.NODE_CLASS_MAPPINGS["MinimaxH3LatentUpscaler3D"] = (
-        _MiniMaxLatentUpscaler
+        VersionedLatentUpscaler
     )
 
     result = module.EasyMultiTrackProject.execute(
@@ -1354,6 +1380,11 @@ def test_multitrack_h3_medium_dual_uses_selected_latent_upscale_model(monkeypatc
     assert upscale["inputs"]["mode"] == "target dimensions"
     assert upscale["inputs"]["align"] == 32
     assert upscale["inputs"]["enable_chunking"] is True
+    for name in ("enable_temporal_chunking", "force_unload"):
+        if name in upscaler_defaults:
+            assert upscale["inputs"][name] is upscaler_defaults[name]
+        else:
+            assert name not in upscale["inputs"]
     assert upscale["inputs"]["device"] == "cuda"
     assert upscale["inputs"]["precision"] == "fp16"
     assert (

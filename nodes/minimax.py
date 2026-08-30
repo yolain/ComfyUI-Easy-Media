@@ -187,6 +187,9 @@ def _h3_latent_upscale_inputs(
     if _h3_node_mapping(node_id) is None:
         raise RuntimeError(f"{node_id} is not installed")
     return {
+        # Include required options added by newer upscalers without sending them
+        # to older versions; explicit project settings below take precedence.
+        **_h3_required_node_defaults(node_id),
         "latent": latent,
         "model_name": model_name,
         "mode": "target dimensions",
