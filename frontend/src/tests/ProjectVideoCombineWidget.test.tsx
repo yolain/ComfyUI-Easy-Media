@@ -95,6 +95,108 @@ beforeEach(() => {
 })
 
 describe('ProjectVideoCombineWidget', () => {
+  function renderComparison() {
+    let animationFrame: FrameRequestCallback | undefined
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      animationFrame = callback
+      return 1
+    }))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    const clip = {
+      ...projectData.clips[0],
+      source_start_frame: 24,
+      video_files: [projectData.clips[0], {
+        file_path: 'easy_media/projects/demo/video_0_2.mp4',
+        file_name: 'video_0_2.mp4',
+        source_frame_count: 72,
+      }],
+    }
+    const second = {
+      ...projectData.clips[0], id: 'segment-1', index: 1,
+      file_path: 'easy_media/projects/demo/video_1_1.mp4', file_name: 'video_1_1.mp4',
+    }
+    const { props } = widgetProps({ value: { ...projectData, clips: [clip, second] } })
+    const result = render(<ProjectVideoCombineWidget {...props} />)
+    const trigger = screen.getByRole('button', { name: 'Select up to two videos for segment 1' })
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'video_0_2.mp4' }))
+    fireEvent.click(trigger)
+    const child = within(result.container.querySelector('[data-compare-video-playback]') as HTMLElement)
+    const mainPlay = screen.getAllByRole('button', { name: 'Play' }).find((button) => !button.closest('[data-compare-video-playback]')) as HTMLButtonElement
+    return { ...result, child, mainPlay, tick: (time: number) => act(() => animationFrame?.(time)) }
+  }
+
+  it('plays comparisons from the project trim and continues into the next segment', () => {
+    const { container, child, mainPlay, tick } = renderComparison()
+    const videos = [...container.querySelectorAll('video')]
+    expect(mainPlay.disabled).toBe(false)
+    expect(videos[0].currentTime).toBe(1)
+    expect(videos[1].currentTime).toBe(1)
+    fireEvent.click(mainPlay)
+    const started = performance.now()
+    expect(child.getByRole('button', { name: 'Pause' })).not.toBeNull()
+    expect(videos.every((video) => !video.loop)).toBe(true)
+    tick(started + 2000)
+    expect(videos[0].currentTime).toBeCloseTo(3, 0)
+    expect(videos[1].currentTime).toBeCloseTo(3, 0)
+
+    const pause = vi.spyOn(videos[0], 'pause')
+    tick(started + 4200)
+    expect(pause).toHaveBeenCalled()
+    expect(container.querySelector('[data-compare-video-playback]')).toBeNull()
+    const next = container.querySelector('video')!
+    expect(next.src).toContain('video_1_1.mp4')
+    expect(vi.mocked(next.play).mock.contexts).toContain(next)
+    expect(screen.getByRole('button', { name: 'Pause' })).not.toBeNull()
+  })
+
+  it('keeps local comparison playback independent while the project is paused', () => {
+    const { container, child, mainPlay } = renderComparison()
+    const videos = [...container.querySelectorAll('video')]
+    fireEvent.click(child.getByRole('button', { name: 'Play' }))
+    expect(mainPlay.getAttribute('aria-label')).toBe('Play')
+    videos[1].currentTime = 2
+    fireEvent.timeUpdate(videos[1])
+    expect(videos[0].currentTime).toBe(2)
+    expect(container.querySelector('.text-gradient')?.textContent).toBe('00:00:00')
+    fireEvent.ended(videos[1])
+    expect(container.querySelector('[data-compare-video-playback]')).not.toBeNull()
+    expect(mainPlay.getAttribute('aria-label')).toBe('Play')
+  })
+
+  it('does not restart a shorter comparison video or rewind the parent timeline when it ends', () => {
+    const { container, mainPlay, tick } = renderComparison()
+    const videos = [...container.querySelectorAll('video')]
+    Object.defineProperty(videos[1], 'duration', { configurable: true, value: 3 })
+    fireEvent.click(mainPlay)
+    const started = performance.now()
+    tick(started + 2500)
+    expect(videos[1].currentTime).toBe(3)
+    const play = vi.spyOn(videos[1], 'play')
+    play.mockClear()
+    fireEvent.ended(videos[1])
+    expect(play).not.toHaveBeenCalled()
+    expect(videos[0].currentTime).toBeGreaterThan(3)
+    expect(mainPlay.getAttribute('aria-label')).toBe('Pause')
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'Video time' }), { key: 'Home' })
+    expect(videos[1].currentTime).toBe(1)
+    expect(play).toHaveBeenCalled()
+    tick(started + 4200)
+    expect(container.querySelector('video')?.src).toContain('video_1_1.mp4')
+  })
+
+  it('pauses both clocks from the child during parent playback, then allows local playback', () => {
+    const { child, mainPlay } = renderComparison()
+    fireEvent.click(mainPlay)
+    fireEvent.click(child.getByRole('button', { name: 'Pause' }))
+    expect(mainPlay.getAttribute('aria-label')).toBe('Play')
+    fireEvent.click(child.getByRole('button', { name: 'Play' }))
+    expect(mainPlay.getAttribute('aria-label')).toBe('Play')
+    fireEvent.click(mainPlay)
+    fireEvent.click(mainPlay)
+    expect(child.getByRole('button', { name: 'Play' })).not.toBeNull()
+  })
+
   it('refreshes the selected project and clears the stale preview first', async () => {
     const { props, api } = widgetProps({ value: { ...projectData, clips: [] } })
     api.fetchApi.mockResolvedValue({ ok: true, json: async () => projectData })

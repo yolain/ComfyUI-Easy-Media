@@ -19,6 +19,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCanvasScale } from '@/hooks/use-canvas-scale'
+import { useParentVideoPlayback, type ParentVideoPlayback } from '@/hooks/use-parent-video-playback'
 import type { ReactWidgetProps } from '@/lib/create-react-widget'
 import { LocaleContext, useT } from '@/lib/i18n'
 import { mediaPathToViewUrl } from '@/lib/media-url'
@@ -89,6 +90,7 @@ interface CompareVideoInnerProps {
   allowMediaSelection?: boolean
   bindNodeEvents?: boolean
   pausePlaybackNonce?: number
+  parentPlayback?: ParentVideoPlayback
 }
 
 export interface CompareVideoProps {
@@ -96,6 +98,7 @@ export interface CompareVideoProps {
   sourceUrl: string
   outputUrl: string
   pausePlaybackNonce?: number
+  parentPlayback?: ParentVideoPlayback
 }
 
 type ExecutedHandler = (output: unknown) => void
@@ -402,6 +405,7 @@ export const CompareVideo = memo(function CompareVideo({
   sourceUrl,
   outputUrl,
   pausePlaybackNonce,
+  parentPlayback,
 }: Readonly<CompareVideoProps>) {
   const locale = app?.ui?.settings?.settingsValues?.['Comfy.Locale']
   const [compareMode, setCompareMode] = useState<CompareMode>('side-by-side')
@@ -422,6 +426,7 @@ export const CompareVideo = memo(function CompareVideo({
         allowMediaSelection={false}
         bindNodeEvents={false}
         pausePlaybackNonce={pausePlaybackNonce}
+        parentPlayback={parentPlayback}
       />
     </LocaleContext.Provider>
   )
@@ -593,6 +598,7 @@ function CompareVideoWidgetInner({
   allowMediaSelection = true,
   bindNodeEvents = true,
   pausePlaybackNonce,
+  parentPlayback,
 }: Readonly<CompareVideoInnerProps>) {
   const t = useT()
   const canvasScale = useCanvasScale(app)
@@ -605,10 +611,13 @@ function CompareVideoWidgetInner({
   const [isPointerInside, setIsPointerInside] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
   const [muted, setMuted] = useState(false)
+  const effectiveMuted = muted || parentPlayback?.muted === true
   const [volume, setVolume] = useState(0.75)
   const [currentTime, setCurrentTime] = useState(0)
   const [metadataDuration, setMetadataDuration] = useState(0)
   const settingsRef = useRef(settings)
+  const parentPlaybackRef = useRef(parentPlayback)
+  parentPlaybackRef.current = parentPlayback
   const onSettingsChangeRef = useRef(onSettingsChange)
   const manualSlotsRef = useRef<Set<'source' | 'output'>>(new Set())
   const previousWatchRef = useRef(settings.watch_output_history)
@@ -629,7 +638,9 @@ function CompareVideoWidgetInner({
   const hasOutput = Boolean(outputUrl)
   const hasAnyVideo = hasSource || hasOutput
   const canCompare = hasSource && hasOutput
-  const duration = hasOutput ? metadataDuration : Math.max(payload?.duration ?? 0, metadataDuration, 0)
+  const duration = parentPlayback?.isPlaying
+    ? parentPlayback.endTime
+    : hasOutput ? metadataDuration : Math.max(payload?.duration ?? 0, metadataDuration, 0)
 
   const visibleMode: CompareMode = canCompare ? mode : hasSource ? 'source' : 'output'
   const isSideBySide = canCompare && visibleMode === 'side-by-side'
@@ -672,14 +683,14 @@ function CompareVideoWidgetInner({
 
   useEffect(() => {
     if (sourceRef.current) {
-      sourceRef.current.muted = muted || hasOutput
+      sourceRef.current.muted = effectiveMuted || hasOutput
       sourceRef.current.volume = volume
     }
     if (outputRef.current) {
-      outputRef.current.muted = muted
+      outputRef.current.muted = effectiveMuted
       outputRef.current.volume = volume
     }
-  }, [hasOutput, muted, volume])
+  }, [hasOutput, effectiveMuted, volume])
 
   useEffect(() => {
     if (canCompare) {
@@ -797,6 +808,9 @@ function CompareVideoWidgetInner({
     setIsPlaying(true)
     for (const video of [sourceRef.current, outputRef.current]) {
       if (!video) continue
+      const parent = parentPlaybackRef.current
+      if (parent?.isPlaying && Number.isFinite(video.duration) && parent.currentTime >= video.duration) continue
+      if (!video.paused) continue
       const playResult = video.play()
       if (playResult) {
         playResult.catch((error: unknown) => {
@@ -817,6 +831,10 @@ function CompareVideoWidgetInner({
     if (pausePlaybackNonce === undefined) return
     pauseVideos()
   }, [pausePlaybackNonce, pauseVideos])
+
+  const syncParentVideo = useParentVideoPlayback(
+    parentPlayback, sourceRef, outputRef, setCurrentTime, playVideos, pauseVideos,
+  )
 
   useEffect(() => {
     const source = sourceRef.current
@@ -851,6 +869,7 @@ function CompareVideoWidgetInner({
   }
 
   function handleTimeUpdate(event: React.SyntheticEvent<HTMLVideoElement>) {
+    if (parentPlayback?.isPlaying) return
     const video = event.currentTarget
     const master = outputRef.current ?? sourceRef.current
     if (video !== master) return
@@ -861,7 +880,11 @@ function CompareVideoWidgetInner({
     }
   }
 
-  function handleEnded() {
+  function handleEnded(event: React.SyntheticEvent<HTMLVideoElement>) {
+    if (parentPlayback?.isPlaying) {
+      event.currentTarget.pause()
+      return
+    }
     syncVideos(0)
     setCurrentTime(0)
     if (isPlaying) playVideos()
@@ -869,6 +892,10 @@ function CompareVideoWidgetInner({
 
   function handleSeek(value: number[]) {
     const nextTime = value[0] ?? 0
+    if (parentPlayback?.isPlaying) {
+      parentPlayback.onSeek(Math.max(parentPlayback.startTime, Math.min(parentPlayback.endTime, nextTime)))
+      return
+    }
     setCurrentTime(nextTime)
     syncVideos(nextTime)
   }
@@ -975,13 +1002,14 @@ function CompareVideoWidgetInner({
               )}
               data-compare-video-panel={isSideBySide ? 'source' : undefined}
               src={sourceUrl}
-              loop
-              muted={muted || hasOutput}
+              loop={!parentPlayback?.isPlaying}
+              muted={effectiveMuted || hasOutput}
               playsInline
               preload="auto"
               onLoadedMetadata={(event) => {
                 const nextDuration = event.currentTarget.duration || 0
                 if (!hasOutput) setMetadataDuration(nextDuration)
+                syncParentVideo(event.currentTarget)
               }}
               onTimeUpdate={handleTimeUpdate}
               onEnded={handleEnded}
@@ -1001,13 +1029,14 @@ function CompareVideoWidgetInner({
               }}
               data-compare-video-panel={isSideBySide ? 'output' : undefined}
               src={outputUrl}
-              loop
-              muted={muted}
+              loop={!parentPlayback?.isPlaying}
+              muted={effectiveMuted}
               playsInline
               preload="auto"
               onLoadedMetadata={(event) => {
                 const nextDuration = event.currentTarget.duration || 0
                 setMetadataDuration(nextDuration)
+                syncParentVideo(event.currentTarget)
               }}
               onTimeUpdate={handleTimeUpdate}
               onEnded={handleEnded}
@@ -1090,7 +1119,12 @@ function CompareVideoWidgetInner({
                   variant="ghost"
                   size="icon"
                   className="cursor-pointer"
-                  onClick={isPlaying ? pauseVideos : playVideos}
+                  onClick={() => {
+                    if (isPlaying) {
+                      pauseVideos()
+                      if (parentPlayback?.isPlaying) parentPlayback.onPause()
+                    } else playVideos()
+                  }}
                   aria-label={isPlaying ? t('compareVideo.pause') : t('compareVideo.play')}
                 >
                   {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
@@ -1109,7 +1143,7 @@ function CompareVideoWidgetInner({
               <Slider
                 className="w-full"
                 value={[Math.min(currentTime, duration || currentTime)]}
-                min={0}
+                min={parentPlayback?.isPlaying ? parentPlayback.startTime : 0}
                 max={Math.max(duration, currentTime, 0.01)}
                 step={0.01}
                 onValueChange={handleSeek}

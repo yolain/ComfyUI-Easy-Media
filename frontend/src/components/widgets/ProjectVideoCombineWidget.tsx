@@ -295,7 +295,6 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
       ? currentPaths.filter((path) => path !== filePath)
       : [...currentPaths, filePath]
     setPreviewFilePaths((current) => ({ ...current, [clip.id]: nextPaths }))
-    setIsPlaying(false)
     selectClip(clip)
     if (nextPaths[0] !== clip.file_path) selectClipFile(clip, nextPaths[0])
   }
@@ -796,11 +795,23 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
           <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black p-3">
             {isComparing ? (
               <CompareVideo
+                key={`${active!.clip.id}:${compareUrls.join('|')}`}
                 app={app}
                 sourceUrl={compareUrls[0]!}
                 outputUrl={compareUrls[1]!}
                 pausePlaybackNonce={previewPauseNonce}
-
+                parentPlayback={{
+                  isPlaying,
+                  currentTime: (active!.clip.source_start_frame + currentFrame - active!.start) / data.frame_rate,
+                  startTime: active!.clip.source_start_frame / data.frame_rate,
+                  endTime: active!.clip.source_end_frame / data.frame_rate,
+                  muted,
+                  onPause: () => {
+                    setCurrentFrame(currentFrameRef.current)
+                    setIsPlaying(false)
+                  },
+                  onSeek: (time) => seek(active!.start + time * data.frame_rate - active!.clip.source_start_frame),
+                }}
               />
             ) : activeUrl ? (
               [
@@ -844,7 +855,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
             </div>
             <div className="flex items-center gap-2 text-muted-foreground">
               <span className="w-16 text-right tabular-nums text-gradient">{formatMultiTrackTime(currentFrame, { frameRate: data.frame_rate, showFrames: true })}</span>
-              <Button type="button" variant="secondary" size="icon" className={`${ICON_BUTTON_CLASS} rounded-full`} disabled={total === 0 || isComparing} aria-label={isPlaying ? t('multitrack.pause') : t('multitrack.play')} onClick={togglePlayback}>{isPlaying ? <Pause /> : <Play />}</Button>
+              <Button type="button" variant="secondary" size="icon" className={`${ICON_BUTTON_CLASS} rounded-full`} disabled={total === 0} aria-label={isPlaying ? t('multitrack.pause') : t('multitrack.play')} onClick={togglePlayback}>{isPlaying ? <Pause /> : <Play />}</Button>
               <span className="w-16 tabular-nums">{formatMultiTrackTime(total, { frameRate: data.frame_rate, showFrames: true })}</span>
             </div>
             <div className="ml-auto flex items-center gap-1">
