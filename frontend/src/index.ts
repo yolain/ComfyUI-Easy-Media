@@ -10,6 +10,7 @@ import type { CompareVideoSettings } from '@/components/widgets/compareVideoWidg
 import type { ProjectData } from '@/types/project'
 import { DEFAULT_PROJECT_DATA } from '@/types/project'
 import { suppressCompareVideoDefaultPreview } from '@/lib/compare-video-node'
+import { installWorkflowSubmission } from '@/lib/workflow-submission'
 
 declare const __COMFY_EASY_MEDIA_GLOBAL_CSS__: string;
 
@@ -44,6 +45,7 @@ comfyApp.registerExtension({
   name: 'Comfy.EasyMedia.widgets',
 
   async setup() {
+    installWorkflowSubmission(comfyApp)
     addInlineStyles(
       __COMFY_EASY_MEDIA_GLOBAL_CSS__,
       `${import.meta.env.PROJECT_NAME}-globals`,

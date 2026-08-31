@@ -40,6 +40,51 @@ def customize_template_module(patch_workflow_module):
     )
 
 
+@pytest.fixture(scope="module")
+def submit_workflow_module():
+    return _load_module("multitrack_submit_workflow_under_test", SCRIPTS / "submit_workflow.py")
+
+
+@pytest.mark.parametrize("content, expected", [
+    (None, "http://127.0.0.1:8188"),
+    ("", "http://127.0.0.1:8188"),
+    ("WEB_VERSION: dev\n", "http://127.0.0.1:8188"),
+    ("COMFYUI_URL:\n", "http://127.0.0.1:8188"),
+    ('COMFYUI_URL: "  "\n', "http://127.0.0.1:8188"),
+    ('COMFYUI_URL: "https://comfy.example/prefix/" # comment\n', "https://comfy.example/prefix"),
+    ("COMFYUI_URL: localhost:9000\n", "http://localhost:9000"),
+])
+def test_submit_url_config_and_fallback(submit_workflow_module, tmp_path, content, expected):
+    path = tmp_path / "config.yaml"
+    if content is not None:
+        path.write_text(content, encoding="utf-8")
+    assert submit_workflow_module.resolve_comfyui_url(None, path) == expected
+
+
+def test_explicit_url_ignores_even_invalid_config(submit_workflow_module, tmp_path):
+    path = tmp_path / "config.yaml"
+    path.write_text("COMFYUI_URL: [invalid", encoding="utf-8")
+    assert submit_workflow_module.resolve_comfyui_url("localhost:9999/", path) == "http://localhost:9999"
+
+
+@pytest.mark.parametrize("content", ["COMFYUI_URL: [invalid", "- value", "COMFYUI_URL: 42", "COMFYUI_URL: ftp://example.com", "COMFYUI_URL: http://localhost:99999"])
+def test_invalid_config_does_not_silently_change_instance(submit_workflow_module, tmp_path, content):
+    path = tmp_path / "config.yaml"
+    path.write_text(content, encoding="utf-8")
+    with pytest.raises(ValueError):
+        submit_workflow_module.resolve_comfyui_url(None, path)
+
+
+def test_config_location_for_bundled_and_copied_skill(submit_workflow_module, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert submit_workflow_module.default_config_path() == ROOT / "config.yaml"
+    copied_script = tmp_path / "installed/skill/scripts/submit_workflow.py"
+    monkeypatch.setattr(submit_workflow_module, "__file__", str(copied_script))
+    assert submit_workflow_module.default_config_path() == tmp_path / "config.yaml"
+    monkeypatch.chdir(SCRIPTS)
+    assert submit_workflow_module.default_config_path() == ROOT / "config.yaml"
+
+
 def _template_workflow() -> dict:
     return json.loads(TEMPLATE.read_text(encoding="utf-8"))
 
