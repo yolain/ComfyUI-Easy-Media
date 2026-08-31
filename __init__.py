@@ -96,7 +96,6 @@ class EasyMediaExtension(ComfyExtension):
             EasyH3ProjectContextLatentLoad,
             EasyH3SegmentSamplingStart,
             EasyH3SegmentSaveEnd,
-            EasyH3SegmentEncodingStart,
             EasyH3ContextMediaTrim,
             EasyH3AudioContextLatent,
             EasyH3LockedAudioDurationAlign,

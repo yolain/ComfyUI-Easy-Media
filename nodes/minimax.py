@@ -19,7 +19,7 @@ from ..modules.motion_context.core import (
     apply_motion_context,
     build_hard_motion_context,
 )
-from ..utils import log_node_info
+from ..utils import instrument_node_timing, log_node_info, log_stage_time, synchronize_execution_device
 from ..utils.h3_presets import get_h3_preset_keys, load_h3_presets, select_h3_preset
 from ..utils.h3_project import (
     choose_h3_generation,
@@ -1025,6 +1025,21 @@ class EasyH3ProjectContextLatentLoad(io.ComfyNode):
         return io.NodeOutput(load_h3_latent(latent_path))
 
 
+def _timed_h3_project_graph(graph: GraphBuilder, project_name: str) -> dict[str, Any]:
+    """Tag native operations for timing without changing node types or inputs."""
+    expanded = graph.finalize()
+    timed_types = {"SamplerCustomAdvanced", "VAEDecode", "VAEDecodeAudio"}
+    for node_id, node in expanded.items():
+        if node["class_type"] not in timed_types:
+            continue
+        target = _h3_node_mapping(node["class_type"])
+        if target is not None:
+            instrument_node_timing(target)
+        operation = node_id.rsplit(".", 1)[-1]
+        node.setdefault("_meta", {})["easy_media_timing"] = f"{project_name} / {operation}"
+    return expanded
+
+
 class EasyH3SegmentSamplingStart(io.ComfyNode):
     """Notify and log immediately before a project sampling pass starts."""
 
@@ -1118,39 +1133,6 @@ class EasyH3SegmentSaveEnd(io.ComfyNode):
             segment_index,
         )
         return io.NodeOutput(video_path)
-
-
-class EasyH3SegmentEncodingStart(io.ComfyNode):
-    """Log when a project segment's decoded media enters video encoding."""
-
-    @classmethod
-    def define_schema(cls) -> io.Schema:
-        return io.Schema(
-            node_id="easy h3SegmentEncodingStart",
-            display_name="H3 Segment Encoding Start",
-            category="_EasyUse/H3",
-            inputs=[
-                io.Image.Input("images"),
-                io.Audio.Input("audio"),
-                io.Int.Input("segment_index", min=0),
-            ],
-            outputs=[
-                io.Image.Output("images"),
-                io.Audio.Output("audio"),
-            ],
-            not_idempotent=True,
-            is_dev_only=True,
-        )
-
-    @classmethod
-    def execute(
-        cls,
-        images: torch.Tensor,
-        audio: dict[str, Any],
-        segment_index: int,
-    ) -> io.NodeOutput:
-        log_node_info("MultiTrack Project", f"Encoding segment {segment_index}")
-        return io.NodeOutput(images, audio)
 
 
 class EasyH3AudioContextLatent(io.ComfyNode):
@@ -1427,7 +1409,10 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         audio_only = (info["width"], info["height"]) == (32, 32)
         if audio_only:
             target_media = project_dir / f"audio_{int(segment_index)}_{generation}.wav"
-            save_h3_audio(audio, target_media)
+            with log_stage_time(
+                "MultiTrack Project", f"{safe_name} / segment {segment_index} / save_audio",
+            ):
+                save_h3_audio(audio, target_media)
         else:
             source_video = _h3_project_source_path(str(video_path), output_dir)
             if not source_video.is_file():
@@ -1458,14 +1443,24 @@ class EasyH3ProjectArtifact(io.ComfyNode):
             project_dir
             / f"context_latent_{int(segment_index)}_{generation}.safetensors"
         )
-        save_h3_latent(context_latent, target_context_latent)
+        with log_stage_time(
+            "MultiTrack Project",
+            f"{safe_name} / segment {segment_index} / save_latent_high",
+            synchronize=synchronize_execution_device,
+        ):
+            save_h3_latent(context_latent, target_context_latent)
 
         target_context_latent_low: Path | None = None
         if context_latent_low is not None:
             target_context_latent_low = project_dir / (
                 f"context_latent_low_{int(segment_index)}_{generation}.safetensors"
             )
-            save_h3_latent(context_latent_low, target_context_latent_low)
+            with log_stage_time(
+                "MultiTrack Project",
+                f"{safe_name} / segment {segment_index} / save_latent_low",
+                synchronize=synchronize_execution_device,
+            ):
+                save_h3_latent(context_latent_low, target_context_latent_low)
         else:
             stale_context_latent_low = project_dir / (
                 f"context_latent_low_{int(segment_index)}_{generation}.safetensors"
@@ -2522,20 +2517,13 @@ class EasyMultiTrackProject(io.ComfyNode):
                 report_segment_step(0.89)
                 # Keep decoded audio for latent continuity, but deliver the original
                 # task audio in the video so the project needs no separate WAV.
-                encoding_start = graph.node(
-                    "easy h3SegmentEncodingStart",
-                    id=f"encoding_start_{task_index}",
-                    images=output_images,
-                    audio=task_output.out(8) if has_task_locked_audio else output_audio,
-                    segment_index=task_index,
-                )
                 saved_video = graph.node(
                     "easy saveVideo",
                     id=f"save_video_{task_index}",
                     input_mode="images+audio",
                     **{
-                        "input_mode.images": encoding_start.out(0),
-                        "input_mode.audio": encoding_start.out(1),
+                        "input_mode.images": output_images,
+                        "input_mode.audio": task_output.out(8) if has_task_locked_audio else output_audio,
                         "input_mode.fps": fps,
                         "output_mode": "hide&save",
                     },
@@ -2598,7 +2586,7 @@ class EasyMultiTrackProject(io.ComfyNode):
         return io.NodeOutput(
             last_project_output,
             full_locked_audio,
-            expand=graph.finalize(),
+            expand=_timed_h3_project_graph(graph, safe_project_name),
         )
 
 

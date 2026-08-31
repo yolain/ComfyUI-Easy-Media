@@ -174,7 +174,7 @@ v1.3.0 新增多轨项目流水线，将时间线编排、逐段生成、上下�
 
 ### 🎞️ 多轨项目 MultiTrack Project
 
-![multiTrackProject](https://github.com/user-attachments/assets/a2d801eb-24c0-4ca3-963e-62ff4b1f2b79)
+![multiTrackProject](https://github.com/user-attachments/assets/b4cc13a9-5e64-4361-8b3a-ddf900d04a94)
 
 `easy multitrackProject` 负责管理 MiniMax H3 项目的逐段生成。编辑器中的尺寸是**一采尺寸**，双采样在此基础上放大后进行二采；项目文件保存在 `ComfyUI/output/easy_media/projects/<project_name>/`，包含片段媒体、项目记录以及用于续接的上下文潜空间。
 

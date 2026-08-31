@@ -320,6 +320,8 @@ def _load_basic_module():
     )
     multitrack_module = importlib.util.module_from_spec(multitrack_spec)
     multitrack_spec.loader.exec_module(multitrack_module)
+    from contextlib import nullcontext
+    utils_module.log_stage_time = lambda *_args, **_kwargs: nullcontext()
     utils_module.multitrack_segments_in_window = multitrack_module.multitrack_segments_in_window
     utils_module.multitrack_slot_media_types = multitrack_module.multitrack_slot_media_types
 

@@ -16,7 +16,7 @@ import torch
 from comfy_api.latest import Input, InputImpl, Types, io, ui
 from comfy.utils import ProgressBar
 
-from ..utils import flatten_media_inputs, merge_two_audio, save_audio_to_temp_wav, split_list_outputs
+from ..utils import log_stage_time, flatten_media_inputs, merge_two_audio, save_audio_to_temp_wav, split_list_outputs
 from ..utils.video import extract_merge_spec, ffmpeg_concat, ffmpeg_concat_with_fade, ffmpeg_extract_audio, ffmpeg_replace_audio, ffmpeg_supports_xfade, ffprobe_info, normalize_video_images, tensor_crossfade_audio, tensor_crossfade_images, trim_video_with_ffmpeg, validate_merge_compatibility, video_input_to_local_file
 
 logger = logging.getLogger(__name__)
@@ -230,12 +230,13 @@ class EasySaveVideo(io.ComfyNode):
             if not metadata:
                 metadata = None
 
-        source_video.save_to(
-            full_path,
-            format=Types.VideoContainer.AUTO,
-            codec=Types.VideoCodec.AUTO,
-            metadata=metadata,
-        )
+        with log_stage_time("Save Video", f"{relative_path} / save_video"):
+            source_video.save_to(
+                full_path,
+                format=Types.VideoContainer.AUTO,
+                codec=Types.VideoCodec.AUTO,
+                metadata=metadata,
+            )
 
         if hide_preview:
             return io.NodeOutput(source_video, relative_path)

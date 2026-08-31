@@ -194,6 +194,7 @@ def _load_minimax_node(monkeypatch):
     comfy.__path__ = []
     model_management = types.ModuleType("comfy.model_management")
     model_management.intermediate_device = lambda: torch.device("cpu")
+    model_management.get_torch_device = lambda: torch.device("cpu")
     nested_tensor = types.ModuleType("comfy.nested_tensor")
     nested_tensor.NestedTensor = _NestedTensor
     comfy_utils = types.ModuleType("comfy.utils")
@@ -249,6 +250,14 @@ def _load_minimax_node(monkeypatch):
     utils_package = types.ModuleType("easy_media.utils")
     utils_package.__path__ = []
     utils_package.log_node_info = lambda *_args, **_kwargs: None
+    log_spec = importlib.util.spec_from_file_location(
+        "stage_log_under_test", Path(__file__).parents[1] / "utils" / "log.py"
+    )
+    log_module = importlib.util.module_from_spec(log_spec)
+    log_spec.loader.exec_module(log_module)
+    utils_package.log_stage_time = log_module.log_stage_time
+    utils_package.instrument_node_timing = log_module.instrument_node_timing
+    utils_package.synchronize_execution_device = log_module.synchronize_execution_device
     utils_package.save_audio_to_temp_wav = lambda _audio: None
     models_module = types.ModuleType("easy_media.utils.models")
     models_module.detect_turbo_model = lambda model: types.SimpleNamespace(
@@ -615,20 +624,14 @@ def test_multitrack_h3_project_outputs_locked_audio_used_by_generation(monkeypat
         if node["inputs"]["task_index"] == 0
     )
     align = _graph_node(result, "easy h3LockedAudioDurationAlign")
-    encoding_start = _graph_node(result, "easy h3SegmentEncodingStart")
+    saved_video = _graph_node(result, "easy saveVideo")
 
     assert result.values[1] == [full_audio_id, 8]
     assert audio_lock["inputs"]["audio"] == [segment_audio_id, 8]
     artifact = _graph_node(result, "easy h3ProjectArtifact")
     assert "locked_audio" not in artifact["inputs"]
     assert align["inputs"]["fps"] == 24.0
-    assert encoding_start["inputs"]["audio"] == [segment_audio_id, 8]
-    encoding_id = next(
-        node_id for node_id, node in result.expand.items() if node is encoding_start
-    )
-    assert _graph_node(result, "easy saveVideo")["inputs"]["input_mode.audio"] == [
-        encoding_id, 1,
-    ]
+    assert saved_video["inputs"]["input_mode.audio"] == [segment_audio_id, 8]
     assert full_audio["inputs"]["prompt_format"] == "default"
 
 
@@ -642,8 +645,8 @@ def test_multitrack_h3_project_outputs_none_without_locked_audio(monkeypatch):
         node["class_type"] == "easy h3LockedAudioDurationAlign"
         for node in result.expand.values()
     )
-    encoding_start = _graph_node(result, "easy h3SegmentEncodingStart")
-    audio_link = encoding_start["inputs"]["audio"]
+    saved_video = _graph_node(result, "easy saveVideo")
+    audio_link = saved_video["inputs"]["input_mode.audio"]
     assert result.expand[audio_link[0]]["class_type"] == "VAEDecodeAudio"
 
 
@@ -683,16 +686,12 @@ def test_h3_segment_execution_markers_log_the_current_segment(monkeypatch):
     monkeypatch.setitem(sys.modules, "server", server)
 
     latent = {"samples": torch.zeros(1)}
-    images = torch.zeros(1, 1, 1, 3)
-    audio = {"waveform": torch.zeros(1, 1, 1), "sample_rate": 24_000}
     sampling_output = module.EasyH3SegmentSamplingStart.execute(
         object(), object(), object(), object(), latent, "demo", 3, "first"
     )
-    encoding_output = module.EasyH3SegmentEncodingStart.execute(images, audio, 3)
     save_end_output = module.EasyH3SegmentSaveEnd.execute("video.mp4", "demo", 3)
 
     assert sampling_output.values[-1] is latent
-    assert encoding_output.values == (images, audio)
     assert save_end_output.values == ("video.mp4",)
     assert notifications == [
         (
@@ -709,11 +708,10 @@ def test_h3_segment_execution_markers_log_the_current_segment(monkeypatch):
             {"project_name": "demo", "phase": "after_save", "segment_index": 3},
         ),
     ]
-    assert len(messages) == 2
+    assert len(messages) == 1
     assert messages[0][0] == "MultiTrack Project"
     assert messages[0][1].startswith("Sampling segment 3 (first):")
     assert "sampler_name=None" in messages[0][1]
-    assert messages[1] == ("MultiTrack Project", "Encoding segment 3")
 
 
 def test_h3_context_media_trim_removes_head_and_grid_tail_together(monkeypatch):
@@ -1067,7 +1065,7 @@ def test_multitrack_h3_project_expands_single_task_sampling_pipeline(monkeypatch
     assert "easy h3SegmentSaveEnd" in nodes_by_type
     assert "VAEDecode" in nodes_by_type
     assert "VAEDecodeAudio" in nodes_by_type
-    assert "easy h3SegmentEncodingStart" in nodes_by_type
+    assert "easy h3SegmentEncodingStart" not in nodes_by_type
     assert "easy saveVideo" in nodes_by_type
     save_inputs = nodes_by_type["easy saveVideo"]["inputs"]
     assert save_inputs["input_mode"] == "images+audio"
@@ -1859,13 +1857,13 @@ def test_multitrack_h3_context_chain_uses_previous_segment_latent(monkeypatch):
         and node["inputs"]["audio"] == [trim_id, 1]
     )
     assert context_align["inputs"]["images"] == [trim_id, 0]
-    context_encoding = next(
+    context_video = next(
         node for node in nodes
-        if node["class_type"] == "easy h3SegmentEncodingStart"
-        and node["inputs"]["segment_index"] == 1
+        if node["class_type"] == "easy saveVideo"
+        and node["inputs"]["input_mode.images"] == [trim_id, 0]
     )
     # The task audio already excludes the context prefix; do not trim it again.
-    assert context_encoding["inputs"]["audio"] == [task_length_link[0], 8]
+    assert context_video["inputs"]["input_mode.audio"] == [task_length_link[0], 8]
     artifacts = [
         (node_id, node)
         for node_id, node in result.expand.items()
@@ -3154,3 +3152,28 @@ def test_audio_project_preflight_does_not_block_other_projects_or_video(monkeypa
     )
     result = module.EasyMultiTrackProject.execute(**inputs)
     assert _graph_node(result, "easy h3ProjectArtifact")
+
+
+def test_project_timing_keeps_native_nodes_and_inputs(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    module.comfy_nodes.NODE_CLASS_MAPPINGS["ImageResizeKJv2"] = _ImageResizeKJWithNvidia
+    inputs = _h3_project_inputs(project_name="timing-demo", sampling_mode=_h3_sampling_mode("dual"))
+    module.GraphBuilder.set_default_prefix("timing", 0, 0)
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    tagged = [node for node in result.expand.values() if "easy_media_timing" in node.get("_meta", {})]
+    assert len(tagged) >= 5
+    assert {node["class_type"] for node in tagged} == {"SamplerCustomAdvanced", "VAEDecode", "VAEDecodeAudio"}
+    labels = [node["_meta"]["easy_media_timing"] for node in tagged]
+    assert len(set(labels)) == len(labels)
+    assert all(label.startswith("timing-demo / ") for label in labels)
+    assert any("first_pass_sample_0" in label for label in labels)
+    assert any("second_pass_sample_0" in label for label in labels)
+
+    monkeypatch.setattr(module, "_timed_h3_project_graph", lambda graph, _name: graph.finalize())
+    module.GraphBuilder.set_default_prefix("timing", 0, 0)
+    without_timing = module.EasyMultiTrackProject.execute(**inputs)
+    graph_without_metadata = {
+        node_id: {key: value for key, value in node.items() if key != "_meta"}
+        for node_id, node in result.expand.items()
+    }
+    assert graph_without_metadata == without_timing.expand

@@ -256,6 +256,8 @@ def _install_comfy_stubs(monkeypatch, tmp_path: Path):
     monkeypatch.setitem(sys.modules, "easy_media", types.ModuleType("easy_media"))
     monkeypatch.setitem(sys.modules, "easy_media.nodes", types.ModuleType("easy_media.nodes"))
     easy_media_utils = types.ModuleType("easy_media.utils")
+    from contextlib import nullcontext
+    easy_media_utils.log_stage_time = lambda *_args, **_kwargs: nullcontext()
     easy_media_utils.merge_two_audio = lambda first, second, method: (first, second, method)
     easy_media_utils.save_audio_to_temp_wav = lambda audio: None
     easy_media_utils.flatten_media_inputs = lambda value: (

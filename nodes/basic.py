@@ -29,6 +29,7 @@ from ..utils import (
     load_audio_waveform,
     load_image_tensor,
     log_node_info,
+    log_stage_time,
     iter_valid_audio_inputs,
     merge_audio_inputs,
     audio_data_uris,
@@ -3030,248 +3031,253 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 if isinstance(candidate_content, dict)
             ]
 
-        selected_images: list[torch.Tensor] = []
-        selected_image_indexes: set[int] = set()
-        marker_image_frames: list[int] = []
-        deferred_media = info.get("media_loading") == "deferred"
-        media_progress = ProgressBar(2)
-        media_progress.update_absolute(0)
-        for task_content, task_content_start in task_content_entries:
-            for image_info in task_content.get("images", []):
-                if not isinstance(image_info, dict):
-                    continue
-                if deferred_media:
-                    image = _resolve_timeline_image_item(image_info, None)
-                    if image is None:
+        with log_stage_time(
+            "MultiTrack Task Output",
+            f"segment {requested_index} / media_loading ｜ "
+            f"{info.get('width', 544)}x{info.get('height', 960)}",
+        ):
+            selected_images: list[torch.Tensor] = []
+            selected_image_indexes: set[int] = set()
+            marker_image_frames: list[int] = []
+            deferred_media = info.get("media_loading") == "deferred"
+            media_progress = ProgressBar(2)
+            media_progress.update_absolute(0)
+            for task_content, task_content_start in task_content_entries:
+                for image_info in task_content.get("images", []):
+                    if not isinstance(image_info, dict):
                         continue
-                    panorama_view = image_info.get("panorama_view")
-                    if panorama_view is not None:
-                        try:
-                            image = equirectangular_to_perspective(
-                                image,
-                                panorama_view,
-                                int(info.get("width", 544)),
-                                int(info.get("height", 960)),
-                            )
-                        except (TypeError, ValueError, RuntimeError) as exc:
-                            image_id = image_info.get("id", "")
-                            raise ValueError(
-                                f"Failed to project panorama image {image_id!r}: {exc}"
-                            ) from exc
-                    selected_images.append(image)
-                    if output_full_timeline or task_entry.get("marker_mode"):
-                        marker_image_frames.append(max(0, task_content_start - start_frame))
-                    continue
-                try:
-                    media_index = int(image_info.get("media_index"))
-                except (TypeError, ValueError):
-                    continue
-                if (
-                    media_index not in selected_image_indexes
-                    and 0 <= media_index < len(image_items)
-                    and isinstance(image_items[media_index], torch.Tensor)
-                ):
-                    selected_image_indexes.add(media_index)
-                    selected_images.append(image_items[media_index])
-                    if output_full_timeline or task_entry.get("marker_mode"):
-                        marker_image_frames.append(max(0, task_content_start - start_frame))
+                    if deferred_media:
+                        image = _resolve_timeline_image_item(image_info, None)
+                        if image is None:
+                            continue
+                        panorama_view = image_info.get("panorama_view")
+                        if panorama_view is not None:
+                            try:
+                                image = equirectangular_to_perspective(
+                                    image,
+                                    panorama_view,
+                                    int(info.get("width", 544)),
+                                    int(info.get("height", 960)),
+                                )
+                            except (TypeError, ValueError, RuntimeError) as exc:
+                                image_id = image_info.get("id", "")
+                                raise ValueError(
+                                    f"Failed to project panorama image {image_id!r}: {exc}"
+                                ) from exc
+                        selected_images.append(image)
+                        if output_full_timeline or task_entry.get("marker_mode"):
+                            marker_image_frames.append(max(0, task_content_start - start_frame))
+                        continue
+                    try:
+                        media_index = int(image_info.get("media_index"))
+                    except (TypeError, ValueError):
+                        continue
+                    if (
+                        media_index not in selected_image_indexes
+                        and 0 <= media_index < len(image_items)
+                        and isinstance(image_items[media_index], torch.Tensor)
+                    ):
+                        selected_image_indexes.add(media_index)
+                        selected_images.append(image_items[media_index])
+                        if output_full_timeline or task_entry.get("marker_mode"):
+                            marker_image_frames.append(max(0, task_content_start - start_frame))
 
-        media_progress.update_absolute(1)
+            media_progress.update_absolute(1)
 
-        if output_full_timeline or task_entry.get("marker_mode"):
-            image_indexes = ",".join(str(frame) for frame in marker_image_frames)
-        else:
-            image_indexes = _evenly_distributed_image_indexes(
-                len(selected_images),
-                duration_frames,
-            )
+            if output_full_timeline or task_entry.get("marker_mode"):
+                image_indexes = ",".join(str(frame) for frame in marker_image_frames)
+            else:
+                image_indexes = _evenly_distributed_image_indexes(
+                    len(selected_images),
+                    duration_frames,
+                )
 
-        selected_audio: list[dict] = []
-        locked_audio: dict | None = None
-        selected_video: list = []
-        has_video = False
-        global_volume_db = audio_volume_db(info)
-        global_muted = audio_is_muted(info)
-        has_solo_track = any(
-            isinstance(track, dict)
-            and track.get("type") in {"audio", "video"}
-            and track.get("solo") is True
-            for track in tracks
-        ) if isinstance(tracks, list) else False
-        media_tracks = tracks if isinstance(tracks, list) else []
-        if not output_full_timeline:
-            media_tracks = media_tracks[1:]
-        if output_full_timeline and not deferred_media:
-            selected_audio = list(audio_items)
-            selected_video = list(video_items)
-            has_video = any(item is not None for item in selected_video)
+            selected_audio: list[dict] = []
+            locked_audio: dict | None = None
+            selected_video: list = []
+            has_video = False
+            global_volume_db = audio_volume_db(info)
+            global_muted = audio_is_muted(info)
+            has_solo_track = any(
+                isinstance(track, dict)
+                and track.get("type") in {"audio", "video"}
+                and track.get("solo") is True
+                for track in tracks
+            ) if isinstance(tracks, list) else False
+            media_tracks = tracks if isinstance(tracks, list) else []
+            if not output_full_timeline:
+                media_tracks = media_tracks[1:]
+            if output_full_timeline and not deferred_media:
+                selected_audio = list(audio_items)
+                selected_video = list(video_items)
+                has_video = any(item is not None for item in selected_video)
+                for track in media_tracks if isinstance(media_tracks, list) else []:
+                    if not isinstance(track, dict) or track.get("type") != "audio":
+                        continue
+                    media_index = _track_output_index(track)
+                    if (
+                        locked_audio is None
+                        and track.get("audio_locked") is True
+                        and media_index is not None
+                        and 0 <= media_index < len(audio_items)
+                        and isinstance(audio_items[media_index], dict)
+                    ):
+                        locked_audio = audio_items[media_index]
+                media_tracks = []
             for track in media_tracks if isinstance(media_tracks, list) else []:
-                if not isinstance(track, dict) or track.get("type") != "audio":
+                if not isinstance(track, dict):
                     continue
                 media_index = _track_output_index(track)
-                if (
-                    locked_audio is None
-                    and track.get("audio_locked") is True
-                    and media_index is not None
-                    and 0 <= media_index < len(audio_items)
-                    and isinstance(audio_items[media_index], dict)
-                ):
-                    locked_audio = audio_items[media_index]
-            media_tracks = []
-        for track in media_tracks if isinstance(media_tracks, list) else []:
-            if not isinstance(track, dict):
-                continue
-            media_index = _track_output_index(track)
-            speaker_segment = (
-                _speaker_reference_segment(track)
-                if is_minimax and not output_full_timeline
-                else None
-            )
-            locked_audio_track = (
-                track.get("type") == "audio" and track.get("audio_locked") is True
-            )
-            if speaker_segment is not None:
-                speaker_audio: dict | None = None
-                if deferred_media:
-                    speaker_content = speaker_segment.get("content", {})
-                    resolved_speaker = _resolve_multitrack_audio(speaker_content, None)
-                    if resolved_speaker is not None:
-                        speaker_audio = _build_speaker_reference_audio(
-                            speaker_segment,
-                            resolved_speaker,
-                            global_volume_db + audio_volume_db(track),
-                            global_muted
-                            or audio_is_muted(track)
-                            or (has_solo_track and track.get("solo") is not True),
-                        )
-                else:
-                    speaker_media_index = _speaker_reference_output_index(speaker_segment)
-                    if (
-                        speaker_media_index is not None
-                        and 0 <= speaker_media_index < len(audio_items)
-                        and isinstance(audio_items[speaker_media_index], dict)
-                    ):
-                        speaker_audio = audio_items[speaker_media_index]
-                if speaker_audio is not None:
-                    selected_audio.append(speaker_audio)
-                continue
-            track_media_duration_frames = media_duration_frames
-            if is_minimax:
-                track_media_end = _track_media_end_frame(
-                    track,
-                    start_frame,
-                    next_task_start,
+                speaker_segment = (
+                    _speaker_reference_segment(track)
+                    if is_minimax and not output_full_timeline
+                    else None
                 )
-                if track_media_end is None:
+                locked_audio_track = (
+                    track.get("type") == "audio" and track.get("audio_locked") is True
+                )
+                if speaker_segment is not None:
+                    speaker_audio: dict | None = None
+                    if deferred_media:
+                        speaker_content = speaker_segment.get("content", {})
+                        resolved_speaker = _resolve_multitrack_audio(speaker_content, None)
+                        if resolved_speaker is not None:
+                            speaker_audio = _build_speaker_reference_audio(
+                                speaker_segment,
+                                resolved_speaker,
+                                global_volume_db + audio_volume_db(track),
+                                global_muted
+                                or audio_is_muted(track)
+                                or (has_solo_track and track.get("solo") is not True),
+                            )
+                    else:
+                        speaker_media_index = _speaker_reference_output_index(speaker_segment)
+                        if (
+                            speaker_media_index is not None
+                            and 0 <= speaker_media_index < len(audio_items)
+                            and isinstance(audio_items[speaker_media_index], dict)
+                        ):
+                            speaker_audio = audio_items[speaker_media_index]
+                    if speaker_audio is not None:
+                        selected_audio.append(speaker_audio)
                     continue
-                available_frames = max(0, track_media_end - start_frame)
-                track_media_duration_frames = (
-                    min(track_media_duration_frames, available_frames)
-                    if track_media_duration_frames is not None
-                    else available_frames
-                )
-                if track_media_duration_frames is not None and track_media_duration_frames <= 0:
-                    continue
-            if deferred_media and track.get("type") in {"audio", "video"}:
-                local_duration = (
-                    track_media_duration_frames
-                    if is_minimax
-                    else duration_frames
-                )
-                if local_duration is None or local_duration <= 0:
-                    continue
-                local_segments = multitrack_segments_in_window(
-                    track,
-                    start_frame,
-                    start_frame + local_duration,
-                )
-                track_volume_db = global_volume_db + audio_volume_db(track)
-                track_muted = (
-                    global_muted
-                    or audio_is_muted(track)
-                    or (has_solo_track and track.get("solo") is not True)
-                )
-                if track.get("type") == "audio":
-                    resolved_audio_segments: list[tuple[dict, dict]] = []
+                track_media_duration_frames = media_duration_frames
+                if is_minimax:
+                    track_media_end = _track_media_end_frame(
+                        track,
+                        start_frame,
+                        next_task_start,
+                    )
+                    if track_media_end is None:
+                        continue
+                    available_frames = max(0, track_media_end - start_frame)
+                    track_media_duration_frames = (
+                        min(track_media_duration_frames, available_frames)
+                        if track_media_duration_frames is not None
+                        else available_frames
+                    )
+                    if track_media_duration_frames is not None and track_media_duration_frames <= 0:
+                        continue
+                if deferred_media and track.get("type") in {"audio", "video"}:
+                    local_duration = (
+                        track_media_duration_frames
+                        if is_minimax
+                        else duration_frames
+                    )
+                    if local_duration is None or local_duration <= 0:
+                        continue
+                    local_segments = multitrack_segments_in_window(
+                        track,
+                        start_frame,
+                        start_frame + local_duration,
+                    )
+                    track_volume_db = global_volume_db + audio_volume_db(track)
+                    track_muted = (
+                        global_muted
+                        or audio_is_muted(track)
+                        or (has_solo_track and track.get("solo") is not True)
+                    )
+                    if track.get("type") == "audio":
+                        resolved_audio_segments: list[tuple[dict, dict]] = []
+                        for local_segment in local_segments:
+                            local_content = local_segment.get("content", {})
+                            resolved_audio = _resolve_multitrack_audio(local_content, None)
+                            if resolved_audio is not None:
+                                resolved_audio_segments.append((local_segment, resolved_audio))
+                        if not is_minimax or resolved_audio_segments:
+                            selected_audio.append(_merge_audio_track(
+                                resolved_audio_segments,
+                                local_duration,
+                                frame_rate,
+                                track_volume_db,
+                                track_muted,
+                            ))
+                        if locked_audio is None and locked_audio_track and resolved_audio_segments:
+                            locked_audio = _merge_audio_track(
+                                resolved_audio_segments,
+                                duration_frames,
+                                frame_rate,
+                                track_volume_db,
+                                track_muted,
+                            )
+                        continue
+
+                    resolved_video_segments: list[tuple[dict, object]] = []
                     for local_segment in local_segments:
                         local_content = local_segment.get("content", {})
-                        resolved_audio = _resolve_multitrack_audio(local_content, None)
-                        if resolved_audio is not None:
-                            resolved_audio_segments.append((local_segment, resolved_audio))
-                    if not is_minimax or resolved_audio_segments:
-                        selected_audio.append(_merge_audio_track(
-                            resolved_audio_segments,
+                        resolved_video = _resolve_multitrack_video(local_content, None)
+                        if resolved_video is None:
+                            continue
+                        resolved_video_segments.append((local_segment, resolved_video))
+                    has_video = has_video or bool(local_segments)
+                    if not is_minimax or resolved_video_segments:
+                        selected_video.append(_merge_video_track(
+                            resolved_video_segments,
                             local_duration,
                             frame_rate,
+                            int(info.get("width", 544)),
+                            int(info.get("height", 960)),
                             track_volume_db,
                             track_muted,
+                            resize_method=str(info.get("resize_method", "stretch")),
                         ))
-                    if locked_audio is None and locked_audio_track and resolved_audio_segments:
-                        locked_audio = _merge_audio_track(
-                            resolved_audio_segments,
-                            duration_frames,
-                            frame_rate,
-                            track_volume_db,
-                            track_muted,
-                        )
                     continue
-
-                resolved_video_segments: list[tuple[dict, object]] = []
-                for local_segment in local_segments:
-                    local_content = local_segment.get("content", {})
-                    resolved_video = _resolve_multitrack_video(local_content, None)
-                    if resolved_video is None:
-                        continue
-                    resolved_video_segments.append((local_segment, resolved_video))
-                has_video = has_video or bool(local_segments)
-                if not is_minimax or resolved_video_segments:
-                    selected_video.append(_merge_video_track(
-                        resolved_video_segments,
-                        local_duration,
-                        frame_rate,
-                        int(info.get("width", 544)),
-                        int(info.get("height", 960)),
-                        track_volume_db,
-                        track_muted,
-                        resize_method=str(info.get("resize_method", "stretch")),
-                    ))
-                continue
-            if track.get("type") == "audio" and media_index is not None and 0 <= media_index < len(audio_items):
-                track_audio = audio_items[media_index]
-                if isinstance(track_audio, dict):
-                    task_audio = _trim_track_audio(
-                        track_audio,
-                        start_frame,
-                        track_media_duration_frames if is_minimax else duration_frames,
-                        frame_rate,
+                if track.get("type") == "audio" and media_index is not None and 0 <= media_index < len(audio_items):
+                    track_audio = audio_items[media_index]
+                    if isinstance(track_audio, dict):
+                        task_audio = _trim_track_audio(
+                            track_audio,
+                            start_frame,
+                            track_media_duration_frames if is_minimax else duration_frames,
+                            frame_rate,
+                        )
+                        selected_audio.append(task_audio)
+                        if locked_audio is None and locked_audio_track:
+                            locked_audio = task_audio
+                elif track.get("type") == "video" and media_index is not None and 0 <= media_index < len(video_items):
+                    track_video = video_items[media_index]
+                    video_duration = duration_frames / frame_rate
+                    if is_minimax:
+                        video_duration = (
+                            track_media_duration_frames / frame_rate
+                            if track_media_duration_frames is not None
+                            else 0.0
+                        )
+                    trimmed = track_video.as_trimmed(
+                        start_time=start_frame / frame_rate,
+                        duration=video_duration,
+                        strict_duration=False,
                     )
-                    selected_audio.append(task_audio)
-                    if locked_audio is None and locked_audio_track:
-                        locked_audio = task_audio
-            elif track.get("type") == "video" and media_index is not None and 0 <= media_index < len(video_items):
-                track_video = video_items[media_index]
-                video_duration = duration_frames / frame_rate
-                if is_minimax:
-                    video_duration = (
-                        track_media_duration_frames / frame_rate
-                        if track_media_duration_frames is not None
-                        else 0.0
+                    if trimmed is not None:
+                        selected_video.append(trimmed)
+                    has_video = has_video or any(
+                        isinstance(segment, dict)
+                        and isinstance(segment.get("content"), dict)
+                        and _ranges_overlap(start_frame, end_frame, segment)
+                        for segment in track.get("segments", [])
                     )
-                trimmed = track_video.as_trimmed(
-                    start_time=start_frame / frame_rate,
-                    duration=video_duration,
-                    strict_duration=False,
-                )
-                if trimmed is not None:
-                    selected_video.append(trimmed)
-                has_video = has_video or any(
-                    isinstance(segment, dict)
-                    and isinstance(segment.get("content"), dict)
-                    and _ranges_overlap(start_frame, end_frame, segment)
-                    for segment in track.get("segments", [])
-                )
 
-        media_progress.update_absolute(2)
+            media_progress.update_absolute(2)
 
         task_type = _multitrack_task_type(task, len(selected_images), has_video)
         prompt = _selected_multitrack_user_prompt(content)
