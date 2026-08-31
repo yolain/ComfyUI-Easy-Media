@@ -307,8 +307,13 @@ def _slot_index(slot_name: str | None) -> int:
 
 
 def _unwrap_slot_input(value):
-    if isinstance(value, list) and len(value) == 1 and isinstance(value[0], list):
-        return value[0]
+    # With is_input_list (and lazy inputs), a value can arrive as a tuple or as a
+    # tuple-wrapped list; normalise to a plain list before indexing.
+    if isinstance(value, tuple):
+        value = list(value)
+    if isinstance(value, list) and len(value) == 1 and isinstance(value[0], (list, tuple)):
+        inner = value[0]
+        return list(inner) if isinstance(inner, tuple) else inner
     return value
 
 
@@ -444,9 +449,13 @@ def _resolution_needs_source_dimensions(resolution: str | dict) -> bool:
 def _as_list_input(value) -> list:
     if value is None:
         return []
+    # is_input_list/lazy plumbing can also deliver a tuple (or tuple-wrapped list).
+    if isinstance(value, tuple):
+        value = list(value)
     if isinstance(value, list):
-        if len(value) == 1 and isinstance(value[0], list):
-            return value[0]
+        if len(value) == 1 and isinstance(value[0], (list, tuple)):
+            inner = value[0]
+            return list(inner) if isinstance(inner, tuple) else inner
         return value
     return [value]
 
@@ -1059,9 +1068,18 @@ def _index_slot_image(image_input, slot_name: str | None) -> 'torch.Tensor | Non
     image_input = _unwrap_slot_input(image_input)
     if image_input is None:
         return None
-    candidates = image_input if isinstance(image_input, list) else [image_input]
+    candidates = image_input if isinstance(image_input, (list, tuple)) else [image_input]
     flattened: list[torch.Tensor] = []
     for candidate in candidates:
+        # Tolerate a nested list/tuple of tensors produced by is_input_list plumbing.
+        if isinstance(candidate, (list, tuple)):
+            for sub in candidate:
+                if not isinstance(sub, torch.Tensor):
+                    continue
+                t2 = _normalize_image_tensor(sub)
+                if t2 is not None and not _is_empty_slot_image(t2):
+                    flattened.extend(t2[i:i + 1] for i in range(t2.shape[0]))
+            continue
         if not isinstance(candidate, torch.Tensor):
             continue
         tensor = _normalize_image_tensor(candidate)
@@ -1834,7 +1852,18 @@ class MultiTrackEditor(io.ComfyNode):
             data = build_multitrack_data_from_prompt_override(data, raw_override)
         slot_types = multitrack_slot_media_types(data)
         values = {"image": image, "audio": audio, "video": video}
-        return [media_type for media_type in sorted(slot_types) if values[media_type] is None]
+
+        def _missing_lazy_input(v):
+            # An unevaluated lazy input under is_input_list arrives as (None,) rather
+            # than None; treat None / empty / all-None sequences as missing so the
+            # engine is asked to evaluate it.
+            if v is None:
+                return True
+            if isinstance(v, (list, tuple)):
+                return len(v) == 0 or all(x is None for x in v)
+            return False
+
+        return [media_type for media_type in sorted(slot_types) if _missing_lazy_input(values[media_type])]
 
     @classmethod
     def execute(
