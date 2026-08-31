@@ -63,6 +63,7 @@ from .modules.subtitle_recognition import (
     validate_subtitle_recognition_method,
 )
 from .utils.speech import generate_voxcpm2_speech
+from .utils.workflow_submission import register_workflow_routes
 from .utils.video import (
     download_audio_to_temp,
     download_video_to_temp,
@@ -75,6 +76,11 @@ from .utils.video import (
 _SMART_SPLIT_LOCK = asyncio.Lock()
 _SUBTITLE_SPEECH_LOCK = asyncio.Lock()
 _RUNNINGHUB_ACCOUNT_ENDPOINT = "https://www.runninghub.cn/uc/openapi/accountStatus"
+
+register_workflow_routes(
+    PromptServer.instance.routes,
+    lambda session_id: session_id in PromptServer.instance.sockets,
+)
 
 
 @PromptServer.instance.routes.get("/easy-media/project")

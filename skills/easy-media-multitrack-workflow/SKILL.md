@@ -20,7 +20,7 @@ description: "Create, edit, and optionally run ComfyUI Easy Media MultiTrack wor
 
 1. 保留源文件，运行 `scripts/patch_workflow.py inspect WORKFLOW.json`，确认连接的 `easy multiTrackEditor` / `easy multitrackProject`、分辨率、format、FPS、轨道和项目参数。
 2. 需要时间线、分辨率或音频角色时阅读 [references/multitrack-schema.md](references/multitrack-schema.md)，生成完整的新 `track_data`。空模板必须用目标内容替换空 TRACK_DATA；已有对象保留 ID 和未知字段，只为新增对象生成 UUID。
-3. 仅当用户明确要求上传或执行时，阅读 [references/upload-api.md](references/upload-api.md) 并把本地/URL 素材交给 ComfyUI。使用用户地址，未给则使用 `http://127.0.0.1:8188`；TRACK_DATA 只写接口返回的媒体路径。
+3. 仅当用户明确要求上传或执行时，阅读 [references/upload-api.md](references/upload-api.md) 并把本地/URL 素材交给 ComfyUI。使用用户地址，未提供地址时先读取 Easy Media 节点包 `config.yaml` 的 `COMFYUI_URL`，文件或字段不存在（含空值）时才回退至 `http://127.0.0.1:8188`；TRACK_DATA 只写接口返回的媒体路径。
 4. 用户明确要求受支持的 loader/attention 替换时，按 [references/template-workflow.md](references/template-workflow.md) 原位处理；其他情况不改节点图。
 5. 按 [references/multitrack-schema.md](references/multitrack-schema.md#补丁-plan) 生成只包含实际变更的 plan，先 dry-run，再写入新文件并重新 inspect：
 
@@ -43,7 +43,7 @@ description: "Create, edit, and optionally run ComfyUI Easy Media MultiTrack wor
 
 “创建/生成一个工作流”只授权生成 JSON；“运行、执行、开始生成、提交队列、直接出片”等明确意图才授权上传素材并执行。
 
-用户要求执行时，阅读 [references/execution-api.md](references/execution-api.md)：使用用户地址，未提供则使用 `http://127.0.0.1:8188`；所有素材必须上传到同一实例。UI workflow 不能原样 POST 到 `/prompt`，必须先由 ComfyUI 前端序列化为 API-format prompt，再提交并记录 `prompt_id`。等待到成功、失败或用户要求的停止条件，不以“已排队”冒充“已生成”。
+用户要求在 ComfyUI 中打开或执行时，阅读 [references/execution-api.md](references/execution-api.md)，使用 `scripts/submit_workflow.py` 提交 **UI workflow JSON**。默认新开工作流 tab，再通过前端原生运行入口入队；只要求打开时传 `--no-queue`，明确要求覆盖当前 tab 时传 `--mode replace`。不改用 API-format prompt 或直接 POST `/prompt`。未指定目标且只有一个在线页面时自动选择；多个页面时列出客户端让用户指定，不猜测。使用用户地址，未提供地址时先读取 Easy Media 节点包 `config.yaml` 的 `COMFYUI_URL`，文件或字段不存在（含空值）时才回退至 `http://127.0.0.1:8188`；所有素材必须上传到同一实例。执行后记录 `request_id` 和 `prompt_id`，等待到成功、失败或用户要求的停止条件，不以“已排队”冒充“已生成”。
 
 ## 交付
 
