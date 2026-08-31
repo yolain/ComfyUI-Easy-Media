@@ -127,6 +127,8 @@ def _load_basic_module(monkeypatch):
     utils.prompt_enhancer_supports_video_url = lambda model: False
     utils.prompt_enhancer_video_inputs = lambda model, values: []
     utils.minimax_length_to_seconds = lambda length: 5
+    from contextlib import nullcontext
+    utils.log_stage_time = lambda *_args, **_kwargs: nullcontext()
     utils.write_ass_file = lambda *args, **kwargs: None
     utils.write_srt_file = lambda *args, **kwargs: None
     prompt_override_path = Path(__file__).resolve().parents[1] / "utils" / "prompt_override.py"

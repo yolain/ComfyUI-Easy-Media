@@ -169,7 +169,7 @@ If an older workflow connects directly to the editor's media outputs, insert `Mu
 
 ### 🎞️ MultiTrack Project
 
-![multiTrackProject](https://github.com/user-attachments/assets/a2d801eb-24c0-4ca3-963e-62ff4b1f2b79)
+![multiTrackProject](https://github.com/user-attachments/assets/b4cc13a9-5e64-4361-8b3a-ddf900d04a94)
 
 `easy multitrackProject` manages segment-by-segment generation for MiniMax H3 projects. The editor's dimensions are the **first-pass dimensions**; dual sampling scales up from this size for the second pass. Project files are stored in `ComfyUI/output/easy_media/projects/<project_name>/`, including segment media, project records, and context latents for continuation.
 
