@@ -68,7 +68,7 @@ class MakeVideoList(io.ComfyNode):
             category=CATEGORY_VIDEO,
             description="Combine up to 10 optional video inputs into a video list.",
             inputs=[
-                io.Boolean.Input("skip_empty", default=False, label_on="Skip", label_off="Fill"),
+                io.Boolean.Input("skip_empty", default=True, label_on="Skip", label_off="Fill"),
                 io.Video.Input("video1", optional=True),
                 io.Video.Input("video2", optional=True),
                 io.Video.Input("video3", optional=True),
@@ -217,7 +217,8 @@ class EasySaveVideo(io.ComfyNode):
         file = f"{filename}_{counter:05}_.{ext}"
         full_path = os.path.join(full_output_folder, file)
         prefix = "temp" if write_temp else "output"
-        relative_path = f"{prefix}/{os.path.relpath(full_path, output_dir)}"
+        relative_output_path = os.path.relpath(full_path, output_dir).replace("\\", "/")
+        relative_path = f"{prefix}/{relative_output_path}"
 
         metadata: dict | None = None
         if save_metadata:
@@ -735,7 +736,7 @@ class EasyCompareVideos(io.ComfyNode):
             for _path, temp_files, _metadata in prepared.values():
                 _cleanup_compare_temp_files(temp_files)
 
-        standard_preview = output is not None or source is not None
+        standard_preview = payload["output"] or payload["source"]
         preview_ui = (
             ui.PreviewVideo([standard_preview]).as_dict()
             if standard_preview is not None

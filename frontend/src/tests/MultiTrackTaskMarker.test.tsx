@@ -45,7 +45,7 @@ describe('MultiTrackTaskMarker', () => {
     expect(marker.style.color).toBe('var(--highlight)')
     expect(marker.getAttribute('aria-pressed')).toBe('true')
     expect(document.querySelector('.lucide-task-marker-icon')).not.toBeNull()
-    expect(screen.getByText('Task 01')).not.toBeNull()
+    expect(screen.getByText('Segment 01')).not.toBeNull()
     expect(screen.getByText('00:02:00')).not.toBeNull()
     fireEvent.mouseDown(marker)
     fireEvent.click(marker)

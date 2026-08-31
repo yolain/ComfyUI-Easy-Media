@@ -23,6 +23,12 @@ export function mediaPathToViewUrl(filePath: string, sourceType: ViewSourceType)
   return `/view?filename=${encodeURIComponent(filename)}&type=${sourceType}&subfolder=${encodeURIComponent(subfolder)}`
 }
 
+export function addMediaRevision(url: string, revision?: string | number): string {
+  if (revision === undefined || revision === '') return url
+  const separator = url.includes('?') ? '&' : '?'
+  return `${url}${separator}v=${encodeURIComponent(String(revision))}`
+}
+
 export function mediaContentToViewUrl(content: ViewableMediaContent): string | null {
   if (content.url) return content.url
   if (content.local_path) return `file://${content.local_path}`

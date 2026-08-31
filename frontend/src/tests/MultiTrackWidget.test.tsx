@@ -24,8 +24,11 @@ vi.mock('@/lib/video-utils', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/PreviewArea', () => ({
-  PreviewArea: ({ selectedSegment, onSelectedSegmentContentChange, onTrackSegmentsContentChange, onGenerateSubtitleSpeech }: {
+  PreviewArea: ({ selectedSegment, selectedTaskSegments, isPlaying, playbackNonce, onSelectedSegmentContentChange, onTrackSegmentsContentChange, onGenerateSubtitleSpeech }: {
     selectedSegment: { trackType: string; segment: TrackData['tracks'][number]['segments'][number] } | null
+    selectedTaskSegments?: TrackData['tracks'][number]['segments']
+    isPlaying: boolean
+    playbackNonce?: number
     onSelectedSegmentContentChange: (patch: unknown) => void
     onTrackSegmentsContentChange: (updates: Array<{ segmentId: string; patch: unknown }>) => void
     onGenerateSubtitleSpeech?: (
@@ -41,6 +44,9 @@ vi.mock('@/components/widgets/multitrack/PreviewArea', () => ({
     ) => Promise<void>
   }) => (
     <div data-testid="preview-area">
+      <span data-testid="preview-is-playing">{String(isPlaying)}</span>
+      <span data-testid="preview-playback-nonce">{playbackNonce ?? 0}</span>
+      <span data-testid="preview-selected-task-count">{selectedTaskSegments?.length ?? 0}</span>
       {selectedSegment?.trackType === 'subtitle' ? (
         <button
           type="button"
@@ -200,9 +206,14 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
           </button>
         ) : null}
         {taskTrack?.segments[1] ? (
-          <button type="button" onClick={() => onSelectSegment(taskTrack.segments[1].id)}>
-            select second task segment
-          </button>
+          <>
+            <button type="button" onClick={() => onSelectSegment(taskTrack.segments[1].id)}>
+              select second task segment
+            </button>
+            <button type="button" onClick={() => onSelectSegments(taskTrack.segments.slice(0, 2).map((item) => item.id))}>
+              select first two task segments
+            </button>
+          </>
         ) : null}
         <button type="button" onClick={() => onAddTrack('video')}>add video track</button>
         <button type="button" onClick={() => onAddTrack('audio')}>add audio track</button>
@@ -523,7 +534,19 @@ describe('MultiTrackWidget', () => {
     const data = createDefaultTrackData()
     data.total_length = 120
     data.tracks[0].segments = [
-      { id: 'task-first', start_frame: 0, end_frame: 24, color: data.tracks[0].color, content: { media_type: 'none' } },
+      {
+        id: 'task-first',
+        start_frame: 0,
+        end_frame: 24,
+        color: data.tracks[0].color,
+        content: {
+          media_type: 'none',
+          task_mode: 'ref',
+          continuity_mode: 'context',
+          ref_image_size: 'max',
+          system_prompt: 'Keep this custom prompt',
+        },
+      },
       { id: 'task-second', start_frame: 72, end_frame: 96, color: data.tracks[0].color, content: { media_type: 'none' } },
     ]
     data.tracks.push({
@@ -549,6 +572,12 @@ describe('MultiTrackWidget', () => {
       [24, 72],
       [72, 96],
     ])
+    expect(taskUpdated.tracks[0].segments[1].content).toMatchObject({
+      task_mode: 'ref',
+      system_prompt: 'Keep this custom prompt',
+      continuity_mode: 'context',
+      ref_image_size: 'max',
+    })
 
     view.rerender(<MultiTrackWidget {...props} value={taskUpdated} onChange={onChange} />)
     fireEvent.click(screen.getByRole('button', { name: 'fill subtitle gap' }))
@@ -765,6 +794,33 @@ describe('MultiTrackWidget', () => {
     expect(screen.getByTestId('toolbar-current-time').textContent).toBe('24')
   })
 
+  it('keeps the task editor visible when every selected segment is a task', () => {
+    const data = createDefaultTrackData()
+    data.total_length = 48
+    data.tracks[0].segments = [
+      {
+        id: 'task-first',
+        start_frame: 0,
+        end_frame: 24,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default', user_prompt: 'First' },
+      },
+      {
+        id: 'task-second',
+        start_frame: 24,
+        end_frame: 48,
+        color: data.tracks[0].color,
+        content: { media_type: 'none', task_mode: 'default', user_prompt: 'Second' },
+      },
+    ]
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} />)
+    fireEvent.click(screen.getByRole('button', { name: 'select first two task segments' }))
+
+    expect(screen.getByTestId('preview-selected-task-count').textContent).toBe('2')
+    expect(screen.getByTestId('selected-task-user-prompt').textContent).toBe('Second')
+  })
+
   it('switches the selected task when seeking into another task range', () => {
     const data = createDefaultTrackData()
     data.total_length = 10
@@ -828,6 +884,53 @@ describe('MultiTrackWidget', () => {
 
     expect(screen.getByTestId('selected-task-user-prompt').textContent).toBe('Second')
     vi.unstubAllGlobals()
+  })
+
+  it('loops playback to frame zero and restarts preview media at the timeline end', () => {
+    const data = createDefaultTrackData()
+    data.frame_rate = 10
+    data.total_length = 10
+    data.tracks[0].segments = [{
+      id: 'loop-task',
+      start_frame: 0,
+      end_frame: 10,
+      color: data.tracks[0].color,
+      content: { media_type: 'none' },
+    }]
+    let animationFrame: FrameRequestCallback | null = null
+    const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+      animationFrame = callback
+      return requestAnimationFrame.mock.calls.length
+    })
+    vi.stubGlobal('requestAnimationFrame', requestAnimationFrame)
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} />)
+    fireEvent.click(screen.getByRole('button', { name: 'toggle playback' }))
+    expect(animationFrame).not.toBeNull()
+
+    act(() => animationFrame?.(performance.now() + 1100))
+
+    expect(screen.getByTestId('toolbar-current-time').textContent).toBe('0')
+    expect(screen.getByTestId('preview-is-playing').textContent).toBe('true')
+    expect(screen.getByTestId('preview-playback-nonce').textContent).toBe('1')
+    expect(requestAnimationFrame.mock.calls.length).toBeGreaterThan(1)
+    vi.unstubAllGlobals()
+  })
+
+  it('starts shared sync play without changing the global audio value', () => {
+    const data = createDefaultTrackData()
+    const node = {}
+    const onChange = vi.fn()
+
+    render(<MultiTrackWidget {...widgetProps()} value={data} node={node} onChange={onChange} />)
+    act(() => {
+      (node as { __easyMediaSyncPlay?: (startAt: number, muted?: boolean) => void })
+        .__easyMediaSyncPlay?.(performance.now(), true)
+    })
+
+    expect(onChange).not.toHaveBeenCalled()
+    expect(screen.getByTestId('preview-is-playing').textContent).toBe('true')
   })
 
   it('allows a task marker at the timeline end', () => {

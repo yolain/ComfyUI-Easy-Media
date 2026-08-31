@@ -11,6 +11,7 @@ vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
     value: string
     allowMultipleSelection?: boolean
     maxSelectionCount?: number
+    slotItems?: Array<{ value: string }>
     onChange: (value: string, source: 'input') => void
   }) => (
     <div
@@ -18,6 +19,7 @@ vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
       data-value={props.value}
       data-multiple={String(props.allowMultipleSelection)}
       data-limit={String(props.maxSelectionCount)}
+      data-slot-items={props.slotItems?.map((item) => item.value).join(',') ?? ''}
     >
       <button type="button" onClick={() => props.onChange('replacement.png', 'input')}>
         choose replacement
@@ -25,6 +27,12 @@ vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
     </div>
   ),
 }))
+
+vi.stubGlobal('ResizeObserver', class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+})
 
 function activateTab(name: string) {
   const tab = screen.getByRole('tab', { name })
@@ -106,12 +114,126 @@ describe('TaskSegmentEditor', () => {
     const onContentChange = vi.fn()
     render(<TaskSegmentEditor segment={taskSegment()} onContentChange={onContentChange} />)
 
-    fireEvent.click(screen.getByRole('combobox'))
-    fireEvent.click(screen.getByRole('option', { name: 'Reference (r2v)' }))
+    fireEvent.click(screen.getByRole('combobox', { name: 'Task mode' }))
+    fireEvent.click(screen.getByRole('option', { name: 'R2V' }))
     inputEditable(screen.getByRole('textbox', { name: 'Prompt' }), 'New prompt')
 
     expect(onContentChange).toHaveBeenCalledWith({ task_mode: 'ref' })
     expect(onContentChange).toHaveBeenCalledWith({ user_prompt: 'New prompt' })
+  })
+
+  it('shows and stores MiniMax continuity mode from the second task onward', () => {
+    const onContentChange = vi.fn()
+    const first = taskSegment()
+    const second = secondTaskSegment()
+    const { rerender } = render(
+      <TaskSegmentEditor
+        segment={second}
+        trackSegments={[first, second]}
+        format="MiniMax"
+        onContentChange={onContentChange}
+      />,
+    )
+
+    const continuitySelect = screen.getByRole('combobox', { name: 'Continuity mode' })
+    expect(continuitySelect.className).toContain('w-20')
+    expect(screen.getByRole('combobox', { name: 'Task mode' }).className).toContain('w-24')
+    fireEvent.click(continuitySelect)
+    fireEvent.click(screen.getByRole('option', { name: 'Context' }))
+    expect(onContentChange).toHaveBeenCalledWith({ continuity_mode: 'context' })
+
+    rerender(
+      <TaskSegmentEditor
+        segment={first}
+        trackSegments={[first, second]}
+        format="MiniMax"
+        onContentChange={onContentChange}
+      />,
+    )
+    expect(screen.queryByRole('combobox', { name: 'Continuity mode' })).toBeNull()
+
+    rerender(
+      <TaskSegmentEditor
+        segment={second}
+        trackSegments={[first, second]}
+        format="Seedance"
+        onContentChange={onContentChange}
+      />,
+    )
+    expect(screen.queryByRole('combobox', { name: 'Continuity mode' })).toBeNull()
+  })
+
+  it('shows and stores reference image size only for reference tasks', () => {
+    const onContentChange = vi.fn()
+    const referenceSegment = taskSegment()
+    referenceSegment.content.task_mode = 'ref'
+    referenceSegment.content.ref_image_size = 'max'
+    const { rerender } = render(
+      <TaskSegmentEditor
+        segment={referenceSegment}
+        format="MiniMax"
+        onContentChange={onContentChange}
+      />,
+    )
+
+    const sizeSelect = screen.getByRole('combobox', { name: 'Reference image size' })
+    expect(sizeSelect.textContent).toContain('Max')
+    fireEvent.click(sizeSelect)
+    fireEvent.click(screen.getByRole('option', { name: 'Match' }))
+    expect(onContentChange).toHaveBeenCalledWith({ ref_image_size: 'match' })
+
+    rerender(
+      <TaskSegmentEditor
+        segment={taskSegment()}
+        format="MiniMax"
+        onContentChange={onContentChange}
+      />,
+    )
+    expect(screen.queryByRole('combobox', { name: 'Reference image size' })).toBeNull()
+  })
+
+  it('synchronizes dropdown changes across selected tasks while keeping the first continuity mode as shot', () => {
+    const onContentChange = vi.fn()
+    const onTrackSegmentsContentChange = vi.fn()
+    const first = taskSegment()
+    first.content.task_mode = 'ref'
+    first.content.continuity_mode = 'shot'
+    const second = secondTaskSegment()
+    second.content.task_mode = 'ref'
+    second.content.continuity_mode = 'shot'
+
+    render(
+      <TaskSegmentEditor
+        segment={first}
+        trackSegments={[first, second]}
+        selectedSegments={[first, second]}
+        format="MiniMax"
+        onContentChange={onContentChange}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Continuity mode' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Context' }))
+    expect(onTrackSegmentsContentChange).toHaveBeenLastCalledWith([
+      { segmentId: first.id, patch: { continuity_mode: 'shot' } },
+      { segmentId: second.id, patch: { continuity_mode: 'context' } },
+    ])
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Reference image size' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Max' }))
+    expect(onTrackSegmentsContentChange).toHaveBeenLastCalledWith([
+      { segmentId: first.id, patch: { ref_image_size: 'max' } },
+      { segmentId: second.id, patch: { ref_image_size: 'max' } },
+    ])
+
+    fireEvent.click(screen.getByRole('combobox', { name: 'Task mode' }))
+    fireEvent.click(screen.getByRole('option', { name: 'VI2V' }))
+    expect(onTrackSegmentsContentChange).toHaveBeenLastCalledWith([
+      { segmentId: first.id, patch: { task_mode: 'edit' } },
+      { segmentId: second.id, patch: { task_mode: 'edit' } },
+    ])
+    expect(onContentChange).not.toHaveBeenCalled()
   })
 
   it('stores the A/B prompt selection, edits B independently, and shows its tooltip on hover', async () => {
@@ -154,13 +276,31 @@ describe('TaskSegmentEditor', () => {
     const options = screen.getAllByRole('option').map((option) => option.textContent)
 
     expect(options).toEqual([
-      'Default (i2v)',
-      'Reference (r2v)',
-      'Edit (vi2v)',
-      'Last Frame (l2v)',
+      'FL2V',
+      'R2V',
+      'VI2V',
+      'L2V',
     ])
-    fireEvent.click(screen.getByRole('option', { name: 'Last Frame (l2v)' }))
+    fireEvent.click(screen.getByRole('option', { name: 'L2V' }))
     expect(onContentChange).toHaveBeenCalledWith({ task_mode: 'l2v' })
+  })
+
+  it.each([
+    [0, 'T2V'],
+    [1, 'I2V'],
+    [2, 'FL2V'],
+    [3, 'FMLF2V'],
+  ])('shows the default task type for %i task images', (imageCount, expectedLabel) => {
+    const segment = taskSegment()
+    segment.content.images = Array.from({ length: imageCount }, (_, index) => ({
+      id: `image-${index}`,
+      source_type: 'input' as const,
+      file_path: `image-${index}.png`,
+    }))
+
+    render(<TaskSegmentEditor segment={segment} onContentChange={vi.fn()} />)
+
+    expect(screen.getByRole('combobox', { name: 'Task mode' }).textContent).toContain(expectedLabel)
   })
 
   it('keeps task prompt wheel scrolling inside the editor', () => {
@@ -196,7 +336,7 @@ describe('TaskSegmentEditor', () => {
 
     fireEvent.click(screen.getByRole('combobox'))
 
-    expect(screen.getByRole('option', { name: 'Reference (rv2v)' })).not.toBeNull()
+    expect(screen.getByRole('option', { name: 'RV2V' })).not.toBeNull()
   })
 
   it('uses rv2v for reference mode with preset video', () => {
@@ -210,7 +350,7 @@ describe('TaskSegmentEditor', () => {
 
     fireEvent.click(screen.getByRole('combobox'))
 
-    expect(screen.getByRole('option', { name: 'Reference (rv2v)' })).not.toBeNull()
+    expect(screen.getByRole('option', { name: 'RV2V' })).not.toBeNull()
   })
 
   it.each([
@@ -227,7 +367,7 @@ describe('TaskSegmentEditor', () => {
 
     fireEvent.click(screen.getByRole('combobox'))
 
-    expect(screen.getByRole('option', { name: 'Reference (r2v)' })).not.toBeNull()
+    expect(screen.getByRole('option', { name: 'R2V' })).not.toBeNull()
   })
 
   it('uploads dropped image files and appends them to task images', async () => {
@@ -459,7 +599,7 @@ describe('TaskSegmentEditor', () => {
       </LocaleContext.Provider>,
     )
 
-    expect(screen.getByRole('combobox').textContent).toContain('默认 (i2v)')
+    expect(screen.getByRole('combobox').textContent).toContain('首尾生视频')
     expect(screen.getByRole('textbox', { name: '提示词' })).not.toBeNull()
     expect(screen.getByLabelText('任务图片拖放区域')).not.toBeNull()
   })
@@ -989,12 +1129,12 @@ describe('TaskSegmentEditor', () => {
       />,
     )
 
-    expect(screen.getByText('Task 1').className).toContain('text-[10px]')
-    expect(screen.getByText('Task 1').className).toContain('text-primary')
+    expect(screen.getByText('Segment 2').className).toContain('text-[10px]')
+    expect(screen.getByText('Segment 2').className).toContain('text-primary')
     expect(screen.getByText('00:00:03').className).toContain('text-[10px]')
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit task duration' }))
-    expect(screen.queryByText('Task 1')).toBeNull()
+    expect(screen.queryByText('Segment 2')).toBeNull()
     expect(screen.queryByText('00:00:03')).toBeNull()
     const durationInput = screen.getByRole('textbox', { name: 'Duration' })
     expect(durationInput.className).toContain('tabular-nums')
@@ -1036,5 +1176,41 @@ describe('TaskSegmentEditor', () => {
     expect(screen.getByTestId('task-image-drop-zone').className).toContain('aspect-square')
     expect(screen.getByRole('button', { name: 'Task image drop zone' }).tagName).not.toBe('BUTTON')
     expect(screen.getByRole('textbox', { name: 'Prompt' }).className).toContain('text-[10px]')
+  })
+
+  it('shows connected image inputs in the media selector slot list', () => {
+    const emptyImageSegment = {
+      ...taskSegment(),
+      content: {
+        ...taskSegment().content,
+        images: [],
+      },
+    }
+    const sourceNode = {
+      outputs: [{ shape: 0 }],
+      imgs: [{ currentSrc: '/view?filename=reference.png&type=input' }],
+    }
+    const node = {
+      inputs: [{ name: 'image', type: 'IMAGE', link: 7 }],
+    }
+    const app = {
+      graph: {
+        links: { 7: { origin_id: 3, origin_slot: 0 } },
+        getNodeById: (id: number) => id === 3 ? sourceNode : null,
+      },
+    }
+
+    render(
+      <TaskSegmentEditor
+        segment={emptyImageSegment}
+        node={node}
+        app={app}
+        onContentChange={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Task image drop zone' }))
+    expect(screen.getByTestId('media-selector-mock').getAttribute('data-slot-items'))
+      .toBe('__slot__:image')
   })
 })

@@ -2,6 +2,10 @@ export type MultiTrackType = 'task' | 'video' | 'audio' | 'subtitle'
 
 export type MultiTrackTaskMode = 'default' | 'l2v' | 'ref' | 'edit'
 
+export type MultiTrackContinuityMode = 'shot' | 'context'
+
+export type MultiTrackRefImageSize = 'match' | 'max'
+
 export type MultiTrackUserPromptVariant = 'a' | 'b'
 
 export type MultiTrackMediaType = 'image' | 'audio' | 'video' | 'subtitle' | 'none'
@@ -42,12 +46,15 @@ export interface MultiTrackSegmentContent {
   user_prompt_variant?: MultiTrackUserPromptVariant
   system_prompt?: string
   task_mode?: MultiTrackTaskMode
+  continuity_mode?: MultiTrackContinuityMode
+  ref_image_size?: MultiTrackRefImageSize
   images?: MultiTrackTaskImage[]
   duration?: number
   volume_db?: number
   muted?: boolean
   speed?: number
   media_index?: number
+  speaker_reference?: boolean
   subtitle_style?: MultiTrackSubtitleStyle
   subtitle_speech?: MultiTrackSubtitleSpeechSettings
 }
@@ -97,6 +104,7 @@ export interface MultiTrack {
   visible?: boolean
   volume_db?: number
   locked: boolean
+  audio_locked?: boolean
   media_index?: number
   segments: MultiTrackSegment[]
 }

@@ -1,5 +1,7 @@
 import type {
   MultiTrack,
+  MultiTrackContinuityMode,
+  MultiTrackRefImageSize,
   MultiTrackSegment,
   MultiTrackSegmentContent,
   MultiTrackSourceType,
@@ -15,6 +17,10 @@ export const MULTITRACK_DEFAULT_TOTAL_LENGTH = 120
 export const MULTITRACK_MIN_DURATION_SECONDS = 5
 export const MULTITRACK_TASK_MODES = ['default', 'ref', 'edit', 'l2v'] as const
 export const MULTITRACK_DEFAULT_TASK_MODE: MultiTrackTaskMode = 'default'
+export const MULTITRACK_CONTINUITY_MODES = ['shot', 'context'] as const
+export const MULTITRACK_DEFAULT_CONTINUITY_MODE: MultiTrackContinuityMode = 'shot'
+export const MULTITRACK_REF_IMAGE_SIZES = ['match', 'max'] as const
+export const MULTITRACK_DEFAULT_REF_IMAGE_SIZE: MultiTrackRefImageSize = 'match'
 export const MULTITRACK_DEFAULT_VOLUME_DB = 0
 export const MULTITRACK_MIN_VOLUME_DB = -20
 export const MULTITRACK_MAX_VOLUME_DB = 6
@@ -90,6 +96,20 @@ export function getMultiTrackTaskModeLabel(
   t: (path: string) => string,
 ): string {
   return t(`multitrackTaskModes.${mode}`)
+}
+
+export function getMultiTrackTaskType(
+  mode: MultiTrackTaskMode,
+  imageCount: number,
+  hasVideoInRange: boolean,
+): string {
+  if (mode === 'l2v') return 'l2v'
+  if (mode === 'ref') return hasVideoInRange ? 'rv2v' : 'r2v'
+  if (mode === 'edit') return imageCount > 0 ? 'vi2v' : 'v2v'
+  if (imageCount <= 0) return 't2v'
+  if (imageCount === 1) return 'i2v'
+  if (imageCount === 2) return 'fl2v'
+  return 'fmlf2v'
 }
 
 export function secondsToFrame(time: number, frameRate: number): number {
@@ -311,6 +331,36 @@ function normalizeTaskMode(value: unknown): MultiTrackTaskMode {
   return isMultiTrackTaskMode(value) ? value : MULTITRACK_DEFAULT_TASK_MODE
 }
 
+function normalizeContinuityMode(value: unknown): MultiTrackContinuityMode {
+  return typeof value === 'string' && (MULTITRACK_CONTINUITY_MODES as readonly string[]).includes(value)
+    ? value as MultiTrackContinuityMode
+    : MULTITRACK_DEFAULT_CONTINUITY_MODE
+}
+
+function normalizeRefImageSize(value: unknown): MultiTrackRefImageSize {
+  return typeof value === 'string' && (MULTITRACK_REF_IMAGE_SIZES as readonly string[]).includes(value)
+    ? value as MultiTrackRefImageSize
+    : MULTITRACK_DEFAULT_REF_IMAGE_SIZE
+}
+
+export function getInheritedTaskSegmentContent(
+  segments: MultiTrackSegment[],
+  startFrame: number,
+  fallbackTaskMode: MultiTrackTaskMode = MULTITRACK_DEFAULT_TASK_MODE,
+): Pick<MultiTrackSegmentContent, 'task_mode' | 'system_prompt' | 'continuity_mode' | 'ref_image_size'> {
+  const previousSegment = segments
+    .filter((segment) => segment.start_frame < startFrame)
+    .sort((left, right) => right.start_frame - left.start_frame)[0]
+  const systemPrompt = previousSegment?.content.system_prompt
+
+  return {
+    task_mode: previousSegment?.content.task_mode ?? fallbackTaskMode,
+    continuity_mode: previousSegment?.content.continuity_mode ?? MULTITRACK_DEFAULT_CONTINUITY_MODE,
+    ref_image_size: previousSegment?.content.ref_image_size ?? MULTITRACK_DEFAULT_REF_IMAGE_SIZE,
+    ...(systemPrompt ? { system_prompt: systemPrompt } : {}),
+  }
+}
+
 function insertionIndexForCenter(segments: MultiTrackSegment[], startTime: number): number {
   return segments.filter((segment) => {
     const center = segment.start_frame + segmentDuration(segment) / 2
@@ -453,7 +503,11 @@ export function addDefaultTaskSegmentIfRangeEmpty(
     color: MULTITRACK_TRACK_COLORS.task,
     content: {
       media_type: 'none',
-      task_mode: MULTITRACK_DEFAULT_TASK_MODE,
+      ...getInheritedTaskSegmentContent(
+        taskTrack.segments,
+        safeStartFrame,
+        taskTrack.task_mode ?? MULTITRACK_DEFAULT_TASK_MODE,
+      ),
     },
   }
 
@@ -485,13 +539,14 @@ export function applyCombinedTaskTexts(
   const base = Math.floor(span / count)
   const remainder = span % count
   let cursor = 0
+  const nextSegments: MultiTrackSegment[] = []
 
-  return normalizedParts.map((userPrompt, index) => {
+  normalizedParts.forEach((userPrompt, index) => {
     const existing = segments[index]
     const size = base + (index < remainder ? 1 : 0)
     const startFrame = cursor
     cursor += size
-    return {
+    nextSegments.push({
       id: existing?.id ?? uuid(),
       start_frame: startFrame,
       end_frame: cursor,
@@ -500,12 +555,13 @@ export function applyCombinedTaskTexts(
         ? applySelectedTaskUserPrompt(existing.content, userPrompt)
         : {
             media_type: 'none',
-            task_mode: MULTITRACK_DEFAULT_TASK_MODE,
+            ...getInheritedTaskSegmentContent(nextSegments, startFrame),
             images: [],
             user_prompt: userPrompt,
           },
-    }
+    })
   })
+  return nextSegments
 }
 
 export function getSelectedTaskUserPrompt(content: MultiTrackSegmentContent): string {
@@ -935,6 +991,13 @@ function segmentContainsTime(segment: MultiTrackSegment, time: number): boolean 
   return time >= segment.start_frame && time < segment.end_frame
 }
 
+/** Keep the timeline end selectable while previewing the final valid frame. */
+export function getMultiTrackPreviewFrame(data: TrackData, currentTime: number): number {
+  const currentFrame = snapTimeToFrame(currentTime, data.frame_rate)
+  if (data.total_length > 0 && currentFrame === data.total_length) return data.total_length - 1
+  return currentFrame
+}
+
 function segmentSourceFrame(segment: MultiTrackSegment, currentFrame: number): number {
   return Math.max(0, currentFrame - (segment.origin_start_frame ?? segment.start_frame))
 }
@@ -944,7 +1007,7 @@ export function getActivePreviewVideoSegment(
   currentTime: number,
   selectedSegmentId: string | null,
 ): ActivePreviewVideoSegment | null {
-  const currentFrame = snapTimeToFrame(currentTime, data.frame_rate)
+  const currentFrame = getMultiTrackPreviewFrame(data, currentTime)
   const videoTracks = data.tracks.filter((track) => track.type === 'video')
   if (selectedSegmentId) {
     for (const track of videoTracks) {
@@ -995,7 +1058,7 @@ export function getActivePreviewAudioSources(
     data.muted === true ||
     (selectedSegment !== null && selectedSegment.trackType !== 'video' && selectedSegment.trackType !== 'audio')
   ) return []
-  const currentFrame = snapTimeToFrame(currentTime, data.frame_rate)
+  const currentFrame = getMultiTrackPreviewFrame(data, currentTime)
   const audioTracks = data.tracks.filter((track) => track.type === 'video' || track.type === 'audio')
   const hasSolo = audioTracks.some((track) => track.solo === true)
   const selectedId = selectedSegment && (selectedSegment.trackType === 'video' || selectedSegment.trackType === 'audio')
@@ -1248,6 +1311,36 @@ export interface MultiTrackPreviewResolutionInput {
   format?: string
 }
 
+export function setExclusiveMultiTrackAudioTrackLock(
+  data: TrackData,
+  trackId: string,
+  locked: boolean,
+): TrackData {
+  const target = data.tracks.find((track) => track.id === trackId)
+  if (!target || target.type !== 'audio') return data
+
+  return {
+    ...data,
+    tracks: data.tracks.map((track) => (
+      track.type === 'audio'
+        ? { ...track, audio_locked: locked && track.id === trackId }
+        : track
+    )),
+  }
+}
+
+function normalizeExclusiveMultiTrackAudioLock(tracks: MultiTrack[]): MultiTrack[] {
+  let keptLockedAudio = false
+  return tracks.map((track) => {
+    if (track.type !== 'audio' || track.audio_locked !== true) return track
+    if (!keptLockedAudio) {
+      keptLockedAudio = true
+      return track
+    }
+    return { ...track, audio_locked: false }
+  })
+}
+
 interface NodeResolutionWidget {
   name?: string
   value?: unknown
@@ -1467,29 +1560,47 @@ function normalizeLegacySegment(segment: LegacyMultiTrackSegment): MultiTrackSeg
   const endFrame = normalizeFrameValue(segment.end_frame)
     ?? startFrame + 1
 
+  const content = {
+    ...omitLegacyVolume(segment.content),
+    muted: segment.content.muted === true,
+    volume_db: normalizedVolumeDb(segment.content.volume_db),
+  } as MultiTrackSegment['content'] & { audio_locked?: unknown }
+  delete content.audio_locked
   return {
     ...omitLegacyVolume(segment),
     start_frame: startFrame,
     end_frame: Math.max(startFrame + 1, endFrame),
     origin_start_frame: normalizeSignedFrameValue(segment.origin_start_frame) ?? undefined,
-    content: {
-      ...omitLegacyVolume(segment.content),
-      muted: segment.content.muted === true,
-      volume_db: normalizedVolumeDb(segment.content.volume_db),
-    },
+    content,
   }
 }
 
 function normalizeTrackSegments(track: LegacyMultiTrack): MultiTrackSegment[] {
-  return track.segments
+  const segments = track.segments
     .map((segment) => normalizeLegacySegment(segment))
     .sort((a, b) => a.start_frame - b.start_frame)
+  if (track.type !== 'audio') return segments
+
+  let keptSpeakerReference = false
+  return segments.map((segment) => {
+    if (segment.content.speaker_reference !== true) return segment
+    if (!keptSpeakerReference) {
+      keptSpeakerReference = true
+      return segment
+    }
+    return {
+      ...segment,
+      content: { ...segment.content, speaker_reference: false },
+    }
+  })
 }
 
 function normalizeTaskSegmentContent(content: MultiTrackSegment['content']): MultiTrackSegment['content'] {
   const normalized = {
     ...content,
     task_mode: normalizeTaskMode(content.task_mode),
+    continuity_mode: normalizeContinuityMode(content.continuity_mode),
+    ref_image_size: normalizeRefImageSize(content.ref_image_size),
     images: Array.isArray(content.images) ? content.images : [],
   }
   if (normalized.user_prompt === undefined && typeof normalized.text === 'string') {
@@ -1543,6 +1654,9 @@ export function normalizeTrackData(raw: LegacyTrackData): TrackData {
   const frameRate = Math.max(1, Math.round(raw.frame_rate ?? MULTITRACK_DEFAULT_FRAME_RATE))
   const tracks = raw.tracks.map((track) => {
     const normalizedTrack = omitLegacyVolume(track)
+    const legacyAudioLocked = track.type === 'audio' && track.segments.some((segment) => (
+      (segment.content as MultiTrackSegment['content'] & { audio_locked?: unknown }).audio_locked === true
+    ))
     const segments = normalizeTrackSegments(track)
     const audioSettings = {
       muted: track.muted === true,
@@ -1567,6 +1681,9 @@ export function normalizeTrackData(raw: LegacyTrackData): TrackData {
         ...normalizedTrack,
         ...audioSettings,
         type: track.type,
+        audio_locked: track.type === 'audio'
+          ? track.audio_locked === true || legacyAudioLocked
+          : undefined,
         visible: track.type === 'subtitle' ? track.visible !== false : track.visible,
         segments,
       } as MultiTrack
@@ -1598,7 +1715,8 @@ export function normalizeTrackData(raw: LegacyTrackData): TrackData {
     const typeName = track.type.charAt(0).toUpperCase() + track.type.slice(1)
     return { ...track, name: `${typeName} ${index}` }
   })
-  const totalLength = normalizeTotalLength(namedTracks, frameRate)
+  const normalizedAudioLocks = normalizeExclusiveMultiTrackAudioLock(namedTracks)
+  const totalLength = normalizeTotalLength(normalizedAudioLocks, frameRate)
   const taskMarkers = normalizeTaskMarkers(raw.task_markers, totalLength)
 
   return {
@@ -1609,7 +1727,7 @@ export function normalizeTrackData(raw: LegacyTrackData): TrackData {
     total_length: totalLength,
     task_markers: taskMarkers,
     task_overview: raw.task_overview === true,
-    tracks: namedTracks,
+    tracks: normalizedAudioLocks,
   }
 }
 

@@ -50,31 +50,59 @@ class EasyMediaExtension(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
         nodes = [
+            # TimelineEditor
             TimelineEditor,
-            MultiTrackEditor,
             TimelineInfoOutput,
-            MultiTrackInfoOutput,
-            MultiTrackAudioOutput,
-            RecognizeSubtitle,
-            AddSubtitleToVideo,
-            MultiTrackAddSubtitleToVideo,
+            TimelineSegmentOutput,
+            TimelineSegmentCount,
+            # MultiTrack
+            MultiTrackEditor,
             MultiTrackTaskOutput,
             MultiTrackPromptEnhancer,
             MultiTrackPromptEnhancerImageListBridge,
-            TimelineSegmentOutput,
-            TimelineSegmentCount,
+            MultiTrackInfoOutput,
+            MultiTrackAudioOutput,
+            # Subtitle
+            MultiTrackAddSubtitleToVideo,
+            RecognizeSubtitle,
+            AddSubtitleToVideo,
+            # Image
             MakeRefsCompositeBySam3,
             ImageIndexesToIntList,
-            MatchLine,
+            # Audio
+            EasyAudioMerge,
+            EasyMinimaxH3AudioLock,
+            # Video
+            EasySaveVideo,
+            EasyCompareVideos,
+            EasyGetAudioFromVideo,
+            EasyMergeVideos,
+            EasyMergeVideosFromPaths,
+            # Split
             SplitImages,
             SplitAudios,
             SplitVideos,
+            # Make List
             MakeImageList,
             MakeAudioList,
             MakeVideoList,
-            EasyAudioMerge,
+            # Common
+            EasyModelLoaderPack,
+            MatchLine,
             APIWorkflowGate,
             # MiniMax
+            EasyMiniMaxH3MotionContextHard,
+            EasyMiniMaxH3HiResContinuity,
+            EasyH3ProjectContextLatentLoad,
+            EasyH3SegmentSamplingStart,
+            EasyH3SegmentSaveEnd,
+            EasyH3SegmentEncodingStart,
+            EasyH3ContextMediaTrim,
+            EasyH3AudioContextLatent,
+            EasyH3LockedAudioDurationAlign,
+            EasyH3ProjectArtifact,
+            EasyMultiTrackProject,
+            EasyMultiTrackProjectVideoCombine,
             EasyMiniMaxH3ToVideo,
             EasyMiniMaxH3ReferenceToVideoBridge,
             EasyRemoveH3MotionContextLatent,
@@ -87,12 +115,6 @@ class EasyMediaExtension(ComfyExtension):
             LTXSamplerSimple,
             LTXVAddGuidesFromBatchIndexes,
             LTXVMakeRefVideo,
-            # Video
-            EasySaveVideo,
-            EasyCompareVideos,
-            EasyGetAudioFromVideo,
-            EasyMergeVideos,
-            EasyMergeVideosFromPaths,
         ]
         try:
             from comfy_extras.nodes_bernini import BerniniConditioning as CoreBerniniConditioning

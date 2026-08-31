@@ -303,6 +303,27 @@ def test_hide_save_writes_output_without_preview(monkeypatch, tmp_path):
     assert result.ui is None
 
 
+def test_hide_save_normalizes_windows_relative_path(monkeypatch, tmp_path):
+    video_module = _load_video_module(monkeypatch, tmp_path)
+    source_video = _FakeVideo()
+    monkeypatch.setattr(
+        video_module.os.path,
+        "relpath",
+        lambda *_args: r"projects\h3\clip_00001_.mp4",
+    )
+
+    result = video_module.EasySaveVideo.execute(
+        input_mode={"input_mode": "video", "video": source_video},
+        output_mode={"output_mode": "hide&save"},
+        filename_prefix="clip",
+    )
+
+    assert result.values == (
+        source_video,
+        "output/projects/h3/clip_00001_.mp4",
+    )
+
+
 def test_hide_writes_temp_without_preview(monkeypatch, tmp_path):
     video_module = _load_video_module(monkeypatch, tmp_path)
     source_video = _FakeVideo()

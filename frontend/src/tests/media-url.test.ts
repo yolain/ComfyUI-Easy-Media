@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { audioContentToViewUrl, mediaContentToViewUrl, mediaPathToViewUrl } from '@/lib/media-url'
+import { addMediaRevision, audioContentToViewUrl, mediaContentToViewUrl, mediaPathToViewUrl } from '@/lib/media-url'
 import type { AudioContent } from '@/types/timeline'
 
 describe('media view urls', () => {
+  it('adds a cache revision without replacing existing query parameters', () => {
+    expect(addMediaRevision('/view?filename=clip.mp4&type=output', '123456789')).toBe(
+      '/view?filename=clip.mp4&type=output&v=123456789',
+    )
+  })
+
   it('splits input subfolder paths into filename and subfolder query params', () => {
     expect(mediaPathToViewUrl('samples/drums/kick 01.wav', 'input')).toBe(
       '/view?filename=kick%2001.wav&type=input&subfolder=samples%2Fdrums',

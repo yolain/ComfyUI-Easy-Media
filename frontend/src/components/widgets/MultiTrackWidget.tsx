@@ -5,6 +5,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { useCanvasScale } from '@/hooks/use-canvas-scale'
 import { useElementWidth } from '@/hooks/use-element-width'
 import { useMultiTrackHistory } from '@/hooks/use-multitrack-history'
+import { useMultiTrackResolutionInput } from '@/hooks/use-multitrack-resolution-input'
 import type { ReactWidgetProps } from '@/lib/create-react-widget'
 import { LocaleContext, translate } from '@/lib/i18n'
 import {
@@ -19,6 +20,7 @@ import {
   deleteSegmentWithLinkedTasks,
   distributeMultiTrackSegmentsEvenly,
   getMultiTrackTrackHeight,
+  getInheritedTaskSegmentContent,
   getSelectedMultiTrackSegment,
   MULTITRACK_DEFAULT_VOLUME_DB,
   MULTITRACK_MEDIA_TRACK_LIMIT,
@@ -33,6 +35,7 @@ import {
   splitMultiTrackSegmentByFrames,
   snapSecondsToFrame,
   snapTimeToFrame,
+  setExclusiveMultiTrackAudioTrackLock,
   syncMatchingTasksToPrimaryVideoTrack,
   syncMatchingTasksToPrimaryVideoSegment,
   updateMultiTrackSegmentContent,
@@ -159,11 +162,24 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   const timelineWidth = Math.max(1, useElementWidth(timelineContainerRef))
   const scaledTimelineWidth = timelineWidth * zoom
   const canvasScale = useCanvasScale(app)
+  const resolutionInput = useMultiTrackResolutionInput(node)
   const selectedSegment = selectedSegmentIds.size <= 1
     ? getSelectedMultiTrackSegment(data, selectedSegmentId)
     : null
-  const selectedTaskTrackSegments = selectedSegment?.trackType === 'task'
-    ? data.tracks.find((track) => track.id === selectedSegment.trackId && track.type === 'task')?.segments ?? [selectedSegment.segment]
+  const selectedTaskSegments = selectedSegmentIds.size > 1
+    ? data.tracks.flatMap((track) => (
+        track.type === 'task'
+          ? track.segments.filter((segment) => selectedSegmentIds.has(segment.id))
+          : []
+      ))
+    : []
+  const hasOnlySelectedTaskSegments = selectedTaskSegments.length === selectedSegmentIds.size
+    && selectedTaskSegments.length > 1
+  const previewSelectedSegment = selectedSegment ?? (hasOnlySelectedTaskSegments
+    ? getSelectedMultiTrackSegment(data, selectedSegmentId)
+    : null)
+  const selectedTaskTrackSegments = previewSelectedSegment?.trackType === 'task'
+    ? data.tracks.find((track) => track.id === previewSelectedSegment.trackId && track.type === 'task')?.segments ?? [previewSelectedSegment.segment]
     : undefined
   const splittingTaskSegment = splittingTaskSegmentId
     ? data.tracks
@@ -329,7 +345,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   }, [currentTime, data.tracks, selectedSegmentId, selectedSegmentIds])
 
   useEffect(() => {
-    const syncNode = node as { __easyMediaSyncPlay?: (startAt: number) => void }
+    const syncNode = node as { __easyMediaSyncPlay?: (startAt: number, muted?: boolean) => void }
     syncNode.__easyMediaSyncPlay = () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
       rafRef.current = null
@@ -373,9 +389,12 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
       const elapsed = (now - startedAtRef.current) / 1000
       const next = snapTimeToFrame(startTimeRef.current + secondsToFrame(elapsed, data.frame_rate), data.frame_rate)
       if (next >= data.total_length) {
-        currentTimeRef.current = data.total_length
-        setCurrentTime(data.total_length)
-        setIsPlaying(false)
+        currentTimeRef.current = 0
+        startTimeRef.current = 0
+        startedAtRef.current = now
+        setCurrentTime(0)
+        setSyncPlayNonce((value) => value + 1)
+        rafRef.current = requestAnimationFrame(tick)
         return
       }
       currentTimeRef.current = next
@@ -604,8 +623,14 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
 
   function handleTrackAudioSettingsChange(
     trackId: string,
-    patch: Partial<Pick<MultiTrack, 'muted' | 'solo'>>,
+    patch: Partial<Pick<MultiTrack, 'muted' | 'solo' | 'audio_locked'>>,
   ) {
+    if ('audio_locked' in patch) {
+      commitNormalizedTrackChange(
+        setExclusiveMultiTrackAudioTrackLock(data, trackId, patch.audio_locked === true),
+      )
+      return
+    }
     if ('solo' in patch) {
       const target = data.tracks.find((track) => track.id === trackId)
       if (!target || (target.type !== 'video' && target.type !== 'audio')) return
@@ -645,6 +670,25 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
           ? { ...track, visible }
           : track
       )),
+    })
+  }
+
+  function handleSpeakerReferenceChange(trackId: string, segmentId: string, enabled: boolean) {
+    commitNormalizedTrackChange({
+      ...data,
+      tracks: data.tracks.map((track) => {
+        if (track.id !== trackId || track.type !== 'audio') return track
+        return {
+          ...track,
+          segments: track.segments.map((segment) => ({
+            ...segment,
+            content: {
+              ...segment.content,
+              speaker_reference: enabled && segment.id === segmentId,
+            },
+          })),
+        }
+      }),
     })
   }
 
@@ -715,7 +759,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         color: track.color,
         content: {
           media_type: 'none' as const,
-          task_mode: track.task_mode ?? 'default',
+          ...getInheritedTaskSegmentContent(track.segments, startFrame, track.task_mode ?? 'default'),
           images: images ?? [],
         },
       }
@@ -1320,22 +1364,24 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     <LocaleContext.Provider value={locale}>
       <TooltipProvider>
         <div
-          className="relative flex h-full w-full flex-col overflow-hidden rounded text-foreground font-sans text-xs select-none"
+          className="relative flex h-full w-full min-w-0 max-w-full flex-col overflow-hidden rounded text-foreground font-sans text-xs select-none"
           aria-busy={isSmartSplitting || isRecognizingSubtitles}
         >
           <PreviewArea
             data={data}
             currentTime={currentTime}
-            selectedSegment={selectedSegment}
+            selectedSegment={previewSelectedSegment}
             isPlaying={isPlaying}
             playbackNonce={syncPlayNonce}
             node={node}
+            app={app}
             editingSubtitleSegmentId={editingSubtitleSegmentId}
             onSubtitleEditRequestHandled={() => setEditingSubtitleSegmentId(null)}
             onSelectSegment={(segmentId) => handleSelectSegment(segmentId)}
             onGlobalSettingsChange={handleGlobalSettingsChange}
             onSelectedSegmentContentChange={handleSelectedSegmentContentChange}
             taskSegments={selectedTaskTrackSegments}
+            selectedTaskSegments={hasOnlySelectedTaskSegments ? selectedTaskSegments : undefined}
             onTrackSegmentsContentChange={handleTrackSegmentsContentChange}
             onTaskTrackSegmentsChange={handleTaskTrackSegmentsChange}
             onSelectedSegmentDurationChange={handleSelectedSegmentDurationChange}
@@ -1422,6 +1468,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     onReorderTrack={handleReorderTrack}
                     onTrackVisibilityChange={handleTrackVisibilityChange}
                     onTrackAudioSettingsChange={handleTrackAudioSettingsChange}
+                    onSpeakerReferenceChange={handleSpeakerReferenceChange}
                     onDistributeTaskSegments={handleDistributeTaskSegments}
                     onCloneTaskSegment={handleCloneSegment}
                     onSplitTaskSegment={setSplittingTaskSegmentId}
@@ -1434,6 +1481,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     onEditSubtitleSegment={setEditingSubtitleSegmentId}
                     cutMode={false}
                     onCutSegment={handleCutSegment}
+                    format={resolutionInput.format}
                   />
                 </div>
               </div>

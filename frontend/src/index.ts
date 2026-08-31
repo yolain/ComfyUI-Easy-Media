@@ -2,10 +2,13 @@ import { addInlineStyles } from "@/lib/add-stylesheet";
 import { getEasyMediaSyncPlayMenuItems, installEasyMediaSyncPlay } from "@/lib/sync-play";
 import { preserveTimelineEditorNodeSize } from "@/lib/timeline-node-size";
 import { preserveCompareVideoNodeSize } from "@/lib/compare-video-node-size";
+import { preserveVideoCombineNodeSize } from '@/lib/project-video-combine-node-size';
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 import type { TimelineData } from '@/types/timeline'
 import type { TrackData } from '@/types/multitrack'
 import type { CompareVideoSettings } from '@/components/widgets/compareVideoWidget'
+import type { ProjectData } from '@/types/project'
+import { DEFAULT_PROJECT_DATA } from '@/types/project'
 import { suppressCompareVideoDefaultPreview } from '@/lib/compare-video-node'
 
 declare const __COMFY_EASY_MEDIA_GLOBAL_CSS__: string;
@@ -17,7 +20,7 @@ declare global {
 
 const [
   { createReactWidget },
-  { TimelineWidget, MultiTrackWidget, CompareVideoWidget, PromptEnhancerAccountWidget },
+  { TimelineWidget, MultiTrackWidget, CompareVideoWidget, PromptEnhancerAccountWidget, ProjectVideoCombineWidget },
   { createDefaultTimelineData },
   { createDefaultTrackData },
 ] = await Promise.all([
@@ -50,6 +53,7 @@ comfyApp.registerExtension({
   beforeRegisterNodeDef(nodeType, nodeData) {
     preserveTimelineEditorNodeSize(nodeType, nodeData)
     preserveCompareVideoNodeSize(nodeType, nodeData)
+    preserveVideoCombineNodeSize(nodeType, nodeData)
     installEasyMediaSyncPlay(nodeType, nodeData)
     suppressCompareVideoDefaultPreview(nodeType, nodeData)
   },
@@ -71,6 +75,14 @@ comfyApp.registerExtension({
         defaultValue: DEFAULT_TRACK_DATA_VALUE,
         domWidgetOptions: {
           getMinHeight: () => 320,
+        },
+      }),
+      PROJECT_DATA: createReactWidget<ProjectData>(ProjectVideoCombineWidget, {
+        defaultValue: JSON.stringify(DEFAULT_PROJECT_DATA),
+        domWidgetOptions: {
+          getMinHeight: () => 520,
+          hideOnZoom: false,
+          serialize: true,
         },
       }),
       EASY_COMPARE_VIDEO: createReactWidget<CompareVideoSettings>(CompareVideoWidget, {

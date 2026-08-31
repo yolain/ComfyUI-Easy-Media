@@ -170,6 +170,7 @@ def _load_basic_module():
         Hidden=types.SimpleNamespace(extra_pnginfo="EXTRA_PNGINFO"),
         Image=_PortType,
         Int=_PortType,
+        LatentUpscaleModel=_PortType,
         Mask=_PortType,
         Model=_PortType,
         NodeOutput=_NodeOutput,
@@ -358,6 +359,19 @@ def _load_basic_module():
     return module
 
 
+def _load_related_node_module(module_name):
+    _load_basic_module()
+    path = Path(__file__).parents[1] / "nodes" / f"{module_name}.py"
+    spec = importlib.util.spec_from_file_location(
+        f"easy_media.nodes.{module_name}",
+        path,
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _load_image_module():
     _load_basic_module()
     path = Path(__file__).parents[1] / "nodes" / "image.py"
@@ -476,6 +490,30 @@ def test_multitrack_info_output_treats_an_end_marker_as_marker_mode():
     result = module.MultiTrackInfoOutput.execute(tracks_info)
 
     assert result.values[-1] == 1
+
+
+def test_multitrack_task_entries_keep_the_exclusive_timeline_end_without_an_end_marker():
+    module = _load_basic_module()
+    tracks_info = {
+        "timeline_total_length": 12,
+        "total_length": 13,
+        "frame_rate": 24,
+        "task_markers": [{"id": "split", "frame": 4}],
+        "tracks": [{
+            "type": "task",
+            "segments": [
+                {"id": "first", "start_frame": 0, "end_frame": 4},
+                {"id": "second", "start_frame": 4, "end_frame": 12},
+            ],
+        }],
+    }
+
+    entries = module._multitrack_task_entries(tracks_info)
+
+    assert [
+        (entry["start_frame"], entry["end_frame"])
+        for entry in entries
+    ] == [(0, 4), (4, 12)]
 
 
 def test_multitrack_add_subtitle_to_video_saves_srt_to_output_srt(monkeypatch, tmp_path):
@@ -1542,6 +1580,81 @@ def test_multitrack_task_output_preserves_deferred_audio_crop_and_silence():
     assert waveform == [0.0, 0.0, 6.0, 7.0]
 
 
+def test_multitrack_task_output_returns_the_locked_track_deferred_audio():
+    module = _load_basic_module()
+    source_audio = {
+        "waveform": torch.arange(8, dtype=torch.float32).reshape(1, 1, 8),
+        "sample_rate": 2,
+    }
+    module._resolve_multitrack_audio = lambda content, audio_input: source_audio
+    tracks_info = {
+        "media_loading": "deferred",
+        "format": "MiniMax",
+        "width": 640,
+        "height": 360,
+        "total_length": 8,
+        "frame_rate": 2,
+        "tracks": [
+            {
+                "type": "task",
+                "segments": [{
+                    "start_frame": 4,
+                    "end_frame": 8,
+                    "content": {"media_type": "none", "images": []},
+                }],
+            },
+            {
+                "type": "audio",
+                "audio_locked": True,
+                "segments": [{
+                    "id": "locked-audio",
+                    "start_frame": 4,
+                    "end_frame": 8,
+                    "origin_start_frame": 4,
+                    "content": {
+                        "media_type": "audio",
+                        "source_type": "input",
+                        "file_path": "audio.wav",
+                    },
+                }],
+            },
+        ],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(tracks_info, task_index=0)
+
+    assert result.values[8]["waveform"].flatten().tolist() == [0.0, 1.0, 2.0, 3.0]
+
+
+def test_multitrack_task_output_uses_the_locked_audio_track_index():
+    module = _load_basic_module()
+    first_audio = {"waveform": torch.ones(1, 1, 4), "sample_rate": 2}
+    locked_audio = {"waveform": torch.full((1, 1, 4), 7.0), "sample_rate": 2}
+    tracks_info = {
+        "frame_rate": 2,
+        "tracks": [
+            {"type": "task", "segments": [{
+                "start_frame": 0, "end_frame": 4,
+                "content": {"media_type": "none", "images": []},
+            }]},
+            {"type": "audio", "media_index": 0, "segments": [{
+                "start_frame": 0, "end_frame": 4,
+                "content": {"media_type": "audio", "media_index": 0},
+            }]},
+            {"type": "audio", "media_index": 1, "audio_locked": True, "segments": [{
+                "start_frame": 0, "end_frame": 4,
+                "content": {"media_type": "audio", "media_index": 1},
+            }]},
+        ],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [], [[first_audio, locked_audio]], [], [0], ["default"]
+    )
+
+    assert torch.equal(result.values[8]["waveform"], locked_audio["waveform"])
+
+
 def test_multitrack_task_output_crops_deferred_media_by_task_index():
     module = _load_basic_module()
     source_audio = {
@@ -2179,6 +2292,7 @@ def test_multitrack_task_output_schema_and_task_media_selection():
     assert [output.name for output in schema.outputs] == [
         "SYSTEM_PROMPT", "USER_PROMPT", "TYPE", "LENGTH", "IMAGES", "AUDIO", "VIDEO",
         "IMAGE_INDEXES",
+        "LOCKED_AUDIO",
     ]
 
     images = [torch.zeros(1, 2, 2, 3), torch.ones(1, 2, 2, 3), torch.full((1, 2, 2, 3), 2.0)]
@@ -2224,16 +2338,27 @@ def test_multitrack_task_output_schema_and_task_media_selection():
         selected_audio,
         selected_video,
         image_indexes,
+        locked_audio,
     ) = result.values
     assert system_prompt == ""
     assert user_prompt == "make it move"
     assert task_type == "rv2v"
     assert length == 5
+    assert locked_audio is None
     assert selected_images == [images[1], images[2]]
     assert selected_audio[0]["waveform"].flatten().tolist() == list(range(4, 12))
     assert selected_video == [video_track]
     assert image_indexes == "0,-1"
     assert video_track.trim_calls == [(1.0, 2.0, False)]
+
+    locked_track = tracks_info["tracks"][2]
+    locked_segment = locked_track["segments"][0]
+    locked_segment.update({"start_frame": 2, "end_frame": 6})
+    locked_track["audio_locked"] = True
+    locked_result = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [images], [[audio_track]], [[video_track]], [0], ["default"]
+    )
+    assert locked_result.values[8]["waveform"].flatten().tolist() == list(range(4, 12))
 
 
 def test_multitrack_task_output_uses_selected_user_prompt_variant():
@@ -2313,6 +2438,94 @@ def test_multitrack_task_output_outputs_none_for_empty_minimax_media_tracks():
 
     assert result.values[5] == [None]
     assert result.values[6] == [None]
+
+
+def test_minimax_speaker_reference_is_reused_in_every_task_and_capped_at_15_seconds(monkeypatch):
+    module = _load_basic_module()
+    source_audio = {
+        "waveform": torch.arange(30, dtype=torch.float32).reshape(1, 1, 30),
+        "sample_rate": 1,
+    }
+    monkeypatch.setattr(module, "_resolve_multitrack_audio", lambda content, audio_input: source_audio)
+    tracks_info = {
+        "media_loading": "deferred",
+        "format": "MiniMax",
+        "frame_rate": 1,
+        "tracks": [
+            {"type": "task", "segments": [
+                {"start_frame": 0, "end_frame": 5, "content": {"user_prompt": "first"}},
+                {"start_frame": 20, "end_frame": 25, "content": {"user_prompt": "second"}},
+            ]},
+            {"type": "audio", "segments": [
+                {
+                    "id": "speaker",
+                    "start_frame": 0,
+                    "end_frame": 5,
+                    "content": {"media_type": "audio", "speaker_reference": True},
+                },
+                {
+                    "id": "other-audio",
+                    "start_frame": 20,
+                    "end_frame": 25,
+                    "content": {"media_type": "audio"},
+                },
+            ]},
+        ],
+    }
+
+    first = module.MultiTrackTaskOutput.execute(tracks_info, task_index=0)
+    second = module.MultiTrackTaskOutput.execute(tracks_info, task_index=1)
+
+    expected = list(range(15))
+    assert first.values[5][0]["waveform"].flatten().tolist() == expected
+    assert second.values[5][0]["waveform"].flatten().tolist() == expected
+
+
+def test_multitrack_editor_materializes_a_dedicated_minimax_speaker_reference():
+    module = _load_basic_module()
+    source_audio = {
+        "waveform": torch.arange(30, dtype=torch.float32).reshape(1, 1, 30),
+        "sample_rate": 1,
+    }
+    track_data = {
+        "frame_rate": 1,
+        "total_length": 30,
+        "tracks": [
+            {"type": "task", "segments": [
+                {"start_frame": 20, "end_frame": 25, "content": {"user_prompt": "late task"}},
+            ]},
+            {"id": "voice-track", "type": "audio", "segments": [{
+                "id": "voice",
+                "start_frame": 0,
+                "end_frame": 5,
+                "content": {
+                    "media_type": "audio",
+                    "source_type": "slot",
+                    "slot_name": "audio1",
+                    "speaker_reference": True,
+                },
+            }]},
+        ],
+    }
+
+    editor_result = module.MultiTrackEditor.execute(
+        "640 x 360 (16:9)",
+        "MiniMax",
+        track_data,
+        audio=[source_audio],
+    )
+    tracks_info, audio_output = editor_result.values[0], editor_result.values[2]
+    speaker_content = tracks_info["tracks"][1]["segments"][0]["content"]
+
+    assert speaker_content["speaker_media_index"] == 1
+    assert audio_output[1]["waveform"].flatten().tolist() == list(range(15))
+
+    task_result = module.MultiTrackTaskOutput.execute(
+        tracks_info,
+        audio=audio_output,
+        task_index=0,
+    )
+    assert task_result.values[5][0]["waveform"].flatten().tolist() == list(range(15))
 
 
 def test_multitrack_task_output_keeps_minimax_audio_when_video_track_is_empty():
@@ -2546,7 +2759,7 @@ def test_multitrack_task_output_evenly_distributes_regular_task_image_indexes():
         [tracks_info], [images], [], [], [0], ["default"],
     )
 
-    assert result.values[-1] == "0,4,8,-1"
+    assert result.values[7] == "0,4,8,-1"
 
 
 def test_multitrack_task_output_uses_relative_segment_starts_for_marker_image_indexes():
@@ -2583,7 +2796,7 @@ def test_multitrack_task_output_uses_relative_segment_starts_for_marker_image_in
     )
 
     assert result.values[4] == [images[0], images[1]]
-    assert result.values[-1] == "0,4"
+    assert result.values[7] == "0,4"
 
 
 def test_multitrack_task_output_uses_marker_ranges_and_overlapping_task_content():
@@ -2713,6 +2926,152 @@ def test_multitrack_task_output_combines_images_from_all_segments_inside_task_la
 
     assert first.values[4] == [images[0], images[1]]
     assert second.values[4] == [images[2]]
+
+
+def test_multitrack_task_output_minus_one_materializes_the_complete_deferred_timeline():
+    module = _load_basic_module()
+    first_image = torch.zeros(1, 2, 2, 3)
+    second_image = torch.ones(1, 2, 2, 3)
+    source_audio = {
+        "waveform": torch.arange(4, dtype=torch.float32).reshape(1, 1, 4),
+        "sample_rate": 2,
+    }
+    source_video = _FakeVideo(
+        _VideoComponents(torch.ones(2, 2, 2, 3), None, Fraction(2))
+    )
+    module._resolve_timeline_image_item = lambda item, image_input: (
+        first_image if item["id"] == "first-image" else second_image
+    )
+    module._resolve_multitrack_audio = lambda content, audio_input: source_audio
+    module._resolve_multitrack_video = lambda content, video_input: source_video
+    module.merge_video_track_with_ffmpeg = lambda *args, **kwargs: None
+    module.resize_image = lambda images, width, height, method: images
+    tracks_info = {
+        "media_loading": "deferred",
+        "format": "None",
+        "width": 2,
+        "height": 2,
+        "resize_method": "stretch",
+        "frame_rate": 2,
+        "timeline_total_length": 6,
+        "tracks": [
+            {"type": "task", "segments": [
+                {
+                    "start_frame": 0,
+                    "end_frame": 3,
+                    "content": {
+                        "user_prompt": "first",
+                        "images": [{"id": "first-image"}],
+                    },
+                },
+                {
+                    "start_frame": 3,
+                    "end_frame": 6,
+                    "content": {
+                        "user_prompt": "second",
+                        "images": [{"id": "second-image"}],
+                    },
+                },
+            ]},
+            {"type": "audio", "segments": [{
+                "start_frame": 2,
+                "end_frame": 4,
+                "content": {"media_type": "audio"},
+            }]},
+            {"type": "video", "segments": [{
+                "start_frame": 4,
+                "end_frame": 6,
+                "content": {"media_type": "video"},
+            }]},
+        ],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(
+        tracks_info,
+        task_index=-1,
+        prompt_format="default",
+    )
+
+    assert result.values[3] == 7
+    assert result.values[4] == [first_image, second_image]
+    assert result.values[7] == "0,3"
+    assert result.values[5][0]["waveform"].flatten().tolist() == [
+        0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+    ]
+    frames = result.values[6][0].get_components().images
+    assert [float(frame.mean()) for frame in frames] == [0.0, 0.0, 0.0, 0.0, 1.0, 1.0]
+
+
+def test_multitrack_task_output_minus_one_reuses_eager_full_timeline_media():
+    module = _load_basic_module()
+    image = torch.ones(1, 2, 2, 3)
+    audio = {"waveform": torch.ones(1, 1, 4), "sample_rate": 2}
+    video = _FakeVideo(_VideoComponents(torch.ones(4, 2, 2, 3), None, Fraction(2)))
+    tracks_info = {
+        "media_loading": "eager",
+        "frame_rate": 2,
+        "timeline_total_length": 4,
+        "tracks": [
+            {"type": "task", "segments": [{
+                "start_frame": 0,
+                "end_frame": 4,
+                "content": {"user_prompt": "full", "images": [{"media_index": 0}]},
+            }]},
+            {"type": "audio", "media_index": 0, "audio_locked": True, "segments": [{
+                "start_frame": 0,
+                "end_frame": 4,
+                "content": {"media_type": "audio", "media_index": 0},
+            }]},
+            {"type": "video", "media_index": 0, "segments": [{
+                "start_frame": 0,
+                "end_frame": 4,
+                "content": {"media_type": "video", "media_index": 0},
+            }]},
+        ],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(
+        [tracks_info], [image], [[audio]], [[video]], [-1], ["default"],
+    )
+
+    assert result.values[4] == [image]
+    assert result.values[5] == [audio]
+    assert result.values[6] == [video]
+    assert result.values[8] is audio
+    assert video.trim_calls == []
+
+
+def test_multitrack_task_output_minus_one_does_not_stop_at_the_next_minimax_task():
+    module = _load_basic_module()
+    source_audio = {
+        "waveform": torch.arange(8, dtype=torch.float32).reshape(1, 1, 8),
+        "sample_rate": 1,
+    }
+    module._resolve_multitrack_audio = lambda content, audio_input: source_audio
+    tracks_info = {
+        "media_loading": "deferred",
+        "format": "MiniMax",
+        "width": 2,
+        "height": 2,
+        "frame_rate": 1,
+        "timeline_total_length": 8,
+        "tracks": [
+            {"type": "task", "segments": [
+                {"start_frame": 0, "end_frame": 4, "content": {"user_prompt": "first"}},
+                {"start_frame": 4, "end_frame": 8, "content": {"user_prompt": "second"}},
+            ]},
+            {"type": "audio", "audio_locked": True, "segments": [{
+                "start_frame": 0,
+                "end_frame": 8,
+                "content": {"media_type": "audio"},
+            }]},
+        ],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(tracks_info, task_index=-1)
+
+    assert result.values[5][0]["waveform"].flatten().tolist() == list(range(8))
+    assert result.values[8]["waveform"].flatten().tolist() == list(range(8))
 
 
 def test_multitrack_audio_output_schema_is_basic_and_exposes_mode_and_two_tracks():
@@ -3174,13 +3533,14 @@ def test_multitrack_prompt_enhancer_schema_exposes_requested_inputs_and_outputs(
     for model_name, (default, maximum) in module.PROMPT_ENHANCER_MAX_TOKENS.items():
         child_inputs = {port.name: port for port in model_options[model_name]}
         expected_inputs = (
-            {"inference_mode", "force_offload", "max_tokens"}
+            {"inference_mode", "force_offload", "max_size"}
             if model_name == module.LLAMACPP_MODEL
             else {"apikey", "max_tokens"}
         )
         assert set(child_inputs) == expected_inputs
-        assert child_inputs["max_tokens"].kwargs["default"] == default
-        assert child_inputs["max_tokens"].kwargs["max"] == maximum
+        value_name = "max_size" if model_name == module.LLAMACPP_MODEL else "max_tokens"
+        assert child_inputs[value_name].kwargs["default"] == default
+        assert child_inputs[value_name].kwargs["max"] == maximum
     assert all(input_port.kwargs.get("tooltip") for input_port in schema.inputs)
     assert all(output_port.kwargs.get("tooltip") for output_port in schema.outputs)
     assert [output.name for output in schema.outputs] == [
@@ -3254,7 +3614,7 @@ def test_multitrack_prompt_enhancer_expands_local_llama_instruct_node():
             "inference_mode": "images",
             "max_frames": 48,
             "force_offload": True,
-            "max_tokens": 1024,
+            "max_size": 768,
         }],
         seed=[9],
     )
@@ -3540,6 +3900,7 @@ def test_multitrack_prompt_enhancer_has_complete_chinese_localization():
         "ratio",
         "return_async",
         "apikey",
+        "max_size",
         "max_tokens",
         "seed",
         "enabled",
@@ -3629,7 +3990,7 @@ def test_multitrack_prompt_enhancer_image_bridge_caps_all_inference_modes():
 
 
 def test_match_line_returns_first_containing_line_index():
-    module = _load_basic_module()
+    module = _load_related_node_module("common")
     schema = module.MatchLine.define_schema()
 
     result = module.MatchLine.execute("alpha\r\nbeta target\r\ntarget again", "target")
@@ -3641,7 +4002,7 @@ def test_match_line_returns_first_containing_line_index():
 
 
 def test_match_line_returns_minus_one_for_empty_or_missing_match():
-    module = _load_basic_module()
+    module = _load_related_node_module("common")
 
     assert module.MatchLine.execute("alpha\nbeta", "missing").values == (-1,)
     assert module.MatchLine.execute("alpha\nbeta", "").values == (-1,)
@@ -3659,7 +4020,7 @@ def test_match_line_has_chinese_localization():
 
 
 def test_workflow_format_gate_skips_input_for_workflow_metadata():
-    module = _load_basic_module()
+    module = _load_related_node_module("common")
     module.APIWorkflowGate.hidden = types.SimpleNamespace(
         extra_pnginfo={"workflow": {"nodes": []}},
     )
@@ -3669,7 +4030,7 @@ def test_workflow_format_gate_skips_input_for_workflow_metadata():
 
 
 def test_workflow_format_gate_requests_input_for_api_prompt():
-    module = _load_basic_module()
+    module = _load_related_node_module("common")
     module.APIWorkflowGate.hidden = types.SimpleNamespace(extra_pnginfo={})
 
     assert module.APIWorkflowGate.check_lazy_status() == ["value"]
@@ -3678,7 +4039,7 @@ def test_workflow_format_gate_requests_input_for_api_prompt():
 
 
 def test_workflow_format_gate_passes_list_values_through_list_output():
-    module = _load_basic_module()
+    module = _load_related_node_module("common")
     module.APIWorkflowGate.hidden = types.SimpleNamespace(extra_pnginfo={})
 
     value = ["a", "b"]
@@ -3687,7 +4048,7 @@ def test_workflow_format_gate_passes_list_values_through_list_output():
 
 
 def test_workflow_format_gate_schema_has_list_output():
-    module = _load_basic_module()
+    module = _load_related_node_module("common")
 
     schema = module.APIWorkflowGate.define_schema()
 
@@ -3697,7 +4058,7 @@ def test_workflow_format_gate_schema_has_list_output():
 
 
 def test_workflow_format_gate_detects_nested_workflow_metadata():
-    module = _load_basic_module()
+    module = _load_related_node_module("common")
 
     assert module._is_workflow_format({"extra": [{"workflow": {"version": 1}}]}) is True
     assert module._is_workflow_format({"prompt": {"1": {"class_type": "Node"}}}) is False
@@ -3753,7 +4114,7 @@ def test_split_images_has_chinese_localization():
 
 
 def test_split_audios_expands_a_list_into_ten_independent_outputs():
-    module = _load_basic_module()
+    module = _load_related_node_module("audio")
     audios = [
         {"waveform": torch.full((1, 1, 4), value), "sample_rate": 16000}
         for value in (1.0, 2.0)
@@ -3769,7 +4130,17 @@ def test_split_audios_expands_a_list_into_ten_independent_outputs():
 
 
 def test_split_audios_rejects_an_empty_list():
-    module = _load_basic_module()
+    module = _load_related_node_module("audio")
 
     with pytest.raises(ValueError, match="at least one audio"):
         module.SplitAudios.execute([])
+
+
+def test_multitrack_editor_preserves_audio_only_custom_resolution():
+    module = _load_basic_module()
+    result = module.MultiTrackEditor.execute(
+        {"resolution": "width x height (custom)", "width": 32, "height": 32},
+        "MiniMax",
+        {"total_length": 120, "frame_rate": 24, "tracks": []},
+    )
+    assert (result.values[0]["width"], result.values[0]["height"]) == (32, 32)

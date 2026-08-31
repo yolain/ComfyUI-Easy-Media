@@ -41,7 +41,6 @@ from ..utils import (
     PromptEnhancerClient,
     prompt_enhancer_video_inputs,
     minimax_length_to_seconds,
-    split_list_outputs,
     merge_video_track_with_ffmpeg,
     multitrack_segments_in_window,
     multitrack_slot_media_types,
@@ -151,8 +150,8 @@ resolution_combo_options = [
     io.DynamicCombo.Option(
         s,
         [
-            io.Int.Input("width", default=544, min=64, max=8096, step=8),
-            io.Int.Input("height", default=960, min=64, max=8096, step=8),
+            io.Int.Input("width", default=544, min=32, max=8096, step=8),
+            io.Int.Input("height", default=960, min=32, max=8096, step=8),
             resize_method_input,
         ]
         if "custom" in s
@@ -206,6 +205,96 @@ PROMPT_ENHANCER_RATIO_OPTIONS = [
     "9:16",
 ]
 
+H3_AUDIO_LATENT_FPS = 40.0
+
+
+def _h3_nested_parts(
+    value: object, value_name: str
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return the video/audio tensors from a MiniMax H3 nested value."""
+    if not getattr(value, "is_nested", False):
+        raise ValueError(f"Expected {value_name} to be a MiniMax H3 nested tensor.")
+
+    try:
+        parts = (
+            tuple(value.tensors)
+            if hasattr(value, "tensors")
+            else tuple(value.unbind())
+        )
+    except (AttributeError, RuntimeError, TypeError) as error:
+        raise ValueError(f"Unable to read {value_name} streams: {error}") from error
+    if len(parts) != 2:
+        raise ValueError(
+            f"Expected 2 {value_name} streams (video, audio), got {len(parts)}."
+        )
+    return parts[0], parts[1]
+
+
+def _split_h3_av_latent(latent: dict) -> tuple[torch.Tensor, torch.Tensor]:
+    """Validate and split a MiniMax H3 joint audio/video latent."""
+    if not isinstance(latent, dict) or "samples" not in latent:
+        raise ValueError("Expected a LATENT dictionary with a 'samples' entry.")
+
+    samples = latent["samples"]
+    video, audio = _h3_nested_parts(samples, "latent")
+    if video.ndim != 5 or video.shape[1] != 24:
+        raise ValueError(
+            f"Invalid H3 video latent shape {tuple(video.shape)}; expected [B, 24, T, H, W]."
+        )
+    if audio.ndim != 4 or audio.shape[1] != 32 or audio.shape[2] != 2:
+        raise ValueError(
+            f"Invalid H3 audio latent shape {tuple(audio.shape)}; expected [B, 32, 2, T]."
+        )
+    if video.shape[0] != 1 or audio.shape[0] != 1:
+        raise ValueError("MiniMax H3 audio locking currently requires batch size 1.")
+    return video, audio
+
+
+def _split_h3_noise_mask(
+    latent: dict,
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    """Split an optional H3 mask, including legacy video-only masks."""
+    mask = latent.get("noise_mask")
+    if mask is None:
+        return None, None
+    if getattr(mask, "is_nested", False):
+        return _h3_nested_parts(mask, "noise_mask")
+    if isinstance(mask, torch.Tensor):
+        return mask, None
+    raise ValueError(f"Unsupported H3 noise_mask type: {type(mask)!r}.")
+
+
+def _fit_h3_audio_waveform(
+    waveform: torch.Tensor, target_samples: int, short_audio_mode: str
+) -> torch.Tensor:
+    """Crop, loop, or silence-pad waveform data before H3 audio VAE encoding."""
+    current_samples = waveform.shape[-1]
+    if current_samples == target_samples:
+        return waveform.contiguous()
+    if current_samples > target_samples:
+        return waveform[..., :target_samples].contiguous()
+    if short_audio_mode == "loop":
+        if current_samples <= 0:
+            raise ValueError("Cannot loop an empty audio waveform.")
+        repeats = math.ceil(target_samples / current_samples)
+        repeat_shape = [1] * waveform.ndim
+        repeat_shape[-1] = repeats
+        return waveform.repeat(*repeat_shape)[..., :target_samples].contiguous()
+    return F.pad(waveform, (0, target_samples - current_samples), value=0.0)
+
+
+def _fit_h3_encoded_audio(encoded: torch.Tensor, target_length: int) -> torch.Tensor:
+    """Correct audio VAE temporal rounding without assuming zero latent is silence."""
+    encoded_length = encoded.shape[-1]
+    if encoded_length == target_length:
+        return encoded.contiguous()
+    if encoded_length > target_length:
+        return encoded[..., :target_length].contiguous()
+    if encoded_length <= 0:
+        raise ValueError("The MiniMax H3 audio VAE returned an empty latent.")
+    tail = encoded[..., -1:].repeat_interleave(target_length - encoded_length, dim=-1)
+    return torch.cat((encoded, tail), dim=-1).contiguous()
+
 
 def _align_video_frame_count(frame_count: int, format_name: str) -> int:
     frame_grid = VIDEO_FORMATS.get(format_name, {}).get("frames")
@@ -247,19 +336,6 @@ def _video_frame_count_from_duration(
         target_frames = max(0.0, float(duration_frames)) * target_frame_rate / safe_source_rate
     return _align_video_frame_count(math.ceil(target_frames), format_name)
 
-
-def _contains_workflow_metadata(value: object) -> bool:
-    if isinstance(value, dict):
-        if "workflow" in value and value["workflow"] is not None:
-            return True
-        return any(_contains_workflow_metadata(item) for item in value.values())
-    if isinstance(value, list):
-        return any(_contains_workflow_metadata(item) for item in value)
-    return False
-
-
-def _is_workflow_format(extra_pnginfo: object) -> bool:
-    return _contains_workflow_metadata(extra_pnginfo)
 
 # ---------------------------------------------------------------------------
 # prompt_override parsing helpers
@@ -637,6 +713,55 @@ def _merge_audio_track(
     return {"waveform": merged, "sample_rate": sample_rate}
 
 
+_MAX_SPEAKER_REFERENCE_SECONDS = 15.0
+
+
+def _speaker_reference_segment(track: dict) -> 'dict | None':
+    """Return the one audio clip explicitly reused as this track's speaker reference."""
+    if track.get("type") != "audio":
+        return None
+    for segment in track.get("segments", []):
+        if not isinstance(segment, dict):
+            continue
+        content = segment.get("content", {})
+        if (
+            isinstance(content, dict)
+            and content.get("media_type") == "audio"
+            and content.get("speaker_reference") is True
+        ):
+            return segment
+    return None
+
+
+def _build_speaker_reference_audio(
+    segment: dict,
+    audio: dict,
+    base_volume_db: float = 0.0,
+    muted: bool = False,
+) -> dict:
+    """Return the complete source audio from zero, capped at 15 seconds."""
+    waveform = audio.get("waveform")
+    sample_rate = int(audio.get("sample_rate", 44100))
+    if not isinstance(waveform, torch.Tensor):
+        return {
+            "waveform": torch.zeros(1, 1, 1),
+            "sample_rate": sample_rate,
+        }
+
+    max_samples = max(1, round(_MAX_SPEAKER_REFERENCE_SECONDS * sample_rate))
+    reference = waveform[..., :max_samples]
+    content = segment.get("content", {})
+    if not isinstance(content, dict):
+        content = {}
+    gain = 0.0 if muted or audio_is_muted(content) else audio_db_to_gain(
+        base_volume_db + audio_volume_db(content)
+    )
+    return {
+        "waveform": reference * gain,
+        "sample_rate": sample_rate,
+    }
+
+
 def _video_stream_source(video) -> 'str | None':
     try:
         trim_start, trim_duration = video.get_active_trim_window()
@@ -1000,6 +1125,26 @@ def _build_tracks_info_and_media_outputs(
                 content = normalized_segment.get("content", {})
                 if content.get("media_type") == "audio":
                     content["media_index"] = media_index
+            speaker_segment = _speaker_reference_segment(normalized_track)
+            if format_name == "MiniMax" and speaker_segment is not None:
+                speaker_segment_id = speaker_segment.get("id")
+                speaker_source = next(
+                    (
+                        audio
+                        for source_segment, audio in track_audio_segments
+                        if source_segment.get("id") == speaker_segment_id
+                    ),
+                    None,
+                )
+                if speaker_source is not None:
+                    speaker_media_index = len(audio_out)
+                    audio_out.append(_build_speaker_reference_audio(
+                        speaker_segment,
+                        speaker_source,
+                        track_volume_db,
+                        track_muted,
+                    ))
+                    speaker_segment["content"]["speaker_media_index"] = speaker_media_index
         elif materialize_media and track_type == "video" and (format_name != "MiniMax" or track_video_segments):
             media_index = len(video_out)
             video_out.append(
@@ -1794,7 +1939,7 @@ class MultiTrackEditor(io.ComfyNode):
                 io.DynamicCombo.Input(
                     "resolution",
                     options=resolution_combo_options,
-                    tooltip="Select a resolution or choose 'Custom' to specify your own width and height.",
+                    tooltip="Select a resolution or choose 'Custom'. Width and height of 32 enable audio-only output in MultiTrack Project.",
                 ),
                 io.Combo.Input("format", options=list(VIDEO_FORMATS.keys()), default="Wan",  tooltip="Choose a video format to automatically set resolution and frame rate."),
                 TYPE_TRACK_DATA.Input("track_data"),
@@ -2047,6 +2192,7 @@ def _multitrack_task_entries(info: dict) -> list[dict]:
         ]
 
     range_start = 0
+    has_timeline_end = info.get("timeline_total_length") is not None
     total_length = max(0, _multitrack_frame_value(
         info.get("timeline_total_length", info.get("total_length")),
     ))
@@ -2059,7 +2205,11 @@ def _multitrack_task_entries(info: dict) -> list[dict]:
         ),
         default=0,
     )
-    range_end = max(0, total_length - 1, marker_end)
+    range_end = max(
+        0,
+        total_length if has_timeline_end else total_length - 1,
+        marker_end,
+    )
     if range_end <= range_start and tasks:
         range_end = max(_multitrack_frame_value(task.get("end_frame"), range_start) for task in tasks)
     if range_end <= range_start:
@@ -2098,6 +2248,28 @@ def _multitrack_task_entries(info: dict) -> list[dict]:
         for start_frame, end_frame in zip(boundaries, boundaries[1:])
         if end_frame > start_frame
     ]
+
+
+def _multitrack_timeline_end(info: dict) -> int:
+    tracks = info.get("tracks", [])
+    segment_end = max(
+        (
+            max(0, _multitrack_frame_value(segment.get("end_frame")))
+            for track in tracks
+            if isinstance(track, dict)
+            for segment in track.get("segments", [])
+            if isinstance(segment, dict)
+        ),
+        default=0,
+    ) if isinstance(tracks, list) else 0
+    if info.get("timeline_total_length") is not None:
+        return max(
+            segment_end,
+            max(0, _multitrack_frame_value(info.get("timeline_total_length"))),
+        )
+    if segment_end > 0:
+        return segment_end
+    return max(0, _multitrack_frame_value(info.get("total_length")))
 
 
 def _audio_track_frame_range(track: object, frame_rate: float) -> tuple[int, int] | None:
@@ -2539,6 +2711,15 @@ def _track_output_index(track: dict) -> 'int | None':
         return None
 
 
+def _speaker_reference_output_index(segment: dict) -> 'int | None':
+    content = segment.get("content", {})
+    raw_index = content.get("speaker_media_index") if isinstance(content, dict) else None
+    try:
+        return int(raw_index) if raw_index is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _track_media_end_frame(
     track: dict,
     start_frame: int | None = None,
@@ -2711,7 +2892,15 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 io.Image.Input("images", optional=True),
                 io.Audio.Input("audio", optional=True),
                 io.Video.Input("video", optional=True),
-                io.Int.Input("task_index", default=0, min=0),
+                io.Int.Input(
+                    "task_index",
+                    default=0,
+                    min=-1,
+                    tooltip=(
+                        "When set to -1, output the complete timeline media from "
+                        "all clips."
+                    ),
+                ),
                 io.Combo.Input(
                     "prompt_format",
                     options=PROMPT_FORMAT_OPTIONS + ["api", "llm"],
@@ -2728,6 +2917,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 io.Audio.Output("AUDIO", is_output_list=True),
                 io.Video.Output("VIDEO", is_output_list=True),
                 io.String.Output("IMAGE_INDEXES"),
+                io.Audio.Output("LOCKED_AUDIO"),
             ],
         )
 
@@ -2746,7 +2936,9 @@ class MultiTrackTaskOutput(io.ComfyNode):
         image_items = _as_list_input(images)
         audio_items = _as_list_input(audio)
         video_items = _as_list_input(video)
-        index = max(0, int(_unwrap_list_scalar(task_index, 0)))
+        requested_index = int(_unwrap_list_scalar(task_index, 0))
+        output_full_timeline = requested_index == -1
+        index = max(0, requested_index)
         selected_prompt_format = str(_unwrap_list_scalar(prompt_format, "default"))
 
         tracks = info.get("tracks", [])
@@ -2757,11 +2949,18 @@ class MultiTrackTaskOutput(io.ComfyNode):
         content = task.get("content", {}) if isinstance(task.get("content", {}), dict) else {}
         start_frame = max(0, int(task_entry.get("start_frame", task.get("start_frame", 0))))
         end_frame = max(start_frame, int(task_entry.get("end_frame", task.get("end_frame", start_frame))))
+        if output_full_timeline:
+            start_frame = 0
+            end_frame = _multitrack_timeline_end(info)
         duration_frames = end_frame - start_frame
         frame_rate = float(info.get("frame_rate", 24))
         is_minimax = info.get("format") == "MiniMax"
         next_task_start = None
-        if is_minimax and task_entry_index + 1 < len(task_entries):
+        if (
+            is_minimax
+            and not output_full_timeline
+            and task_entry_index + 1 < len(task_entries)
+        ):
             next_task_start = max(
                 start_frame,
                 _multitrack_frame_value(task_entries[task_entry_index + 1].get("start_frame")),
@@ -2769,7 +2968,13 @@ class MultiTrackTaskOutput(io.ComfyNode):
         media_duration_frames = (
             next_task_start - start_frame if next_task_start is not None else None
         )
-        if not task_entry:
+        if output_full_timeline:
+            length = (
+                _video_frame_count_from_duration(duration_frames, frame_rate, "MiniMax")
+                if is_minimax
+                else duration_frames + 1
+            )
+        elif not task_entry:
             length = 0
         elif is_minimax:
             length = _video_frame_count_from_duration(duration_frames, frame_rate, "MiniMax")
@@ -2777,7 +2982,14 @@ class MultiTrackTaskOutput(io.ComfyNode):
             length = duration_frames + 1
 
         task_content_entries = [(content, start_frame)]
-        if task_entry.get("marker_mode"):
+        if output_full_timeline:
+            task_content_entries = [
+                (candidate_content, _multitrack_frame_value(candidate.get("start_frame")))
+                for candidate in _multitrack_task_segments(info)
+                for candidate_content in [candidate.get("content", {})]
+                if isinstance(candidate_content, dict)
+            ]
+        elif task_entry.get("marker_mode"):
             task_content_entries = [
                 (
                     candidate_content,
@@ -2818,7 +3030,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
                                 f"Failed to project panorama image {image_id!r}: {exc}"
                             ) from exc
                     selected_images.append(image)
-                    if task_entry.get("marker_mode"):
+                    if output_full_timeline or task_entry.get("marker_mode"):
                         marker_image_frames.append(max(0, task_content_start - start_frame))
                     continue
                 try:
@@ -2832,12 +3044,12 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 ):
                     selected_image_indexes.add(media_index)
                     selected_images.append(image_items[media_index])
-                    if task_entry.get("marker_mode"):
+                    if output_full_timeline or task_entry.get("marker_mode"):
                         marker_image_frames.append(max(0, task_content_start - start_frame))
 
         media_progress.update_absolute(1)
 
-        if task_entry.get("marker_mode"):
+        if output_full_timeline or task_entry.get("marker_mode"):
             image_indexes = ",".join(str(frame) for frame in marker_image_frames)
         else:
             image_indexes = _evenly_distributed_image_indexes(
@@ -2846,6 +3058,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
             )
 
         selected_audio: list[dict] = []
+        locked_audio: dict | None = None
         selected_video: list = []
         has_video = False
         global_volume_db = audio_volume_db(info)
@@ -2856,10 +3069,63 @@ class MultiTrackTaskOutput(io.ComfyNode):
             and track.get("solo") is True
             for track in tracks
         ) if isinstance(tracks, list) else False
-        for track in tracks[1:] if isinstance(tracks, list) else []:
+        media_tracks = tracks if isinstance(tracks, list) else []
+        if not output_full_timeline:
+            media_tracks = media_tracks[1:]
+        if output_full_timeline and not deferred_media:
+            selected_audio = list(audio_items)
+            selected_video = list(video_items)
+            has_video = any(item is not None for item in selected_video)
+            for track in media_tracks if isinstance(media_tracks, list) else []:
+                if not isinstance(track, dict) or track.get("type") != "audio":
+                    continue
+                media_index = _track_output_index(track)
+                if (
+                    locked_audio is None
+                    and track.get("audio_locked") is True
+                    and media_index is not None
+                    and 0 <= media_index < len(audio_items)
+                    and isinstance(audio_items[media_index], dict)
+                ):
+                    locked_audio = audio_items[media_index]
+            media_tracks = []
+        for track in media_tracks if isinstance(media_tracks, list) else []:
             if not isinstance(track, dict):
                 continue
             media_index = _track_output_index(track)
+            speaker_segment = (
+                _speaker_reference_segment(track)
+                if is_minimax and not output_full_timeline
+                else None
+            )
+            locked_audio_track = (
+                track.get("type") == "audio" and track.get("audio_locked") is True
+            )
+            if speaker_segment is not None:
+                speaker_audio: dict | None = None
+                if deferred_media:
+                    speaker_content = speaker_segment.get("content", {})
+                    resolved_speaker = _resolve_multitrack_audio(speaker_content, None)
+                    if resolved_speaker is not None:
+                        speaker_audio = _build_speaker_reference_audio(
+                            speaker_segment,
+                            resolved_speaker,
+                            global_volume_db + audio_volume_db(track),
+                            global_muted
+                            or audio_is_muted(track)
+                            or (has_solo_track and track.get("solo") is not True),
+                        )
+                else:
+                    speaker_media_index = _speaker_reference_output_index(speaker_segment)
+                    if (
+                        speaker_media_index is not None
+                        and 0 <= speaker_media_index < len(audio_items)
+                        and isinstance(audio_items[speaker_media_index], dict)
+                    ):
+                        speaker_audio = audio_items[speaker_media_index]
+                if speaker_audio is not None:
+                    selected_audio.append(speaker_audio)
+                continue
             track_media_duration_frames = media_duration_frames
             if is_minimax:
                 track_media_end = _track_media_end_frame(
@@ -2911,6 +3177,14 @@ class MultiTrackTaskOutput(io.ComfyNode):
                             track_volume_db,
                             track_muted,
                         ))
+                    if locked_audio is None and locked_audio_track and resolved_audio_segments:
+                        locked_audio = _merge_audio_track(
+                            resolved_audio_segments,
+                            duration_frames,
+                            frame_rate,
+                            track_volume_db,
+                            track_muted,
+                        )
                     continue
 
                 resolved_video_segments: list[tuple[dict, object]] = []
@@ -2936,14 +3210,15 @@ class MultiTrackTaskOutput(io.ComfyNode):
             if track.get("type") == "audio" and media_index is not None and 0 <= media_index < len(audio_items):
                 track_audio = audio_items[media_index]
                 if isinstance(track_audio, dict):
-                    selected_audio.append(
-                        _trim_track_audio(
-                            track_audio,
-                            start_frame,
-                            track_media_duration_frames if is_minimax else duration_frames,
-                            frame_rate,
-                        )
+                    task_audio = _trim_track_audio(
+                        track_audio,
+                        start_frame,
+                        track_media_duration_frames if is_minimax else duration_frames,
+                        frame_rate,
                     )
+                    selected_audio.append(task_audio)
+                    if locked_audio is None and locked_audio_track:
+                        locked_audio = task_audio
             elif track.get("type") == "video" and media_index is not None and 0 <= media_index < len(video_items):
                 track_video = video_items[media_index]
                 video_duration = duration_frames / frame_rate
@@ -2987,7 +3262,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
         chat_system_prompt, chat_user_prompt = _build_chat_prompts(system_prompt, api_prompt, prompt)
         llm_prompt = build_llm_prompt(chat_system_prompt, chat_user_prompt, json_mode)
         if selected_prompt_format == "promptRelay":
-            if task_entry.get("marker_mode"):
+            if output_full_timeline or task_entry.get("marker_mode"):
                 user_prompt = _format_marker_task_prompt_relay(
                     _multitrack_task_segments(info),
                     start_frame,
@@ -3018,6 +3293,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
             (selected_audio or [None]) if is_minimax else selected_audio,
             (selected_video or [None]) if is_minimax else selected_video,
             image_indexes,
+            locked_audio,
         )
 
 
@@ -3086,9 +3362,10 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                         ]
                     )
                 default, maximum = PROMPT_ENHANCER_MAX_TOKENS[model_name]
+                value_name = "max_size" if model_name == LLAMACPP_MODEL else "max_tokens"
                 inputs.append(
                     io.Int.Input(
-                        "max_size",
+                        value_name,
                         default=default,
                         min=128 if model_name == LLAMACPP_MODEL else 1,
                         max=maximum,
@@ -3268,6 +3545,7 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
             _unwrap_list_scalar(model_config.get("apikey"), "")
         )
         selected_max_size = model_config.get("max_size")
+        selected_max_tokens = model_config.get("max_tokens")
         selected_inference_mode = model_config.get(
             "inference_mode", "one by one"
         )
@@ -3458,10 +3736,10 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                 image_urls=image_urls,
                 video_urls=video_urls,
                 audio_urls=audio_urls,
-                max_size=(
+                max_tokens=(
                     None
-                    if selected_max_size is None
-                    else int(_unwrap_list_scalar(selected_max_size, 512))
+                    if selected_max_tokens is None
+                    else int(_unwrap_list_scalar(selected_max_tokens, 4096))
                 ),
                 return_async=async_requested,
                 poll_interval=5.0,
@@ -3593,6 +3871,166 @@ class MultiTrackPromptEnhancerImageListBridge(io.ComfyNode):
 
 
 TYPE_MAP = {"flf": 0, "fmlf": 1, "ref": 2}
+
+
+class EasyMinimaxH3AudioLock(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy minimaxH3AudioLock",
+            display_name="Easy MiniMax H3 Audio Lock",
+            category=CATEGORY_AUDIO,
+            description=(
+                "Lock or remix supplied audio into a MiniMax H3 joint AV latent. "
+                "The H3 per-stream noise mask controls how much audio is preserved."
+            ),
+            inputs=[
+                io.Latent.Input(
+                    "latent", tooltip="MiniMax H3 joint audio/video latent."
+                ),
+                io.Vae.Input("audio_vae", tooltip="MiniMax H3 audio VAE."),
+                io.Audio.Input("audio", tooltip="Audio to lock into the H3 latent."),
+                io.Float.Input(
+                    "remix_strength",
+                    default=1.0,
+                    min=0.0,
+                    max=1.0,
+                    step=0.01,
+                    tooltip="0 fully regenerates audio; 1 hard-locks the supplied audio.",
+                ),
+                io.Combo.Input(
+                    "short_audio_mode",
+                    options=["silence", "loop"],
+                    default="silence",
+                    tooltip="Pad short audio with silence or loop it before encoding.",
+                ),
+                io.Int.Input(
+                    "prepend_frames",
+                    default=0,
+                    min=0,
+                    max=3600,
+                    tooltip=(
+                        "Silent video-frame duration inserted before locked audio. "
+                        "Used to align audio after context-prefix trimming."
+                    ),
+                ),
+                io.Float.Input(
+                    "frame_rate",
+                    default=24.0,
+                    min=1.0,
+                    max=240.0,
+                    step=0.01,
+                ),
+            ],
+            outputs=[io.Latent.Output("latent")],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        latent: dict,
+        audio_vae: object,
+        audio: dict,
+        remix_strength: float = 1.0,
+        short_audio_mode: str = "silence",
+        prepend_frames: int = 0,
+        frame_rate: float = 24.0,
+    ) -> io.NodeOutput:
+        selected_latent = latent
+        selected_audio_vae = audio_vae
+        selected_strength = float(remix_strength)
+        selected_short_audio_mode = str(short_audio_mode)
+        video_latent, base_audio_latent = _split_h3_av_latent(selected_latent)
+        if selected_short_audio_mode not in {"silence", "loop"}:
+            raise ValueError(
+                f"Unsupported short_audio_mode: {selected_short_audio_mode!r}."
+            )
+        waveform = audio.get("waveform")
+        sample_rate = audio.get("sample_rate")
+        if not isinstance(waveform, torch.Tensor) or not isinstance(sample_rate, int):
+            raise ValueError(
+                "AUDIO input must contain a tensor waveform and integer sample_rate."
+            )
+        if waveform.ndim != 3 or waveform.shape[0] < 1:
+            raise ValueError("AUDIO waveform must have shape [B, C, T] with B >= 1.")
+        selected_frame_rate = float(frame_rate)
+        if not math.isfinite(selected_frame_rate) or selected_frame_rate <= 0:
+            raise ValueError("frame_rate must be a positive finite number.")
+
+        target_length = int(base_audio_latent.shape[-1])
+        vae_sample_rate = int(
+            getattr(selected_audio_vae, "audio_sample_rate", 32000)
+        )
+        waveform = waveform[:1]
+        if sample_rate != vae_sample_rate:
+            try:
+                import torchaudio
+            except ImportError as error:
+                raise RuntimeError(
+                    "torchaudio is required to resample MiniMax H3 lock audio."
+                ) from error
+            waveform = torchaudio.functional.resample(
+                waveform, sample_rate, vae_sample_rate
+            )
+
+        prepend_samples = max(
+            0,
+            round(int(prepend_frames) / selected_frame_rate * vae_sample_rate),
+        )
+        if prepend_samples > 0:
+            waveform = F.pad(waveform, (prepend_samples, 0), value=0.0)
+
+        target_samples = max(
+            1, round(target_length / H3_AUDIO_LATENT_FPS * vae_sample_rate)
+        )
+        waveform = _fit_h3_audio_waveform(
+            waveform, target_samples, selected_short_audio_mode
+        )
+        try:
+            encoded = selected_audio_vae.encode(waveform.movedim(1, -1))
+        except (AttributeError, RuntimeError, TypeError, ValueError) as error:
+            raise RuntimeError(f"Failed to encode MiniMax H3 lock audio: {error}") from error
+        if not isinstance(encoded, torch.Tensor) or encoded.ndim != 4:
+            raise ValueError("MiniMax H3 audio VAE must return a 4D tensor.")
+        encoded = _fit_h3_encoded_audio(encoded, target_length)
+        if encoded.shape[0] != 1 or encoded.shape[1] != 32 or encoded.shape[2] != 2:
+            raise ValueError(
+                f"Unexpected H3 audio VAE output shape {tuple(encoded.shape)}; "
+                "expected [1, 32, 2, T]."
+            )
+        encoded = encoded.to(
+            device=base_audio_latent.device,
+            dtype=base_audio_latent.dtype,
+        ).contiguous()
+
+        strength = max(0.0, min(1.0, selected_strength))
+        clean_audio = base_audio_latent if strength == 0.0 else encoded
+        old_video_mask, _ = _split_h3_noise_mask(selected_latent)
+        video_mask = (
+            torch.ones_like(video_latent, dtype=torch.float32)
+            if old_video_mask is None
+            else old_video_mask.to(
+                device=video_latent.device, dtype=torch.float32
+            ).contiguous()
+        )
+        audio_mask = torch.full_like(
+            clean_audio,
+            fill_value=1.0 - strength,
+            dtype=torch.float32,
+        )
+
+        try:
+            import comfy.nested_tensor
+        except ImportError as error:
+            raise RuntimeError(
+                "MiniMax H3 audio locking requires ComfyUI nested tensor support."
+            ) from error
+
+        output = dict(selected_latent)
+        output["samples"] = comfy.nested_tensor.NestedTensor((video_latent, clean_audio))
+        output["noise_mask"] = comfy.nested_tensor.NestedTensor((video_mask, audio_mask))
+        return io.NodeOutput(output)
+
 
 class TimelineSegmentOutput(io.ComfyNode):
     @classmethod
@@ -3768,154 +4206,3 @@ class TimelineSegmentCount(io.ComfyNode):
 
         count: int = len(info.get("segments", []))
         return io.NodeOutput(count)
-
-
-# ---------------------------------------------------------------------------
-# Tuple builder nodes
-# ---------------------------------------------------------------------------
-
-
-class MakeAudioList(io.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id="easy makeAudioList",
-            display_name="Make Audio List",
-            category=CATEGORY_AUDIO,
-            description="Combine up to 10 optional audio inputs into an audio list.",
-            inputs=[
-                io.Boolean.Input("skip_empty", default=False, label_on="Skip", label_off="Fill"),
-                io.Audio.Input("audio1", optional=True),
-                io.Audio.Input("audio2", optional=True),
-                io.Audio.Input("audio3", optional=True),
-                io.Audio.Input("audio4", optional=True),
-                io.Audio.Input("audio5", optional=True),
-                io.Audio.Input("audio6", optional=True),
-                io.Audio.Input("audio7", optional=True),
-                io.Audio.Input("audio8", optional=True),
-                io.Audio.Input("audio9", optional=True),
-                io.Audio.Input("audio10", optional=True),
-            ],
-            outputs=[
-                io.Audio.Output("AUDIO", is_output_list=True),
-            ],
-        )
-
-    @classmethod
-    def execute(cls, skip_empty: bool, **kwargs: object) -> io.NodeOutput:
-        audios: list[dict] = []
-        for i in range(1, 11):
-            key = f"audio{i}"
-            v = kwargs.get(key)
-            if v is not None:
-                audios.append(v)
-            elif not skip_empty:
-                empty = silence(16000, 0.001, 1)
-                audios.append({"waveform": empty, "sample_rate": 16000})
-
-        return io.NodeOutput(audios)
-
-
-class SplitAudios(io.ComfyNode):
-    @classmethod
-    def define_schema(cls) -> io.Schema:
-        return io.Schema(
-            node_id="easy splitAudios",
-            display_name="Split Audios",
-            category=CATEGORY_AUDIO,
-            description="Split an audio list into 10 single-audio outputs.",
-            is_input_list=True,
-            inputs=[
-                io.Audio.Input("audios"),
-            ],
-            outputs=[
-                io.Audio.Output(f"AUDIO{i}") for i in range(0, 10)
-            ],
-        )
-
-    @classmethod
-    def execute(cls, audios: list[dict[str, object]]) -> io.NodeOutput:
-        if not audios:
-            raise ValueError("audios must contain at least one audio.")
-        if not all(isinstance(audio, dict) for audio in audios):
-            raise TypeError("audios must contain only audio dictionaries.")
-
-        return io.NodeOutput(*split_list_outputs(audios))
-
-
-class MatchLine(io.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id="easy matchLine",
-            display_name="Match Line",
-            category=CATEGORY_LOGIC,
-            description="Return the zero-based index of the first line containing the match text.",
-            inputs=[
-                io.String.Input("text", default="", multiline=True),
-                io.String.Input("match", default=""),
-            ],
-            outputs=[
-                io.Int.Output("LINE_INDEX"),
-            ],
-        )
-
-    @classmethod
-    def execute(cls, text: str, match: str) -> io.NodeOutput:
-        if not match:
-            return io.NodeOutput(-1)
-
-        line_index = next(
-            (index for index, line in enumerate(text.splitlines()) if match in line),
-            -1,
-        )
-        return io.NodeOutput(line_index)
-
-
-class APIWorkflowGate(io.ComfyNode):
-    @classmethod
-    def define_schema(cls):
-        return io.Schema(
-            node_id="easy apiWorkflowGate",
-            display_name="API Workflow Gate",
-            category=CATEGORY_LOGIC,
-            description=(
-                "Pass the input through for API workflow execution; return None without "
-                "evaluating the input when execution includes workflow metadata."
-            ),
-            inputs=[
-                io.AnyType.Input(
-                    "value",
-                    optional=True,
-                    lazy=True,
-                    tooltip="Any input to evaluate only when the execution prompt is API workflow format.",
-                ),
-            ],
-            hidden=[io.Hidden.extra_pnginfo],
-            outputs=[
-                io.AnyType.Output("VALUE"),
-                io.AnyType.Output("VALUES", is_output_list=True),
-            ],
-        )
-
-    @classmethod
-    def _is_workflow_format(cls) -> bool:
-        hidden = getattr(cls, "hidden", None)
-        extra_pnginfo = getattr(hidden, "extra_pnginfo", None)
-        return _is_workflow_format(extra_pnginfo)
-
-    @classmethod
-    def check_lazy_status(cls, value: object | None = None) -> list[str]:
-        if cls._is_workflow_format():
-            return []
-        if value is None:
-            return ["value"]
-        return []
-
-    @classmethod
-    def execute(cls, value: object | None = None) -> io.NodeOutput:
-        if cls._is_workflow_format():
-            return io.NodeOutput(None, [])
-        if isinstance(value, list):
-            return io.NodeOutput(None, value)
-        return io.NodeOutput(value, [])

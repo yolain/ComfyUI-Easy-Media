@@ -29,7 +29,7 @@ describe('PreviewFloatingToolbar', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Audio settings' }))
-    expect(screen.getAllByText('Audio (GV)').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('MainAudio').length).toBeGreaterThan(0)
     fireEvent.click(screen.getByRole('button', { name: 'Mute preview audio' }))
 
     expect(onGlobalSettingsChange).toHaveBeenCalledWith({ muted: true })
@@ -89,8 +89,8 @@ describe('PreviewFloatingToolbar', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Speed settings' }))
-    fireEvent.keyDown(screen.getByRole('slider', { name: 'Frame rate' }), { key: 'ArrowRight' })
+    fireEvent.click(screen.getByRole('button', { name: 'fps settings' }))
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'FPS' }), { key: 'ArrowRight' })
     rerender(
       <PreviewFloatingToolbar
         globalMuted={false}
@@ -104,7 +104,7 @@ describe('PreviewFloatingToolbar', () => {
         onSelectedSegmentDurationChange={onSelectedSegmentDurationChange}
       />,
     )
-    fireEvent.keyDown(screen.getByRole('slider', { name: 'Frame rate' }), { key: 'ArrowRight' })
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'FPS' }), { key: 'ArrowRight' })
     const durationInput = screen.getByLabelText('Duration')
     expect(durationInput.getAttribute('type')).toBe('text')
     expect(durationInput.getAttribute('value')).toBe('00:03:00')
@@ -132,7 +132,7 @@ describe('PreviewFloatingToolbar', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Speed settings' }))
+    fireEvent.click(screen.getByRole('button', { name: 'fps settings' }))
     const durationInput = screen.getByLabelText('Duration')
     fireEvent.change(durationInput, { target: { value: '00:05:12' } })
     fireEvent.blur(durationInput)

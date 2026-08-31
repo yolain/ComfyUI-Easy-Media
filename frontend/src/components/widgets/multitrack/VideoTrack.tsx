@@ -33,7 +33,7 @@ interface VideoTrackProps {
   onCloneSegment: (segmentId: string) => void
   canDeleteTrack: boolean
   onDeleteTrack: (trackId: string) => void
-  onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo'>>) => void
+  onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo' | 'audio_locked'>>) => void
   onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
   onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
   onMoveSegment: (segmentId: string, nextStartTime: number, clientY: number) => void

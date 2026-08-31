@@ -24,13 +24,20 @@ vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/MultiTrackSegmentBlock', () => ({
-  MultiTrackSegmentBlock: ({ segment, onDoubleClick }: {
-    segment: { id: string }
+  MultiTrackSegmentBlock: ({ segment, audioLocked, onAudioLockToggle, speakerReference, onSpeakerReferenceToggle, onDoubleClick }: {
+    segment: { id: string; content?: { speaker_reference?: boolean } }
+    audioLocked?: boolean
+    onAudioLockToggle?: (locked: boolean) => void
+    speakerReference?: boolean
+    onSpeakerReferenceToggle?: (enabled: boolean) => void
     onDoubleClick?: (segmentId: string, event: React.MouseEvent) => void
   }) => (
-    <button type="button" onDoubleClick={(event) => onDoubleClick?.(segment.id, event)}>
-      {segment.id}
-    </button>
+    <div>
+      <button type="button" data-audio-locked={String(audioLocked === true)} onClick={() => onAudioLockToggle?.(!audioLocked)} onDoubleClick={(event) => onDoubleClick?.(segment.id, event)}>
+        {segment.id}
+      </button>
+      <button type="button" aria-label={`speaker-${segment.id}`} data-speaker-reference={String(speakerReference === true)} onClick={() => onSpeakerReferenceToggle?.(!speakerReference)} />
+    </div>
   ),
 }))
 
@@ -64,6 +71,7 @@ function renderAudioTrack(track: MultiTrack, props?: Partial<ComponentProps<type
         cutMode={false}
         onCutSegment={vi.fn()}
         {...props}
+        onCloneSegment={props?.onCloneSegment ?? vi.fn()}
       />
     </TooltipProvider>,
   )
@@ -170,6 +178,44 @@ describe('AudioTrack', () => {
     expect(actionGroup?.classList.contains('flex')).toBe(true)
     expect(actionGroup?.classList.contains('gap-1')).toBe(true)
     expect(actionGroup?.style.left).toBe('486px')
+  })
+
+  it('marks every segment when its MiniMax audio track is locked', () => {
+    const onTrackAudioSettingsChange = vi.fn()
+    const track: MultiTrack = {
+      id: 'audio-track', name: 'Audio 0', type: 'audio', color: 'var(--highlight)',
+      muted: false, locked: false, audio_locked: true,
+      segments: [
+        { id: 'first', start_frame: 0, end_frame: 24, color: 'var(--highlight)', content: { media_type: 'audio' } },
+        { id: 'second', start_frame: 24, end_frame: 48, color: 'var(--highlight)', content: { media_type: 'audio' } },
+      ],
+    }
+
+    renderAudioTrack(track, { audioLockEnabled: true, onTrackAudioSettingsChange })
+
+    expect(screen.getByRole('button', { name: 'first' }).dataset.audioLocked).toBe('true')
+    expect(screen.getByRole('button', { name: 'second' }).dataset.audioLocked).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: 'first' }))
+    expect(onTrackAudioSettingsChange).toHaveBeenCalledWith('audio-track', { audio_locked: false })
+  })
+
+  it('toggles the speaker reference for the selected audio segment', () => {
+    const onSpeakerReferenceChange = vi.fn()
+    const track: MultiTrack = {
+      id: 'audio-track', name: 'Audio 0', type: 'audio', color: 'var(--highlight)',
+      muted: false, locked: false,
+      segments: [{
+        id: 'voice', start_frame: 0, end_frame: 24, color: 'var(--highlight)',
+        content: { media_type: 'audio', speaker_reference: true },
+      }],
+    }
+
+    renderAudioTrack(track, { audioLockEnabled: true, onSpeakerReferenceChange })
+
+    const speakerButton = screen.getByRole('button', { name: 'speaker-voice' })
+    expect(speakerButton.dataset.speakerReference).toBe('true')
+    fireEvent.click(speakerButton)
+    expect(onSpeakerReferenceChange).toHaveBeenCalledWith('audio-track', 'voice', false)
   })
 
   it('opens the current audio in the media selector on double click and replaces it', () => {

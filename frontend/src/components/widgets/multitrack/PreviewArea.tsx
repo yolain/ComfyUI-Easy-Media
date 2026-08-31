@@ -5,26 +5,32 @@ import { Button } from '@/components/ui/button'
 import { TaskMarkerIcon } from '@/components/ui/custom-lucide-icon'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
 import {
-  collectMultiTrackPreviewResolutionInput,
   frameToSeconds,
   getActivePreviewAudioSources,
   getActivePreviewVideoSegment,
+  getMultiTrackPreviewFrame,
   getMultiTrackTaskModeLabel,
   getSelectedTaskUserPrompt,
   getSelectedTaskUserPromptPatch,
+  MULTITRACK_CONTINUITY_MODES,
+  MULTITRACK_DEFAULT_CONTINUITY_MODE,
+  MULTITRACK_DEFAULT_REF_IMAGE_SIZE,
+  MULTITRACK_REF_IMAGE_SIZES,
   MULTITRACK_TASK_MODES,
   parseMultiTrackPreviewResolution,
   segmentDuration,
-  snapTimeToFrame,
   type MultiTrackVideoMetadata,
   type SelectedMultiTrackSegment,
 } from '@/lib/multitrack-utils'
+import { useMultiTrackResolutionInput } from '@/hooks/use-multitrack-resolution-input'
 import { useT } from '@/lib/i18n'
 import { mediaContentToViewUrl } from '@/lib/media-url'
+import { computeSlotItems } from '@/lib/timeline-utils'
 import {
   DEFAULT_SUBTITLE_SPEECH_SETTINGS,
   type SubtitleSpeechSettings,
@@ -39,7 +45,7 @@ import {
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
 import { DEFAULT_SUBTITLE_STYLE } from '@/lib/subtitle-recognition'
 import { invalidateMediaListCache } from '@/stores/media-list-store'
-import type { MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSubtitleStyle, MultiTrackTaskImage, MultiTrackTaskMode, MultiTrackUserPromptVariant, TrackData } from '@/types/multitrack'
+import type { MultiTrackContinuityMode, MultiTrackRefImageSize, MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSubtitleStyle, MultiTrackTaskImage, MultiTrackTaskMode, MultiTrackUserPromptVariant, TrackData } from '@/types/multitrack'
 import { PreviewFloatingToolbar } from './PreviewFloatingToolbar'
 import { PreviewAudioPlayback } from './PreviewAudioPlayback'
 import { PanoramaImagePreview } from '@/components/widgets/panorama/PanoramaImagePreview'
@@ -47,7 +53,6 @@ import { TaskSegmentEditor } from './TaskSegmentEditor'
 import { VideoPreview } from './VideoPreview'
 import { SubtitleSettingsPanel } from './SubtitleSettingsPanel'
 
-const RESOLUTION_POLL_INTERVAL_MS = 250
 const SUBTITLE_SETTINGS_PANEL_TOOLBAR_INSET = 'calc(max(35%, 18rem) + 12px)'
 const EXPANDED_IMAGE_MIN_ZOOM = 1
 const EXPANDED_IMAGE_MAX_ZOOM = 6
@@ -60,12 +65,14 @@ interface PreviewAreaProps {
   isPlaying: boolean
   playbackNonce?: number
   node: unknown
+  app?: unknown
   editingSubtitleSegmentId?: string | null
   onSubtitleEditRequestHandled?: () => void
   onSelectSegment?: (segmentId: string) => void
   onGlobalSettingsChange: (patch: Partial<Pick<TrackData, 'muted' | 'volume_db' | 'frame_rate'>>) => void
   onSelectedSegmentContentChange: (patch: Partial<MultiTrackSegmentContent>) => void
   taskSegments?: MultiTrackSegment[]
+  selectedTaskSegments?: MultiTrackSegment[]
   onTrackSegmentsContentChange?: (updates: Array<{ segmentId: string; patch: Partial<MultiTrackSegmentContent> }>) => void
   onTaskTrackSegmentsChange?: (segments: MultiTrackSegment[]) => void
   onSelectedSegmentDurationChange: (duration: number) => void
@@ -73,14 +80,6 @@ interface PreviewAreaProps {
     segment: MultiTrackSegment,
     settings: SubtitleSpeechSettings,
   ) => Promise<void>
-}
-
-function resolutionInputSignature(input: unknown): string {
-  try {
-    return JSON.stringify(input)
-  } catch {
-    return String(Date.now())
-  }
 }
 
 interface ActiveTaskImages {
@@ -91,6 +90,7 @@ interface ActiveTaskImages {
 }
 
 interface ActiveTaskPrompt {
+  index: number
   segmentId: string
   prompt: string
   taskMode: MultiTrackTaskMode
@@ -121,7 +121,7 @@ function moveTaskImage(
 }
 
 function getActiveTaskImages(data: TrackData, currentTime: number): ActiveTaskImages | null {
-  const currentFrame = snapTimeToFrame(currentTime, data.frame_rate)
+  const currentFrame = getMultiTrackPreviewFrame(data, currentTime)
 
   for (const track of data.tracks) {
     if (track.type !== 'task') continue
@@ -149,17 +149,19 @@ function getActiveTaskImages(data: TrackData, currentTime: number): ActiveTaskIm
 }
 
 function getActiveTaskPrompt(data: TrackData, currentTime: number): ActiveTaskPrompt | null {
-  const currentFrame = snapTimeToFrame(currentTime, data.frame_rate)
+  const currentFrame = getMultiTrackPreviewFrame(data, currentTime)
 
   for (const track of data.tracks) {
     if (track.type !== 'task') continue
-    const segment = track.segments.find((item) => (
+    const index = track.segments.findIndex((item) => (
       currentFrame >= item.start_frame && currentFrame < item.end_frame
     ))
-    if (!segment) continue
+    if (index < 0) continue
+    const segment = track.segments[index]
 
     const prompt = getSelectedTaskUserPrompt(segment.content)
     return {
+      index,
       segmentId: segment.id,
       prompt,
       taskMode: segment.content.task_mode ?? 'default',
@@ -171,7 +173,7 @@ function getActiveTaskPrompt(data: TrackData, currentTime: number): ActiveTaskPr
 }
 
 function getActiveSubtitleSegments(data: TrackData, currentTime: number): MultiTrackSegment[] {
-  const currentFrame = snapTimeToFrame(currentTime, data.frame_rate)
+  const currentFrame = getMultiTrackPreviewFrame(data, currentTime)
   return data.tracks.flatMap((track) => {
     if (track.type !== 'subtitle' || track.visible === false) return []
     return track.segments.filter((item) => (
@@ -235,12 +237,14 @@ export function PreviewArea({
   isPlaying,
   playbackNonce = 0,
   node,
+  app,
   editingSubtitleSegmentId,
   onSubtitleEditRequestHandled,
   onSelectSegment,
   onGlobalSettingsChange,
   onSelectedSegmentContentChange,
   taskSegments,
+  selectedTaskSegments,
   onTrackSegmentsContentChange,
   onTaskTrackSegmentsChange,
   onSelectedSegmentDurationChange,
@@ -263,7 +267,11 @@ export function PreviewArea({
   } | null>(null)
   const [editingSubtitle, setEditingSubtitle] = useState<{ segmentId: string; text: string } | null>(null)
   const [firstVideoMetadata, setFirstVideoMetadata] = useState<MultiTrackVideoMetadata | null>(null)
-  const [resolutionInput, setResolutionInput] = useState(() => collectMultiTrackPreviewResolutionInput(node))
+  const resolutionInput = useMultiTrackResolutionInput(node)
+  const imageSlotItems = useMemo(
+    () => computeSlotItems(node, app, 'image'),
+    [node, app, activeTaskMediaSelectorOpen],
+  )
   const videoSegments = useMemo(() => (
     data.tracks
       .filter((track) => track.type === 'video')
@@ -418,25 +426,6 @@ export function PreviewArea({
     }
   }, [firstVideoUrl])
 
-  useEffect(() => {
-    let currentSignature = resolutionInputSignature(collectMultiTrackPreviewResolutionInput(node))
-    setResolutionInput((current) => (
-      resolutionInputSignature(current) === currentSignature
-        ? current
-        : collectMultiTrackPreviewResolutionInput(node)
-    ))
-
-    const timer = window.setInterval(() => {
-      const nextInput = collectMultiTrackPreviewResolutionInput(node)
-      const nextSignature = resolutionInputSignature(nextInput)
-      if (nextSignature === currentSignature) return
-      currentSignature = nextSignature
-      setResolutionInput(nextInput)
-    }, RESOLUTION_POLL_INTERVAL_MS)
-
-    return () => window.clearInterval(timer)
-  }, [node])
-
   function handleActiveTaskImageReorderDrop(targetImageId: string) {
     if (!activeTaskImages) return
     const sourceId = draggedTaskImageIdRef.current
@@ -542,6 +531,26 @@ export function PreviewArea({
     }])
   }
 
+  function handleActiveTaskContinuityModeChange(
+    segmentId: string,
+    continuityMode: MultiTrackContinuityMode,
+  ) {
+    onTrackSegmentsContentChange?.([{
+      segmentId,
+      patch: { continuity_mode: continuityMode },
+    }])
+  }
+
+  function handleActiveTaskRefImageSizeChange(
+    segmentId: string,
+    refImageSize: MultiTrackRefImageSize,
+  ) {
+    onTrackSegmentsContentChange?.([{
+      segmentId,
+      patch: { ref_image_size: refImageSize },
+    }])
+  }
+
   function commitSubtitleEditing() {
     if (!editingSubtitle) return
     if (selectedSegment?.trackType === 'subtitle' && selectedSegment.segment.id === editingSubtitle.segmentId) {
@@ -616,6 +625,7 @@ export function PreviewArea({
             mediaType="image"
             allowMultipleSelection
             maxSelectionCount={MAX_TASK_IMAGES - activeTaskImages.allImages.length}
+            slotItems={imageSlotItems}
             onChange={handleActiveTaskSelectedMedia}
           />
         </PopoverContent>
@@ -930,7 +940,7 @@ export function PreviewArea({
     return (
       <div
         data-testid="task-prompt-overlay"
-        className="flex w-full items-center bg-black/70 px-2 text-primary-foreground"
+        className={`flex w-full editing ${ editing ? 'items-end' : 'items-center'} bg-black/70 px-2 text-primary-foreground`}
       >
         { !usesTaskImageOnlyPreview ? (<TooltipProvider>
           <Tooltip>
@@ -959,7 +969,7 @@ export function PreviewArea({
             autoFocus
             aria-label={t('multitrack.userPrompt')}
             placeholder={t('multitrack.promptPlaceholder')}
-            className="min-h-6 flex-1 resize-none border-none bg-transparent px-1 py-0 text-[9px] leading-4 text-primary shadow-none focus-visible:ring-0"
+            className="min-h-24 flex-1 resize-none border-none bg-transparent px-1 py-0 text-[9px] leading-4 text-primary shadow-none focus-visible:ring-0"
             value={editing.text}
             onMouseDown={(event) => event.stopPropagation()}
             onClick={(event) => event.stopPropagation()}
@@ -998,26 +1008,114 @@ export function PreviewArea({
           </div>
         )}
         <span className="shrink-0 px-1 text-[9px] leading-4 text-secondary">|</span>
-        <select
-          data-testid="task-mode-select"
-          aria-label="task_mode"
-          className="h-5 shrink-0 cursor-pointer border-none bg-transparent px-1 text-[9px] leading-4 text-primary outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+        {resolutionInput.format === 'MiniMax' && activeTaskPrompt.index > 0 && (
+          <>
+            <Select
+              value={activeTaskPrompt.content.continuity_mode ?? MULTITRACK_DEFAULT_CONTINUITY_MODE}
+              disabled={!onTrackSegmentsContentChange}
+              onValueChange={(value) => handleActiveTaskContinuityModeChange(
+                activeTaskPrompt.segmentId,
+                value as MultiTrackContinuityMode,
+              )}
+            >
+              <TooltipProvider delayDuration={300}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <SelectTrigger
+                      data-testid="task-continuity-mode-select"
+                      aria-label={t('multitrack.continuityMode')}
+                      className="h-5 min-h-0 w-16 shrink-0 cursor-pointer border-none bg-transparent px-1 text-[9px] leading-4 text-primary shadow-none focus-visible:ring-1 focus-visible:ring-ring [&_svg]:size-3"
+                      onClick={(event) => event.stopPropagation()}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">{t('multitrack.continuityModeTooltip')}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <SelectContent>
+                {MULTITRACK_CONTINUITY_MODES.map((continuityMode) => (
+                  <SelectItem key={continuityMode} value={continuityMode}>
+                    <span className="text-[10px]">{t(`multitrackContinuityModes.${continuityMode}`)}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="shrink-0 px-1 text-[9px] leading-4 text-secondary">|</span>
+          </>
+        )}
+        {resolutionInput.format === 'MiniMax'  && ['ref','edit'].includes(activeTaskPrompt.taskMode) && (
+          <>
+            <Select
+              value={activeTaskPrompt.content.ref_image_size ?? MULTITRACK_DEFAULT_REF_IMAGE_SIZE}
+              disabled={!onTrackSegmentsContentChange}
+              onValueChange={(value) => handleActiveTaskRefImageSizeChange(
+                activeTaskPrompt.segmentId,
+                value as MultiTrackRefImageSize,
+              )}
+            >
+              <TooltipProvider delayDuration={300}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <SelectTrigger
+                      data-testid="task-ref-image-size-select"
+                      aria-label={t('multitrack.refImageSize')}
+                      className="h-5 min-h-0 w-16 shrink-0 cursor-pointer border-none bg-transparent px-1 text-[9px] leading-4 text-primary shadow-none focus-visible:ring-1 focus-visible:ring-ring [&_svg]:size-3"
+                      onClick={(event) => event.stopPropagation()}
+                      onDoubleClick={(event) => event.stopPropagation()}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">{t('multitrack.refImageSizeTooltip')}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <SelectContent>
+                {MULTITRACK_REF_IMAGE_SIZES.map((refImageSize) => (
+                  <SelectItem key={refImageSize} value={refImageSize}>
+                    <span className="text-[10px]">{t(`multitrackRefImageSizes.${refImageSize}`)}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="shrink-0 px-1 text-[9px] leading-4 text-secondary">|</span>
+          </>
+        )}
+        <Select
           value={activeTaskPrompt.taskMode}
           disabled={!onTrackSegmentsContentChange}
-          onMouseDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}
-          onDoubleClick={(event) => event.stopPropagation()}
-          onChange={(event) => handleActiveTaskModeChange(
+          onValueChange={(value) => handleActiveTaskModeChange(
             activeTaskPrompt.segmentId,
-            event.currentTarget.value as MultiTrackTaskMode,
+            value as MultiTrackTaskMode,
           )}
         >
-          {MULTITRACK_TASK_MODES.map((taskMode) => (
-            <option key={taskMode} value={taskMode}>
-              {getMultiTrackTaskModeLabel(taskMode, t)}
-            </option>
-          ))}
-        </select>
+          <TooltipProvider delayDuration={300}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <SelectTrigger
+                  data-testid="task-mode-select"
+                  aria-label={t('multitrack.taskMode')}
+                  className="h-5 min-h-0 w-12 shrink-0 cursor-pointer border-none bg-transparent px-1 text-[9px] leading-4 text-primary shadow-none focus-visible:ring-1 focus-visible:ring-ring [&_svg]:size-3"
+                  onClick={(event) => event.stopPropagation()}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="top">{t('multitrack.taskModeTooltip')}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          <SelectContent>
+            {MULTITRACK_TASK_MODES.map((taskMode) => (
+              <SelectItem key={taskMode} value={taskMode}>
+                <span className="text-[10px]">
+                  {getMultiTrackTaskModeLabel(taskMode, t)}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
     )
   }
@@ -1147,7 +1245,7 @@ export function PreviewArea({
     return (
       <div
         data-multitrack-preview-area
-        className="relative flex min-h-24 flex-1 overflow-hidden rounded-sm bg-background"
+        className="relative flex min-h-24 w-full min-w-0 max-w-full flex-1 overflow-hidden rounded-sm bg-background"
         onClick={(event) => event.stopPropagation()}
       >
         {expandedTaskImage ? (
@@ -1155,7 +1253,10 @@ export function PreviewArea({
         ) : (
           <TaskSegmentEditor
             segment={selectedSegment.segment}
+            node={node}
+            app={app}
             trackSegments={taskSegments}
+            selectedSegments={selectedTaskSegments}
             videoSegments={videoSegments}
             mediaTracks={data.tracks.filter((track) => track.type === 'audio' || track.type === 'video')}
             frameRate={data.frame_rate}
@@ -1180,7 +1281,7 @@ export function PreviewArea({
   return (
     <div
       data-multitrack-preview-area
-      className="relative flex min-h-24 flex-1 items-center justify-center overflow-hidden rounded-sm bg-black text-xs text-muted-foreground"
+      className="relative flex min-h-24 w-full min-w-0 max-w-full flex-1 items-center justify-center overflow-hidden rounded-sm bg-black text-xs text-muted-foreground"
       onClick={(event) => event.stopPropagation()}
     >
       {expandedTaskImage && expandedTaskImageTarget?.source === 'active'
@@ -1202,7 +1303,7 @@ export function PreviewArea({
       ) : null}
       <div className="flex h-full min-h-24 w-full flex-col items-center justify-center gap-0.5">
         {!hasSegments ? renderEmptyPreview() : null}
-        <div className={!hasSegments ? 'hidden' : previewMediaGroupClassName}>
+        <div className={!hasSegments ? 'hidden' : `min-w-0 ${previewMediaGroupClassName}`}>
           {usesTaskImageOnlyPreview && activeTaskImages ? (
             <>
               <div

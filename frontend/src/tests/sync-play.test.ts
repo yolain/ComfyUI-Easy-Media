@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  EASY_MEDIA_SYNC_PLAY_MENU_LABEL_KEY,
   getEasyMediaSyncPlayMenuItems,
+  getSyncPlayNodeMuted,
   getSyncPlayTargetNodes,
   installEasyMediaSyncPlay,
   playNativeNodeVideosFromStart,
@@ -18,11 +18,12 @@ describe('sync play node targeting', () => {
     const current = { comfyClass: 'easy saveVideo' }
     const saveVideo = { comfyClass: 'easy saveVideo' }
     const editor = { comfyClass: 'easy multiTrackEditor' }
+    const projectCombine = { comfyClass: 'easy multitrackProjectVideoCombine' }
     const other = { comfyClass: 'KSampler' }
 
     expect(getSyncPlayTargetNodes(current, {
-      selected_nodes: { saveVideo, editor, other },
-    })).toEqual([saveVideo, editor])
+      selected_nodes: { saveVideo, editor, projectCombine, other },
+    })).toEqual([saveVideo, editor, projectCombine])
   })
 
   it('falls back to the current node when there is no selected target node', () => {
@@ -38,15 +39,17 @@ describe('sync play menu installation', () => {
   it('returns a right click menu action that plays selected target nodes', async () => {
     const saveVideo = { comfyClass: 'easy saveVideo', __easyMediaSyncPlay: vi.fn() }
     const editor = { comfyClass: 'easy multiTrackEditor', __easyMediaSyncPlay: vi.fn() }
+    const projectCombine = { comfyClass: 'easy multitrackProjectVideoCombine', __easyMediaSyncPlay: vi.fn() }
     const options = getEasyMediaSyncPlayMenuItems(saveVideo, {
-      selected_nodes: { saveVideo, editor },
+      selected_nodes: { saveVideo, editor, projectCombine },
     })
     const syncPlayOption = options.find((option) => option?.content === 'Sync Play')
     await syncPlayOption?.callback?.()
 
     expect(syncPlayOption).toBeDefined()
-    expect(saveVideo.__easyMediaSyncPlay).toHaveBeenCalledOnce()
-    expect(editor.__easyMediaSyncPlay).toHaveBeenCalledOnce()
+    expect(saveVideo.__easyMediaSyncPlay).toHaveBeenCalledWith(expect.any(Number), false)
+    expect(editor.__easyMediaSyncPlay).toHaveBeenCalledWith(expect.any(Number), true)
+    expect(projectCombine.__easyMediaSyncPlay).toHaveBeenCalledWith(expect.any(Number), true)
   })
 
   it('does not add the menu action to unrelated nodes', () => {
@@ -65,6 +68,28 @@ describe('sync play menu installation', () => {
     installEasyMediaSyncPlay(nodeType, { name: 'easy saveVideo' })
 
     expect(nodeType.prototype.__easyMediaSyncPlay).toBe(existingPlayback)
+  })
+})
+
+describe('sync play audio priority', () => {
+  it('uses save video, project combine, then multitrack editor priority', () => {
+    const saveVideo = { comfyClass: 'easy saveVideo' }
+    const projectCombine = { comfyClass: 'easy multitrackProjectVideoCombine' }
+    const editor = { comfyClass: 'easy multiTrackEditor' }
+
+    expect(getSyncPlayNodeMuted(saveVideo, [saveVideo, projectCombine, editor])).toBe(false)
+    expect(getSyncPlayNodeMuted(projectCombine, [saveVideo, projectCombine, editor])).toBe(true)
+    expect(getSyncPlayNodeMuted(editor, [saveVideo, projectCombine, editor])).toBe(true)
+    expect(getSyncPlayNodeMuted(projectCombine, [projectCombine, editor])).toBe(false)
+    expect(getSyncPlayNodeMuted(editor, [projectCombine, editor])).toBe(true)
+    expect(getSyncPlayNodeMuted(editor, [editor])).toBe(false)
+  })
+
+  it('does not change compare video audio state', () => {
+    expect(getSyncPlayNodeMuted(
+      { comfyClass: 'easy compareVideos' },
+      [{ comfyClass: 'easy saveVideo' }, { comfyClass: 'easy compareVideos' }],
+    )).toBeUndefined()
   })
 })
 

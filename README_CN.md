@@ -17,6 +17,7 @@
 </div>
 
 
+
 ## 📦 安装
 
 > [!IMPORTANT]
@@ -31,19 +32,78 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 安装完成后，打开 ComfyUI，在左侧侧边栏的 `Templates（模板）` 面板中即可找到内置的示例工作流，查找 `ComfyUI-Easy-Media` 相关条目。
 
+<a id="multitrack-workflow-skill"></a>
+
+### 🤖 使用 Skill 自动生成多轨工作流
+
+节点包附带 `easy-media-multitrack-workflow` Skill，可让 Codex 根据素材和自然语言要求，从内置模板新建或修改已有工作流，自动编排时间线、提示词、衔接模式与采样参数。
+
+```text
+使用 $easy-media-multitrack-workflow，根据这些参考图和提示词创建三个各 5 秒的任务，
+第一段用分镜，后两段用上下文，生成新的工作流 JSON。
+```
+
+默认只生成 JSON；明确要求运行时可上传素材并提交 ComfyUI 执行。安装方法与详细用法见 [Skill 说明](./skills/easy-media-multitrack-workflow/README.md)。
+
 ## ✨ 核心功能
+
+### 🎞️ (新)多轨项目流水线 MultiTrack Project Pipeline
+
+![pipeline](https://github.com/user-attachments/assets/0170ae6f-149e-41ba-9bdf-03ec31b0625e)
+
+v1.3.0 新增多轨项目流水线，将时间线编排、逐段生成、上下文衔接和成片合并串起来。目前 **多轨项目节点适配 MiniMax H3**；多轨编辑器本身仍与模型解耦，可以继续接入其他模型工作流。
+
+如果希望通过自然语言自动配置这套流水线，可使用 [工作流生成 Skill](#multitrack-workflow-skill)，从空模板生成或在已有工作流上修改。
+
+```text
+多轨编辑器 ── TRACKS_INFO ──→ 多轨项目 ── PROJECT_NAME ──→ 多轨项目视频合并 ── VIDEO ──→ 保存视频
+                               ↑
+                         model_loader
+                    （可选 model_loader_2nd）
+```
+
+> [!IMPORTANT]
+> **v1.3.0 改为按需加载媒体。** 时间线未引用 Slot 资源时，编辑器不再提前加载整条时间线的图像、音频和视频，`IMAGES`、`AUDIO`、`VIDEO` 输出为 `None`，这是正常行为。使用项目流水线只需连接 `TRACKS_INFO`；旧工作流如需直接获取媒体，请改接 [多轨任务输出](#multitrack-lazy-loading)。
+
+#### 1. 多轨编辑器：编排任务与衔接方式
+
+选择 `MiniMax` 格式，设置目标尺寸、帧率，为各个任务片段填写提示词，并按需要添加参考图、视频或音频。轨道、任务模式与媒体编辑操作见下方 [多轨编辑器介绍](#multitrack-editor)。
+
+新增的 **衔接模式** 决定当前任务如何接续上一段，与文生视频、图生视频、参考生视频等任务模式分别设置：
+
+| 衔接模式 | 生成方式 | 适用场景 |
+|----------|----------|----------|
+| **分镜（`shot`）** | 当前片段独立生成，不继承上一段的运动和声音上下文 | 新镜头、换场景、需要明显切镜的段落 |
+| **上下文（`context`）** | 取上一段生成结果的尾部音视频潜空间，引导当前片段继续运动与声音 | 连续动作、长镜头、需要延续声音的段落 |
+
+第一段作为起始镜头使用分镜模式；后续片段可逐段切换，也可多选任务片段统一调整。例如“分镜 → 上下文 → 上下文 → 分镜”表示先连续生成三段，再开启一个新镜头。此设置影响**生成阶段**，并非合并时添加的淡入淡出转场；上下文也不能保证任意场景或提示词变化都能无缝接续。
+
+#### 2. 多轨项目：编码、采样与逐段循环
+
+将编辑器的 `TRACKS_INFO` 接入 `tracks_info`，再接入包含 H3 模型、CLIP、视频 VAE 和音频 VAE 的 `model_loader`。节点会根据任务顺序自动展开执行，不需要再手动搭建片段索引循环：
+
+```text
+读取当前任务并按需加载媒体 → 编码提示词与参考条件 → 一采
+    →［可选：放大视频潜空间 → 二采］→ 解码音视频 → 裁剪上下文重叠部分
+    → 保存片段与上下文 → 处理下一任务 → 输出项目名称
+```
+
+每段都按自己的提示词、参考素材和衔接模式生成。开启上下文时，一采使用上一段对应分辨率的上下文，二采再使用上一段最终高分辨率结果维持接缝；保存完成后才继续下一段。可指定起始片段和生成数量，也可只生成一采预览后再续跑二采。参数、放大模型依赖及上下文实现的来源与调整见 [多轨项目详细说明](#multitrack-project)。
+
+#### 3. 多轨项目视频合并：预览、选片与输出
+
+将项目的 `PROJECT_NAME` 接入合并节点，便可预览已生成的片段、选择每段采用的版本，并将各段拼接为完整视频。**自动合并**适合一次运行直接出片；关闭后可先检查结果，再点 **合并** 单独执行合并与下游保存，无需重跑模型。同一片段有多个生成版本时，可选择两个视频进行同步对比，选定后再输出。具体操作见 [多轨项目视频合并](#multitrack-project-video-combine)。
+
+<a id="multitrack-editor"></a>
 
 ### 🎞️ 多轨编辑器 MultiTrack Editor
 
-#### 与其他节点的区别
-
-![Compare](https://github.com/user-attachments/assets/e7a30db8-48b3-480a-a211-a2633b4b1243)
 
 > **提示：** 多轨编辑器的优势在于解耦，它只用来做媒体的编辑与加载，不与任何模型绑定，用户可以自由选择任何模型节点来处理多轨编辑器输出的媒体数据。
 
 #### 概览
 
-![multiTrackEditor](https://github.com/user-attachments/assets/fc9ebcc6-d5e6-4f43-9825-6432c17d340d)
+![multiTrackEditor](https://github.com/user-attachments/assets/45dc72fd-d2bc-4df9-9e46-5c3e7fc6aa62)
 
 #### 轨道
 
@@ -59,6 +119,30 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 - 选中任务片段可设置图片、任务类型、用户提示词/系统提示词（根据任务类型会有默认值也可以自行编写）
 - 在 `多轨信息输出` 节点将输出视频的宽高尺寸、视频总帧数、帧率、任务数量
 - 在 `多轨任务输出` 节点将输出对应片段任务的 用户提示词&系统提示词，用户可自行抉择是否外接LLM节点以进行提示词扩写或结合片段中图像进行反推
+
+<a id="multitrack-lazy-loading"></a>
+
+#### v1.3.0 媒体懒加载与旧工作流迁移
+
+编辑器优先传递 `TRACKS_INFO` 中的时间范围、提示词、媒体地址及轨道配置，由下游输出节点在处理对应任务时再加载所需媒体，减少长时间线提前解码、拼接全部资源的开销。媒体元信息探测与前端缩略图、波形预览不等同于工作流中的完整媒体加载。
+
+| 时间线的资源来源 | 编辑器输出行为 | 如何获取媒体 |
+|------------------|----------------|--------------|
+| 文件或 URL，**没有 Slot 引用** | 输出 `TRACKS_INFO`，媒体输出为 `None` | 将 `TRACKS_INFO` 接到多轨项目或多轨任务输出，由下游按需加载 |
+| **有 Slot 引用**，引用上游输入的图像、音频或视频 | 保留即时加载及媒体输出行为；仅请求实际引用的媒体输入类型 | 可继续使用编辑器的媒体输出及配套输出节点 |
+
+旧工作流如果直接连接编辑器的媒体输出，可在中间增加 `多轨任务输出（easy multiTrackTaskOutput）`：
+
+- **逐段处理**：连接 `TRACKS_INFO`，设置 `task_index = 0、1、2…`，获取相应任务范围的媒体。
+- **一次获取全部媒体**：设置 `task_index = -1`，获取整条时间线的媒体，替代旧版编辑器直接输出完整媒体的用法。这会恢复完整加载的资源开销。
+- **只读尺寸、帧率、总帧数和任务数量**：使用 `多轨信息输出`，无需为了这些信息加载完整媒体。
+- **使用多轨项目流水线**：项目内部会调用任务输出，不需要在编辑器和项目之间额外串接任务输出节点。
+
+#### v1.3.0 任务与音频设置
+
+- **任务轨道**：新增分镜 / 上下文衔接模式；多选任务片段时，可批量调整任务模式、衔接模式和参考图尺寸。
+- **锁定音频**：用于多轨项目，以输入音频约束画面生成，交付视频使用原始任务音频，避免将其重新生成。与仅作为声音参考的音频用途不同。
+- **复用音频**：同一参考音频可供多个任务使用，无需复制到每段下面；参考音频最多使用 15 秒，不因当前任务片段更短而被截断。
 
 
 #### 适用场景
@@ -85,6 +169,98 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 > **提示：** 部分模型支持通过 Easy-Media 内置的模型下载接口自动下载，模型文件将放置在 `ComfyUI/models/` 目录下。
 
+
+<a id="multitrack-project"></a>
+
+### 🎞️ 多轨项目 MultiTrack Project
+
+![multiTrackProject](https://github.com/user-attachments/assets/a2d801eb-24c0-4ca3-963e-62ff4b1f2b79)
+
+`easy multitrackProject` 负责管理 MiniMax H3 项目的逐段生成。编辑器中的尺寸是**最终目标尺寸**；项目文件保存在 `ComfyUI/output/easy_media/projects/<project_name>/`，包含片段媒体、项目记录以及用于续接的上下文潜空间。
+
+#### 编码与采样
+
+1. **读取任务并编码**：按当前任务读取提示词和媒体，根据任务模式构建文生、首尾帧、尾帧或多媒体参考条件，并创建音视频潜空间。存在锁定音频时，将音频编码并施加采样约束。
+2. **一采**：`sampling_mode = single` 时直接在目标尺寸生成；`dual` 时按 `upscale_by` 反推较低的一采尺寸，并向上对齐到 32 的倍数。双采样会为目标尺寸重新构建所需的参考条件。
+3. **放大与二采（仅 `dual`）**：放大一采的视频潜空间，与音频潜空间重新组合，再在目标尺寸进行二次采样。`upscale_by = 1` 时不做尺寸放大，但仍可进行二采。
+4. **解码与保存**：解码视频和音频；上下文片段会同步裁掉开头重复的引导部分及末尾用于时间网格对齐的多余帧，再保存当前片段。
+5. **继续下一段**：保存上下文与项目记录后，自动处理后续任务。分镜模式重新开始一个镜头，上下文模式继承前一段；最终输出 `PROJECT_NAME` 供合并节点读取。
+
+| 设置 | 说明 |
+|------|------|
+| `model_loader` | 一采 H3 模型与共用的 CLIP、视频 VAE、音频 VAE；视频项目也需要音频 VAE |
+| `model_loader_2nd` | 可选的二采 H3 模型；不接时复用一采模型，接入后也仍使用一采加载器的编码器和 VAE |
+| `sampling_plan` | 内置 `ultra_light`、`light`、`medium`、`high` 等预设，根据 Turbo / 非 Turbo 模型选择采样器和 sigmas；也可用 `custom` 自定义 |
+| `sampler` / `sigmas` | 成对接入以覆盖一采采样设置；二采对应 `sampler_2nd` / `sigmas_2nd`，也需成对接入。`custom` 需要为实际运行的每个采样阶段提供这两个输入 |
+| `disable_2nd_noise` | 控制是否禁用二采新增噪声，不代表跳过二采 |
+| `1st_pass_only` | 在 `dual` 下只执行所选范围中**第一段的一采**并保存检查点；下次关闭此项，可从该段已有检查点继续二采 |
+
+采样预设可参考仓库中的 [h3_sample.json.example](./presets/h3_sample.json.example)，复制为 `presets/h3_sample.json` 后修改。**当前内置双采样预设采用独立的一采、二采sigmas**；不应再将 `light` 一概理解成“拆分 sigmas、未完成一采”。如自定义预设使用 `split_step`，才会将同一sigmas拆到两个阶段。已有自定义文件会优先生效，升级后应检查自己的配置。
+
+#### 二采放大模型与依赖
+
+| `upscale_model` | 放大路径 | 依赖 |
+|-----------------|----------|------|
+| 选择 H3 潜空间放大模型 | 调用 `MinimaxH3LatentUpscaler3D`，直接把视频潜空间放大到编辑器目标尺寸，再二采 | 安装 [Comfyui_Minimax_h3_latent_Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler)，将 [H3 放大模型权重](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler) 放入 `ComfyUI/models/latent_upscale_models/` |
+| `None` | 一采视频 VAE 解码 → 图像缩放 → VAE 重新编码 → 二采 | 需要 [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) 的 `ImageResizeKJv2` 节点 |
+
+这里的 `upscale_model` 是 **H3 潜空间放大权重**，与 `model_loader_2nd` 中负责二采的 H3 生成模型用途不同。直接放大潜空间可以省去中间的视频 VAE 解码 / 编码步骤，但二采仍在目标分辨率运行，不意味着高分辨率采样的显存开销也会同比下降。选择了模型但未安装对应节点时会报错，不会静默切换放大方式。
+
+例如可从上述模型仓库下载 `minimax_h3_latent_upscaler_3d_fp16.safetensors`，放入指定目录后重启 ComfyUI，再在 `upscale_model` 中选择。该模型文档给出的放大范围为 1–4 倍；即使项目参数允许更大数值，也应遵循所选放大模型的支持范围。
+
+#### 上下文方式的来源与调整
+
+上下文条件逻辑基于 [NikoDemon80 / ComfyUI-H3-Motion-Context](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context)，在 Easy Media 内部适配了项目循环和双采样。当前硬衔接实现要求 ComfyUI 支持 H3 原生音视频关键帧（ComfyUI 0.34.0+）；升级时应同时检查 ComfyUI 的兼容性。
+
+相较于只给当前任务附加上一段的上下文条件，项目流水线还做了以下处理：
+
+- **一采硬衔接**：保留原生音视频关键帧与原有多媒体参考，将上一段尾部音视频潜空间复制到当前采样起始潜空间；在复制区域内分别设置视频、音频的锁定与渐进释放掩码，让接缝附近逐渐进入新内容。
+- **区分低分辨率与高分辨率上下文**：双采样时，一采继承上一段的一采上下文；二采放大后，再把上一段最终高分辨率视频尾部复制到当前高分辨率潜空间，避免仅放大低分辨率接缝。上下文二采会冻结当前音频，保留一采形成的声音连续性。
+- **上下文专用二采Sigmas**：当前内置预设提供 `sigmas_2nd_context = 0.50, 0.30, 0.14, 0.06, 0.0`，用于已有前段上下文的二采；显式接入自定义二采采样器或 sigmas 时，不会再替换为该Sigmas。
+- **同步裁剪与干净的续接源**：项目默认取上一段尾部 22 帧作为上下文，为满足 H3 时间网格额外预留 34 帧生成空间。解码后去掉重复开头和多余尾帧，保留当前任务所需帧数；再从实际交付的音视频范围重新编码上下文，避免连续续接时误用被裁掉的尾部。
+- **项目内自动传递与跨次续跑**：同一轮生成自动传递前段上下文；从中间片段开始生成时，从项目中读取前一段的活动版本上下文，无需手工连 Save / Load Latent 节点。
+
+> **注意：** 上下文依赖前一段已保存的潜空间，只有 MP4 文件不足以恢复完整上下文。改变目标尺寸、放大倍率或更换前一段版本后，应重新检查后续上下文链；已有后续片段不会因为前段改变而自动重新生成。
+
+#### 指定范围、重生成与版本保留
+
+| 设置 | 行为 |
+|------|------|
+| `project_name` | 指定项目目录与记录，续跑时使用相同项目名 |
+| `segment_start_number` | 从第几段开始，**从 1 计数**；与多轨任务输出从 0 开始的 `task_index` 不同 |
+| `segment_count` | 本轮最多生成多少段；`-1` 表示从起始段处理到末尾 |
+| `project_save = new` | 在同一项目下保留既有结果，为重生成片段新增版本，便于后续对比 |
+| `project_save = override` | 覆盖对应片段版本；与 `segment_count = -1` 搭配时，会先清理起始段及之后的已保存片段，再重生成（续跑的一采检查点会保留） |
+
+例如只重做第 3 段，可设 `segment_start_number = 3`、`segment_count = 1`；想保留旧结果对比，再选 `project_save = new`。若第 3 段为上下文模式，需要项目里有第 2 段兼容的上下文。确认第 3 段的新版本后，依赖它的后续上下文片段也应重新生成。
+
+<a id="multitrack-project-video-combine"></a>
+
+### 🎞️ 多轨项目视频合并 MultiTrack Project Video Combine
+
+![MultiTrackProjectVideoCombine](https://github.com/user-attachments/assets/976dd4fd-8b69-4adb-8aee-d2269123502a)
+
+
+`easy multitrackProjectVideoCombine` 从项目读取已经保存的视频片段。预览可以按时间线连续播放各段，**无需先生成完整合并文件**；可通过项目选择器切换项目或刷新已保存的结果。
+
+#### 自动合并与手动合并
+
+- **自动合并（默认开启）**：执行工作流后，等待项目生成完成，读取当前项目片段并按时间线顺序拼接，输出 `VIDEO` 与 `FILENAME_PREFIX`。接入 `保存视频` 等输出节点即可保存成片。
+- **手动合并**：关闭自动合并后，项目仍生成并保存各段，合并节点只更新项目预览，不向下游输出合并结果。检查并选好各段后，等待 ComfyUI 队列清空，再点击节点内的 **合并**；它只提交合并节点及其下游，不重新执行上游编码和采样。
+- **保存要求**：手动合并前，需要连接下游视频保存输出节点。合并节点本身提供临时合并视频，最终输出路径和文件名由保存节点控制，可使用 `FILENAME_PREFIX` 作为命名前缀。
+
+#### 同一片段的多个版本与对比
+
+使用 `project_save = new` 重生成后，点击时间线中的片段，展开该片段的视频文件列表：
+
+1. **选择一个视频**：将该版本用于项目预览和合并。
+2. **选择两个视频**：进入同步对比预览，便于比较不同种子、提示词或采样设置的结果；每个片段最多同时选择两个版本。
+3. **对比后保留一个**：取消不采用的版本，再手动合并。双选仅用于对比，合并仍使用主选版本（当前选择列表中的第一个），不会把对比画面或两个版本一起拼进成片。
+
+片段上会标注分镜 / 上下文模式，便于检查接缝。选择旧版本用于合并只会改变选片，不会修复已生成的后续上下文；若版本间动作或声音结尾不同，需要重新生成相应后续段落。删除片段版本或整个项目会同时删除关联文件与上下文，操作前请确认不再需要续跑。
+
+> **适用范围：** 此节点用于视频项目。编辑器尺寸设为 `32 × 32` 的纯音频项目不支持通过该节点合并视频。
+
 ### 🎞️ 字幕烧录到视频 Subtitle To Video
 
 ![SubtitleToVideo](https://github.com/user-attachments/assets/58f90eb7-d671-437d-8adf-d8a04a3e261e)
@@ -94,51 +270,6 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 ![CompareVideos](https://github.com/user-attachments/assets/3bad558c-c5f4-411d-ba4c-b2edee9b9f11)
 
 > 预览源视频和输出视频的输入，支持交互式对比滑块进行左右对比。
-
-### 🎞️ API工作流阀门 APIWorkflowGate
-
-![APIWorkflowGate](https://github.com/user-attachments/assets/60a2f32b-d77b-4bf1-a1e3-99803de240c1)
-
-> **提示：** 在`APP模式`下，可以通过 `APIWorkflowGate` 节点判断只有为API调用的工作流才会透传前面的输入项，反之常规执行工作流队列会直接从后续节点开始执行。
-
----
-
-### 🎞️ 时间线编辑器 Timeline Editor
-
-![timelineEditor](https://github.com/user-attachments/assets/d7c9e894-6e7e-488c-90fb-d3aa8310419d)
-
-<details>
-<summary>动态参数注入</summary>
-
-> 如果你想通过`agents`或`app`方式动态地调用时间线编辑器，目前提供了一种方案，你可以将媒体素材输入到时间线编辑器的对应输入端口（`prompt_override`、`image`、`audio`、`video`）中。当`prompt_override`注入时，它会覆盖时间线编辑器中的片段数据。但相比于可视化界面直接编辑片段内容，动态参数注入的方式有局限性，例如无法很方便的控制音频时长和出现的范围，`prompt_override`提供了一种提示词格式化模板的规范写法，类似于 `promptRelay + seedance2.0` 动态提示词结合，具体可参考下方的示例。
-
-![dynamicInput](https://github.com/user-attachments/assets/eef6798e-a68d-4724-8e72-69b1a13825dd)
-
-**可选参数**：
-- `prompt_override`：由于ComfyUI存在force_input兼容性问题，当force_input存在时自定义部件将无法被获取，所以目前该参数的类型被设置为了`AnyType`，建议使用常规的字符串类型节点进行连入即可。
-- `image`：输入的图片资源列表，建议使用新增加的`easy makeImageList`节点来创建图片列表。
-- `video`: 输入的视频资源列表，若片段只需要一段视频直接将视频连接到video输入口即可，如需要多段视频则建议使用新增加的`easy makeVideoList`节点来创建视频列表。
-- `audio`：输入的音频资源列表，若片段只需要一段音频直接将音频连接到audio输入口即可，如需要多段音频则建议使用新增加的`easy makeAudioList`节点来创建音频列表。
-
-
-**提示词示例**：
-
-```
-@图片1 @音频1 镜头晃动，老者正望着光亮处神色慌张地喊话： 别学那玩意，别连线啊。 [0-120] | @图片2 @音频2 镜头缓慢推进，男人正在操作电脑，说道：有意思，这ComfyUI能火，我指定得学它 [121-241]
-```
-
-- [0-120] 和 [120-240] 表示时间轴上片段的起止帧范围，单位为帧（frame），也支持 [0-5s] [5-10s] 这种写法，单位为秒。如果不指定时间范围，默认会均分原先时间轴编辑器上设置的总时长。
-- 片段之间使用 `|` 分隔，表示不同的时间段。每个片段可以包含`媒体占位符`、`文本提示词`和`起止帧范围`。
-- 图片注入：支持 `@image{n}`、`@img{n}`、`@图{n}`、`@图片{n}`、`@图像{n}` 作为占位符来注入图片资源, 其中`{n}`表示图片列表中的第n张图（从1开始计数）。例如，`@image1`将注入图片列表中的第一张图。
-- 视频注入：支持 `@video{n}`、`@视频{n}` 作为占位符来注入视频资源, 其中`{n}`表示视频列表中的第n段视频（从1开始计数）。例如，`@video1`将注入视频列表中的第一段视频。
-- 音频注入：支持 `@audio{n}`、`@音频{n}` 作为占位符来注入音频资源, 其中`{n}`表示音频列表中的第n段音频（从1开始计数）。例如，`@audio1`将注入音频列表中的第一段音频。
-
-![dynamicInput2](https://github.com/user-attachments/assets/6dd84d52-1fd3-4b27-a890-2a0e22cecda4)
-
-**使用时间线编辑器添加输入口的媒体**：
-> 如果你只想通过`image`或`audio`、`video`输入端口传递参数，不想使用`prompt_override`，你也可以在添加图片或添加音频的地方使用`slot`方式关联到对应输入端口的媒体，这样在执行工作流任务时，便会自动将输入的媒体资源关联到时间线编辑器中对应的片段上。
-（注意：时间编辑器上显示的预览是溯源到最初加载图片或加载音频的节点中对应资源的，如果你在加载与时间编辑器流程之间使用了裁剪或者截断等节点对原始媒体进行处理，后端同样会执行这一块的处理，只是前端的预览显示是初始加载的状态。）
-</details>
 
 
 ### 🎞️ 保存视频 SaveVideo
@@ -178,41 +309,179 @@ bun run build:release
 
 ## 节点列表
 
-| 节点 ID | 描述 |
-|---------|------|
-| easy timelineEditor | 加载媒体时间线（prompt、图片、音频轨道）并输出结构化数据 |
-| easy timelineInfoOutput | 输出时间线信息，包括格式化的 prompt、尺寸和图片索引 |
-| easy timelineSegmentOutput | 输出时间线的特定片段数据 |
-| easy timelineSegmentCount | 输出时间线中的片段总数 |
-| easy makeImageList | 将多个图片输入组合成图片列表 |
-| easy makeAudioList | 将多个音频输入组合成音频列表 |
-| easy splitAudios | 将音频列表拆分为多个独立音频输出 |
-| easy audioMerge | 合并或拼接最多 6 个音频输入 |
-| easy makeVideoList | 将多个视频输入组合成视频列表 |
-| easy splitVideos | 将视频列表拆分为多个独立视频输出 |
-| easy imageIndexesToIntList | 将逗号分隔的图片索引字符串转换为整数列表 |
-| easy saveVideo | 将图片和可选音频保存为视频文件 |
-| easy getAudioFromVideo | 从 VIDEO 输入中提取音频 |
-| easy mergeVideos | 串联多个兼容的 VIDEO 片段 |
-| easy mergeVideosFromPaths | 从文件路径列表加载并串联视频 |
-| easy multiTrackEditor | 多轨编辑器，编辑和传递多轨媒体数据 |
-| easy multiTrackInfoOutput | 输出多轨维度、时长、帧率和任务数量 |
-| easy multiTrackTaskOutput | 输出多轨任务段的提示词和任务范围媒体 |
-| easy recognizeSubtitle | 使用 Qwen3-ASR 或 Whisper Large V3 识别字幕，可设置 SRT/时间戳输出、每句长度和模型卸载 |
-| easy addSubtitleToVideo | 将 SRT、时间戳或括号格式的多行字幕文本规范化并烧录到视频中 |
-| easy multiTrackAddSubtitleToVideo | 将字幕轨道添加到视频轨道中 |
-| easy makeRefsCompositeBySam3 | 使用 SAM3 检测提示的主体并组合参考图到画布 |
-| easy splitImages | 将图像列表或批次拆分为多个单图像输出 |
-| easy matchLine | 返回包含匹配文本的第一行的零基索引 |
-| easy apiWorkflowGate | 判断是否为 API 调用的工作流，透传前面输入项 |
-| easy minimaxH3ToVideo | 构建 MiniMax H3 文生视频、参考生视频或首尾帧生视频的条件与潜空间输入 |
-| easy removeH3MotionContextLatent | 在循环结束后删除 H3 Motion Context 潜空间文件 |
-| LTXVAddGuidesFromBatchIndexes | 从批量图像添加引导图到潜在变量的指定帧索引 |
-| LTXVMakeRefVideo | 将参考图像批次扩展为 IC-LoRA 参考视频 |
-| easy ltxMultiTrackEncode | 构建 Prompt Relay 条件并生成 LTX 视频/音频潜变量 |
-| easy ltxI2VInplaceAndUpsample | 可选地对 LTX 视频潜变量进行 upscale 并应用图像引导 |
-| easy ltxSamplerSimple | 对组合的 LTX 音视频潜变量进行采样并裁剪视频引导 |
-| easy berniniS2VConditioning | 统一 Bernini + Wan S2V 条件处理，保留可选单人全画面音频，并支持单人遮罩或可选双人顺序音频 |
+<table>
+  <thead>
+    <tr>
+      <th>分类</th>
+      <th>节点 ID</th>
+      <th>描述</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td rowspan="4">🎞️ 多轨编辑器 Multi-Track Editor</td>
+      <td>easy multiTrackEditor</td>
+      <td>编辑多轨时间线并传递轨道信息；无 Slot 引用时延迟到下游加载媒体</td>
+    </tr>
+    <tr>
+      <td>easy multiTrackInfoOutput</td>
+      <td>输出多轨维度、时长、帧率和任务数量</td>
+    </tr>
+    <tr>
+      <td>easy multiTrackTaskOutput</td>
+      <td>按需加载并输出任务段提示词和媒体；task_index = -1 时输出整条时间线媒体</td>
+    </tr>
+    <tr>
+      <td>easy multiTrackAddSubtitleToVideo</td>
+      <td>将字幕轨道添加到视频轨道中</td>
+    </tr>
+    <tr>
+      <td rowspan="7">🎬 MiniMax H3</td>
+      <td>easy minimaxH3ToVideo</td>
+      <td>构建 MiniMax H3 文生视频、参考生视频或首尾帧生视频的条件与潜空间输入</td>
+    </tr>
+    <tr>
+      <td>easy MiniMaxH3ReferenceToVideoBridge</td>
+      <td>用于 H3 参考条件构建的桥接节点，无需 Autogrow 展开</td>
+    </tr>
+    <tr>
+      <td>easy MiniMaxH3MotionContextHard</td>
+      <td>应用 H3 上下文条件并硬链接视频/音频潜空间连续性</td>
+    </tr>
+    <tr>
+      <td>easy MiniMaxH3HiResContinuity</td>
+      <td>将前一个高分辨率视频尾部复制到当前 upscale 潜空间中</td>
+    </tr>
+    <tr>
+      <td>easy removeH3MotionContextLatent</td>
+      <td>在循环结束后删除 H3 Motion Context 潜空间文件</td>
+    </tr>
+    <tr>
+      <td>easy multitrackProject</td>
+      <td>构建并执行多轨 MiniMax H3 项目，支持可选的第一/第二遍采样</td>
+    </tr>
+    <tr>
+      <td>easy multitrackProjectVideoCombine</td>
+      <td>预览项目片段、选择版本并双视频对比，支持自动或手动合并</td>
+    </tr>
+    <tr>
+      <td rowspan="5">🎞️ LTX Video</td>
+      <td>LTXVAddGuidesFromBatchIndexes</td>
+      <td>从批量图像添加引导图到潜在变量的指定帧索引</td>
+    </tr>
+    <tr>
+      <td>LTXVMakeRefVideo</td>
+      <td>将参考图像批次扩展为 IC-LoRA 参考视频</td>
+    </tr>
+    <tr>
+      <td>easy ltxMultiTrackEncode</td>
+      <td>构建 Prompt Relay 条件并生成 LTX 视频/音频潜变量</td>
+    </tr>
+    <tr>
+      <td>easy ltxI2VInplaceAndUpsample</td>
+      <td>可选地对 LTX 视频潜变量进行 upscale 并应用图像引导</td>
+    </tr>
+    <tr>
+      <td>easy ltxSamplerSimple</td>
+      <td>对组合的 LTX 音视频潜变量进行采样并裁剪视频引导</td>
+    </tr>
+    <tr>
+      <td rowspan="4">🎞️ 时间线编辑 Timeline Editor</td>
+      <td>easy timelineEditor</td>
+      <td>加载媒体时间线（prompt、图片、音频轨道）并输出结构化数据</td>
+    </tr>
+    <tr>
+      <td>easy timelineInfoOutput</td>
+      <td>输出时间线信息，包括格式化的 prompt、尺寸和图片索引</td>
+    </tr>
+    <tr>
+      <td>easy timelineSegmentOutput</td>
+      <td>输出时间线的特定片段数据</td>
+    </tr>
+    <tr>
+      <td>easy timelineSegmentCount</td>
+      <td>输出时间线中的片段总数</td>
+    </tr>
+    <tr>
+      <td rowspan="8">📋 媒体列表操作 Media List Operations</td>
+      <td>easy makeImageList</td>
+      <td>将多个图片输入组合成图片列表</td>
+    </tr>
+    <tr>
+      <td>easy makeAudioList</td>
+      <td>将多个音频输入组合成音频列表</td>
+    </tr>
+    <tr>
+      <td>easy splitAudios</td>
+      <td>将音频列表拆分为多个独立音频输出</td>
+    </tr>
+    <tr>
+      <td>easy audioMerge</td>
+      <td>合并或拼接最多 6 个音频输入</td>
+    </tr>
+    <tr>
+      <td>easy makeVideoList</td>
+      <td>将多个视频输入组合成视频列表</td>
+    </tr>
+    <tr>
+      <td>easy splitVideos</td>
+      <td>将视频列表拆分为多个独立视频输出</td>
+    </tr>
+    <tr>
+      <td>easy imageIndexesToIntList</td>
+      <td>将逗号分隔的图片索引字符串转换为整数列表</td>
+    </tr>
+    <tr>
+      <td>easy splitImages</td>
+      <td>将图像列表或批次拆分为多个单图像输出</td>
+    </tr>
+    <tr>
+      <td rowspan="4">🎬 视频操作 Video Operations</td>
+      <td>easy saveVideo</td>
+      <td>将图片和可选音频保存为视频文件</td>
+    </tr>
+    <tr>
+      <td>easy getAudioFromVideo</td>
+      <td>从 VIDEO 输入中提取音频</td>
+    </tr>
+    <tr>
+      <td>easy mergeVideos</td>
+      <td>串联多个兼容的 VIDEO 片段</td>
+    </tr>
+    <tr>
+      <td>easy mergeVideosFromPaths</td>
+      <td>从文件路径列表加载并串联视频</td>
+    </tr>
+    <tr>
+      <td rowspan="2">📝 字幕 Subtitle</td>
+      <td>easy recognizeSubtitle</td>
+      <td>使用 Qwen3-ASR 或 Whisper Large V3 识别字幕，可设置 SRT/时间戳输出、每句长度和模型卸载</td>
+    </tr>
+    <tr>
+      <td>easy addSubtitleToVideo</td>
+      <td>将 SRT、时间戳或括号格式的多行字幕文本规范化并烧录到视频中</td>
+    </tr>
+    <tr>
+      <td rowspan="1">🖼️ 参考图与图像 Reference & Image</td>
+      <td>easy makeRefsCompositeBySam3</td>
+      <td>使用 SAM3 检测提示的主体并组合参考图到画布</td>
+    </tr>
+    <tr>
+      <td rowspan="2">🔧 工具 Utility</td>
+      <td>easy matchLine</td>
+      <td>返回包含匹配文本的第一行的零基索引</td>
+    </tr>
+    <tr>
+      <td>easy apiWorkflowGate</td>
+      <td>判断是否为 API 调用的工作流，透传前面输入项</td>
+    </tr>
+    <tr>
+      <td rowspan="1">🗣️ 语音转视频 Speech to Video (S2V)</td>
+      <td>easy berniniS2VConditioning</td>
+      <td>统一 Bernini + Wan S2V 条件处理，保留可选单人全画面音频，并支持单人遮罩或可选双人顺序音频</td>
+    </tr>
+  </tbody>
+</table>
 
 ## Credits
 
@@ -221,6 +490,8 @@ bun run build:release
 - [Whisper](https://github.com/openai/whisper)
 - [VoxCPM2](https://github.com/OpenBMB/VoxCPM)
 - [Bernini S2V](https://huggingface.co/rzgar/Bernini-R-S2V)
+- [H3-Motion-Context](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context)
+- [MiniMax H3 Latent Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler)
 
 ## Source of Inspiration
 

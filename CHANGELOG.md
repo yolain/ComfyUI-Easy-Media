@@ -6,12 +6,19 @@
 
 ### ✨ New Features
 
-- **MultiTrack Project**： Building now...
-- **MultiTrack Project Video Combine**： Building now...
+- **MultiTrack Project**: Currently adapted for MiniMax, mainly used to simplify the pipeline. It handles multi-track loop segment encoding, sampling, and decoding/saving, supports specifying segment start position and maximum generation count.
+- **MultiTrack Project Video Combine**: Preview uncombined segment outputs, supports automatic and manual combining.
 
-### ⚡ Performance
+### ⚡ MiniMax H3 Optimizations
 
-- **Multi-Track Editor**: Defer file and URL media loading when no slot resources are referenced; task output nodes now materialize only the media they need, reduce Unnecessary Overhead in Long-Form Video Tasks. (Now you just need to connect `TRACKS_INFO`; the `image`, `video`, and `audio` output by the multi-track editor will all be set to `None` in Slot-less resource mode.)
+- **Motion Context & Resampling**: Optimized the pairing of the original `MotionContext` with resampling. In the current default sampling configuration: `medium` produces smoother results, while `light` cannot sample sufficiently in the first sampling due to sigma separation.
+- **Multi-Track Editor (Audio Track)**: Added `Lock Audio` feature, only applicable under MultiTrack Project. When generating video, audio will no longer regenerate, but instead schedules video frame output based on this audio.
+- **Multi-Track Editor (Audio Track)**: Added `Reuse Audio` - all segments can reuse this audio (previously required cloning to each segment), supports up to 15 seconds without being truncated by segments.
+- **Multi-Track Editor (Task Track)**: When multi-selecting task segments, you can uniformly adjust task mode, transition mode, and reference image size.
+- **Multi-Track Editor (Task Track)**: New feature added.
+- **Multi-Track Editor**: Adjusted many texts for better understanding.
+- **Multi-Track Task Output**: Adjusted minimum value of task_index to -1. When -1, it can output all track complete media information like the previous Multi-Track Editor. (Due to the previous optimization, the Multi-Track Editor cannot directly output complete content)
+- **Multi-Track Editor**: Defer file and URL media loading when no slot resources are referenced; task output nodes now materialize only the media they need, reduce unnecessary media resource overhead in long-form video tasks. (Now you just need to connect `TRACKS_INFO`; the `image`, `video`, and `audio` output by the multi-track editor will all be `None` in Slot-less resource mode.)
 
 
 ## [1.2.1] - 2026-08-22
