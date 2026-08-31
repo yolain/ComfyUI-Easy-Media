@@ -171,13 +171,13 @@ If an older workflow connects directly to the editor's media outputs, insert `Mu
 
 ![multiTrackProject](https://github.com/user-attachments/assets/a2d801eb-24c0-4ca3-963e-62ff4b1f2b79)
 
-`easy multitrackProject` manages segment-by-segment generation for MiniMax H3 projects. The editor's dimensions are the **final target dimensions**. Project files are stored in `ComfyUI/output/easy_media/projects/<project_name>/`, including segment media, project records, and context latents for continuation.
+`easy multitrackProject` manages segment-by-segment generation for MiniMax H3 projects. The editor's dimensions are the **first-pass dimensions**; dual sampling scales up from this size for the second pass. Project files are stored in `ComfyUI/output/easy_media/projects/<project_name>/`, including segment media, project records, and context latents for continuation.
 
 #### Encoding and Sampling
 
 1. **Read and encode the task:** Load its prompts and media, build conditioning for text-to-video, first/last frames, last-frame-only, or multimedia references according to the task mode, and create audio/video latents. When audio is locked, encode it and apply sampling constraints.
-2. **First pass:** With `sampling_mode = single`, generate directly at the target dimensions. With `dual`, derive a lower first-pass resolution from `upscale_by`, rounding each dimension up to a multiple of 32. Dual sampling also rebuilds the required reference conditioning for the target dimensions.
-3. **Upscale and second pass (`dual` only):** Upscale the first-pass video latent, recombine it with the audio latent, and sample again at the target dimensions. Setting `upscale_by = 1` skips resizing but still allows a second pass.
+2. **First pass:** Both `sampling_mode = single` and `dual` generate at the editor's configured dimensions. The first-pass size is not reduced based on `upscale_by`.
+3. **Upscale and second pass (`dual` only):** Multiply each configured dimension by `upscale_by`, then align to the nearest multiple of 32 using `round(dimension * upscale_by / 32) * 32`. Upscale the first-pass video latent to this size, recombine it with the audio latent, and sample again. Rebuild reference conditioning when dimensions change. Setting `upscale_by = 1.000` skips resizing but still allows a second pass.
 4. **Decode and save:** Decode video and audio. For Context segments, trim the repeated guide prefix and extra trailing frames required by the temporal grid before saving the segment.
 5. **Continue to the next segment:** Save context and project records, then process subsequent tasks automatically. Shot starts a new shot; Context inherits the previous segment. Finally, output `PROJECT_NAME` for the combine node.
 
@@ -187,8 +187,11 @@ If an older workflow connects directly to the editor's media outputs, insert `Mu
 | `model_loader_2nd` | Optional second-pass H3 model; defaults to the first-pass model. Even when connected, encoding and VAEs still come from the first-pass loader |
 | `sampling_plan` | Built-in presets such as `ultra_light`, `light`, `medium`, and `high` select samplers and sigmas for Turbo / non-Turbo models; use `custom` for manual settings |
 | `sampler` / `sigmas` | Connect both to override first-pass sampling. Second-pass overrides use `sampler_2nd` / `sigmas_2nd`, also as a pair. `custom` requires both inputs for every sampling pass that runs |
+| `upscale_by` | Second-pass scale relative to the editor dimensions; default `1.250`, three decimal places, step `0.001` |
 | `disable_2nd_noise` | Disables added second-pass noise; it does not skip the second pass |
 | `1st_pass_only` | In `dual` mode, runs and checkpoints **only the first pass of the first selected segment**. Disable it on the next run to resume that segment at the second pass |
+
+Alignment uses Python `round`, matching [the H3 latent upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler/blob/main/nodes/minimax_h3_latent_upscaler_3d.py); it is not always upward, and exact ties round to the even integer. For example, `1344 × 768` at `1.250` becomes `1680 × 960` before alignment and **`1664 × 960`** for the second pass. Both upscaling paths use this size, and project records and combined exports retain the resulting dimensions. Single-pass generation and first-pass-only previews keep the editor dimensions; audio-only projects (`32 × 32`) do not upscale. Existing workflows retain their saved multiplier rather than automatically adopting the new default.
 
 To customize presets, copy [h3_sample.json.example](./presets/h3_sample.json.example) to `presets/h3_sample.json` and edit it. **The current built-in dual-sampling presets use separate first- and second-pass sigma schedules.** Do not assume that `light` always splits sigmas and leaves the first pass incomplete. A custom preset with `split_step` explicitly splits one sigma schedule across both passes. Existing custom files take precedence, so review your configuration after upgrading.
 
@@ -196,7 +199,7 @@ To customize presets, copy [h3_sample.json.example](./presets/h3_sample.json.exa
 
 | `upscale_model` | Upscaling Path | Dependencies |
 |-----------------|----------------|--------------|
-| An H3 latent upscaler model | Calls `MinimaxH3LatentUpscaler3D` to upscale the video latent directly to the editor's target dimensions before the second pass | Install [Comfyui_Minimax_h3_latent_Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler) and place the [H3 upscaler weights](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler) in `ComfyUI/models/latent_upscale_models/` |
+| An H3 latent upscaler model | Calls `MinimaxH3LatentUpscaler3D` to upscale the video latent directly to the scaled, aligned second-pass dimensions | Install [Comfyui_Minimax_h3_latent_Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler) and place the [H3 upscaler weights](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler) in `ComfyUI/models/latent_upscale_models/` |
 | `None` | Decode the first-pass video with the VAE → Resize images → Re-encode with the VAE → Second pass | Requires `ImageResizeKJv2` from [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) |
 
 `upscale_model` selects **H3 latent upscaler weights**, which serve a different purpose from the H3 generation model in `model_loader_2nd`. Direct latent upscaling avoids the intermediate video VAE decode/encode round trip, but the second pass still runs at the target resolution; its VRAM requirements do not decrease proportionally. Selecting an upscaler model without installing the required node raises an error rather than silently switching paths.
@@ -215,7 +218,7 @@ In addition to attaching the previous segment's context conditioning, the projec
 - **Synchronized trimming and clean continuation sources:** By default, the project takes the previous segment's last 22 frames as context and reserves 34 extra generation frames to satisfy H3's temporal grid. After decoding, it removes the repeated prefix and excess tail, retaining the task's required frame count. It then re-encodes context from the actual delivered audio/video range so subsequent segments do not inherit discarded tail frames.
 - **Automatic handoff and resuming across runs:** Context passes automatically between segments in one run. When starting from a later segment, the project loads context from the previous segment's active saved version, without manually wiring Save / Load Latent nodes.
 
-> **Note:** Context continuation requires the previous segment's saved latents; an MP4 alone is insufficient. After changing target dimensions, scaling factor, or the previous segment's version, check the downstream context chain. Existing later segments are not automatically regenerated when an earlier segment changes.
+> **Note:** Context continuation requires the previous segment's saved latents; an MP4 alone is insufficient. After changing editor dimensions, scaling factor, or the previous segment's version, check the downstream context chain. Regenerate first-pass checkpoints and context latents created with the old reduced-first-pass sizing before resuming with the new sizing behavior. Existing later segments are not automatically regenerated when an earlier segment changes.
 
 #### Generation Ranges, Regeneration, and Version Retention
 

@@ -554,7 +554,10 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
         assert inputs[name].kwargs["optional"] is True
     assert inputs["1st_pass_only"].kwargs["default"] is False
     assert inputs["disable_2nd_noise"].kwargs["default"] is False
-    assert inputs["upscale_by"].kwargs["default"] == 1.5
+    assert inputs["upscale_by"].kwargs["default"] == 1.250
+    assert inputs["upscale_by"].kwargs["step"] == 0.001
+    assert inputs["upscale_by"].kwargs["round"] == 0.001
+    assert inputs["upscale_by"].kwargs["extra_dict"] == {"precision": 3}
     assert inputs["segment_start_number"].kwargs["default"] == 1
     assert inputs["segment_start_number"].kwargs["min"] == 1
     assert inputs["segment_count"].kwargs["default"] == -1
@@ -1233,11 +1236,11 @@ def test_multitrack_h3_fast_dual_non_turbo_uses_preset_sigmas_and_pixel_upscale(
     assert sigma_schedules[0].startswith("1.0000, 0.9901")
     assert sigma_schedules[1].startswith("0.6316, 0.4877")
     assert (conditioning["inputs"]["width"], conditioning["inputs"]["height"]) == (
-        896,
-        512,
+        1344,
+        768,
     )
     assert resize["inputs"]["upscale_method"] == "nvidia_rtx_vsr"
-    assert (resize["inputs"]["width"], resize["inputs"]["height"]) == (1344, 768)
+    assert (resize["inputs"]["width"], resize["inputs"]["height"]) == (1664, 960)
     separate_id = next(
         node_id for node_id, node in result.expand.items() if node is separate
     )
@@ -1254,6 +1257,43 @@ def test_multitrack_h3_fast_dual_non_turbo_uses_preset_sigmas_and_pixel_upscale(
     ]
     assert sampler_names == ["euler", "sa_solver"]
     assert any(node["class_type"] == "DisableNoise" for node in nodes)
+
+
+@pytest.mark.parametrize("upscale_model", ["None", "h3_upscale.safetensors"])
+@pytest.mark.parametrize(
+    ("upscale_by", "expected_size"),
+    [(None, (1664, 960)), ([1.0], (1344, 768)), ([1.234], (1664, 960)), (2.0, (2688, 1536))],
+)
+def test_multitrack_project_uses_flat_upscale_by(
+    monkeypatch, tmp_path, upscale_model, upscale_by, expected_size
+):
+    module = _load_minimax_node(monkeypatch)
+    module.comfy_nodes.NODE_CLASS_MAPPINGS["ImageResizeKJv2"] = _ImageResizeKJWithNvidia
+    module.comfy_nodes.NODE_CLASS_MAPPINGS["MinimaxH3LatentUpscaler3D"] = _MiniMaxLatentUpscaler
+    monkeypatch.setattr(module.folder_paths, "get_output_directory", lambda: str(tmp_path))
+    inputs = _h3_project_inputs(sampling_mode=["dual"], upscale_model=[upscale_model])
+    if upscale_by is not None:
+        inputs["upscale_by"] = upscale_by
+
+    result = module.EasyMultiTrackProject.execute(**inputs)
+
+    conditioning = _graph_node(result, "easy minimaxH3ToVideo")["inputs"]
+    assert (conditioning["width"], conditioning["height"]) == (1344, 768)
+    artifact_info = _graph_node(result, "easy h3ProjectArtifact")["inputs"]["tracks_info"]
+    assert (artifact_info["width"], artifact_info["height"]) == expected_size
+    manifest = json.loads((tmp_path / "easy_media/projects/default/project.json").read_text())
+    assert (manifest["width"], manifest["height"]) == expected_size
+    assert (inputs["tracks_info"][0]["width"], inputs["tracks_info"][0]["height"]) == (1344, 768)
+    upscale_type = "ImageResizeKJv2" if upscale_model == "None" else "MinimaxH3LatentUpscaler3D"
+    if expected_size == (1344, 768):
+        assert not any(node["class_type"] == upscale_type for node in result.expand.values())
+    else:
+        upscale = _graph_node(result, upscale_type)["inputs"]
+        prefix = "" if upscale_model == "None" else "mode."
+        assert (upscale[f"{prefix}width"], upscale[f"{prefix}height"]) == expected_size
+        conditionings = [node["inputs"] for node in result.expand.values()
+                        if node["class_type"] == "easy minimaxH3ToVideo"]
+        assert (conditionings[1]["width"], conditionings[1]["height"]) == expected_size
 
 
 def test_multitrack_h3_project_forwards_override_save_mode(monkeypatch):
@@ -1394,8 +1434,8 @@ def test_multitrack_h3_medium_dual_uses_selected_latent_upscale_model(
         upscale["inputs"]["mode.width"],
         upscale["inputs"]["mode.height"],
     ) == (
-        1344,
-        768,
+        1664,
+        960,
     )
     separate_id = next(
         node_id for node_id, node in result.expand.items() if node is separate
@@ -1638,8 +1678,8 @@ def test_multitrack_h3_first_pass_preview_only_builds_first_selected_task(monkey
         node for node in nodes if node["class_type"] == "easy minimaxH3ToVideo"
     )
     assert (conditioning["inputs"]["width"], conditioning["inputs"]["height"]) == (
-        896,
-        512,
+        1344,
+        768,
     )
     artifact = next(
         node for node in nodes if node["class_type"] == "easy h3ProjectArtifact"
@@ -1954,8 +1994,8 @@ def test_multitrack_h3_dual_context_uses_separate_low_and_hires_latents(monkeypa
         if node["class_type"] == "easy minimaxH3ToVideo"
         and node["inputs"]["prompt"]
         == low_context_conditioning["inputs"]["prompt"]
-        and node["inputs"]["width"] == 1344
-        and node["inputs"]["height"] == 768
+        and node["inputs"]["width"] == 1664
+        and node["inputs"]["height"] == 960
     )
     context_guiders = [
         (node_id, node)

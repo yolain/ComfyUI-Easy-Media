@@ -29,7 +29,7 @@ from ..utils.h3_project import (
     h3_generation_mode,
     h3_locked_audio_track,
     h3_project_filename_prefix,
-    h3_first_pass_dimensions,
+    h3_second_pass_dimensions,
     has_h3_first_pass_checkpoint,
     h3_task_entries,
     h3_task_type,
@@ -1760,10 +1760,12 @@ class EasyMultiTrackProject(io.ComfyNode):
                 io.Boolean.Input("disable_2nd_noise", default=False, tooltip="Disable noise in second-pass for dual-sampling"),
                 io.Float.Input(
                     "upscale_by",
-                    default=1.5,
+                    default=1.250,
                     min=1.0,
                     max=8.0,
-                    step=0.05,
+                    step=0.001,
+                    round=0.001,
+                    extra_dict={"precision": 3},
                 ),
                 io.Combo.Input(
                     "upscale_model",
@@ -1873,9 +1875,32 @@ class EasyMultiTrackProject(io.ComfyNode):
         project_save = str(_first_input(kwargs.get("project_save"), "new"))
         if project_save not in {"new", "override"}:
             raise ValueError("project_save must be 'new' or 'override'")
+        upscale_by = float(
+            _first_input(
+                sampling_config.get("upscale_by"),
+                _first_input(kwargs.get("upscale_by"), 1.250),
+            )
+        )
+        if not math.isfinite(upscale_by) or upscale_by < 1:
+            raise ValueError(
+                "upscale_by must be a finite value greater than or equal to 1"
+            )
+
+        first_pass_width = int(info["width"])
+        first_pass_height = int(info["height"])
+        audio_only = (first_pass_width, first_pass_height) == (32, 32)
+        fps = float(info["frame_rate"])
+        target_width, target_height = h3_second_pass_dimensions(
+            first_pass_width,
+            first_pass_height,
+            run_second_pass,
+            upscale_by,
+        )
+        # Keep task inputs at the configured size; exports use the final size.
+        output_info = {**info, "width": target_width, "height": target_height}
         initialize_h3_project(
             safe_project_name,
-            info,
+            output_info,
             folder_paths.get_output_directory(),
         )
         all_entries = h3_task_entries(info)
@@ -1931,22 +1956,6 @@ class EasyMultiTrackProject(io.ComfyNode):
             f"Found {len(all_entries)} segments; processing {len(selected_entries)}",
         )
         report_step(20)
-        upscale_by = float(_first_input(sampling_config.get("upscale_by"), 1.5))
-        if not math.isfinite(upscale_by) or upscale_by < 1:
-            raise ValueError(
-                "upscale_by must be a finite value greater than or equal to 1"
-            )
-
-        target_width = int(info["width"])
-        target_height = int(info["height"])
-        audio_only = (target_width, target_height) == (32, 32)
-        fps = float(info["frame_rate"])
-        first_pass_width, first_pass_height = h3_first_pass_dimensions(
-            target_width,
-            target_height,
-            has_second_pass,
-            upscale_by,
-        )
         first_pass_seed = int(_first_input(kwargs.get("seed"), 42))
         second_pass_seed = first_pass_seed
         selected_upscale_model = str(
@@ -2549,7 +2558,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                 "segment_index": task_index,
                 "context_latent": project_hires_context_latent,
                 **saved_media_inputs,
-                "tracks_info": info,
+                "tracks_info": output_info,
                 "continuity_mode": continuity_mode,
                 "sampling_pass": (
                     "first"

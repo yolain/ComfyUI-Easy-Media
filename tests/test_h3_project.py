@@ -17,7 +17,7 @@ from utils.h3_project import (  # noqa: E402
     delete_h3_project_video,
     h3_generation_mode,
     h3_locked_audio_track,
-    h3_first_pass_dimensions,
+    h3_second_pass_dimensions,
     has_h3_first_pass_checkpoint,
     h3_project_filename_prefix,
     h3_task_entries,
@@ -169,9 +169,15 @@ def test_minimax_frame_count_matches_nearest_17k_plus_5_grid():
     assert minimax_frame_count(240) == 243
 
 
-def test_first_pass_dimensions_are_reduced_only_with_a_second_pass():
-    assert h3_first_pass_dimensions(1344, 768, True, 1.5) == (896, 512)
-    assert h3_first_pass_dimensions(1344, 768, False, 1.5) == (1344, 768)
+def test_second_pass_dimensions_scale_up_then_align_to_32():
+    assert h3_second_pass_dimensions(1344, 768, True, 1.5) == (2016, 1152)
+    assert h3_second_pass_dimensions(1344, 768, True, 1.250) == (1664, 960)
+    assert h3_second_pass_dimensions(1344, 768, True, 1.2) == (1600, 928)
+    assert h3_second_pass_dimensions(1216, 768, True, 1.250) == (1536, 960)
+    assert h3_second_pass_dimensions(1344, 768, True, 1.234) == (1664, 960)
+    assert h3_second_pass_dimensions(1344, 768, False, 1.5) == (1344, 768)
+    assert h3_second_pass_dimensions(1344, 768, True, 1.0) == (1344, 768)
+    assert h3_second_pass_dimensions(32, 32, True, 1.5) == (32, 32)
 
 
 def test_safe_project_name_defaults_and_removes_path_separators():

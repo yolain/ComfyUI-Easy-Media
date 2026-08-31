@@ -336,14 +336,15 @@ def minimax_frame_count(duration_frames: int | float) -> int:
     return H3_FRAME_REMAINDER + max(0, grid_index) * H3_FRAME_STEP
 
 
-def h3_first_pass_dimensions(
+def h3_second_pass_dimensions(
     width: int, height: int, has_second_pass: bool, upscale_by: float
 ) -> tuple[int, int]:
-    if not has_second_pass or upscale_by <= 1:
+    """Scale then round to the nearest 32px grid, matching the H3 upscaler."""
+    if not has_second_pass or upscale_by <= 1 or (width, height) == (32, 32):
         return width, height
     return (
-        max(32, math.ceil(width / (32 * upscale_by)) * 32),
-        max(32, math.ceil(height / (32 * upscale_by)) * 32),
+        max(32, round(width * upscale_by / 32) * 32),
+        max(32, round(height * upscale_by / 32) * 32),
     )
 
 

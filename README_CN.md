@@ -176,13 +176,13 @@ v1.3.0 新增多轨项目流水线，将时间线编排、逐段生成、上下�
 
 ![multiTrackProject](https://github.com/user-attachments/assets/a2d801eb-24c0-4ca3-963e-62ff4b1f2b79)
 
-`easy multitrackProject` 负责管理 MiniMax H3 项目的逐段生成。编辑器中的尺寸是**最终目标尺寸**；项目文件保存在 `ComfyUI/output/easy_media/projects/<project_name>/`，包含片段媒体、项目记录以及用于续接的上下文潜空间。
+`easy multitrackProject` 负责管理 MiniMax H3 项目的逐段生成。编辑器中的尺寸是**一采尺寸**，双采样在此基础上放大后进行二采；项目文件保存在 `ComfyUI/output/easy_media/projects/<project_name>/`，包含片段媒体、项目记录以及用于续接的上下文潜空间。
 
 #### 编码与采样
 
 1. **读取任务并编码**：按当前任务读取提示词和媒体，根据任务模式构建文生、首尾帧、尾帧或多媒体参考条件，并创建音视频潜空间。存在锁定音频时，将音频编码并施加采样约束。
-2. **一采**：`sampling_mode = single` 时直接在目标尺寸生成；`dual` 时按 `upscale_by` 反推较低的一采尺寸，并向上对齐到 32 的倍数。双采样会为目标尺寸重新构建所需的参考条件。
-3. **放大与二采（仅 `dual`）**：放大一采的视频潜空间，与音频潜空间重新组合，再在目标尺寸进行二次采样。`upscale_by = 1` 时不做尺寸放大，但仍可进行二采。
+2. **一采**：`sampling_mode = single` 和 `dual` 都按编辑器设定尺寸生成，不再根据 `upscale_by` 反推缩小一采尺寸。
+3. **放大与二采（仅 `dual`）**：将设定的宽、高分别乘以 `upscale_by`，再按 `round(尺寸 * upscale_by / 32) * 32` 就近对齐到 32 的倍数。把一采的视频潜空间放大到此尺寸，与音频潜空间重新组合后进行二采；尺寸变化时重新构建对应的参考条件。`upscale_by = 1.000` 时不做尺寸放大，但仍可进行二采。
 4. **解码与保存**：解码视频和音频；上下文片段会同步裁掉开头重复的引导部分及末尾用于时间网格对齐的多余帧，再保存当前片段。
 5. **继续下一段**：保存上下文与项目记录后，自动处理后续任务。分镜模式重新开始一个镜头，上下文模式继承前一段；最终输出 `PROJECT_NAME` 供合并节点读取。
 
@@ -192,8 +192,11 @@ v1.3.0 新增多轨项目流水线，将时间线编排、逐段生成、上下�
 | `model_loader_2nd` | 可选的二采 H3 模型；不接时复用一采模型，接入后也仍使用一采加载器的编码器和 VAE |
 | `sampling_plan` | 内置 `ultra_light`、`light`、`medium`、`high` 等预设，根据 Turbo / 非 Turbo 模型选择采样器和 sigmas；也可用 `custom` 自定义 |
 | `sampler` / `sigmas` | 成对接入以覆盖一采采样设置；二采对应 `sampler_2nd` / `sigmas_2nd`，也需成对接入。`custom` 需要为实际运行的每个采样阶段提供这两个输入 |
+| `upscale_by` | 相对于编辑器尺寸的二采放大倍率；默认 `1.250`，三位小数，步长 `0.001` |
 | `disable_2nd_noise` | 控制是否禁用二采新增噪声，不代表跳过二采 |
 | `1st_pass_only` | 在 `dual` 下只执行所选范围中**第一段的一采**并保存检查点；下次关闭此项，可从该段已有检查点继续二采 |
+
+对齐使用 Python `round`，与 [H3 潜空间放大节点](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler/blob/main/nodes/minimax_h3_latent_upscaler_3d.py) 一致，并非固定向上对齐；恰好居中时取偶数。例如 `1344 × 768`、倍率 `1.250`，相乘后为 `1680 × 960`，二采对齐尺寸为 **`1664 × 960`**。两条放大路径采用相同尺寸，项目记录与合并导出也保留实际输出尺寸。单采样和仅一采预览保持编辑器尺寸；纯音频项目（`32 × 32`）不放大。旧工作流保留已保存的倍率，不会自动改成新默认值。
 
 采样预设可参考仓库中的 [h3_sample.json.example](./presets/h3_sample.json.example)，复制为 `presets/h3_sample.json` 后修改。**当前内置双采样预设采用独立的一采、二采sigmas**；不应再将 `light` 一概理解成“拆分 sigmas、未完成一采”。如自定义预设使用 `split_step`，才会将同一sigmas拆到两个阶段。已有自定义文件会优先生效，升级后应检查自己的配置。
 
@@ -201,7 +204,7 @@ v1.3.0 新增多轨项目流水线，将时间线编排、逐段生成、上下�
 
 | `upscale_model` | 放大路径 | 依赖 |
 |-----------------|----------|------|
-| 选择 H3 潜空间放大模型 | 调用 `MinimaxH3LatentUpscaler3D`，直接把视频潜空间放大到编辑器目标尺寸，再二采 | 安装 [Comfyui_Minimax_h3_latent_Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler)，将 [H3 放大模型权重](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler) 放入 `ComfyUI/models/latent_upscale_models/` |
+| 选择 H3 潜空间放大模型 | 调用 `MinimaxH3LatentUpscaler3D`，直接把视频潜空间放大到乘倍率并对齐后的二采尺寸 | 安装 [Comfyui_Minimax_h3_latent_Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler)，将 [H3 放大模型权重](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler) 放入 `ComfyUI/models/latent_upscale_models/` |
 | `None` | 一采视频 VAE 解码 → 图像缩放 → VAE 重新编码 → 二采 | 需要 [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) 的 `ImageResizeKJv2` 节点 |
 
 这里的 `upscale_model` 是 **H3 潜空间放大权重**，与 `model_loader_2nd` 中负责二采的 H3 生成模型用途不同。直接放大潜空间可以省去中间的视频 VAE 解码 / 编码步骤，但二采仍在目标分辨率运行，不意味着高分辨率采样的显存开销也会同比下降。选择了模型但未安装对应节点时会报错，不会静默切换放大方式。
@@ -220,7 +223,7 @@ v1.3.0 新增多轨项目流水线，将时间线编排、逐段生成、上下�
 - **同步裁剪与干净的续接源**：项目默认取上一段尾部 22 帧作为上下文，为满足 H3 时间网格额外预留 34 帧生成空间。解码后去掉重复开头和多余尾帧，保留当前任务所需帧数；再从实际交付的音视频范围重新编码上下文，避免连续续接时误用被裁掉的尾部。
 - **项目内自动传递与跨次续跑**：同一轮生成自动传递前段上下文；从中间片段开始生成时，从项目中读取前一段的活动版本上下文，无需手工连 Save / Load Latent 节点。
 
-> **注意：** 上下文依赖前一段已保存的潜空间，只有 MP4 文件不足以恢复完整上下文。改变目标尺寸、放大倍率或更换前一段版本后，应重新检查后续上下文链；已有后续片段不会因为前段改变而自动重新生成。
+> **注意：** 上下文依赖前一段已保存的潜空间，只有 MP4 文件不足以恢复完整上下文。改变编辑器尺寸、放大倍率或更换前一段版本后，应重新检查后续上下文链。旧版按反算缩小尺寸生成的一采检查点和上下文潜空间，应重新生成后再按新尺寸规则续跑；已有后续片段不会因为前段改变而自动重新生成。
 
 #### 指定范围、重生成与版本保留
 
