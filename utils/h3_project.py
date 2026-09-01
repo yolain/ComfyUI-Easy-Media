@@ -460,8 +460,6 @@ def safe_h3_project_name(value: Any) -> str:
 
 
 def choose_h3_generation(project_dir: Path, segment_index: int, override: bool) -> int:
-    if override:
-        return 1
     versions: dict[int, float] = {}
     pattern = re.compile(
         rf"^(?:video|audio|locked_audio|context_latent(?:_low)?)_{int(segment_index)}_"
@@ -482,6 +480,12 @@ def choose_h3_generation(project_dir: Path, segment_index: int, override: bool) 
                     modified,
                     versions.get(generation, modified),
                 )
+    if override:
+        return (
+            max(versions, key=lambda generation: (versions[generation], generation))
+            if versions
+            else 1
+        )
     for generation in range(1, H3_PROJECT_VERSION_LIMIT + 1):
         if generation not in versions:
             return generation

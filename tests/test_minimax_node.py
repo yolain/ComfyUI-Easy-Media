@@ -2610,7 +2610,7 @@ def test_h3_project_artifact_preserves_complete_first_pass_checkpoint(
         assert audio.shape[-1] == 65
 
 
-def test_h3_project_artifact_override_reuses_generation_one(monkeypatch, tmp_path):
+def test_h3_project_artifact_override_reuses_latest_generation(monkeypatch, tmp_path):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
     monkeypatch.setattr(
@@ -2622,27 +2622,34 @@ def test_h3_project_artifact_override_reuses_generation_one(monkeypatch, tmp_pat
     project_dir = tmp_path / "easy_media" / "projects" / "default"
     project_dir.mkdir(parents=True)
 
-    for run in range(2):
+    for run, project_save in enumerate(("new", "new", "override")):
         staged = project_dir / f".override_{run}.mp4"
         staged.write_bytes(f"video-{run}".encode())
         module.EasyH3ProjectArtifact.execute(
             project_name="",
-            project_save="override",
+            project_save=project_save,
             segment_index=3,
             context_latent=_h3_context_latent(run),
             video_path=f"output/{staged.relative_to(tmp_path)}",
             tracks_info=info,
         )
 
-    assert [path.name for path in project_dir.glob("video_3_*.mp4")] == [
-        "video_3_1.mp4"
+    assert sorted(path.name for path in project_dir.glob("video_3_*.mp4")) == [
+        "video_3_1.mp4",
+        "video_3_2.mp4",
     ]
+    assert (project_dir / "video_3_1.mp4").read_bytes() == b"video-0"
+    assert (project_dir / "video_3_2.mp4").read_bytes() == b"video-2"
     assert not list(project_dir.glob("latent_3_*"))
-    assert [
+    assert sorted(
         path.name for path in project_dir.glob("context_latent_3_*.safetensors")
-    ] == [
-        "context_latent_3_1.safetensors"
+    ) == [
+        "context_latent_3_1.safetensors",
+        "context_latent_3_2.safetensors",
     ]
+    manifest = json.loads((project_dir / "project.json").read_text())
+    assert manifest["segments"]["3"]["active_generation"] == 2
+    assert set(manifest["segments"]["3"]["generations"]) == {"1", "2"}
 
 
 @pytest.mark.parametrize("project_save", ["new", "override"])
