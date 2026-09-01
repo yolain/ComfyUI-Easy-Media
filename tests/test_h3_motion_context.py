@@ -228,3 +228,22 @@ def test_h3_hires_continuity_uses_previous_video_and_freezes_current_audio(
     assert torch.equal(output_audio, current_audio)
     assert torch.all(video_mask[:, :, 2:] == 1)
     assert torch.all(audio_mask == 0)
+
+
+def test_trim_motion_context_latent_keeps_only_detached_cpu_av_tail(
+    nested_tensor_module,
+):
+    latent = _av_latent(video_steps=12)
+    source_video, source_audio = latent["samples"]
+
+    output = core.trim_motion_context_latent(latent, context_length="22")
+
+    video, audio = output["samples"].tensors
+    assert video.shape[2] == 7
+    assert audio.shape[-1] == 37
+    assert torch.equal(video, source_video[:, :, -7:])
+    assert torch.equal(audio, source_audio[..., -37:])
+    assert video.device.type == "cpu"
+    assert audio.device.type == "cpu"
+    assert video.untyped_storage().data_ptr() != source_video.untyped_storage().data_ptr()
+    assert audio.untyped_storage().data_ptr() != source_audio.untyped_storage().data_ptr()

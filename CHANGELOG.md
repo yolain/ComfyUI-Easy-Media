@@ -12,6 +12,7 @@
 ### ⚡ MiniMax H3 Optimizations
 
 - **Motion Context & Resampling**: Optimized the pairing of the original `MotionContext` with resampling. In the current default sampling configuration: `medium` produces smoother results, while `light` cannot sample sufficiently in the first sampling due to sigma separation.
+- **Motion Context Latent Memory**: Keep only the 22-frame high-resolution audio/video context tail on CPU between segments and in completed project artifacts, while retaining the complete low-resolution first-pass checkpoint for deferred second-pass runs.
 - **Multi-Track Editor (Audio Track)**: Added `Lock Audio` feature, only applicable under MultiTrack Project. When generating video, audio will no longer regenerate, but instead schedules video frame output based on this audio.
 - **Multi-Track Editor (Audio Track)**: Added `Reuse Audio` - all segments can reuse this audio (previously required cloning to each segment), supports up to 15 seconds without being truncated by segments.
 - **Multi-Track Editor (Task Track)**: When multi-selecting task segments, you can uniformly adjust task mode, transition mode, and reference image size.
