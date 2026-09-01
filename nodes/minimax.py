@@ -47,6 +47,7 @@ from ..utils.models import detect_turbo_lora_from_prompt, detect_turbo_model
 from ..utils.minimax import (
     expand_image_inputs,
     flatten_media_inputs,
+    h3_phase_aligned_context_start,
     remove_output_files_by_prefix,
 )
 
@@ -213,18 +214,28 @@ def _h3_encode_context_media(
     vae: Any,
     audio_vae: Any,
     node_prefix: str,
+    context_frames: int = 22,
 ) -> Any:
-    """Encode an already-trimmed clip into a clean H3 AV context latent."""
+    """Encode a phase-aligned video suffix and the delivered audio timeline."""
+    video_tail = graph.node(
+        "easy h3ContextMediaTrim",
+        id=f"{node_prefix}_encode_trim",
+        images=images,
+        audio=audio,
+        trim_frames=0,
+        output_frames=int(context_frames),
+        phase_align_video_encode=True,
+    )
     encoded_video = graph.node(
         "VAEEncode",
         id=f"{node_prefix}_video_encode",
-        pixels=images,
+        pixels=video_tail.out(0),
         vae=vae,
     )
     encoded_audio = graph.node(
         "VAEEncodeAudio",
         id=f"{node_prefix}_audio_encode",
-        audio=audio,
+        audio=video_tail.out(1),
         vae=audio_vae,
     )
     return graph.node(
@@ -1065,7 +1076,13 @@ class EasyH3ProjectContextLatentLoad(io.ComfyNode):
 def _timed_h3_project_graph(graph: GraphBuilder, project_name: str) -> dict[str, Any]:
     """Tag native operations for timing without changing node types or inputs."""
     expanded = graph.finalize()
-    timed_types = {"SamplerCustomAdvanced", "VAEDecode", "VAEDecodeAudio"}
+    timed_types = {
+        "SamplerCustomAdvanced",
+        "VAEEncode",
+        "VAEEncodeAudio",
+        "VAEDecode",
+        "VAEDecodeAudio",
+    }
     for node_id, node in expanded.items():
         if node["class_type"] not in timed_types:
             continue
@@ -1216,6 +1233,7 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
                 io.Int.Input("trim_frames", min=0),
                 io.Int.Input("output_frames", min=1),
                 io.Boolean.Input("pad_audio", default=True),
+                io.Boolean.Input("phase_align_video_encode", default=False),
                 io.Float.Input(
                     "fps",
                     default=24.0,
@@ -1239,10 +1257,20 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
         trim_frames: int = 0,
         output_frames: int = 1,
         pad_audio: bool = True,
+        phase_align_video_encode: bool = False,
         fps: float = 24.0,
     ) -> io.NodeOutput:
         prefix = max(0, int(trim_frames))
         wanted_frames = max(1, int(output_frames))
+        if bool(phase_align_video_encode):
+            if not isinstance(images, torch.Tensor) or images.ndim != 4:
+                raise ValueError("images must have IMAGE shape [B, H, W, C]")
+            start = h3_phase_aligned_context_start(
+                int(images.shape[0]),
+                wanted_frames,
+            )
+            return io.NodeOutput(images[start:].contiguous(), audio)
+
         frame_rate = float(fps)
         if not math.isfinite(frame_rate) or frame_rate <= 0:
             raise ValueError("fps must be a positive finite number")

@@ -460,8 +460,6 @@ def safe_h3_project_name(value: Any) -> str:
 
 
 def choose_h3_generation(project_dir: Path, segment_index: int, override: bool) -> int:
-    if override:
-        return 1
     versions: dict[int, float] = {}
     pattern = re.compile(
         rf"^(?:video|audio|locked_audio|context_latent(?:_low)?)_{int(segment_index)}_"
@@ -482,6 +480,12 @@ def choose_h3_generation(project_dir: Path, segment_index: int, override: bool) 
                     modified,
                     versions.get(generation, modified),
                 )
+    if override:
+        return (
+            max(versions, key=lambda generation: (versions[generation], generation))
+            if versions
+            else 1
+        )
     for generation in range(1, H3_PROJECT_VERSION_LIMIT + 1):
         if generation not in versions:
             return generation
@@ -937,6 +941,7 @@ def _h3_project_data(
             "source_start_frame": 0,
             "source_end_frame": active_file["source_frame_count"],
             "source_frame_count": active_file["source_frame_count"],
+            "updated_at": float(segment.get("updated_at", 0) or 0),
             "continuity_mode": (
                 "context" if str(segment.get("continuity_mode", "shot")).lower() == "context" else "shot"
             ),
@@ -1021,20 +1026,36 @@ def compose_h3_project_video(project_name: Any, project_data: Any = None) -> Pat
             # failing an otherwise valid render containing newly generated clips.
             continue
         requested_path = str(clip.get("file_path", ""))
-        selected_file = next(
+        snapshot_updated_at = clip.get("updated_at")
+        if snapshot_updated_at is None and isinstance(requested, dict):
+            snapshot_updated_at = requested.get("updated_at")
+        try:
+            regenerated_after_snapshot = (
+                snapshot_updated_at is not None
+                and float(source_clip.get("updated_at", 0) or 0)
+                > float(snapshot_updated_at)
+            )
+        except (TypeError, ValueError, OverflowError):
+            regenerated_after_snapshot = False
+        active_file = next(
             (
                 file
                 for file in source_clip.get("video_files", [])
-                if file.get("file_path") == requested_path
+                if file.get("file_path") == source_clip.get("file_path")
             ),
-            next(
+            source_clip,
+        )
+        selected_file = (
+            active_file
+            if regenerated_after_snapshot
+            else next(
                 (
                     file
                     for file in source_clip.get("video_files", [])
-                    if file.get("file_path") == source_clip.get("file_path")
+                    if file.get("file_path") == requested_path
                 ),
-                source_clip,
-            ),
+                active_file,
+            )
         )
         source_count = int(selected_file["source_frame_count"])
         try:

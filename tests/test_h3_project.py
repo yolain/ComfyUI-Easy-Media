@@ -330,7 +330,27 @@ def test_generation_uses_free_slot_then_replaces_oldest_at_limit(tmp_path):
         os.utime(path, (modified, modified))
 
     assert choose_h3_generation(tmp_path, 2, False) == 1
-    assert choose_h3_generation(tmp_path, 2, True) == 1
+    assert choose_h3_generation(tmp_path, 2, True) == 10
+
+
+def test_override_generation_targets_latest_saved_video(tmp_path):
+    (tmp_path / "video_2_1.mp4").write_text("older")
+    (tmp_path / "video_2_2.mp4").write_text("newer")
+    os.utime(tmp_path / "video_2_1.mp4", (1000, 1000))
+    os.utime(tmp_path / "video_2_2.mp4", (2000, 2000))
+    (tmp_path / "project.json").write_text(json.dumps({
+        "segments": {
+            "2": {
+                "active_generation": 1,
+                "generations": {
+                    "1": {"video": "video_2_1.mp4"},
+                    "2": {"video": "video_2_2.mp4"},
+                },
+            },
+        },
+    }))
+
+    assert choose_h3_generation(tmp_path, 2, True) == 2
 
 
 def _write_render_project(tmp_path: Path) -> Path:
@@ -515,6 +535,7 @@ def test_compose_h3_project_video_uses_selected_file_for_same_index(monkeypatch,
         "video": alternate.name,
         "locked_audio": alternate_audio.name,
     }
+    manifest["segments"]["0"]["updated_at"] = 100.0
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     monkeypatch.setattr("utils.h3_project.folder_paths.get_output_directory", lambda: str(tmp_path))
     monkeypatch.setattr("utils.video.ffprobe_info", lambda _path: {"frame_count": 120})
@@ -530,6 +551,7 @@ def test_compose_h3_project_video_uses_selected_file_for_same_index(monkeypatch,
         "clips": [{
             "index": 0,
             "file_path": str(alternate.relative_to(tmp_path)),
+            "updated_at": 100.0,
             "source_start_frame": 0,
             "source_end_frame": 120,
         }],
@@ -538,6 +560,58 @@ def test_compose_h3_project_video_uses_selected_file_for_same_index(monkeypatch,
     assert captured["segments"][0]["source"] == str(alternate)
     assert captured["segments"][0]["audio_locked"] is True
     assert captured["segments"][0]["audio_source"] == str(alternate_audio)
+
+
+def test_compose_h3_project_video_uses_generation_written_after_snapshot(
+    monkeypatch,
+    tmp_path,
+):
+    project_dir = _write_render_project(tmp_path)
+    manifest_path = project_dir / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["segments"]["1"]["updated_at"] = 100.0
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(
+        "utils.h3_project.folder_paths.get_output_directory",
+        lambda: str(tmp_path),
+    )
+    monkeypatch.setattr(
+        "utils.video.ffprobe_info",
+        lambda _path: {"frame_count": 120},
+    )
+    snapshot = load_h3_project_data("demo")
+    snapshot["clips"][1] = {
+        **snapshot["clips"][1],
+        "source_start_frame": 10,
+        "source_end_frame": 70,
+    }
+
+    replacement = project_dir / "video_1_2.mp4"
+    replacement.write_bytes(b"new-video-1")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["segments"]["1"]["generations"]["2"] = {
+        "video": replacement.name,
+        "updated_at": 200.0,
+    }
+    manifest["segments"]["1"]["active_generation"] = 2
+    manifest["segments"]["1"]["updated_at"] = 200.0
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    captured = {}
+
+    def fake_merge(segments, total_length, frame_rate, width, height):
+        captured.update({"segments": segments, "total_length": total_length})
+        return str(tmp_path / "combined.mp4")
+
+    monkeypatch.setattr(
+        "utils.video.merge_video_track_with_ffmpeg",
+        fake_merge,
+    )
+
+    compose_h3_project_video("demo", snapshot)
+
+    assert Path(captured["segments"][1]["source"]).name == replacement.name
+    assert captured["segments"][1]["source_start_frame"] == 10
+    assert captured["total_length"] == 180
 
 
 def test_compose_h3_project_video_uses_trimmed_sequential_segments(monkeypatch, tmp_path):

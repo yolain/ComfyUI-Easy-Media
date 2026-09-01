@@ -763,6 +763,39 @@ def test_h3_context_media_trim_can_leave_locked_audio_short_for_alignment(
     assert result.values[1]["waveform"].shape[-1] == 8
 
 
+@pytest.mark.parametrize(
+    ("total_frames", "expected_start"),
+    [(22, 0), (120, 102), (124, 102), (240, 221)],
+)
+def test_h3_context_media_trim_preserves_vae_chunk_phase_for_encoding(
+    monkeypatch,
+    total_frames,
+    expected_start,
+):
+    module = _load_minimax_node(monkeypatch)
+    images = torch.arange(total_frames, dtype=torch.float32).reshape(
+        total_frames, 1, 1, 1
+    )
+    audio = {
+        "waveform": torch.zeros(1, 1, total_frames * 2),
+        "sample_rate": 48,
+    }
+
+    result = module.EasyH3ContextMediaTrim.execute(
+        images,
+        audio,
+        trim_frames=0,
+        output_frames=22,
+        phase_align_video_encode=True,
+    )
+
+    output_images, output_audio = result.values
+    assert output_images[:, 0, 0, 0].tolist() == list(
+        range(expected_start, total_frames)
+    )
+    assert output_audio is audio
+
+
 def test_h3_locked_audio_duration_align_matches_decoded_video_without_padding(
     monkeypatch,
 ):
@@ -2115,6 +2148,21 @@ def test_multitrack_h3_dual_context_uses_separate_low_and_hires_latents(monkeypa
     )
     assert result.expand[low_context_link[0]]["class_type"] == "LTXVConcatAVLatent"
     assert hires_context_link != low_context_link
+    context_concat_links = [hires_trim["inputs"]["latent"], low_context_link]
+    for concat_link in context_concat_links:
+        concat = result.expand[concat_link[0]]
+        video_encode = result.expand[concat["inputs"]["video_latent"][0]]
+        video_trim = result.expand[video_encode["inputs"]["pixels"][0]]
+        audio_encode = result.expand[concat["inputs"]["audio_latent"][0]]
+        assert video_encode["class_type"] == "VAEEncode"
+        assert video_trim["class_type"] == "easy h3ContextMediaTrim"
+        assert video_trim["inputs"]["output_frames"] == 22
+        assert video_trim["inputs"]["phase_align_video_encode"] is True
+        assert audio_encode["class_type"] == "VAEEncodeAudio"
+        assert audio_encode["inputs"]["audio"] == [
+            video_encode["inputs"]["pixels"][0],
+            1,
+        ]
 
 
 def test_multitrack_h3_connected_second_pass_sampling_overrides_context_preset(
@@ -2562,7 +2610,7 @@ def test_h3_project_artifact_preserves_complete_first_pass_checkpoint(
         assert audio.shape[-1] == 65
 
 
-def test_h3_project_artifact_override_reuses_generation_one(monkeypatch, tmp_path):
+def test_h3_project_artifact_override_reuses_latest_generation(monkeypatch, tmp_path):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
     monkeypatch.setattr(
@@ -2574,27 +2622,34 @@ def test_h3_project_artifact_override_reuses_generation_one(monkeypatch, tmp_pat
     project_dir = tmp_path / "easy_media" / "projects" / "default"
     project_dir.mkdir(parents=True)
 
-    for run in range(2):
+    for run, project_save in enumerate(("new", "new", "override")):
         staged = project_dir / f".override_{run}.mp4"
         staged.write_bytes(f"video-{run}".encode())
         module.EasyH3ProjectArtifact.execute(
             project_name="",
-            project_save="override",
+            project_save=project_save,
             segment_index=3,
             context_latent=_h3_context_latent(run),
             video_path=f"output/{staged.relative_to(tmp_path)}",
             tracks_info=info,
         )
 
-    assert [path.name for path in project_dir.glob("video_3_*.mp4")] == [
-        "video_3_1.mp4"
+    assert sorted(path.name for path in project_dir.glob("video_3_*.mp4")) == [
+        "video_3_1.mp4",
+        "video_3_2.mp4",
     ]
+    assert (project_dir / "video_3_1.mp4").read_bytes() == b"video-0"
+    assert (project_dir / "video_3_2.mp4").read_bytes() == b"video-2"
     assert not list(project_dir.glob("latent_3_*"))
-    assert [
+    assert sorted(
         path.name for path in project_dir.glob("context_latent_3_*.safetensors")
-    ] == [
-        "context_latent_3_1.safetensors"
+    ) == [
+        "context_latent_3_1.safetensors",
+        "context_latent_3_2.safetensors",
     ]
+    manifest = json.loads((project_dir / "project.json").read_text())
+    assert manifest["segments"]["3"]["active_generation"] == 2
+    assert set(manifest["segments"]["3"]["generations"]) == {"1", "2"}
 
 
 @pytest.mark.parametrize("project_save", ["new", "override"])
@@ -3307,17 +3362,40 @@ def test_audio_project_preflight_does_not_block_other_projects_or_video(monkeypa
 def test_project_timing_keeps_native_nodes_and_inputs(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     module.comfy_nodes.NODE_CLASS_MAPPINGS["ImageResizeKJv2"] = _ImageResizeKJWithNvidia
-    inputs = _h3_project_inputs(project_name="timing-demo", sampling_mode=_h3_sampling_mode("dual"))
+    inputs = _h3_project_inputs(
+        project_name="timing-demo",
+        sampling_mode=_h3_sampling_mode("dual"),
+    )
+    inputs["tracks_info"][0]["tracks"][0]["segments"].append({
+        "start_frame": 120,
+        "end_frame": 240,
+        "content": {
+            "task_mode": "l2v",
+            "continuity_mode": "context",
+            "images": [],
+            "user_prompt": "continue",
+        },
+    })
     module.GraphBuilder.set_default_prefix("timing", 0, 0)
     result = module.EasyMultiTrackProject.execute(**inputs)
     tagged = [node for node in result.expand.values() if "easy_media_timing" in node.get("_meta", {})]
     assert len(tagged) >= 5
-    assert {node["class_type"] for node in tagged} == {"SamplerCustomAdvanced", "VAEDecode", "VAEDecodeAudio"}
+    assert {node["class_type"] for node in tagged} == {
+        "SamplerCustomAdvanced",
+        "VAEEncode",
+        "VAEEncodeAudio",
+        "VAEDecode",
+        "VAEDecodeAudio",
+    }
     labels = [node["_meta"]["easy_media_timing"] for node in tagged]
     assert len(set(labels)) == len(labels)
     assert all(label.startswith("timing-demo / ") for label in labels)
     assert any("first_pass_sample_0" in label for label in labels)
     assert any("second_pass_sample_0" in label for label in labels)
+    assert any("hires_context_1_video_encode" in label for label in labels)
+    assert any("hires_context_1_audio_encode" in label for label in labels)
+    assert any("low_context_1_video_encode" in label for label in labels)
+    assert any("low_context_1_audio_encode" in label for label in labels)
 
     monkeypatch.setattr(module, "_timed_h3_project_graph", lambda graph, _name: graph.finalize())
     module.GraphBuilder.set_default_prefix("timing", 0, 0)
