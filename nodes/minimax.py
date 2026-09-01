@@ -47,6 +47,7 @@ from ..utils.models import detect_turbo_lora_from_prompt, detect_turbo_model
 from ..utils.minimax import (
     expand_image_inputs,
     flatten_media_inputs,
+    h3_phase_aligned_context_start,
     remove_output_files_by_prefix,
 )
 
@@ -213,12 +214,19 @@ def _h3_encode_context_media(
     vae: Any,
     audio_vae: Any,
     node_prefix: str,
+    context_frames: int = 22,
 ) -> Any:
-    """Encode an already-trimmed clip into a clean H3 AV context latent."""
+    """Encode a phase-aligned video suffix and the delivered audio timeline."""
+    video_tail = graph.node(
+        "easy h3ContextVideoEncodeTrim",
+        id=f"{node_prefix}_video_trim",
+        images=images,
+        context_frames=int(context_frames),
+    )
     encoded_video = graph.node(
         "VAEEncode",
         id=f"{node_prefix}_video_encode",
-        pixels=images,
+        pixels=video_tail.out(0),
         vae=vae,
     )
     encoded_audio = graph.node(
@@ -1065,7 +1073,13 @@ class EasyH3ProjectContextLatentLoad(io.ComfyNode):
 def _timed_h3_project_graph(graph: GraphBuilder, project_name: str) -> dict[str, Any]:
     """Tag native operations for timing without changing node types or inputs."""
     expanded = graph.finalize()
-    timed_types = {"SamplerCustomAdvanced", "VAEDecode", "VAEDecodeAudio"}
+    timed_types = {
+        "SamplerCustomAdvanced",
+        "VAEEncode",
+        "VAEEncodeAudio",
+        "VAEDecode",
+        "VAEDecodeAudio",
+    }
     for node_id, node in expanded.items():
         if node["class_type"] not in timed_types:
             continue
@@ -1278,6 +1292,42 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
             images[prefix : prefix + wanted_frames] if images is not None else None,
             {"waveform": output_waveform, "sample_rate": sample_rate},
         )
+
+
+class EasyH3ContextVideoEncodeTrim(io.ComfyNode):
+    """Keep the smallest H3 VAE chunk-aligned suffix containing the context."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy h3ContextVideoEncodeTrim",
+            display_name="H3 Context Video Encode Trim",
+            category="_EasyUse/H3",
+            description=(
+                "Internal H3 frame slicer that preserves the original 17-frame "
+                "video VAE chunk phase while avoiding full-clip re-encoding."
+            ),
+            inputs=[
+                io.Image.Input("images"),
+                io.Int.Input("context_frames", default=22, min=1),
+            ],
+            outputs=[io.Image.Output("images")],
+            is_dev_only=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        images: torch.Tensor,
+        context_frames: int = 22,
+    ) -> io.NodeOutput:
+        if not isinstance(images, torch.Tensor) or images.ndim != 4:
+            raise ValueError("images must have IMAGE shape [B, H, W, C]")
+        start = h3_phase_aligned_context_start(
+            int(images.shape[0]),
+            int(context_frames),
+        )
+        return io.NodeOutput(images[start:].contiguous())
 
 
 class EasyH3LockedAudioDurationAlign(io.ComfyNode):

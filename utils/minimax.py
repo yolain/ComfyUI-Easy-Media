@@ -6,6 +6,51 @@ from typing import Any
 import torch
 
 
+H3_VAE_FRAME_CHUNK = 17
+H3_VAE_TOKENS_PER_CHUNK = 5
+H3_VAE_FINAL_TOKEN_DROP = 3
+H3_FRAMES_PER_TOKEN = (1, 4, 4, 4, 4)
+
+
+def h3_phase_aligned_context_start(
+    total_frames: int,
+    context_frames: int = 22,
+) -> int:
+    """Return the first frame of the smallest phase-aligned H3 VAE suffix."""
+    frame_count = int(total_frames)
+    requested_frames = int(context_frames)
+    if frame_count < 1:
+        raise ValueError("total_frames must be positive")
+    if requested_frames < 1 or requested_frames > frame_count:
+        raise ValueError(
+            "context_frames must be positive and no greater than total_frames"
+        )
+
+    latent_steps = 0
+    covered_frames = 0
+    while covered_frames < requested_frames:
+        covered_frames += H3_FRAMES_PER_TOKEN[
+            latent_steps % len(H3_FRAMES_PER_TOKEN)
+        ]
+        latent_steps += 1
+    if covered_frames != requested_frames:
+        raise ValueError(
+            "context_frames must align to the H3 temporal latent grid"
+        )
+
+    required_chunks = (
+        latent_steps
+        + H3_VAE_FINAL_TOKEN_DROP
+        + H3_VAE_TOKENS_PER_CHUNK
+        - 1
+    ) // H3_VAE_TOKENS_PER_CHUNK
+    available_chunks = (
+        frame_count + H3_VAE_FRAME_CHUNK - 1
+    ) // H3_VAE_FRAME_CHUNK
+    first_chunk = max(0, available_chunks - required_chunks)
+    return first_chunk * H3_VAE_FRAME_CHUNK
+
+
 def remove_output_files_by_prefix(
     output_directory: str | Path,
     filename_path: str,

@@ -763,6 +763,31 @@ def test_h3_context_media_trim_can_leave_locked_audio_short_for_alignment(
     assert result.values[1]["waveform"].shape[-1] == 8
 
 
+@pytest.mark.parametrize(
+    ("total_frames", "expected_start"),
+    [(22, 0), (120, 102), (124, 102), (240, 221)],
+)
+def test_h3_context_video_encode_trim_preserves_vae_chunk_phase(
+    monkeypatch,
+    total_frames,
+    expected_start,
+):
+    module = _load_minimax_node(monkeypatch)
+    images = torch.arange(total_frames, dtype=torch.float32).reshape(
+        total_frames, 1, 1, 1
+    )
+
+    result = module.EasyH3ContextVideoEncodeTrim.execute(
+        images,
+        context_frames=22,
+    )
+
+    output = result.values[0]
+    assert output[:, 0, 0, 0].tolist() == list(
+        range(expected_start, total_frames)
+    )
+
+
 def test_h3_locked_audio_duration_align_matches_decoded_video_without_padding(
     monkeypatch,
 ):
@@ -2115,6 +2140,18 @@ def test_multitrack_h3_dual_context_uses_separate_low_and_hires_latents(monkeypa
     )
     assert result.expand[low_context_link[0]]["class_type"] == "LTXVConcatAVLatent"
     assert hires_context_link != low_context_link
+    context_concat_links = [hires_trim["inputs"]["latent"], low_context_link]
+    for concat_link in context_concat_links:
+        concat = result.expand[concat_link[0]]
+        video_encode = result.expand[concat["inputs"]["video_latent"][0]]
+        video_trim = result.expand[video_encode["inputs"]["pixels"][0]]
+        audio_encode = result.expand[concat["inputs"]["audio_latent"][0]]
+        assert video_encode["class_type"] == "VAEEncode"
+        assert video_trim["class_type"] == "easy h3ContextVideoEncodeTrim"
+        assert video_trim["inputs"]["context_frames"] == 22
+        assert audio_encode["class_type"] == "VAEEncodeAudio"
+        audio_source = result.expand[audio_encode["inputs"]["audio"][0]]
+        assert audio_source["class_type"] != "easy h3ContextVideoEncodeTrim"
 
 
 def test_multitrack_h3_connected_second_pass_sampling_overrides_context_preset(
@@ -3307,17 +3344,40 @@ def test_audio_project_preflight_does_not_block_other_projects_or_video(monkeypa
 def test_project_timing_keeps_native_nodes_and_inputs(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     module.comfy_nodes.NODE_CLASS_MAPPINGS["ImageResizeKJv2"] = _ImageResizeKJWithNvidia
-    inputs = _h3_project_inputs(project_name="timing-demo", sampling_mode=_h3_sampling_mode("dual"))
+    inputs = _h3_project_inputs(
+        project_name="timing-demo",
+        sampling_mode=_h3_sampling_mode("dual"),
+    )
+    inputs["tracks_info"][0]["tracks"][0]["segments"].append({
+        "start_frame": 120,
+        "end_frame": 240,
+        "content": {
+            "task_mode": "l2v",
+            "continuity_mode": "context",
+            "images": [],
+            "user_prompt": "continue",
+        },
+    })
     module.GraphBuilder.set_default_prefix("timing", 0, 0)
     result = module.EasyMultiTrackProject.execute(**inputs)
     tagged = [node for node in result.expand.values() if "easy_media_timing" in node.get("_meta", {})]
     assert len(tagged) >= 5
-    assert {node["class_type"] for node in tagged} == {"SamplerCustomAdvanced", "VAEDecode", "VAEDecodeAudio"}
+    assert {node["class_type"] for node in tagged} == {
+        "SamplerCustomAdvanced",
+        "VAEEncode",
+        "VAEEncodeAudio",
+        "VAEDecode",
+        "VAEDecodeAudio",
+    }
     labels = [node["_meta"]["easy_media_timing"] for node in tagged]
     assert len(set(labels)) == len(labels)
     assert all(label.startswith("timing-demo / ") for label in labels)
     assert any("first_pass_sample_0" in label for label in labels)
     assert any("second_pass_sample_0" in label for label in labels)
+    assert any("hires_context_1_video_encode" in label for label in labels)
+    assert any("hires_context_1_audio_encode" in label for label in labels)
+    assert any("low_context_1_video_encode" in label for label in labels)
+    assert any("low_context_1_audio_encode" in label for label in labels)
 
     monkeypatch.setattr(module, "_timed_h3_project_graph", lambda graph, _name: graph.finalize())
     module.GraphBuilder.set_default_prefix("timing", 0, 0)
