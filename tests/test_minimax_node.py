@@ -711,10 +711,6 @@ def test_h3_segment_execution_markers_log_the_current_segment(monkeypatch):
                 "sampling_pass": "first",
             },
         ),
-        (
-            "easy_multitrack_project_refresh",
-            {"project_name": "demo", "phase": "after_save", "segment_index": 3},
-        ),
     ]
     assert len(messages) == 1
     assert messages[0][0] == "MultiTrack Project"
@@ -2479,6 +2475,55 @@ def test_h3_project_artifact_writes_manifest_and_rotates_ten_generations(
     active_generation = str(manifest["segments"]["0"]["active_generation"])
     active_files = manifest["segments"]["0"]["generations"][active_generation]
     assert active_files["context_latent_low"].startswith("context_latent_low_0_")
+
+
+def test_h3_project_artifact_notifies_only_after_new_video_is_in_manifest(
+    monkeypatch, tmp_path
+):
+    module = _load_minimax_node(monkeypatch)
+    monkeypatch.setattr(
+        module.folder_paths,
+        "get_output_directory",
+        lambda: str(tmp_path),
+    )
+    project_dir = tmp_path / "easy_media" / "projects" / "demo"
+    project_dir.mkdir(parents=True)
+    staged = project_dir / ".staged.mp4"
+    staged.write_bytes(b"video")
+    notifications = []
+
+    def send_sync(event, payload):
+        manifest = json.loads((project_dir / "project.json").read_text())
+        active_generation = str(
+            manifest["segments"]["0"]["active_generation"]
+        )
+        video_name = manifest["segments"]["0"]["generations"][
+            active_generation
+        ]["video"]
+        notifications.append((event, payload, (project_dir / video_name).is_file()))
+
+    server = types.ModuleType("server")
+    server.PromptServer = types.SimpleNamespace(
+        instance=types.SimpleNamespace(send_sync=send_sync)
+    )
+    monkeypatch.setitem(sys.modules, "server", server)
+
+    module.EasyH3ProjectArtifact.execute(
+        project_name="demo",
+        project_save="new",
+        segment_index=0,
+        context_latent=_h3_context_latent(),
+        video_path=f"output/{staged.relative_to(tmp_path)}",
+        tracks_info=_h3_project_inputs()["tracks_info"][0],
+    )
+
+    assert notifications == [
+        (
+            "easy_multitrack_project_refresh",
+            {"project_name": "demo", "phase": "after_save", "segment_index": 0},
+            True,
+        )
+    ]
 
 
 def test_h3_project_artifact_preserves_complete_first_pass_checkpoint(

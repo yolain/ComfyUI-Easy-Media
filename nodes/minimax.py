@@ -1139,7 +1139,7 @@ class EasyH3SegmentSamplingStart(io.ComfyNode):
 
 
 class EasyH3SegmentSaveEnd(io.ComfyNode):
-    """Notify after a project segment video has been saved."""
+    """Forward a staged project segment video path."""
 
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -1164,11 +1164,7 @@ class EasyH3SegmentSaveEnd(io.ComfyNode):
         project_name: str,
         segment_index: int,
     ) -> io.NodeOutput:
-        _notify_multitrack_project_refresh(
-            project_name,
-            "after_save",
-            segment_index,
-        )
+        del project_name, segment_index
         return io.NodeOutput(video_path)
 
 
@@ -1592,7 +1588,10 @@ class EasyH3ProjectArtifact(io.ComfyNode):
             raise RuntimeError(f"Failed to save H3 project manifest: {error}") from error
         if audio_only:
             log_node_info("MultiTrack Project", f"Saved audio segment {segment_index}: {target_media.name}")
-            _notify_multitrack_project_refresh(safe_name, "after_save", segment_index)
+        # Refresh only after both the media move and the atomic manifest update
+        # have completed.  Refreshing from H3SegmentSaveEnd races this artifact
+        # writer and makes a new/empty project appear to contain no videos.
+        _notify_multitrack_project_refresh(safe_name, "after_save", segment_index)
         return io.NodeOutput(safe_name)
 
 
