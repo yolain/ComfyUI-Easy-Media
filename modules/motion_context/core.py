@@ -126,6 +126,18 @@ def _steps_for_frames(frame_count: int) -> int | None:
 def _video_tail_from_latent(
     latent: dict[str, Any], frame_count: int
 ) -> tuple[list[torch.Tensor], list[int], int]:
+    video, start, steps, covered = _video_tail_bounds(latent, frame_count)
+    blocks = [
+        video[:1, :, start + index : start + index + 1].clone()
+        for index in range(steps)
+    ]
+    return blocks, _step_offsets(steps), covered
+
+
+def _video_tail_bounds(
+    latent: dict[str, Any], frame_count: int
+) -> tuple[torch.Tensor, int, int, int]:
+    """Validate an H3 tail and return its source tensor and temporal bounds."""
     video = _video_from_latent(latent)
     total_steps = int(video.shape[2])
     steps = _steps_for_frames(frame_count)
@@ -146,11 +158,7 @@ def _video_tail_from_latent(
             "H3 temporal cycle position"
         )
     covered = _pixel_frames(steps)
-    blocks = [
-        video[:1, :, start + index : start + index + 1].clone()
-        for index in range(steps)
-    ]
-    return blocks, _step_offsets(steps), covered
+    return video, start, steps, covered
 
 
 def _audio_tail_from_latent(
@@ -196,6 +204,22 @@ def _audio_tail_from_latent(
         requested_steps,
         float(overhang),
     )
+
+
+def trim_motion_context_latent(
+    latent: dict[str, Any],
+    context_length: int | str = "22",
+) -> dict[str, Any]:
+    """Copy only the H3 AV tail needed by the next context segment to CPU."""
+    frame_count = int(context_length)
+    video, start, steps, covered = _video_tail_bounds(latent, frame_count)
+    audio, _, _ = _audio_tail_from_latent(latent, covered)
+    video = video[:1, :, start : start + steps].detach()
+    streams = tuple(
+        stream.detach().to(device="cpu", copy=True).contiguous()
+        for stream in (video, audio)
+    )
+    return {"samples": _official_nested_tensor(streams)}
 
 
 def _resize_frames(

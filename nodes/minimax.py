@@ -18,6 +18,7 @@ from ..modules.motion_context.core import (
     apply_hires_continuity,
     apply_motion_context,
     build_hard_motion_context,
+    trim_motion_context_latent,
 )
 from ..utils import instrument_node_timing, log_node_info, log_stage_time, synchronize_execution_device
 from ..utils.h3_presets import get_h3_preset_keys, load_h3_presets, select_h3_preset
@@ -961,6 +962,42 @@ class EasyMiniMaxH3HiResContinuity(io.ComfyNode):
         return io.NodeOutput(output, trim_frames)
 
 
+class EasyH3MotionContextLatentTrim(io.ComfyNode):
+    """Keep only the CPU-resident AV tail required by Motion Context."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy h3MotionContextLatentTrim",
+            display_name="H3 Motion Context Latent Trim",
+            category="_EasyUse/H3",
+            description=(
+                "Internal H3 context-tail copier used to release full-resolution "
+                "segment latents before the next segment starts."
+            ),
+            inputs=[
+                io.Latent.Input("latent"),
+                io.Combo.Input(
+                    "context_length",
+                    options=["5", "22", "39", "56"],
+                    default="22",
+                ),
+            ],
+            outputs=[io.Latent.Output("context_latent")],
+            is_dev_only=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        latent: dict[str, Any],
+        context_length: str = "22",
+    ) -> io.NodeOutput:
+        return io.NodeOutput(
+            trim_motion_context_latent(latent, context_length=context_length)
+        )
+
+
 class EasyH3ProjectContextLatentLoad(io.ComfyNode):
     """Load the active context latent for a previously rendered segment."""
 
@@ -1448,7 +1485,14 @@ class EasyH3ProjectArtifact(io.ComfyNode):
             f"{safe_name} / segment {segment_index} / save_latent_high",
             synchronize=synchronize_execution_device,
         ):
-            save_h3_latent(context_latent, target_context_latent)
+            save_h3_latent(
+                (
+                    context_latent
+                    if sampling_pass == "first"
+                    else trim_motion_context_latent(context_latent)
+                ),
+                target_context_latent,
+            )
 
         target_context_latent_low: Path | None = None
         if context_latent_low is not None:
@@ -2540,22 +2584,45 @@ class EasyMultiTrackProject(io.ComfyNode):
                     segment_index=task_index,
                 )
                 saved_media_inputs = {"video_path": saved_video_end.out(0)}
+
+            saved_hires_context_latent = project_hires_context_latent
+            saved_low_context_latent = project_low_context_latent
+            runtime_hires_context_latent = graph.node(
+                "easy h3MotionContextLatentTrim",
+                id=f"trim_hires_context_latent_{task_index}",
+                latent=saved_hires_context_latent,
+                context_length=str(context_source_frames),
+            ).out(0)
+            if has_second_pass:
+                runtime_low_context_latent = graph.node(
+                    "easy h3MotionContextLatentTrim",
+                    id=f"trim_low_context_latent_{task_index}",
+                    latent=saved_low_context_latent,
+                    context_length=str(context_source_frames),
+                ).out(0)
+            else:
+                runtime_low_context_latent = runtime_hires_context_latent
+            completed_sampling_pass = (
+                "first"
+                if first_pass_only and has_second_pass
+                else "second" if has_second_pass else "single"
+            )
             artifact_inputs: dict[str, Any] = {
                 "project_name": safe_project_name,
                 "project_save": project_save,
                 "segment_index": task_index,
-                "context_latent": project_hires_context_latent,
+                "context_latent": (
+                    saved_hires_context_latent
+                    if completed_sampling_pass == "first"
+                    else runtime_hires_context_latent
+                ),
                 **saved_media_inputs,
                 "tracks_info": output_info,
                 "continuity_mode": continuity_mode,
-                "sampling_pass": (
-                    "first"
-                    if first_pass_only and has_second_pass
-                    else "second" if has_second_pass else "single"
-                ),
+                "sampling_pass": completed_sampling_pass,
             }
             if has_second_pass:
-                artifact_inputs["context_latent_low"] = project_low_context_latent
+                artifact_inputs["context_latent_low"] = saved_low_context_latent
             if previous_artifact is not None:
                 artifact_inputs["previous"] = previous_artifact
             report_segment_step(0.95)
@@ -2566,8 +2633,8 @@ class EasyMultiTrackProject(io.ComfyNode):
             )
             previous_artifact = artifact.out(0)
             last_project_output = artifact.out(0)
-            previous_hires_context_latent = project_hires_context_latent
-            previous_low_context_latent = project_low_context_latent
+            previous_hires_context_latent = runtime_hires_context_latent
+            previous_low_context_latent = runtime_low_context_latent
             report_segment_step(1.0)
 
         if last_project_output is None:
