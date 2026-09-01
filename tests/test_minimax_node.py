@@ -767,7 +767,7 @@ def test_h3_context_media_trim_can_leave_locked_audio_short_for_alignment(
     ("total_frames", "expected_start"),
     [(22, 0), (120, 102), (124, 102), (240, 221)],
 )
-def test_h3_context_video_encode_trim_preserves_vae_chunk_phase(
+def test_h3_context_media_trim_preserves_vae_chunk_phase_for_encoding(
     monkeypatch,
     total_frames,
     expected_start,
@@ -776,16 +776,24 @@ def test_h3_context_video_encode_trim_preserves_vae_chunk_phase(
     images = torch.arange(total_frames, dtype=torch.float32).reshape(
         total_frames, 1, 1, 1
     )
+    audio = {
+        "waveform": torch.zeros(1, 1, total_frames * 2),
+        "sample_rate": 48,
+    }
 
-    result = module.EasyH3ContextVideoEncodeTrim.execute(
+    result = module.EasyH3ContextMediaTrim.execute(
         images,
-        context_frames=22,
+        audio,
+        trim_frames=0,
+        output_frames=22,
+        phase_align_video_encode=True,
     )
 
-    output = result.values[0]
-    assert output[:, 0, 0, 0].tolist() == list(
+    output_images, output_audio = result.values
+    assert output_images[:, 0, 0, 0].tolist() == list(
         range(expected_start, total_frames)
     )
+    assert output_audio is audio
 
 
 def test_h3_locked_audio_duration_align_matches_decoded_video_without_padding(
@@ -2147,11 +2155,14 @@ def test_multitrack_h3_dual_context_uses_separate_low_and_hires_latents(monkeypa
         video_trim = result.expand[video_encode["inputs"]["pixels"][0]]
         audio_encode = result.expand[concat["inputs"]["audio_latent"][0]]
         assert video_encode["class_type"] == "VAEEncode"
-        assert video_trim["class_type"] == "easy h3ContextVideoEncodeTrim"
-        assert video_trim["inputs"]["context_frames"] == 22
+        assert video_trim["class_type"] == "easy h3ContextMediaTrim"
+        assert video_trim["inputs"]["output_frames"] == 22
+        assert video_trim["inputs"]["phase_align_video_encode"] is True
         assert audio_encode["class_type"] == "VAEEncodeAudio"
-        audio_source = result.expand[audio_encode["inputs"]["audio"][0]]
-        assert audio_source["class_type"] != "easy h3ContextVideoEncodeTrim"
+        assert audio_encode["inputs"]["audio"] == [
+            video_encode["inputs"]["pixels"][0],
+            1,
+        ]
 
 
 def test_multitrack_h3_connected_second_pass_sampling_overrides_context_preset(

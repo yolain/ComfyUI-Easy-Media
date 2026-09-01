@@ -218,10 +218,13 @@ def _h3_encode_context_media(
 ) -> Any:
     """Encode a phase-aligned video suffix and the delivered audio timeline."""
     video_tail = graph.node(
-        "easy h3ContextVideoEncodeTrim",
-        id=f"{node_prefix}_video_trim",
+        "easy h3ContextMediaTrim",
+        id=f"{node_prefix}_encode_trim",
         images=images,
-        context_frames=int(context_frames),
+        audio=audio,
+        trim_frames=0,
+        output_frames=int(context_frames),
+        phase_align_video_encode=True,
     )
     encoded_video = graph.node(
         "VAEEncode",
@@ -232,7 +235,7 @@ def _h3_encode_context_media(
     encoded_audio = graph.node(
         "VAEEncodeAudio",
         id=f"{node_prefix}_audio_encode",
-        audio=audio,
+        audio=video_tail.out(1),
         vae=audio_vae,
     )
     return graph.node(
@@ -1230,6 +1233,7 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
                 io.Int.Input("trim_frames", min=0),
                 io.Int.Input("output_frames", min=1),
                 io.Boolean.Input("pad_audio", default=True),
+                io.Boolean.Input("phase_align_video_encode", default=False),
                 io.Float.Input(
                     "fps",
                     default=24.0,
@@ -1253,10 +1257,20 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
         trim_frames: int = 0,
         output_frames: int = 1,
         pad_audio: bool = True,
+        phase_align_video_encode: bool = False,
         fps: float = 24.0,
     ) -> io.NodeOutput:
         prefix = max(0, int(trim_frames))
         wanted_frames = max(1, int(output_frames))
+        if bool(phase_align_video_encode):
+            if not isinstance(images, torch.Tensor) or images.ndim != 4:
+                raise ValueError("images must have IMAGE shape [B, H, W, C]")
+            start = h3_phase_aligned_context_start(
+                int(images.shape[0]),
+                wanted_frames,
+            )
+            return io.NodeOutput(images[start:].contiguous(), audio)
+
         frame_rate = float(fps)
         if not math.isfinite(frame_rate) or frame_rate <= 0:
             raise ValueError("fps must be a positive finite number")
@@ -1292,42 +1306,6 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
             images[prefix : prefix + wanted_frames] if images is not None else None,
             {"waveform": output_waveform, "sample_rate": sample_rate},
         )
-
-
-class EasyH3ContextVideoEncodeTrim(io.ComfyNode):
-    """Keep the smallest H3 VAE chunk-aligned suffix containing the context."""
-
-    @classmethod
-    def define_schema(cls) -> io.Schema:
-        return io.Schema(
-            node_id="easy h3ContextVideoEncodeTrim",
-            display_name="H3 Context Video Encode Trim",
-            category="_EasyUse/H3",
-            description=(
-                "Internal H3 frame slicer that preserves the original 17-frame "
-                "video VAE chunk phase while avoiding full-clip re-encoding."
-            ),
-            inputs=[
-                io.Image.Input("images"),
-                io.Int.Input("context_frames", default=22, min=1),
-            ],
-            outputs=[io.Image.Output("images")],
-            is_dev_only=True,
-        )
-
-    @classmethod
-    def execute(
-        cls,
-        images: torch.Tensor,
-        context_frames: int = 22,
-    ) -> io.NodeOutput:
-        if not isinstance(images, torch.Tensor) or images.ndim != 4:
-            raise ValueError("images must have IMAGE shape [B, H, W, C]")
-        start = h3_phase_aligned_context_start(
-            int(images.shape[0]),
-            int(context_frames),
-        )
-        return io.NodeOutput(images[start:].contiguous())
 
 
 class EasyH3LockedAudioDurationAlign(io.ComfyNode):
