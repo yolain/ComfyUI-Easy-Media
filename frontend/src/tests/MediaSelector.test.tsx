@@ -73,6 +73,24 @@ describe('MediaSelector', () => {
     expect(screen.getByText('1.0 KB')).toBeTruthy()
   })
 
+  it('offers connected video slots and labels them as video', () => {
+    const onChange = vi.fn()
+    render(
+      <MediaSelector
+        value=""
+        mediaType="video"
+        slotItems={[{ label: 'video1', value: '__slot__:video1' }]}
+        onChange={onChange}
+      />,
+    )
+
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'mediaSelector.tabSlot' }))
+    fireEvent.click(screen.getByText('mediaSelector.slotVideo'))
+
+    expect(onChange).toHaveBeenCalledWith('__slot__:video1')
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'mediaSelector.tabInputs' }))
+  })
+
   it('does not load thumbnails that only briefly enter the viewport', async () => {
     const callbacks: IntersectionObserverCallback[] = []
     vi.stubGlobal('IntersectionObserver', class {

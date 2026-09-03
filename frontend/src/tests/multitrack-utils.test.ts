@@ -77,7 +77,7 @@ describe('multitrack utilities', () => {
     expect(track.segments[0].content).not.toHaveProperty('audio_locked')
   })
 
-  it('keeps only the first marked speaker clip on an audio track', () => {
+  it('migrates legacy speaker clips and keeps only the first shared reference', () => {
     const data = createDefaultTrackData()
     data.tracks.push({
       id: 'audio', name: 'Audio', type: 'audio', color: 'var(--multitrack-audio-bg)',
@@ -90,7 +90,47 @@ describe('multitrack utilities', () => {
 
     const normalized = normalizeTrackData(data)
     const track = normalized.tracks.find((item) => item.id === 'audio')!
-    expect(track.segments.map((segment) => segment.content.speaker_reference)).toEqual([true, false])
+    expect(track.segments.map((segment) => segment.content.shared_reference)).toEqual([true, false])
+    expect(track.segments.every((segment) => segment.content.speaker_reference === undefined)).toBe(true)
+  })
+
+  it('prefixes shared images in every task and reuses matching paths under the nine-image limit', () => {
+    const data = createDefaultTrackData()
+    const taskTrack = data.tracks[0]
+    taskTrack.segments = [
+      {
+        id: 'first', start_frame: 0, end_frame: 24, color: taskTrack.color,
+        content: { media_type: 'none', images: [
+          { id: 'local-a', source_type: 'input', file_path: 'local-a.png' },
+          { id: 'shared', source_type: 'input', file_path: 'shared.png', shared_reference: true },
+        ] },
+      },
+      {
+        id: 'second', start_frame: 24, end_frame: 48, color: taskTrack.color,
+        content: { media_type: 'none', images: [
+          { id: 'same-path', source_type: 'input', file_path: 'shared.png' },
+          ...Array.from({ length: 8 }, (_, index) => ({
+            id: `local-${index}`,
+            source_type: 'input' as const,
+            file_path: `local-${index}.png`,
+          })),
+        ] },
+      },
+    ]
+
+    const normalized = normalizeTrackData(data)
+    const normalizedTasks = normalized.tracks[0].segments
+
+    expect(normalizedTasks[0].content.images?.map((image) => image.file_path)).toEqual([
+      'shared.png',
+      'local-a.png',
+    ])
+    expect(normalizedTasks[1].content.images).toHaveLength(9)
+    expect(normalizedTasks[1].content.images?.[0]).toMatchObject({
+      id: 'same-path',
+      file_path: 'shared.png',
+      shared_reference: true,
+    })
   })
 
   it('applies combined prompt text to each task selected A/B variant', () => {
@@ -316,6 +356,15 @@ describe('multitrack utilities', () => {
       slot_name: 'audio2',
       file_name: 'audio2',
       volume_db: 0,
+    })
+  })
+
+  it('serializes connected video slots as slot media', () => {
+    expect(createMultiTrackVideoContent('__slot__:video2', 'input')).toMatchObject({
+      media_type: 'video',
+      source_type: 'slot',
+      slot_name: 'video2',
+      file_name: 'video2',
     })
   })
 

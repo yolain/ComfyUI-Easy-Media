@@ -866,6 +866,56 @@ describe('PreviewArea', () => {
     }])
   })
 
+  it('shows slot image resource cells in the global preview', () => {
+    const { data } = trackData()
+    data.tracks[0].segments = []
+    data.tracks.unshift({
+      id: 'task-track',
+      name: 'Task 1',
+      type: 'task',
+      color: 'var(--primary)',
+      muted: false,
+      locked: false,
+      segments: [{
+        id: 'active-task',
+        start_frame: 0,
+        end_frame: 24,
+        color: 'var(--primary)',
+        content: {
+          media_type: 'none',
+          images: [{
+            id: 'slot-image',
+            source_type: 'slot',
+            slot_name: 'image1',
+            file_name: 'image1',
+          }],
+        },
+      }],
+    })
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={0}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByTestId('task-preview-slot-image-slot-image').textContent).toBe('Image 1')
+    const slotImage = screen.getByTestId('task-preview-image-slot-image')
+    const addImage = screen.getByTestId('task-preview-add-image')
+    for (const sizeClass of ['h-40', 'w-40', 'aspect-square']) {
+      expect(slotImage.className).toContain(sizeClass)
+      expect(addImage.className).toContain(sizeClass)
+    }
+    expect(screen.getByTestId('task-preview-images')).not.toBeNull()
+  })
+
   it('does not show the active task prompt while another segment is selected', () => {
     const { data, selectedSegment } = trackData()
     data.tracks.unshift({

@@ -36,7 +36,7 @@ description: "Create, edit, and optionally run ComfyUI Easy Media MultiTrack wor
 
 - **分辨率**：用户未表达意图时保留现值。`16:9 0.9mp` 等表达选择 megapixels 模式，并映射完整 `aspect_ratio`；精确尺寸、auto、短/长边和 custom 规则见 schema 参考。
 - **主音频**：需要原样沿用并驱动任务时长/节奏时，设置唯一轨道级 `audio_locked: true`。
-- **说话人参考**：需要所有 MiniMax 任务沿用某段声音特征时，在该音频片段设置 `content.speaker_reference: true`。它不等于 `audio_locked`；同一音轨最多一个。
+- **公用媒体**：上下文分段需要使用同一张图片、同一段音频或同一段视频作为参考时，将对应媒体设置为 `shared_reference: true`。任务图片把字段写在 `content.images[]` 项上；音频/视频把字段写在媒体片段的 `content` 上。公用图片会排在各任务私有图片之前且每个任务合计仍最多 9 张；同一音频或视频轨最多一个公用片段，公用音频最多使用源文件开头 15 秒。它是跨任务参考，不等于轨道级 `audio_locked`。`speaker_reference` 仅作为旧工作流兼容字段，新工作流不再写入。
 - **项目范围**：排队前复核 `segment_start_number`、`segment_count`、`project_save` 和 sampling 设置，尤其是 `override` 的覆盖范围。
 
 ## 可选：提交生成
@@ -47,4 +47,4 @@ description: "Create, edit, and optionally run ComfyUI Easy Media MultiTrack wor
 
 ## 交付
 
-说明基线路径、输出文件、目标节点 ID、分辨率、时间线摘要、媒体路径、锁定音轨/说话人参考、项目参数和图结构是否保持。若已执行，再报告 ComfyUI 地址、`prompt_id`、最终状态和输出摘要。
+说明基线路径、输出文件、目标节点 ID、分辨率、时间线摘要、媒体路径、锁定音轨/公用媒体、项目参数和图结构是否保持。若已执行，再报告 ComfyUI 地址、`prompt_id`、最终状态和输出摘要。

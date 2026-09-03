@@ -193,6 +193,99 @@ def test_locked_audio_must_overlap_every_task_segment(patch_workflow_module):
     assert report["project_changes"]["segment_count"] == {"from": -1, "to": 1}
 
 
+def test_shared_media_accepts_task_images_audio_video_and_legacy_audio(
+    patch_workflow_module,
+):
+    track_data = {
+        "frame_rate": 24,
+        "total_length": 24,
+        "tracks": [
+            {
+                "id": "tasks",
+                "type": "task",
+                "segments": [{
+                    "id": "task-1",
+                    "start_frame": 0,
+                    "end_frame": 24,
+                    "content": {
+                        "images": [{
+                            "id": "shared-image",
+                            "source_type": "input",
+                            "file_path": "shared.png",
+                            "shared_reference": True,
+                        }],
+                    },
+                }],
+            },
+            {
+                "id": "audio",
+                "type": "audio",
+                "segments": [{
+                    "id": "audio-1",
+                    "start_frame": 0,
+                    "end_frame": 24,
+                    "content": {
+                        "media_type": "audio",
+                        "source_type": "input",
+                        "file_path": "voice.wav",
+                        "speaker_reference": True,
+                    },
+                }],
+            },
+            {
+                "id": "video",
+                "type": "video",
+                "segments": [{
+                    "id": "video-1",
+                    "start_frame": 0,
+                    "end_frame": 24,
+                    "content": {
+                        "media_type": "video",
+                        "source_type": "input",
+                        "file_path": "reference.mp4",
+                        "shared_reference": True,
+                    },
+                }],
+            },
+        ],
+    }
+
+    patch_workflow_module.validate_track_data(track_data, recalculate=False)
+    video_summary = patch_workflow_module.summarize_track(track_data["tracks"][2])
+    assert video_summary["media"][0]["shared_reference"] is True
+
+
+def test_shared_media_rejects_multiple_references_on_one_media_track(
+    patch_workflow_module,
+):
+    track_data = {
+        "frame_rate": 24,
+        "total_length": 48,
+        "tracks": [{
+            "id": "video",
+            "type": "video",
+            "segments": [
+                {
+                    "id": f"video-{index}",
+                    "start_frame": index * 24,
+                    "end_frame": (index + 1) * 24,
+                    "content": {
+                        "media_type": "video",
+                        "shared_reference": True,
+                    },
+                }
+                for index in range(2)
+            ],
+        }],
+    }
+
+    with pytest.raises(
+        patch_workflow_module.WorkflowError,
+        match="Each audio/video track may contain only one shared reference",
+    ):
+        patch_workflow_module.validate_track_data(track_data, recalculate=False)
+
+
 def test_template_metadata_matches_documented_asset():
     workflow = _template_workflow()
 

@@ -164,6 +164,11 @@
     "enableSpeakerReference": "Reuse as speaker audio",
     "disableSpeakerReference": "Stop reusing speaker audio",
     "speakerReferenceTooltip": "(MiniMax only) Reuse this clip as this audio track's @Audio reference in every task. Audio longer than 15 seconds is truncated to its first 15 seconds.",
+    "enableSharedReference": "Use as shared reference",
+    "disableSharedReference": "Stop using as shared reference",
+    "sharedReferenceTooltip": "Use this media as this track's reference in every task. Shared audio uses up to its first 15 seconds.",
+    "sharedImageReferenceTooltip": "Set this image to public, and place before local images in every task. Shared and local images together are limited to 9 per task.",
+    "sharedImageLimitTooltip": "A task already has 9 different images. Remove one before sharing this image.",
     "previewTaskLabel": "Task{n}",
     "emptyPreviewTitle": "No segments yet",
     "emptyPreviewDescription": "Add a task segment or video clip to the tracks below.",
@@ -417,6 +422,7 @@
     "slotList": "list",
     "slotImage": "Image {n}",
     "slotAudio": "Audio {n}",
+    "slotVideo": "Video {n}",
     "addLocal": "Add local file"
   }
 }

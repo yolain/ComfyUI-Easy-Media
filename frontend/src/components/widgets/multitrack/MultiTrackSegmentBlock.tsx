@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { Lock, Speech, Unlock } from 'lucide-react'
+import { Lock, Share2, Unlock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   ContextMenu,
@@ -10,7 +10,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { AudioWaveform } from '@/components/widgets/timeline/AudioWaveform'
 import { mediaContentToViewUrl } from '@/lib/media-url'
 import { useT } from '@/lib/i18n'
@@ -61,8 +61,8 @@ interface MultiTrackSegmentBlockProps {
   audioLocked?: boolean
   audioLockEnabled?: boolean
   onAudioLockToggle?: (locked: boolean) => void
-  speakerReference?: boolean
-  onSpeakerReferenceToggle?: (enabled: boolean) => void
+  sharedReference?: boolean
+  onSharedReferenceToggle?: (enabled: boolean) => void
 }
 
 function segmentRect(segment: MultiTrackSegment, totalLength: number, areaWidth: number) {
@@ -104,8 +104,8 @@ export function MultiTrackSegmentBlock({
   audioLocked = false,
   audioLockEnabled = false,
   onAudioLockToggle,
-  speakerReference = false,
-  onSpeakerReferenceToggle,
+  sharedReference = false,
+  onSharedReferenceToggle,
 }: Readonly<MultiTrackSegmentBlockProps>) {
   const t = useT()
   const didDragRef = useRef(false)
@@ -519,35 +519,39 @@ export function MultiTrackSegmentBlock({
             className="absolute right-0 top-0 h-full w-0.5 cursor-ew-resize"
             style={{ background: isResizing || selected ? borderColor : 'transparent' }}
           />
-          {trackType === 'audio' && audioLockEnabled ? (
-            <>
+          {trackType === 'audio' || trackType === 'video' ? (
+            <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
-                    type="button"
-                    size="icon"
-                    variant={speakerReference ? 'secondary' : 'ghost'}
-                    data-testid="audio-speaker-reference"
-                    aria-label={speakerReference ? t('multitrack.disableSpeakerReference') : t('multitrack.enableSpeakerReference')}
-                    aria-pressed={speakerReference}
-                    className={`absolute right-8 top-0.5 z-20 h-5 w-5 cursor-pointer bg-background/80 shadow-sm [&_svg]:!size-3 ${speakerReference ? 'text-highlight' : 'text-muted-foreground'}`}
-                    onMouseDown={(event) => {
-                      event.preventDefault()
-                      event.stopPropagation()
-                    }}
-                    onClick={(event) => {
-                      event.preventDefault()
-                      event.stopPropagation()
-                      onSpeakerReferenceToggle?.(!speakerReference)
-                    }}
+                  type="button"
+                  size="icon"
+                  variant={sharedReference ? 'secondary' : 'ghost'}
+                  data-testid={`${trackType}-shared-reference`}
+                  aria-label={sharedReference ? t('multitrack.disableSharedReference') : t('multitrack.enableSharedReference')}
+                  aria-pressed={sharedReference}
+                  className={`absolute ${trackType === 'audio' && audioLockEnabled ? 'right-8' : 'right-2'} top-0.5 z-20 h-5 w-5 cursor-pointer bg-background/80 shadow-sm [&_svg]:!size-3 ${sharedReference ? 'text-highlight' : 'text-muted-foreground'}`}
+                  onMouseDown={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                  }}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    onSharedReferenceToggle?.(!sharedReference)
+                  }}
                   >
-                    <Speech />
+                    <Share2 />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="max-w-72">
-                  {t('multitrack.speakerReferenceTooltip')}
+                  {t('multitrack.sharedReferenceTooltip')}
                 </TooltipContent>
               </Tooltip>
+            </TooltipProvider>
+          ) : null}
+          {trackType === 'audio' && audioLockEnabled ? (
+            <>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button

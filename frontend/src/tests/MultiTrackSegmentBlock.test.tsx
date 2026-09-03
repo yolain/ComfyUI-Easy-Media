@@ -110,8 +110,8 @@ describe('MultiTrackSegmentBlock context menu', () => {
     expect(onAudioLockToggle).toHaveBeenCalledWith(false)
   })
 
-  it('places the MiniMax speaker-reference control left of the smaller lock control', () => {
-    const onSpeakerReferenceToggle = vi.fn()
+  it('places the shared-reference control left of the smaller audio lock control', () => {
+    const onSharedReferenceToggle = vi.fn()
     render(
       <TooltipProvider>
         <MultiTrackSegmentBlock
@@ -129,18 +129,18 @@ describe('MultiTrackSegmentBlock context menu', () => {
           onResizePreview={vi.fn()}
           onMove={vi.fn()}
           audioLockEnabled
-          speakerReference
-          onSpeakerReferenceToggle={onSpeakerReferenceToggle}
+          sharedReference
+          onSharedReferenceToggle={onSharedReferenceToggle}
         />
       </TooltipProvider>,
     )
 
-    const speakerButton = screen.getByTestId('audio-speaker-reference')
-    expect(speakerButton.className).toContain('right-8')
-    expect(speakerButton.className).toContain('h-5')
+    const sharedButton = screen.getByTestId('audio-shared-reference')
+    expect(sharedButton.className).toContain('right-8')
+    expect(sharedButton.className).toContain('h-5')
     expect(screen.getByTestId('audio-segment-lock').className).toContain('h-5')
-    fireEvent.click(speakerButton)
-    expect(onSpeakerReferenceToggle).toHaveBeenCalledWith(false)
+    fireEvent.click(sharedButton)
+    expect(onSharedReferenceToggle).toHaveBeenCalledWith(false)
   })
   it('offers distribute, clone, split, and delete actions for task segments', () => {
     const { onDelete, onDistribute, onClone, onSplitTask } = renderBlock('task')

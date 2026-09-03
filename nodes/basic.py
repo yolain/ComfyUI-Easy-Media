@@ -43,8 +43,14 @@ from ..utils import (
     prompt_enhancer_video_inputs,
     minimax_length_to_seconds,
     merge_video_track_with_ffmpeg,
+    canonicalize_multitrack_slot_content,
+    multitrack_is_shared_reference,
+    multitrack_media_identity,
+    multitrack_shared_task_images,
     multitrack_segments_in_window,
+    multitrack_slot_name,
     multitrack_slot_media_types,
+    multitrack_task_images_with_shared,
     parse_subtitle_text,
     parse_override_segments,
     prompt_override_has_frame_ranges,
@@ -537,6 +543,22 @@ def _as_list_input(value) -> list:
     return [value]
 
 
+def _embedded_multitrack_media(info: dict, media_type: str) -> list:
+    """Return eager slot media carried by TRACKS_INFO itself."""
+    media = info.get("media")
+    if not isinstance(media, dict):
+        return []
+    return _as_list_input(media.get(media_type))
+
+
+def _multitrack_media_is_deferred(info: dict, media_type: str) -> bool:
+    """Use per-type eager metadata, falling back to the legacy global mode."""
+    eager_types = info.get("eager_media_types")
+    if isinstance(eager_types, (list, tuple, set)):
+        return media_type not in eager_types
+    return info.get("media_loading") == "deferred"
+
+
 def _media_output_for_index(items: list, index: int):
     if index < 0 or index >= len(items):
         return None
@@ -549,11 +571,12 @@ def _index_slot_video(video_input, slot_name: str | None):
 
 
 def _resolve_multitrack_video(content: dict, video_input):
+    slot_name = multitrack_slot_name(content)
+    if slot_name is not None:
+        return _index_slot_video(video_input, slot_name)
     source_type = str(content.get("source_type", "input"))
     if source_type == "preset":
         return None
-    if source_type == "slot":
-        return _index_slot_video(video_input, content.get("slot_name") or content.get("file_name"))
     source = resolve_video_path(
         source_type,
         content.get("file_path"),
@@ -564,8 +587,9 @@ def _resolve_multitrack_video(content: dict, video_input):
 
 
 def _resolve_multitrack_audio(content: dict, audio_input, sample_rate: int = 44100) -> 'dict | None':
-    if content.get("source_type") == "slot":
-        return _index_slot_audio(audio_input, content.get("slot_name") or content.get("file_name"))
+    slot_name = multitrack_slot_name(content)
+    if slot_name is not None:
+        return _index_slot_audio(audio_input, slot_name)
     waveform = load_audio_waveform(
         content.get("source_type", "input"),
         content.get("file_path"),
@@ -723,12 +747,12 @@ def _merge_audio_track(
     return {"waveform": merged, "sample_rate": sample_rate}
 
 
-_MAX_SPEAKER_REFERENCE_SECONDS = 15.0
+_MAX_SHARED_AUDIO_REFERENCE_SECONDS = 15.0
 
 
-def _speaker_reference_segment(track: dict) -> 'dict | None':
-    """Return the one audio clip explicitly reused as this track's speaker reference."""
-    if track.get("type") != "audio":
+def _shared_reference_segment(track: dict) -> 'dict | None':
+    """Return the one audio/video clip reused as this track's shared reference."""
+    if track.get("type") not in {"audio", "video"}:
         return None
     for segment in track.get("segments", []):
         if not isinstance(segment, dict):
@@ -736,14 +760,14 @@ def _speaker_reference_segment(track: dict) -> 'dict | None':
         content = segment.get("content", {})
         if (
             isinstance(content, dict)
-            and content.get("media_type") == "audio"
-            and content.get("speaker_reference") is True
+            and content.get("media_type") == track.get("type")
+            and multitrack_is_shared_reference(content)
         ):
             return segment
     return None
 
 
-def _build_speaker_reference_audio(
+def _build_shared_reference_audio(
     segment: dict,
     audio: dict,
     base_volume_db: float = 0.0,
@@ -758,7 +782,7 @@ def _build_speaker_reference_audio(
             "sample_rate": sample_rate,
         }
 
-    max_samples = max(1, round(_MAX_SPEAKER_REFERENCE_SECONDS * sample_rate))
+    max_samples = max(1, round(_MAX_SHARED_AUDIO_REFERENCE_SECONDS * sample_rate))
     reference = waveform[..., :max_samples]
     content = segment.get("content", {})
     if not isinstance(content, dict):
@@ -919,11 +943,22 @@ def _build_tracks_info_and_media_outputs(
     video_input,
     resolution: str | dict,
     format_name: str,
-    materialize_media: bool = True,
+    materialize_media: bool | set[str] = True,
 ) -> tuple[dict, list, list, list]:
     tracks = data.get("tracks", [])
     if not isinstance(tracks, list):
         raise ValueError("TRACK_DATA.tracks must be a list.")
+
+    materialized_types = (
+        {"image", "audio", "video"}
+        if materialize_media is True
+        else set(materialize_media)
+        if isinstance(materialize_media, set)
+        else set()
+    )
+    materialize_image = "image" in materialized_types
+    materialize_audio = "audio" in materialized_types
+    materialize_video = "video" in materialized_types
 
     frame_rate = float(data.get("frame_rate", 24.0))
     total_length_is_final = data.get("_total_length_is_final") is True
@@ -979,6 +1014,8 @@ def _build_tracks_info_and_media_outputs(
     images_out: list[torch.Tensor] = []
     audio_out: list[dict] = []
     video_out: list = []
+    shared_task_images = multitrack_shared_task_images(tracks)
+    shared_image_media_indexes: dict[tuple, int] = {}
 
     video_segments: list[tuple[int, int, dict]] = []
     for track_index, track in enumerate(tracks):
@@ -993,14 +1030,14 @@ def _build_tracks_info_and_media_outputs(
 
     progress = (
         ProgressBar(max(1, len(video_segments) * 3))
-        if materialize_media and video_segments
+        if materialize_video and video_segments
         else None
     )
     progress_value = 0
     if progress is not None:
         progress.update_absolute(0)
     resolved_videos: dict[tuple[int, int], object] = {}
-    if materialize_media:
+    if materialize_video:
         for track_index, segment_index, content in video_segments:
             video = _resolve_multitrack_video(content, video_input)
             if video is not None:
@@ -1046,24 +1083,45 @@ def _build_tracks_info_and_media_outputs(
             if not isinstance(content, dict):
                 content = {}
 
-            normalized_content = dict(content)
+            normalized_content = canonicalize_multitrack_slot_content(content)
             normalized_content.pop("volume", None)
+            if track_type in {"audio", "video"}:
+                normalized_content["shared_reference"] = multitrack_is_shared_reference(content)
+                normalized_content.pop("speaker_reference", None)
 
             if track_type == "task":
                 normalized_images: list[dict] = []
-                raw_images = content.get("images", [])
+                raw_images = multitrack_task_images_with_shared(
+                    content.get("images", []),
+                    shared_task_images,
+                )
                 if isinstance(raw_images, list):
                     for image_item in raw_images:
                         if not isinstance(image_item, dict):
                             continue
-                        normalized_image = dict(image_item)
+                        normalized_image = canonicalize_multitrack_slot_content(image_item)
+                        panorama_view = image_item.get("panorama_view")
+                        shared_cache_key = None
+                        if multitrack_is_shared_reference(normalized_image):
+                            shared_cache_key = (
+                                multitrack_media_identity(normalized_image),
+                                json.dumps(panorama_view, sort_keys=True, default=str),
+                            )
+                        cached_media_index = (
+                            shared_image_media_indexes.get(shared_cache_key)
+                            if shared_cache_key is not None
+                            else None
+                        )
+                        if cached_media_index is not None:
+                            normalized_image["media_index"] = cached_media_index
+                            normalized_images.append(normalized_image)
+                            continue
                         image = (
-                            _resolve_timeline_image_item(image_item, image_input)
-                            if materialize_media
+                            _resolve_timeline_image_item(normalized_image, image_input)
+                            if materialize_image
                             else None
                         )
                         if image is not None:
-                            panorama_view = image_item.get("panorama_view")
                             if panorama_view is not None:
                                 try:
                                     image = equirectangular_to_perspective(
@@ -1080,13 +1138,15 @@ def _build_tracks_info_and_media_outputs(
                             media_index = len(images_out)
                             images_out.append(image)
                             normalized_image["media_index"] = media_index
+                            if shared_cache_key is not None:
+                                shared_image_media_indexes[shared_cache_key] = media_index
                         normalized_images.append(normalized_image)
                 normalized_content["images"] = normalized_images
-            elif materialize_media and track_type == "audio" and content.get("media_type") == "audio":
+            elif materialize_audio and track_type == "audio" and content.get("media_type") == "audio":
                 audio = _resolve_multitrack_audio(content, audio_input)
                 if audio is not None:
                     track_audio_segments.append((segment, audio))
-            elif materialize_media and track_type == "video" and content.get("media_type") == "video":
+            elif materialize_video and track_type == "video" and content.get("media_type") == "video":
                 video = resolved_videos.get((track_index, segment_index))
                 if video is not None:
                     progress_start = progress_value
@@ -1121,7 +1181,7 @@ def _build_tracks_info_and_media_outputs(
             track_end_frame = _track_media_end_frame(normalized_track)
             if track_end_frame is not None:
                 track_total_length = max(0, track_end_frame)
-        if materialize_media and track_type == "audio" and (format_name != "MiniMax" or track_audio_segments):
+        if materialize_audio and track_type == "audio" and (format_name != "MiniMax" or track_audio_segments):
             media_index = len(audio_out)
             audio_out.append(_merge_audio_track(
                 track_audio_segments,
@@ -1135,27 +1195,27 @@ def _build_tracks_info_and_media_outputs(
                 content = normalized_segment.get("content", {})
                 if content.get("media_type") == "audio":
                     content["media_index"] = media_index
-            speaker_segment = _speaker_reference_segment(normalized_track)
-            if format_name == "MiniMax" and speaker_segment is not None:
-                speaker_segment_id = speaker_segment.get("id")
-                speaker_source = next(
+            shared_segment = _shared_reference_segment(normalized_track)
+            if shared_segment is not None:
+                shared_segment_id = shared_segment.get("id")
+                shared_source = next(
                     (
                         audio
                         for source_segment, audio in track_audio_segments
-                        if source_segment.get("id") == speaker_segment_id
+                        if source_segment.get("id") == shared_segment_id
                     ),
                     None,
                 )
-                if speaker_source is not None:
-                    speaker_media_index = len(audio_out)
-                    audio_out.append(_build_speaker_reference_audio(
-                        speaker_segment,
-                        speaker_source,
+                if shared_source is not None:
+                    shared_media_index = len(audio_out)
+                    audio_out.append(_build_shared_reference_audio(
+                        shared_segment,
+                        shared_source,
                         track_volume_db,
                         track_muted,
                     ))
-                    speaker_segment["content"]["speaker_media_index"] = speaker_media_index
-        elif materialize_media and track_type == "video" and (format_name != "MiniMax" or track_video_segments):
+                    shared_segment["content"]["shared_media_index"] = shared_media_index
+        elif materialize_video and track_type == "video" and (format_name != "MiniMax" or track_video_segments):
             media_index = len(video_out)
             video_out.append(
                 _merge_video_track(
@@ -1173,6 +1233,21 @@ def _build_tracks_info_and_media_outputs(
                 content = normalized_segment.get("content", {})
                 if content.get("media_type") == "video":
                     content["media_index"] = media_index
+            shared_segment = _shared_reference_segment(normalized_track)
+            if shared_segment is not None:
+                shared_segment_id = shared_segment.get("id")
+                shared_source = next(
+                    (
+                        video
+                        for source_segment, video in track_video_segments
+                        if source_segment.get("id") == shared_segment_id
+                    ),
+                    None,
+                )
+                if shared_source is not None:
+                    shared_media_index = len(video_out)
+                    video_out.append(shared_source)
+                    shared_segment["content"]["shared_media_index"] = shared_media_index
         normalized_tracks.append(normalized_track)
 
     if progress is not None and progress_value < progress.total:
@@ -1191,7 +1266,8 @@ def _build_tracks_info_and_media_outputs(
         "width": width,
         "height": height,
         "resize_method": resize_method,
-        "media_loading": "eager" if materialize_media else "deferred",
+        "media_loading": "eager" if materialized_types else "deferred",
+        "eager_media_types": sorted(materialized_types),
         "task_markers": [
             dict(marker)
             for marker in data.get("task_markers", [])
@@ -1201,6 +1277,15 @@ def _build_tracks_info_and_media_outputs(
     }
     audio_result = (audio_out or [None]) if format_name == "MiniMax" else audio_out
     video_result = (video_out or [None]) if format_name == "MiniMax" else video_out
+    if materialized_types:
+        # Slot values have no reloadable file path. Carry the resolved runtime
+        # objects in TRACKS_INFO so task/project nodes only need this one link,
+        # matching the deferred path used by ordinary file-backed media.
+        tracks_info["media"] = {
+            "images": images_out,
+            "audio": audio_result,
+            "video": video_result,
+        }
     return (
         tracks_info,
         images_out,
@@ -1274,8 +1359,9 @@ def _index_slot_audio(audio_input, slot_name: str | None) -> 'dict | None':
 
 
 def _resolve_timeline_image_item(item: dict, image_input, image_loader=load_image_tensor) -> 'torch.Tensor | None':
-    if item.get("source_type") == "slot":
-        return _index_slot_image(image_input, item.get("slot_name") or item.get("file_name"))
+    slot_name = multitrack_slot_name(item)
+    if slot_name is not None:
+        return _index_slot_image(image_input, slot_name)
     return image_loader(
         item.get("source_type", "input"),
         item.get("file_path"),
@@ -2033,7 +2119,7 @@ class MultiTrackEditor(io.ComfyNode):
         data = _parse_track_data(track_data)
         if prompt_override_has_value(prompt_override):
             data = build_multitrack_data_from_prompt_override(data, prompt_override)
-        materialize_media = bool(multitrack_slot_media_types(data))
+        materialize_media = multitrack_slot_media_types(data)
         tracks_info, images_out, audio_out, video_out = _build_tracks_info_and_media_outputs(
             data,
             kwargs.get("image"),
@@ -2475,7 +2561,7 @@ class MultiTrackAudioOutput(io.ComfyNode):
     def execute(
         cls,
         tracks_info: list | dict | str,
-        audio: list | dict | None,
+        audio: list | dict | None = None,
         mode: str | list[str] = "default",
         task_index: int | list[int] = 0,
     ) -> io.NodeOutput:
@@ -2488,8 +2574,10 @@ class MultiTrackAudioOutput(io.ComfyNode):
             if isinstance(track, dict) and track.get("type") == "audio"
         ] if isinstance(tracks, list) else []
 
-        audios = iter_valid_audio_inputs(audio)
-        if info.get("media_loading") == "deferred":
+        audios = iter_valid_audio_inputs(_as_list_input(audio))
+        if not audios:
+            audios = iter_valid_audio_inputs(_embedded_multitrack_media(info, "audio"))
+        if _multitrack_media_is_deferred(info, "audio"):
             timeline_end = max(
                 0,
                 int(info.get("timeline_total_length", info.get("total_length", 0))),
@@ -2741,9 +2829,11 @@ def _track_output_index(track: dict) -> 'int | None':
         return None
 
 
-def _speaker_reference_output_index(segment: dict) -> 'int | None':
+def _shared_reference_output_index(segment: dict) -> 'int | None':
     content = segment.get("content", {})
-    raw_index = content.get("speaker_media_index") if isinstance(content, dict) else None
+    raw_index = None
+    if isinstance(content, dict):
+        raw_index = content.get("shared_media_index", content.get("speaker_media_index"))
     try:
         return int(raw_index) if raw_index is not None else None
     except (TypeError, ValueError):
@@ -2966,6 +3056,12 @@ class MultiTrackTaskOutput(io.ComfyNode):
         image_items = _as_list_input(images)
         audio_items = _as_list_input(audio)
         video_items = _as_list_input(video)
+        if not any(isinstance(item, torch.Tensor) for item in image_items):
+            image_items = _embedded_multitrack_media(info, "images")
+        if not iter_valid_audio_inputs(audio_items):
+            audio_items = _embedded_multitrack_media(info, "audio")
+        if not any(item is not None for item in video_items):
+            video_items = _embedded_multitrack_media(info, "video")
         requested_index = int(_unwrap_list_scalar(task_index, 0))
         output_full_timeline = requested_index == -1
         index = max(0, requested_index)
@@ -3038,15 +3134,25 @@ class MultiTrackTaskOutput(io.ComfyNode):
         ):
             selected_images: list[torch.Tensor] = []
             selected_image_indexes: set[int] = set()
+            selected_shared_image_identities: set[tuple[str, str]] = set()
             marker_image_frames: list[int] = []
-            deferred_media = info.get("media_loading") == "deferred"
+            deferred_images = _multitrack_media_is_deferred(info, "image")
+            deferred_audio = _multitrack_media_is_deferred(info, "audio")
+            deferred_video = _multitrack_media_is_deferred(info, "video")
             media_progress = ProgressBar(2)
             media_progress.update_absolute(0)
             for task_content, task_content_start in task_content_entries:
                 for image_info in task_content.get("images", []):
                     if not isinstance(image_info, dict):
                         continue
-                    if deferred_media:
+                    shared_identity = (
+                        multitrack_media_identity(image_info)
+                        if multitrack_is_shared_reference(image_info)
+                        else None
+                    )
+                    if shared_identity is not None and shared_identity in selected_shared_image_identities:
+                        continue
+                    if deferred_images:
                         image = _resolve_timeline_image_item(image_info, None)
                         if image is None:
                             continue
@@ -3065,6 +3171,8 @@ class MultiTrackTaskOutput(io.ComfyNode):
                                     f"Failed to project panorama image {image_id!r}: {exc}"
                                 ) from exc
                         selected_images.append(image)
+                        if shared_identity is not None:
+                            selected_shared_image_identities.add(shared_identity)
                         if output_full_timeline or task_entry.get("marker_mode"):
                             marker_image_frames.append(max(0, task_content_start - start_frame))
                         continue
@@ -3079,6 +3187,8 @@ class MultiTrackTaskOutput(io.ComfyNode):
                     ):
                         selected_image_indexes.add(media_index)
                         selected_images.append(image_items[media_index])
+                        if shared_identity is not None:
+                            selected_shared_image_identities.add(shared_identity)
                         if output_full_timeline or task_entry.get("marker_mode"):
                             marker_image_frames.append(max(0, task_content_start - start_frame))
 
@@ -3095,6 +3205,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
             selected_audio: list[dict] = []
             locked_audio: dict | None = None
             selected_video: list = []
+            deferred_shared_video_cache: dict[tuple, object] = {}
             has_video = False
             global_volume_db = audio_volume_db(info)
             global_muted = audio_is_muted(info)
@@ -3107,12 +3218,18 @@ class MultiTrackTaskOutput(io.ComfyNode):
             media_tracks = tracks if isinstance(tracks, list) else []
             if not output_full_timeline:
                 media_tracks = media_tracks[1:]
-            if output_full_timeline and not deferred_media:
-                selected_audio = list(audio_items)
-                selected_video = list(video_items)
-                has_video = any(item is not None for item in selected_video)
+            if output_full_timeline:
+                if not deferred_audio:
+                    selected_audio = list(audio_items)
+                if not deferred_video:
+                    selected_video = list(video_items)
+                    has_video = any(item is not None for item in selected_video)
                 for track in media_tracks if isinstance(media_tracks, list) else []:
-                    if not isinstance(track, dict) or track.get("type") != "audio":
+                    if (
+                        deferred_audio
+                        or not isinstance(track, dict)
+                        or track.get("type") != "audio"
+                    ):
                         continue
                     media_index = _track_output_index(track)
                     if (
@@ -3123,44 +3240,71 @@ class MultiTrackTaskOutput(io.ComfyNode):
                         and isinstance(audio_items[media_index], dict)
                     ):
                         locked_audio = audio_items[media_index]
-                media_tracks = []
+                media_tracks = [
+                    track
+                    for track in media_tracks
+                    if isinstance(track, dict)
+                    and (
+                        (track.get("type") == "audio" and deferred_audio)
+                        or (track.get("type") == "video" and deferred_video)
+                    )
+                ]
             for track in media_tracks if isinstance(media_tracks, list) else []:
                 if not isinstance(track, dict):
                     continue
                 media_index = _track_output_index(track)
-                speaker_segment = (
-                    _speaker_reference_segment(track)
-                    if is_minimax and not output_full_timeline
-                    else None
-                )
+                shared_segment = _shared_reference_segment(track) if not output_full_timeline else None
                 locked_audio_track = (
                     track.get("type") == "audio" and track.get("audio_locked") is True
                 )
-                if speaker_segment is not None:
-                    speaker_audio: dict | None = None
-                    if deferred_media:
-                        speaker_content = speaker_segment.get("content", {})
-                        resolved_speaker = _resolve_multitrack_audio(speaker_content, None)
-                        if resolved_speaker is not None:
-                            speaker_audio = _build_speaker_reference_audio(
-                                speaker_segment,
-                                resolved_speaker,
-                                global_volume_db + audio_volume_db(track),
-                                global_muted
-                                or audio_is_muted(track)
-                                or (has_solo_track and track.get("solo") is not True),
-                            )
-                    else:
-                        speaker_media_index = _speaker_reference_output_index(speaker_segment)
-                        if (
-                            speaker_media_index is not None
-                            and 0 <= speaker_media_index < len(audio_items)
-                            and isinstance(audio_items[speaker_media_index], dict)
-                        ):
-                            speaker_audio = audio_items[speaker_media_index]
-                    if speaker_audio is not None:
-                        selected_audio.append(speaker_audio)
-                    continue
+                if shared_segment is not None:
+                    shared_content = shared_segment.get("content", {})
+                    if track.get("type") == "audio":
+                        shared_audio: dict | None = None
+                        if deferred_audio:
+                            resolved_audio = _resolve_multitrack_audio(shared_content, None)
+                            if resolved_audio is not None:
+                                shared_audio = _build_shared_reference_audio(
+                                    shared_segment,
+                                    resolved_audio,
+                                    global_volume_db + audio_volume_db(track),
+                                    global_muted
+                                    or audio_is_muted(track)
+                                    or (has_solo_track and track.get("solo") is not True),
+                                )
+                        else:
+                            shared_media_index = _shared_reference_output_index(shared_segment)
+                            if (
+                                shared_media_index is not None
+                                and 0 <= shared_media_index < len(audio_items)
+                                and isinstance(audio_items[shared_media_index], dict)
+                            ):
+                                shared_audio = audio_items[shared_media_index]
+                        if shared_audio is not None:
+                            selected_audio.append(shared_audio)
+                        continue
+
+                    if track.get("type") == "video":
+                        shared_video = None
+                        if deferred_video:
+                            shared_video = _resolve_multitrack_video(shared_content, None)
+                            if shared_video is not None:
+                                shared_video = _resize_multitrack_video(
+                                    shared_video,
+                                    int(info.get("width", 544)),
+                                    int(info.get("height", 960)),
+                                    str(info.get("resize_method", "stretch")),
+                                    deferred_shared_video_cache,
+                                    lambda _ratio: None,
+                                )
+                        else:
+                            shared_media_index = _shared_reference_output_index(shared_segment)
+                            if shared_media_index is not None and 0 <= shared_media_index < len(video_items):
+                                shared_video = video_items[shared_media_index]
+                        if shared_video is not None:
+                            selected_video.append(shared_video)
+                            has_video = True
+                        continue
                 track_media_duration_frames = media_duration_frames
                 if is_minimax:
                     track_media_end = _track_media_end_frame(
@@ -3178,7 +3322,11 @@ class MultiTrackTaskOutput(io.ComfyNode):
                     )
                     if track_media_duration_frames is not None and track_media_duration_frames <= 0:
                         continue
-                if deferred_media and track.get("type") in {"audio", "video"}:
+                track_media_deferred = (
+                    (track.get("type") == "audio" and deferred_audio)
+                    or (track.get("type") == "video" and deferred_video)
+                )
+                if track_media_deferred:
                     local_duration = (
                         track_media_duration_frames
                         if is_minimax

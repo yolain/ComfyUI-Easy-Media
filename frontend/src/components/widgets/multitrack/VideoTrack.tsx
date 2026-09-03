@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Clapperboard, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
 import type { MediaTab } from '@/components/widgets/mediaSelector/MediaSelector'
 import { useT } from '@/lib/i18n'
+import { computeSlotItems } from '@/lib/timeline-utils'
 import type { SubtitleRecognitionMethod } from '@/lib/subtitle-recognition'
 import type { MultiTrack, MultiTrackSourceType } from '@/types/multitrack'
 import { MULTITRACK_LEFT_GUTTER } from './MultiTrackRuler'
@@ -21,6 +22,8 @@ interface VideoTrackProps {
   width: number
   canvasScale: number
   selectedSegmentIds: Set<string>
+  node: unknown
+  app: unknown
   onAddVideo: (
     trackId: string,
     filePath: string,
@@ -34,6 +37,7 @@ interface VideoTrackProps {
   canDeleteTrack: boolean
   onDeleteTrack: (trackId: string) => void
   onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo' | 'audio_locked'>>) => void
+  onSharedReferenceChange?: (trackId: string, segmentId: string, enabled: boolean) => void
   onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
   onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
   onMoveSegment: (segmentId: string, nextStartTime: number, clientY: number) => void
@@ -52,6 +56,7 @@ function sourceTypeToTab(sourceType: MultiTrackSourceType | undefined): MediaTab
   if (sourceType === 'output') return 'outputs'
   if (sourceType === 'local') return 'local'
   if (sourceType === 'url') return 'url'
+  if (sourceType === 'slot') return 'slot'
   return 'inputs'
 }
 
@@ -62,6 +67,8 @@ export function VideoTrack({
   width,
   canvasScale,
   selectedSegmentIds,
+  node,
+  app,
   onAddVideo,
   onSelectSegment,
   onDeleteSegment,
@@ -69,6 +76,7 @@ export function VideoTrack({
   canDeleteTrack,
   onDeleteTrack,
   onTrackAudioSettingsChange,
+  onSharedReferenceChange = () => {},
   onResizeSegment,
   onResizeSegmentPreview,
   onMoveSegment,
@@ -84,14 +92,19 @@ export function VideoTrack({
 }: Readonly<VideoTrackProps>) {
   const t = useT()
   const contentRef = useRef<HTMLDivElement>(null)
+  const [mediaSelectorOpen, setMediaSelectorOpen] = useState(false)
   const [reselectAnchor, setReselectAnchor] = useState<{ segmentId: string, x: number, y: number } | null>(null)
+  const slotItems = useMemo(
+    () => computeSlotItems(node, app, 'video'),
+    [node, app, mediaSelectorOpen, reselectAnchor],
+  )
   const reselectSegment = reselectAnchor
     ? track.segments.find((segment) => segment.id === reselectAnchor.segmentId)
     : undefined
   const reselectValue = reselectSegment?.content.file_path
     ?? reselectSegment?.content.local_path
     ?? reselectSegment?.content.url
-    ?? ''
+    ?? (reselectSegment?.content.slot_name ? `__slot__:${reselectSegment.content.slot_name}` : '')
   const lastEnd = track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0)
   const addLeft = (lastEnd / Math.max(totalLength, 1)) * width
   const gaps = getTrackSegmentGaps(track.segments)
@@ -139,6 +152,10 @@ export function VideoTrack({
             onDragPreviewChange={onDragPreviewChange}
             getDragPreviewStart={getDragPreviewStart}
             onDragPreviewEnd={onDragPreviewEnd}
+            sharedReference={segment.content.shared_reference === true}
+            onSharedReferenceToggle={(enabled) => {
+              onSharedReferenceChange(track.id, segment.id, enabled)
+            }}
             onDoubleClick={(segmentId, event) => {
               const rect = contentRef.current?.getBoundingClientRect()
               if (!rect) return
@@ -166,6 +183,7 @@ export function VideoTrack({
                 value=""
                 mediaType="video"
                 defaultTab="inputs"
+                slotItems={slotItems}
                 onChange={(filePath, sourceType = 'input') => {
                   onAddVideo(track.id, filePath, sourceType, gap.startFrame, gap.endFrame)
                 }}
@@ -178,7 +196,7 @@ export function VideoTrack({
           className="absolute top-1/2 flex -translate-y-1/2 flex-col gap-1"
           style={{ left: track.segments.length === 0 ? 6 : addLeft + 6 }}
         >
-          <Popover>
+          <Popover open={mediaSelectorOpen} onOpenChange={setMediaSelectorOpen}>
             <PopoverTrigger asChild>
               <Button
                 type="button"
@@ -195,8 +213,10 @@ export function VideoTrack({
                 value=""
                 mediaType="video"
                 defaultTab="inputs"
+                slotItems={slotItems}
                 onChange={(filePath, sourceType = 'input') => {
                   onAddVideo(track.id, filePath, sourceType)
+                  setMediaSelectorOpen(false)
                 }}
               />
             </PopoverContent>
@@ -235,6 +255,7 @@ export function VideoTrack({
               value={reselectValue}
               mediaType="video"
               defaultTab={sourceTypeToTab(reselectSegment?.content.source_type)}
+              slotItems={slotItems}
               onChange={(filePath, sourceType = 'input') => {
                 if (!reselectAnchor) return
                 onReplaceVideo(track.id, reselectAnchor.segmentId, filePath, sourceType)

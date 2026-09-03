@@ -463,6 +463,61 @@ describe('TaskSegmentEditor', () => {
     expect(screen.queryByTestId('media-selector-mock')).toBeNull()
   })
 
+  it('labels slot image placeholders with their slot number', () => {
+    const segment = taskSegment()
+    segment.content.images = [{
+      id: 'slot-image',
+      source_type: 'slot',
+      slot_name: 'image2',
+      file_name: 'image2',
+    }]
+
+    render(<TaskSegmentEditor segment={segment} onContentChange={vi.fn()} />)
+
+    expect(screen.getByTestId('task-image-slot-image').textContent).toContain('Image 2')
+  })
+
+  it('shares an image across tasks before each task local images', () => {
+    const first = taskSegment()
+    first.content.images = [
+      { id: 'local-a', source_type: 'input', file_path: 'local-a.png' },
+      { id: 'shared', source_type: 'input', file_path: 'shared.png' },
+    ]
+    const second = secondTaskSegment()
+    second.content.images = [
+      { id: 'same-path', source_type: 'input', file_path: 'shared.png' },
+      { id: 'local-b', source_type: 'input', file_path: 'local-b.png' },
+    ]
+    const onTrackSegmentsContentChange = vi.fn()
+
+    render(
+      <TaskSegmentEditor
+        segment={first}
+        trackSegments={[first, second]}
+        onContentChange={vi.fn()}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('task-image-shared-shared'))
+
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([
+      {
+        segmentId: first.id,
+        patch: { images: [
+          expect.objectContaining({ id: 'shared', shared_reference: true }),
+          expect.objectContaining({ id: 'local-a' }),
+        ] },
+      },
+      {
+        segmentId: second.id,
+        patch: { images: [
+          expect.objectContaining({ id: 'same-path', shared_reference: true }),
+          expect.objectContaining({ id: 'local-b' }),
+        ] },
+      },
+    ])
+  })
+
   it('reselects an image in place and opens the chosen image first without batch controls', () => {
     const onContentChange = vi.fn()
     render(<TaskSegmentEditor segment={taskSegment()} onContentChange={onContentChange} />)

@@ -308,7 +308,7 @@ def validate_track_data(
     track_ids: set[str] = set()
     segment_ids: set[str] = set()
     locked_audio_tracks: list[tuple[str, int]] = []
-    speaker_references: list[tuple[str, str]] = []
+    shared_media_references: list[tuple[str, str, str]] = []
     task_ranges: list[tuple[int, int]] = []
     max_end = 0
     for track_index, track in enumerate(tracks):
@@ -362,6 +362,15 @@ def validate_track_data(
                 raise WorkflowError(f"{where}.content must be an object")
             if track_type in {"video", "audio"} and content.get("media_type") != track_type:
                 raise WorkflowError(f"{where}.content.media_type must be {track_type!r}")
+            if "shared_reference" in content:
+                if not isinstance(content.get("shared_reference"), bool):
+                    raise WorkflowError(
+                        f"{where}.content.shared_reference must be a boolean"
+                    )
+                if track_type not in {"audio", "video"} or content.get("media_type") != track_type:
+                    raise WorkflowError(
+                        f"Only audio/video segments may contain shared_reference ({where})"
+                    )
             if "speaker_reference" in content:
                 if not isinstance(content.get("speaker_reference"), bool):
                     raise WorkflowError(
@@ -371,23 +380,37 @@ def validate_track_data(
                     raise WorkflowError(
                         f"Only audio segments may contain speaker_reference ({where})"
                     )
-            if content.get("speaker_reference") is True:
-                speaker_references.append((track_id, segment_id))
+            if content.get("shared_reference") is True or content.get("speaker_reference") is True:
+                shared_media_references.append((track_id, segment_id, str(track_type)))
             images = content.get("images", [])
             if track_type == "task" and (not isinstance(images, list) or len(images) > 9):
                 raise WorkflowError(f"{where}.content.images must contain at most 9 items")
+            if track_type == "task" and isinstance(images, list):
+                for image_index, image in enumerate(images):
+                    if not isinstance(image, dict):
+                        raise WorkflowError(
+                            f"{where}.content.images[{image_index}] must be an object"
+                        )
+                    if "shared_reference" in image and not isinstance(
+                        image.get("shared_reference"), bool
+                    ):
+                        raise WorkflowError(
+                            f"{where}.content.images[{image_index}].shared_reference must be a boolean"
+                        )
 
     if len(locked_audio_tracks) > 1:
         locked_ids = [track_id for track_id, _ in locked_audio_tracks]
         raise WorkflowError(f"Only one audio track may be locked; found {locked_ids}")
-    speaker_tracks = [track_id for track_id, _ in speaker_references]
-    duplicate_speaker_tracks = sorted({
-        track_id for track_id in speaker_tracks if speaker_tracks.count(track_id) > 1
+    shared_media_tracks = [track_id for track_id, _, _ in shared_media_references]
+    duplicate_shared_media_tracks = sorted({
+        track_id
+        for track_id in shared_media_tracks
+        if shared_media_tracks.count(track_id) > 1
     })
-    if duplicate_speaker_tracks:
+    if duplicate_shared_media_tracks:
         raise WorkflowError(
-            "Each audio track may contain only one speaker reference; found multiple in "
-            f"{duplicate_speaker_tracks}"
+            "Each audio/video track may contain only one shared reference; found multiple in "
+            f"{duplicate_shared_media_tracks}"
         )
     if locked_audio_tracks:
         locked_id, locked_index = locked_audio_tracks[0]
@@ -599,10 +622,12 @@ def summarize_track(track: dict[str, Any]) -> dict[str, Any]:
         "type": track.get("type"),
         "segments": len(segments) if isinstance(segments, list) else 0,
     }
-    if track.get("type") != "audio":
+    track_type = track.get("type")
+    if track_type not in {"audio", "video"}:
         return summary
 
-    summary["audio_locked"] = track.get("audio_locked") is True
+    if track_type == "audio":
+        summary["audio_locked"] = track.get("audio_locked") is True
     summary["media"] = [
         {
             "file_name": content.get("file_name"),
@@ -610,12 +635,15 @@ def summarize_track(track: dict[str, Any]) -> dict[str, Any]:
             "source_type": content.get("source_type"),
             "start_frame": segment.get("start_frame"),
             "end_frame": segment.get("end_frame"),
-            "speaker_reference": content.get("speaker_reference") is True,
+            "shared_reference": (
+                content.get("shared_reference") is True
+                or content.get("speaker_reference") is True
+            ),
         }
         for segment in segments
         if isinstance(segment, dict)
         and isinstance(segment.get("content"), dict)
-        and (content := segment["content"]).get("media_type") == "audio"
+        and (content := segment["content"]).get("media_type") == track_type
     ]
     return summary
 

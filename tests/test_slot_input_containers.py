@@ -114,6 +114,71 @@ def test_index_slot_video_multi(basic):
 
 
 @pytest.mark.parametrize(
+    "slot_name,expected_index",
+    [
+        ("image1", 0),
+        ("audio2", 1),
+        ("video3", 2),
+    ],
+)
+def test_slot_index_supports_one_based_names(basic, slot_name, expected_index):
+    assert basic._slot_index(slot_name) == expected_index
+
+
+def test_encoded_slot_paths_are_detected_for_all_multitrack_media_types(basic):
+    data = {
+        "tracks": [
+            {
+                "type": "task",
+                "segments": [{"content": {"images": [{"file_path": "__slot__:image2"}]}}],
+            },
+            {
+                "type": "audio",
+                "segments": [{"content": {"media_type": "audio", "file_path": "__slot__:audio2"}}],
+            },
+            {
+                "type": "video",
+                "segments": [{"content": {"media_type": "video", "file_path": "__slot__:video2"}}],
+            },
+        ],
+    }
+
+    assert basic.multitrack_slot_media_types(data) == {"image", "audio", "video"}
+
+
+def test_encoded_slot_paths_resolve_connected_media(basic):
+    images = [torch.zeros(1, 4, 4, 3), torch.ones(1, 4, 4, 3)]
+    audios = [
+        {"waveform": torch.zeros(1, 1, 4), "sample_rate": 2},
+        {"waveform": torch.ones(1, 1, 4), "sample_rate": 2},
+    ]
+    videos = [object(), object()]
+
+    image = basic._resolve_timeline_image_item({"file_path": "__slot__:image2"}, images)
+    audio = basic._resolve_multitrack_audio({"file_path": "__slot__:audio2"}, audios)
+    video = basic._resolve_multitrack_video({"file_path": "__slot__:video2"}, videos)
+
+    assert image is not None and torch.equal(image, images[1])
+    assert audio is audios[1]
+    assert video is videos[1]
+
+
+def test_canonicalize_encoded_slot_path_for_tracks_info(basic):
+    normalized = basic.canonicalize_multitrack_slot_content({
+        "media_type": "video",
+        "source_type": "input",
+        "file_path": "__slot__:video2",
+    })
+
+    assert normalized == {
+        "media_type": "video",
+        "source_type": "slot",
+        "slot_name": "video2",
+        "file_name": "video2",
+    }
+
+
+@pytest.mark.parametrize(
     "value,expected_len",
     [
         ((object(),), 1),

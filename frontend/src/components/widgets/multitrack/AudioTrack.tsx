@@ -45,7 +45,7 @@ interface AudioTrackProps {
   onCloneSegment: (segmentId: string) => void
   onDeleteTrack: (trackId: string) => void
   onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo' | 'audio_locked'>>) => void
-  onSpeakerReferenceChange?: (trackId: string, segmentId: string, enabled: boolean) => void
+  onSharedReferenceChange?: (trackId: string, segmentId: string, enabled: boolean) => void
   onResizeSegment: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
   onResizeSegmentPreview: (segmentId: string, edge: 'start' | 'end', nextTime: number, brakeDistanceFrames?: number) => void
   onMoveSegment: (segmentId: string, nextStartTime: number, clientY: number) => void
@@ -82,7 +82,7 @@ export function AudioTrack({
   onCloneSegment,
   onDeleteTrack,
   onTrackAudioSettingsChange,
-  onSpeakerReferenceChange = () => {},
+  onSharedReferenceChange = () => {},
   onResizeSegment,
   onResizeSegmentPreview,
   onMoveSegment,
@@ -159,9 +159,9 @@ export function AudioTrack({
             onAudioLockToggle={(locked) => {
               onTrackAudioSettingsChange(track.id, { audio_locked: locked })
             }}
-            speakerReference={segment.content.speaker_reference === true}
-            onSpeakerReferenceToggle={(enabled) => {
-              onSpeakerReferenceChange(track.id, segment.id, enabled)
+            sharedReference={segment.content.shared_reference === true}
+            onSharedReferenceToggle={(enabled) => {
+              onSharedReferenceChange(track.id, segment.id, enabled)
             }}
             onDoubleClick={(segmentId, event) => {
               const rect = contentRef.current?.getBoundingClientRect()

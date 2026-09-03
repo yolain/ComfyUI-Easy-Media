@@ -30,6 +30,8 @@ export interface MultiTrackTaskImage {
   slot_name?: string
   file_name?: string
   panorama_view?: MultiTrackPanoramaView
+  shared_reference?: boolean
+  shared_reference_copy?: boolean
 }
 
 export interface MultiTrackSegmentContent {
@@ -54,6 +56,9 @@ export interface MultiTrackSegmentContent {
   muted?: boolean
   speed?: number
   media_index?: number
+  shared_reference?: boolean
+  shared_media_index?: number
+  /** @deprecated Migrated to shared_reference when legacy workflows are loaded. */
   speaker_reference?: boolean
   subtitle_style?: MultiTrackSubtitleStyle
   subtitle_speech?: MultiTrackSubtitleSpeechSettings

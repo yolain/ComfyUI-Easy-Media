@@ -76,5 +76,5 @@ HTTP 400 表示参数错误，409 表示多个页面未指定目标、目标忙�
 
 - 工作流通过 dry-run、write 后 inspect 和不变量检查。
 - 分辨率与 DynamicCombo 子字段一致；目标 task 范围、`project_save`、sampling 符合用户要求。
-- `audio_locked` 唯一且覆盖目标任务；`speaker_reference` 指向预期片段。
+- `audio_locked` 唯一且覆盖目标任务；`shared_reference` 指向预期的公用图片、音频或视频，旧 `speaker_reference` 仅用于兼容迁移。
 - 媒体路径存在于当前 ComfyUI 实例；覆盖当前 tab 时用户已要求替换。
