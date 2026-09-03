@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useRef } from 'react'
 import type { ActivePreviewVideoSegment, MultiTrackPreviewResolution } from '@/lib/multitrack-utils'
-import { mediaContentToViewUrl } from '@/lib/media-url'
+import { useT } from '@/lib/i18n'
+import { mediaContentToViewUrl, mediaSlotNumber } from '@/lib/media-url'
 import { cn } from '@/lib/utils'
 
 interface VideoPreviewProps {
@@ -39,6 +40,7 @@ export function VideoPreview({
   className,
   children,
 }: Readonly<VideoPreviewProps>) {
+  const t = useT()
   const videoRef = useRef<HTMLVideoElement>(null)
   const videoUrl = useMemo(() => {
     if (!activeVideo) return null
@@ -104,6 +106,15 @@ export function VideoPreview({
           preload="auto"
           style={{ objectFit: fit }}
         />
+      ) : activeVideo?.segment.content.source_type === 'slot' ? (
+        <div
+          data-testid="multitrack-video-slot-placeholder"
+          className="flex h-full w-full items-center justify-center bg-muted/30 px-3 text-center text-xs font-medium text-muted-foreground"
+        >
+          {t('mediaSelector.slotVideo', {
+            n: mediaSlotNumber(activeVideo.segment.content.slot_name),
+          })}
+        </div>
       ) : (
         <div data-testid="multitrack-black-frame" className="h-full w-full bg-black" />
       )}

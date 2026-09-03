@@ -83,6 +83,29 @@ describe('VideoPreview', () => {
     expect(screen.getByTestId('multitrack-black-frame')).not.toBeNull()
   })
 
+  it('shows a labeled placeholder for a connected video slot', () => {
+    const slotVideo = activeVideo(0)
+    slotVideo.segment.content = {
+      media_type: 'video',
+      source_type: 'slot',
+      slot_name: 'video2',
+      file_name: 'video2',
+    }
+
+    render(
+      <VideoPreview
+        activeVideo={slotVideo}
+        resolution={resolution}
+        isPlaying={false}
+        muted
+        volume={1}
+      />,
+    )
+
+    expect(screen.getByTestId('multitrack-video-slot-placeholder').textContent).toBe('Video 2')
+    expect(screen.queryByTestId('multitrack-black-frame')).toBeNull()
+  })
+
   it('keeps the video out of layout flow so intrinsic dimensions cannot expand the stage', () => {
     render(
       <VideoPreview

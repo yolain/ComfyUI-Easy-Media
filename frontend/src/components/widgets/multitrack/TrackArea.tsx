@@ -75,7 +75,7 @@ interface TrackAreaProps {
   onReorderTrack?: (sourceTrackId: string, targetTrackId: string) => void
   onTrackVisibilityChange?: (trackId: string, visible: boolean) => void
   onTrackAudioSettingsChange: (trackId: string, patch: Partial<Pick<MultiTrack, 'muted' | 'solo' | 'audio_locked'>>) => void
-  onSpeakerReferenceChange?: (trackId: string, segmentId: string, enabled: boolean) => void
+  onSharedReferenceChange?: (trackId: string, segmentId: string, enabled: boolean) => void
   onDistributeTaskSegments: (trackId: string) => void
   onCloneTaskSegment: (trackId: string, segmentId: string) => void
   onSplitTaskSegment?: (segmentId: string) => void
@@ -196,7 +196,7 @@ export function TrackArea({
   onReorderTrack = () => {},
   onTrackVisibilityChange = () => {},
   onTrackAudioSettingsChange,
-  onSpeakerReferenceChange = () => {},
+  onSharedReferenceChange = () => {},
   onDistributeTaskSegments,
   onCloneTaskSegment,
   onSplitTaskSegment = () => {},
@@ -580,6 +580,8 @@ export function TrackArea({
               width={playableWidth}
               canvasScale={canvasScale}
               selectedSegmentIds={selectedSegmentIds}
+              node={node}
+              app={app}
               onAddVideo={onAddVideo}
               onReplaceVideo={onReplaceVideo}
               onSelectSegment={onSelectSegment}
@@ -593,6 +595,7 @@ export function TrackArea({
               canDeleteTrack={track.id !== firstVideoTrackId}
               onDeleteTrack={onDeleteTrack}
               onTrackAudioSettingsChange={onTrackAudioSettingsChange}
+              onSharedReferenceChange={onSharedReferenceChange}
               onResizeSegment={onResizeSegment}
               onResizeSegmentPreview={onResizeSegmentPreview}
               onMoveSegment={(segmentId, nextStartTime, clientY) => {
@@ -624,7 +627,7 @@ export function TrackArea({
               onCloneSegment={(segmentId) => onCloneTaskSegment(track.id, segmentId)}
               onDeleteTrack={onDeleteTrack}
               onTrackAudioSettingsChange={onTrackAudioSettingsChange}
-              onSpeakerReferenceChange={onSpeakerReferenceChange}
+              onSharedReferenceChange={onSharedReferenceChange}
               onResizeSegment={onResizeSegment}
               onResizeSegmentPreview={onResizeSegmentPreview}
               onMoveSegment={(segmentId, nextStartTime, clientY) => handleMoveSegment(segmentId, track.id, nextStartTime, clientY)}

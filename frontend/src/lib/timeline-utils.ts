@@ -1,6 +1,6 @@
 import type { ImageItem, TimelineData, Track, TrackType } from '@/types/timeline'
 import { uuid } from './uuid'
-import { traceToRootSourceViaLink } from './graph-utils'
+import { traceToRootSource } from './graph-utils'
 
 // ---------------------------------------------------------------------------
 // Slot item types (used by MediaSelector's slot tab)
@@ -17,6 +17,62 @@ export interface SlotItem {
   audio_name?: string
 }
 
+interface SlotInputDescriptor {
+  name: string
+  type: string
+  link?: number | null
+}
+
+interface SlotLinkDescriptor {
+  origin_id: number
+  origin_slot: number
+}
+
+interface SlotSourceNodeDescriptor {
+  inputs?: SlotInputDescriptor[]
+  widgets?: Array<{ name?: string; value?: unknown }>
+  widgets_values?: unknown[]
+}
+
+function getInputLink(
+  currentNode: any,
+  input: SlotInputDescriptor,
+  inputIndex: number,
+  graph: any,
+): SlotLinkDescriptor | null {
+  try {
+    const link = currentNode?.getInputLink?.(inputIndex)
+    if (link) return link
+  } catch (error) {
+    console.error('[timeline-utils] failed to read input link:', error)
+  }
+
+  const legacyLinkId = input.link
+  if (legacyLinkId === null || legacyLinkId === undefined) return null
+  return graph?.links?.[legacyLinkId] ?? null
+}
+
+function sourceListSkipsEmpty(
+  sourceNode: SlotSourceNodeDescriptor,
+  mediaType: 'image' | 'audio' | 'video',
+): boolean {
+  const widget = sourceNode.widgets?.find((candidate) => (
+    candidate?.name === 'skip_empty'
+  ))
+  if (typeof widget?.value === 'boolean') return widget.value
+
+  const skipEmptyInputIndex = sourceNode.inputs
+    ?.findIndex((input) => input.name === 'skip_empty') ?? -1
+  const serializedValue = skipEmptyInputIndex >= 0
+    ? sourceNode.widgets_values?.[skipEmptyInputIndex]
+    : undefined
+  if (typeof serializedValue === 'boolean') return serializedValue
+
+  // Match the defaults of the bundled Make*List nodes when runtime widget
+  // metadata is unavailable (for example while loading an older workflow).
+  return mediaType !== 'audio'
+}
+
 /**
  * Inspect a ComfyUI node's optional inputs and the upstream graph to build
  * a list of selectable slot items for the given media type.
@@ -31,18 +87,16 @@ export interface SlotItem {
 export function computeSlotItems(
   node: any,
   app: any,
-  mediaType: 'image' | 'audio',
+  mediaType: 'image' | 'audio' | 'video',
 ): SlotItem[] {
   if (!node?.inputs || !app?.graph) return []
 
   const result: SlotItem[] = []
   const type = mediaType.toUpperCase()
 
-  for (const input of node.inputs as Array<{ name: string; type: string; link: number | null }>) {
+  for (const [inputIndex, input] of (node.inputs as SlotInputDescriptor[]).entries()) {
     if ((input.type ?? '').toUpperCase() !== type) continue
-    if (input.link === null || input.link === undefined) continue
-
-    const link = app.graph.links[input.link]
+    const link = getInputLink(node, input, inputIndex, app.graph)
     if (!link) continue
 
     const sourceNodeId: number = link.origin_id
@@ -53,19 +107,21 @@ export function computeSlotItems(
     const isList = sourceOutputSlot.shape == 6
     if (isList) {
       // Collect this node's indexed inputs: image_0, image_1, ... / audio_0, audio_1, ...
-      const indexedInputs = (sourceNode.inputs as Array<{ name: string; type: string; link: number | null, isConnected: boolean }>)
-        .filter((inp) => inp.isConnected)
+      const indexedInputs = (sourceNode.inputs as SlotInputDescriptor[])
+        .map((inp, index) => ({ inp, index, link: getInputLink(sourceNode, inp, index, app.graph) }))
+        .filter(({ inp, link }) => (inp.type ?? '').toUpperCase() === type && link !== null)
         .sort((a, b) => {
-          const ia = parseInt(a.name.split('_').pop() ?? '0', 10)
-          const ib = parseInt(b.name.split('_').pop() ?? '0', 10)
+          const ia = parseInt(a.inp.name.match(/(\d+)$/)?.[1] ?? '0', 10)
+          const ib = parseInt(b.inp.name.match(/(\d+)$/)?.[1] ?? '0', 10)
           return ia - ib
         })
       if (indexedInputs.length > 0) {
-        for (const inp of indexedInputs) {
+        const skipEmpty = sourceListSkipsEmpty(sourceNode, mediaType)
+        for (const [connectedIndex, { inp, link: inputLink }] of indexedInputs.entries()) {
           let imgsrc: string | undefined
           let audio_name: string | undefined
-          if (inp.link) {
-            const currentNodeId = traceToRootSourceViaLink(inp.link, app.graph)
+          if (inputLink) {
+            const currentNodeId = traceToRootSource(inputLink.origin_id, inputLink.origin_slot, app.graph)
             if (currentNodeId !== null) {
               const currentNode = app.graph.getNodeById(currentNodeId)
               if (mediaType == 'image') {
@@ -75,7 +131,8 @@ export function computeSlotItems(
               }
             }
           }
-          result.push({ label: inp.name, img: imgsrc, audio_name: audio_name, value: `__slot__:${inp.name}` })
+          const slotName = skipEmpty ? `${mediaType}${connectedIndex + 1}` : inp.name
+          result.push({ label: inp.name, img: imgsrc, audio_name: audio_name, value: `__slot__:${slotName}` })
         }
       } else {
         // Fallback: represent base input as a single list reference
@@ -85,7 +142,7 @@ export function computeSlotItems(
       // Try to trace to find the actual image source
       let imgsrc: string | undefined
       let audio_name: string | undefined
-      const currentNodeId = traceToRootSourceViaLink(input.link, app.graph)
+      const currentNodeId = traceToRootSource(link.origin_id, link.origin_slot, app.graph)
       const node = currentNodeId !== null
         ? app.graph.getNodeById(currentNodeId)
         : sourceNode

@@ -557,6 +557,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
               duration: duration ?? fallbackDuration,
               muted: segment.content.muted ?? content.muted,
               volume_db: segment.content.volume_db ?? content.volume_db,
+              shared_reference: segment.content.shared_reference === true,
             },
           }
         }),
@@ -673,18 +674,19 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     })
   }
 
-  function handleSpeakerReferenceChange(trackId: string, segmentId: string, enabled: boolean) {
+  function handleSharedReferenceChange(trackId: string, segmentId: string, enabled: boolean) {
     commitNormalizedTrackChange({
       ...data,
       tracks: data.tracks.map((track) => {
-        if (track.id !== trackId || track.type !== 'audio') return track
+        if (track.id !== trackId || (track.type !== 'audio' && track.type !== 'video')) return track
         return {
           ...track,
           segments: track.segments.map((segment) => ({
             ...segment,
             content: {
               ...segment.content,
-              speaker_reference: enabled && segment.id === segmentId,
+              shared_reference: enabled && segment.id === segmentId,
+              speaker_reference: undefined,
             },
           })),
         }
@@ -721,6 +723,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                 content: {
                   ...content,
                   duration,
+                  shared_reference: segment.content.shared_reference === true,
                 },
               }
             : segment
@@ -1468,7 +1471,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     onReorderTrack={handleReorderTrack}
                     onTrackVisibilityChange={handleTrackVisibilityChange}
                     onTrackAudioSettingsChange={handleTrackAudioSettingsChange}
-                    onSpeakerReferenceChange={handleSpeakerReferenceChange}
+                    onSharedReferenceChange={handleSharedReferenceChange}
                     onDistributeTaskSegments={handleDistributeTaskSegments}
                     onCloneTaskSegment={handleCloneSegment}
                     onSplitTaskSegment={setSplittingTaskSegmentId}

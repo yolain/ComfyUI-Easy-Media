@@ -164,6 +164,11 @@
     "enableSpeakerReference": "复用为说话人音频",
     "disableSpeakerReference": "停止复用说话人音频",
     "speakerReferenceTooltip": "（仅 MiniMax）在每个任务中将此片段复用为该音轨对应的 @音频 引用；超过 15 秒时只取开头 15 秒。",
+    "enableSharedReference": "设为公共参考",
+    "disableSharedReference": "取消公共参考",
+    "sharedReferenceTooltip": "将此媒体作为该轨道在所有任务片段中的公共参考；公共音频最多使用开头 15 秒。",
+    "sharedImageReferenceTooltip": "将此图片设为公用图片，它将排在每个任务片段的私有图片之前；公共图片与私有图片每段合计最多 9 张。",
+    "sharedImageLimitTooltip": "已有任务片段包含 9 张不同图片，请先移除一张再设为公共图片。",
     "previewTaskLabel": "任务{n}",
     "emptyPreviewTitle": "还没有可预览的片段",
     "emptyPreviewDescription": "请在下方轨道添加任务片段或视频片段。",
@@ -417,6 +422,7 @@
     "slotList": "列表",
     "slotImage": "图像 {n}",
     "slotAudio": "音频 {n}",
+    "slotVideo": "视频 {n}",
     "addLocal": "添加本地文件"
   }
 }

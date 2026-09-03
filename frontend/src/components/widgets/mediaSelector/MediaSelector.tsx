@@ -714,7 +714,7 @@ export function MediaSelector({
   maxSelectionCount = 9,
 }: Readonly<MediaSelectorProps>) {
   const t = useT()
-  const showSlotTab = mediaType === 'image' || mediaType === 'audio'
+  const showSlotTab = mediaType === 'image' || mediaType === 'audio' || mediaType === 'video'
   const initialSession = mediaSelectorSessions.get(mediaType)
   const initialSubfolders = value && ['inputs', 'outputs', 'local'].includes(defaultTab)
     ? { ...initialSession?.subfolders, [defaultTab]: getSelectedMediaParent(value) }
@@ -1217,9 +1217,14 @@ export function MediaSelector({
                   const selected = selectedValues.has(item.value)
                   const isImage = item.value.startsWith('__slot__:image')
                   const isAudio = item.value.startsWith('__slot__:audio')
+                  const isVideo = item.value.startsWith('__slot__:video')
                   const displayLabel = isImage
                     ? t('mediaSelector.slotImage', { n: index + 1 })
-                    : t('mediaSelector.slotAudio', { n: index + 1 })
+                    : isAudio
+                      ? t('mediaSelector.slotAudio', { n: index + 1 })
+                      : isVideo
+                        ? t('mediaSelector.slotVideo', { n: index + 1 })
+                        : item.label
                   return (
                     <button
                       key={item.value}
@@ -1239,6 +1244,10 @@ export function MediaSelector({
                       ) : isAudio ? (
                         <div className="w-8 h-8 rounded flex items-center justify-center bg-[#34d399] shrink-0">
                           <FileAudio className="w-4 h-4 text-white" />
+                        </div>
+                      ) : isVideo ? (
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-muted">
+                          <FileVideo className="h-4 w-4 text-muted-foreground" />
                         </div>
                       ) : (
                         <Link2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />

@@ -103,7 +103,7 @@ export function traceToRootSource(
  * The link points from a source output to a target input.
  */
 export function traceToRootSourceViaLink(linkId: number, graph: any): number | null {
-  if (!linkId) {
+  if (linkId === null || linkId === undefined) {
     console.debug('[traceViaLink] No link ID')
     return null
   }

@@ -11,6 +11,7 @@ import type {
   TrackData,
 } from '@/types/multitrack'
 import { uuid } from './uuid'
+import { synchronizeSharedTaskImages } from './task-image-utils'
 
 export const MULTITRACK_DEFAULT_FRAME_RATE = 24
 export const MULTITRACK_DEFAULT_TOTAL_LENGTH = 120
@@ -37,16 +38,22 @@ export function createMultiTrackVideoContent(
   filePath: string,
   sourceType: MultiTrackSourceType,
 ): MultiTrackSegmentContent & { source_type: MultiTrackSourceType } {
-  const normalizedSourceType = sourceType === 'input' && /^https?:\/\//i.test(filePath)
-    ? 'url'
-    : sourceType
+  const normalizedSourceType = filePath.startsWith('__slot__:')
+    ? 'slot'
+    : sourceType === 'input' && /^https?:\/\//i.test(filePath)
+      ? 'url'
+      : sourceType
+  const slotName = normalizedSourceType === 'slot'
+    ? filePath.replace(/^__slot__:/, '')
+    : undefined
   return {
     media_type: 'video',
     source_type: normalizedSourceType,
     file_path: normalizedSourceType === 'input' || normalizedSourceType === 'output' ? filePath : undefined,
     local_path: normalizedSourceType === 'local' ? filePath : undefined,
     url: normalizedSourceType === 'url' ? filePath : undefined,
-    file_name: filePath.split(/[\\/]/).pop() ?? filePath,
+    ...(slotName ? { slot_name: slotName } : {}),
+    file_name: slotName ?? filePath.split(/[\\/]/).pop() ?? filePath,
   }
 }
 
@@ -1566,6 +1573,10 @@ function normalizeLegacySegment(segment: LegacyMultiTrackSegment): MultiTrackSeg
     volume_db: normalizedVolumeDb(segment.content.volume_db),
   } as MultiTrackSegment['content'] & { audio_locked?: unknown }
   delete content.audio_locked
+  if (content.media_type === 'audio' || content.media_type === 'video') {
+    content.shared_reference = content.shared_reference === true || content.speaker_reference === true
+  }
+  delete content.speaker_reference
   return {
     ...omitLegacyVolume(segment),
     start_frame: startFrame,
@@ -1579,18 +1590,18 @@ function normalizeTrackSegments(track: LegacyMultiTrack): MultiTrackSegment[] {
   const segments = track.segments
     .map((segment) => normalizeLegacySegment(segment))
     .sort((a, b) => a.start_frame - b.start_frame)
-  if (track.type !== 'audio') return segments
+  if (track.type !== 'audio' && track.type !== 'video') return segments
 
-  let keptSpeakerReference = false
+  let keptSharedReference = false
   return segments.map((segment) => {
-    if (segment.content.speaker_reference !== true) return segment
-    if (!keptSpeakerReference) {
-      keptSpeakerReference = true
+    if (segment.content.shared_reference !== true) return segment
+    if (!keptSharedReference) {
+      keptSharedReference = true
       return segment
     }
     return {
       ...segment,
-      content: { ...segment.content, speaker_reference: false },
+      content: { ...segment.content, shared_reference: false },
     }
   })
 }
@@ -1716,7 +1727,8 @@ export function normalizeTrackData(raw: LegacyTrackData): TrackData {
     return { ...track, name: `${typeName} ${index}` }
   })
   const normalizedAudioLocks = normalizeExclusiveMultiTrackAudioLock(namedTracks)
-  const totalLength = normalizeTotalLength(normalizedAudioLocks, frameRate)
+  const normalizedSharedImages = synchronizeSharedTaskImages(normalizedAudioLocks)
+  const totalLength = normalizeTotalLength(normalizedSharedImages, frameRate)
   const taskMarkers = normalizeTaskMarkers(raw.task_markers, totalLength)
 
   return {
@@ -1727,7 +1739,7 @@ export function normalizeTrackData(raw: LegacyTrackData): TrackData {
     total_length: totalLength,
     task_markers: taskMarkers,
     task_overview: raw.task_overview === true,
-    tracks: normalizedAudioLocks,
+    tracks: normalizedSharedImages,
   }
 }
 

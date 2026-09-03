@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Captions, Clapperboard, Eye, GalleryHorizontalEnd, ListTree, PanelLeft, PanelRight, Plus, Volume2, X } from 'lucide-react'
+import { ArrowLeft, Captions, Clapperboard, Eye, GalleryHorizontalEnd, ListTree, PanelLeft, PanelRight, Plus, Share2, Volume2, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TaskMarkerIcon } from '@/components/ui/custom-lucide-icon'
@@ -37,8 +37,12 @@ import {
 } from '@/lib/subtitle-speech'
 import {
   createTaskImage,
+  canEnableSharedTaskImage,
   MAX_TASK_IMAGES,
+  sharedTaskImageUpdates,
   splitSelectedTaskMedia,
+  taskImageIdentity,
+  taskImageSlotNumber,
   taskImagesFromContent,
   uploadTaskImageFile,
 } from '@/lib/task-image-utils'
@@ -86,7 +90,7 @@ interface ActiveTaskImages {
   index: number
   segmentId: string
   allImages: MultiTrackTaskImage[]
-  images: Array<{ image: MultiTrackTaskImage; url: string }>
+  images: Array<{ image: MultiTrackTaskImage; url?: string }>
 }
 
 interface ActiveTaskPrompt {
@@ -132,7 +136,7 @@ function getActiveTaskImages(data: TrackData, currentTime: number): ActiveTaskIm
 
     const segment = track.segments[index]
     const allImages = taskImagesFromContent(segment.content.images)
-    const images = allImages.flatMap((image) => {
+    const images = allImages.map((image) => {
       const url = mediaContentToViewUrl({
         source_type: image.source_type ?? 'input',
         file_path: image.file_path,
@@ -140,7 +144,7 @@ function getActiveTaskImages(data: TrackData, currentTime: number): ActiveTaskIm
         url: image.url,
         slot_name: image.slot_name,
       })
-      return url ? [{ image, url }] : []
+      return { image, url: url ?? undefined }
     })
     return { index, segmentId: segment.id, allImages, images }
   }
@@ -439,12 +443,43 @@ export function PreviewArea({
 
   function handleActiveTaskImageDelete(imageId: string) {
     if (!activeTaskImages) return
+    const image = activeTaskImages.allImages.find((item) => item.id === imageId)
+    if (image?.shared_reference === true) {
+      const segments = taskSegments && taskSegments.length > 0
+        ? taskSegments
+        : data.tracks.filter((track) => track.type === 'task').flatMap((track) => track.segments)
+      const identity = taskImageIdentity(image)
+      onTrackSegmentsContentChange?.(sharedTaskImageUpdates(segments, image, false).map((update) => ({
+        segmentId: update.segmentId,
+        patch: {
+          images: update.segmentId === activeTaskImages.segmentId
+            ? update.images.filter((item) => taskImageIdentity(item) !== identity)
+            : update.images,
+        },
+      })))
+      return
+    }
     onTrackSegmentsContentChange?.([{
       segmentId: activeTaskImages.segmentId,
       patch: {
         images: activeTaskImages.allImages.filter((item) => item.id !== imageId),
       },
     }])
+  }
+
+  function handleActiveTaskImageSharedChange(image: MultiTrackTaskImage, enabled: boolean) {
+    const segments = taskSegments && taskSegments.length > 0
+      ? taskSegments
+      : activeTaskImages
+        ? data.tracks
+            .filter((track) => track.type === 'task')
+            .flatMap((track) => track.segments)
+        : []
+    if (segments.length === 0 || (enabled && !canEnableSharedTaskImage(segments, image))) return
+    onTrackSegmentsContentChange?.(sharedTaskImageUpdates(segments, image, enabled).map((update) => ({
+      segmentId: update.segmentId,
+      patch: { images: update.images },
+    })))
   }
 
   function hasDraggedImageFile(dataTransfer: DataTransfer): boolean {
@@ -566,10 +601,23 @@ export function PreviewArea({
 
   function renderActiveTaskImagePreview(
     image: MultiTrackTaskImage,
-    url: string,
+    url: string | undefined,
     imageName: string,
+    imageIndex: number,
     className: string,
   ) {
+    if (!url) {
+      return (
+        <div
+          data-testid={`task-preview-slot-image-${image.id}`}
+          className={`${className} flex items-center justify-center bg-muted/30 px-2 text-center text-[9px] text-muted-foreground`}
+        >
+          {image.source_type === 'slot'
+            ? t('mediaSelector.slotImage', { n: taskImageSlotNumber(image, imageIndex) })
+            : imageName}
+        </div>
+      )
+    }
     return image.panorama_view ? (
       <PanoramaImagePreview
         imageId={image.id}
@@ -635,21 +683,25 @@ export function PreviewArea({
 
   function renderActiveTaskImageThumbnail(
     image: MultiTrackTaskImage,
-    url: string,
+    url: string | undefined,
+    imageIndex: number,
     selected: boolean,
     className = 'aspect-square w-full',
     showControls = true,
     layout: 'thumbnail' | 'flow' = 'thumbnail',
   ) {
     if (!activeTaskImages) return null
-    const imageName = image.file_name ?? image.file_path ?? image.local_path ?? image.url ?? image.id
+    const imageName = image.file_name ?? image.file_path ?? image.local_path ?? image.url ?? image.slot_name ?? image.id
+    const borderClass = image.shared_reference
+      ? 'border-highlight'
+      : selected
+        ? 'border-primary'
+        : 'border-border'
     return (
       <div
         key={image.id}
         data-testid={`task-preview-image-${image.id}`}
-        className={`group relative shrink-0 cursor-pointer overflow-hidden rounded-sm border bg-black ${
-          selected ? 'border-primary' : 'border-border'
-        } ${className}`}
+        className={`group relative shrink-0 cursor-pointer overflow-hidden rounded-sm border bg-black ${borderClass} ${className}`}
         draggable
         onDragStart={() => {
           draggedTaskImageIdRef.current = image.id
@@ -663,7 +715,7 @@ export function PreviewArea({
         <Button
           type="button"
           variant="ghost"
-          className={layout === 'flow'
+          className={layout === 'flow' && url
             ? 'h-full w-auto max-w-full rounded-none p-0 hover:bg-transparent'
             : 'h-full w-full rounded-none p-0 hover:bg-transparent'}
           aria-label={imageName}
@@ -673,12 +725,13 @@ export function PreviewArea({
             image,
             url,
             imageName,
-            layout === 'flow'
+            imageIndex,
+            layout === 'flow' && url
               ? 'h-full w-auto max-w-full object-contain'
               : 'h-full w-full object-contain',
           )}
         </Button>
-        {showControls ? renderActiveTaskImageControls(image, imageName, layout === 'flow' ? 'flow' : 'split') : null}
+        {showControls ? renderActiveTaskImageControls(image, imageName, layout === 'flow' ? 'flow' : 'split', Boolean(url)) : null}
       </div>
     )
   }
@@ -858,6 +911,7 @@ export function PreviewArea({
     image: MultiTrackTaskImage,
     imageName: string,
     layout: 'split' | 'corner' | 'flow',
+    previewAvailable = true,
   ) {
     if (!activeTaskImages) return null
     const wrapperClassName = layout === 'corner'
@@ -870,16 +924,50 @@ export function PreviewArea({
       : 'absolute right-0 top-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100'
     const controlClassName = layout === 'corner' ? 'h-7 w-7' : 'h-5 w-5'
     const iconClassName = layout === 'corner' ? '[&_svg]:!size-4' : '[&_svg]:!size-3'
+    const sharedImageSegments = taskSegments && taskSegments.length > 0
+      ? taskSegments
+      : data.tracks.filter((track) => track.type === 'task').flatMap((track) => track.segments)
+    const canShareImage = image.shared_reference === true
+      || canEnableSharedTaskImage(sharedImageSegments, image)
 
     return (
       <>
         <div className={wrapperClassName}>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                type="button"
+                size="icon"
+                variant={image.shared_reference === true ? 'secondary' : 'ghost'}
+                className={`${controlClassName} cursor-pointer rounded-none bg-background/70 hover:bg-background/90 ${iconClassName} ${image.shared_reference === true ? 'text-highlight' : 'text-muted-foreground'}`}
+                aria-label={image.shared_reference === true
+                  ? t('multitrack.disableSharedReference')
+                  : t('multitrack.enableSharedReference')}
+                aria-pressed={image.shared_reference === true}
+                disabled={!canShareImage}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  handleActiveTaskImageSharedChange(image, image.shared_reference !== true)
+                }}
+                >
+                  <Share2 />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-64">
+                {canShareImage
+                  ? t('multitrack.sharedImageReferenceTooltip')
+                  : t('multitrack.sharedImageLimitTooltip')}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           <Button
             type="button"
             size="icon"
             variant="ghost"
             className={`${controlClassName} cursor-pointer rounded-none bg-background/70 text-foreground hover:bg-background/90 ${iconClassName}`}
             aria-label={t('multitrack.previewImage')}
+            disabled={!previewAvailable}
             onClick={(event) => {
               event.stopPropagation()
               setExpandedTaskImageTarget({
@@ -1311,12 +1399,15 @@ export function PreviewArea({
                 data-layout="flow"
                 className="flex h-full min-h-0 w-full flex-wrap content-center items-center justify-center gap-2 overflow-y-auto bg-black p-2"
               >
-                {activeTaskImages.images.map(({ image, url }) => (
+                {activeTaskImages.images.map(({ image, url }, imageIndex) => (
                   renderActiveTaskImageThumbnail(
                     image,
                     url,
+                    imageIndex,
                     image.id === activeTaskPreviewImage?.image.id,
-                    'h-40 w-fit max-w-full',
+                    image.source_type === 'slot' && !url
+                      ? 'h-40 w-40 aspect-square'
+                      : 'h-40 w-fit max-w-full',
                     true,
                     'flow',
                   )
@@ -1338,8 +1429,8 @@ export function PreviewArea({
                 {t('multitrack.previewTaskLabel', { n: activeTaskImages.index })}
               </div>
               <div className="flex min-h-0 flex-col gap-2 overflow-y-auto pb-2">
-                {activeTaskImages.images.map(({ image, url }) => {
-                  return renderActiveTaskImageThumbnail(image, url, image.id === activeTaskPreviewImage?.image.id)
+                {activeTaskImages.images.map(({ image, url }, imageIndex) => {
+                  return renderActiveTaskImageThumbnail(image, url, imageIndex, image.id === activeTaskPreviewImage?.image.id)
                 })}
                 {renderActiveTaskImageAddSlot('aspect-square h-auto w-full')}
               </div>

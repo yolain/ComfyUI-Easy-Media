@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CloudUpload, Eye, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
+import { CloudUpload, Eye, Pencil, Plus, RotateCcw, Share2, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -31,8 +31,12 @@ import {
 import { cn } from '@/lib/utils'
 import {
   createTaskImage,
+  canEnableSharedTaskImage,
   MAX_TASK_IMAGES,
+  sharedTaskImageUpdates,
   splitSelectedTaskMedia,
+  taskImageIdentity,
+  taskImageSlotNumber,
   taskImagesFromContent,
   uploadTaskImageFile,
 } from '@/lib/task-image-utils'
@@ -397,6 +401,33 @@ export function TaskSegmentEditor({
     if (nextImages.length === 0) return
     if (reselectImageId) {
       const replacement = { ...nextImages[0], id: reselectImageId }
+      if (reselectImage?.shared_reference === true && onTrackSegmentsContentChange) {
+        const oldIdentity = taskImageIdentity(reselectImage)
+        const unsharedUpdates = new Map(
+          sharedTaskImageUpdates(editableSegments, reselectImage, false)
+            .map((update) => [update.segmentId, update.images]),
+        )
+        const replacementSourceSegments = editableSegments.map((item) => ({
+          ...item,
+          content: {
+            ...item.content,
+            images: item.id === segment.id
+              ? [replacement, ...(unsharedUpdates.get(item.id) ?? []).filter((image) => (
+                  taskImageIdentity(image) !== oldIdentity
+                ))]
+              : unsharedUpdates.get(item.id) ?? taskImages(item),
+          },
+        }))
+        onTrackSegmentsContentChange(
+          sharedTaskImageUpdates(replacementSourceSegments, replacement, true).map((update) => ({
+            segmentId: update.segmentId,
+            patch: { images: update.images },
+          })),
+        )
+        setReselectImageId(null)
+        setMediaSelectorOpen(false)
+        return
+      }
       onContentChange({
         images: images.map((image) => image.id === reselectImageId ? replacement : image),
       })
@@ -461,7 +492,35 @@ export function TaskSegmentEditor({
   }
 
   function handleDeleteImage(imageId: string) {
+    const image = images.find((item) => item.id === imageId)
+    if (image?.shared_reference === true && onTrackSegmentsContentChange) {
+      const identity = taskImageIdentity(image)
+      const updates = sharedTaskImageUpdates(editableSegments, image, false).map((update) => ({
+        segmentId: update.segmentId,
+        patch: {
+          images: update.segmentId === segment.id
+            ? update.images.filter((item) => taskImageIdentity(item) !== identity)
+            : update.images,
+        },
+      }))
+      onTrackSegmentsContentChange(updates)
+      return
+    }
     onContentChange({ images: images.filter((image) => image.id !== imageId) })
+  }
+
+  function handleSharedImageChange(image: MultiTrackTaskImage, enabled: boolean) {
+    if (enabled && !canEnableSharedTaskImage(editableSegments, image)) return
+    const updates = sharedTaskImageUpdates(editableSegments, image, enabled)
+    if (onTrackSegmentsContentChange) {
+      onTrackSegmentsContentChange(updates.map((update) => ({
+        segmentId: update.segmentId,
+        patch: { images: update.images },
+      })))
+      return
+    }
+    const current = updates.find((update) => update.segmentId === segment.id)
+    if (current) onContentChange({ images: current.images })
   }
 
   const imageGridColumns = images.length > 0 && images.length < 4 ? 'grid-cols-2' : 'grid-cols-3'
@@ -554,12 +613,16 @@ export function TaskSegmentEditor({
                       url: image.url,
                       slot_name: image.slot_name,
                     })
+                    const canShareImage = image.shared_reference === true
+                      || canEnableSharedTaskImage(editableSegments, image)
                     return (
                       <div
                         key={image.id}
                         draggable
                         data-testid={`task-image-${image.id}`}
-                        className="task-image-grid-item group relative flex aspect-square w-full self-start cursor-pointer items-center justify-center overflow-hidden rounded-md border border-border bg-black"
+                        className={`task-image-grid-item group relative flex aspect-square w-full self-start cursor-pointer items-center justify-center overflow-hidden rounded-md border bg-black ${
+                          image.shared_reference ? 'border-highlight' : 'border-border'
+                        }`}
                         role="button"
                         tabIndex={0}
                         aria-label={t('multitrack.reselectImage', { name: imageDisplayName(image) })}
@@ -602,13 +665,44 @@ export function TaskSegmentEditor({
                           />
                         ) : (
                           <div className="flex h-full w-full items-center justify-center px-2 text-center text-[8px] text-muted-foreground">
-                            {imageDisplayName(image)}
+                            {image.source_type === 'slot'
+                              ? t('mediaSelector.slotImage', { n: taskImageSlotNumber(image, index) })
+                              : imageDisplayName(image)}
                           </div>
                         )}
                         <div
                           data-testid={`task-image-actions-${image.id}`}
                           className="absolute right-1 top-1 z-10 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
                         >
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                type="button"
+                                size="icon"
+                                variant={image.shared_reference === true ? 'secondary' : 'ghost'}
+                                data-testid={`task-image-shared-${image.id}`}
+                                className={`h-6 w-6 cursor-pointer bg-background/70 hover:bg-background/90 [&_svg]:!size-3 ${image.shared_reference === true ? 'text-highlight' : 'text-muted-foreground'}`}
+                                aria-label={image.shared_reference === true
+                                  ? t('multitrack.disableSharedReference')
+                                  : t('multitrack.enableSharedReference')}
+                                aria-pressed={image.shared_reference === true}
+                                disabled={!canShareImage}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  handleSharedImageChange(image, image.shared_reference !== true)
+                                }}
+                                >
+                                  <Share2 />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent side="bottom" className="max-w-64">
+                                {canShareImage
+                                  ? t('multitrack.sharedImageReferenceTooltip')
+                                  : t('multitrack.sharedImageLimitTooltip')}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                           <Button
                             type="button"
                             size="icon"

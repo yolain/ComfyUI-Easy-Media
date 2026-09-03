@@ -39,6 +39,11 @@ export function mediaContentToViewUrl(content: ViewableMediaContent): string | n
   return mediaPathToViewUrl(content.file_path, typeParam)
 }
 
+export function mediaSlotNumber(slotName: string | undefined, fallbackIndex = 0): number {
+  const slotNumber = slotName?.match(/(\d+)$/)?.[1]
+  return slotNumber ? Number(slotNumber) : fallbackIndex + 1
+}
+
 export function audioContentToViewUrl(content: AudioContent): string | null {
   return mediaContentToViewUrl(content)
 }

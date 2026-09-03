@@ -24,19 +24,19 @@ vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/MultiTrackSegmentBlock', () => ({
-  MultiTrackSegmentBlock: ({ segment, audioLocked, onAudioLockToggle, speakerReference, onSpeakerReferenceToggle, onDoubleClick }: {
-    segment: { id: string; content?: { speaker_reference?: boolean } }
+  MultiTrackSegmentBlock: ({ segment, audioLocked, onAudioLockToggle, sharedReference, onSharedReferenceToggle, onDoubleClick }: {
+    segment: { id: string; content?: { shared_reference?: boolean } }
     audioLocked?: boolean
     onAudioLockToggle?: (locked: boolean) => void
-    speakerReference?: boolean
-    onSpeakerReferenceToggle?: (enabled: boolean) => void
+    sharedReference?: boolean
+    onSharedReferenceToggle?: (enabled: boolean) => void
     onDoubleClick?: (segmentId: string, event: React.MouseEvent) => void
   }) => (
     <div>
       <button type="button" data-audio-locked={String(audioLocked === true)} onClick={() => onAudioLockToggle?.(!audioLocked)} onDoubleClick={(event) => onDoubleClick?.(segment.id, event)}>
         {segment.id}
       </button>
-      <button type="button" aria-label={`speaker-${segment.id}`} data-speaker-reference={String(speakerReference === true)} onClick={() => onSpeakerReferenceToggle?.(!speakerReference)} />
+      <button type="button" aria-label={`shared-${segment.id}`} data-shared-reference={String(sharedReference === true)} onClick={() => onSharedReferenceToggle?.(!sharedReference)} />
     </div>
   ),
 }))
@@ -199,23 +199,23 @@ describe('AudioTrack', () => {
     expect(onTrackAudioSettingsChange).toHaveBeenCalledWith('audio-track', { audio_locked: false })
   })
 
-  it('toggles the speaker reference for the selected audio segment', () => {
-    const onSpeakerReferenceChange = vi.fn()
+  it('toggles the shared reference for the selected audio segment', () => {
+    const onSharedReferenceChange = vi.fn()
     const track: MultiTrack = {
       id: 'audio-track', name: 'Audio 0', type: 'audio', color: 'var(--highlight)',
       muted: false, locked: false,
       segments: [{
         id: 'voice', start_frame: 0, end_frame: 24, color: 'var(--highlight)',
-        content: { media_type: 'audio', speaker_reference: true },
+        content: { media_type: 'audio', shared_reference: true },
       }],
     }
 
-    renderAudioTrack(track, { audioLockEnabled: true, onSpeakerReferenceChange })
+    renderAudioTrack(track, { audioLockEnabled: true, onSharedReferenceChange })
 
-    const speakerButton = screen.getByRole('button', { name: 'speaker-voice' })
-    expect(speakerButton.dataset.speakerReference).toBe('true')
-    fireEvent.click(speakerButton)
-    expect(onSpeakerReferenceChange).toHaveBeenCalledWith('audio-track', 'voice', false)
+    const sharedButton = screen.getByRole('button', { name: 'shared-voice' })
+    expect(sharedButton.dataset.sharedReference).toBe('true')
+    fireEvent.click(sharedButton)
+    expect(onSharedReferenceChange).toHaveBeenCalledWith('audio-track', 'voice', false)
   })
 
   it('opens the current audio in the media selector on double click and replaces it', () => {
