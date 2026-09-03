@@ -2,7 +2,7 @@
 
 ---
 
-## [1.3.0] - Unreleased
+## [1.3.0] - 2026-09-03
 
 ### ✨ New Features
 
@@ -15,11 +15,16 @@
 - **Motion Context Latent Memory**: Keep only the 22-frame high-resolution audio/video context tail on CPU between segments and in completed project artifacts, while retaining the complete low-resolution first-pass checkpoint for deferred second-pass runs.
 - **Multi-Track Editor (Audio Track)**: Added `Lock Audio` feature, only applicable under MultiTrack Project. When generating video, audio will no longer regenerate, but instead schedules video frame output based on this audio.
 - **Multi-Track Editor (Audio Track)**: Added `Reuse Audio` - all segments can reuse this audio (previously required cloning to each segment), supports up to 15 seconds without being truncated by segments.
+- **Multi-Track Editor (Shared Media)**: Images, audio clips, and video clips can be marked as shared references when context segments need to reuse the same media. Shared images are placed before each task's local images; shared audio uses up to the first 15 seconds of its source.
 - **Multi-Track Editor (Task Track)**: When multi-selecting task segments, you can uniformly adjust task mode, transition mode, and reference image size.
 - **Multi-Track Editor (Task Track)**: New feature added.
 - **Multi-Track Editor**: Adjusted many texts for better understanding.
 - **Multi-Track Task Output**: Adjusted minimum value of task_index to -1. When -1, it can output all track complete media information like the previous Multi-Track Editor. (Due to the previous optimization, the Multi-Track Editor cannot directly output complete content)
 - **Multi-Track Editor**: Defer file and URL media loading when no slot resources are referenced; task output nodes now materialize only the media they need, reduce unnecessary media resource overhead in long-form video tasks. (Now you just need to connect `TRACKS_INFO`; the `image`, `video`, and `audio` output by the multi-track editor will all be `None` in Slot-less resource mode.)
+
+### 🐛 Bug Fixes
+
+- **Multi-Track Slot Media**: Added video slot selection and fixed image, audio, and video slot discovery and downstream delivery through `TRACKS_INFO`, including sparse lists that skip empty inputs and graphs whose link ID is `0`.
 
 
 ## [1.2.1] - 2026-08-22
