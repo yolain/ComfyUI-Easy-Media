@@ -86,6 +86,7 @@ def _load_basic_module(monkeypatch):
     comfy_api.latest = latest
 
     utils = types.ModuleType("easy_media.utils")
+    utils.__path__ = []
     utils.FFMPEG_RESIZE_METHODS = frozenset()
     utils.audio_db_to_gain = lambda value: value
     utils.audio_is_muted = lambda value: False
@@ -103,8 +104,14 @@ def _load_basic_module(monkeypatch):
     utils.parse_subtitle_text = lambda *args, **kwargs: []
     utils.resize_image = lambda image, *args, **kwargs: image
     utils.merge_video_track_with_ffmpeg = lambda *args, **kwargs: None
+    utils.canonicalize_multitrack_slot_content = lambda value: value
+    utils.multitrack_is_shared_reference = lambda value: False
+    utils.multitrack_media_identity = lambda value: None
+    utils.multitrack_shared_task_images = lambda tracks: []
     utils.multitrack_segments_in_window = lambda *args, **kwargs: []
+    utils.multitrack_slot_name = lambda value: None
     utils.multitrack_slot_media_types = lambda *args, **kwargs: set()
+    utils.multitrack_task_images_with_shared = lambda images, shared: images
     utils.resize_video_with_ffmpeg = lambda *args, **kwargs: None
     utils.resolve_video_path = lambda *args, **kwargs: None
     utils.silence = lambda *args, **kwargs: None
@@ -163,6 +170,24 @@ def _load_basic_module(monkeypatch):
     prompt_builder.build_prompt_request = lambda *args, **kwargs: ("", "", False)
     monkeypatch.setitem(sys.modules, "easy_media.utils.prompt_builder", prompt_builder)
     monkeypatch.setitem(sys.modules, "easy_media.utils.prompt_override", prompt_override)
+    multitrack_path = Path(__file__).resolve().parents[1] / "utils" / "multitrack.py"
+    multitrack_spec = importlib.util.spec_from_file_location(
+        "easy_media.utils.multitrack",
+        multitrack_path,
+    )
+    assert multitrack_spec is not None and multitrack_spec.loader is not None
+    multitrack = importlib.util.module_from_spec(multitrack_spec)
+    monkeypatch.setitem(sys.modules, multitrack_spec.name, multitrack)
+    multitrack_spec.loader.exec_module(multitrack)
+    h3_project_path = Path(__file__).resolve().parents[1] / "utils" / "h3_project.py"
+    h3_project_spec = importlib.util.spec_from_file_location(
+        "easy_media.utils.h3_project",
+        h3_project_path,
+    )
+    assert h3_project_spec is not None and h3_project_spec.loader is not None
+    h3_project = importlib.util.module_from_spec(h3_project_spec)
+    monkeypatch.setitem(sys.modules, h3_project_spec.name, h3_project)
+    h3_project_spec.loader.exec_module(h3_project)
 
     module_path = Path(__file__).resolve().parents[1] / "nodes" / "basic.py"
     spec = importlib.util.spec_from_file_location("easy_media.nodes.basic", module_path)

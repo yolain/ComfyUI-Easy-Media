@@ -3,7 +3,6 @@ import math
 import os
 import re
 import tempfile
-from copy import deepcopy
 from enum import Enum
 from pathlib import Path
 
@@ -16,7 +15,6 @@ from comfy_api.latest import InputImpl, Types, io
 from comfy_execution.graph_utils import GraphBuilder, is_link
 from comfy.utils import ProgressBar
 from ..utils import (
-    FFMPEG_RESIZE_METHODS,
     audio_db_to_gain,
     audio_is_muted,
     audio_volume_db,
@@ -28,7 +26,6 @@ from ..utils import (
     ffprobe_info,
     frames_to_seconds,
     load_audio_waveform,
-    load_image_tensor,
     log_node_info,
     log_stage_time,
     iter_valid_audio_inputs,
@@ -49,7 +46,6 @@ from ..utils import (
     multitrack_media_identity,
     multitrack_shared_task_images,
     multitrack_segments_in_window,
-    multitrack_slot_name,
     multitrack_slot_media_types,
     multitrack_task_images_with_shared,
     parse_subtitle_text,
@@ -57,7 +53,6 @@ from ..utils import (
     prompt_override_has_frame_ranges,
     prompt_override_has_value,
     resize_image,
-    resize_video_with_ffmpeg,
     resolve_video_path,
     silence,
     trim_audio,
@@ -67,9 +62,21 @@ from ..utils import (
     write_srt_file,
 )
 from ..utils.prompt_builder import build_llm_prompt, build_prompt_request
-
-
-MAX_MULTITRACK_PROJECT_IMAGES = 9
+from ..utils.multitrack import (
+    _as_list_input,
+    _embedded_multitrack_media,
+    _index_slot_audio,
+    _merge_audio_track,
+    _multitrack_frame_value,
+    _multitrack_timeline_end,
+    _parse_track_data,
+    _resolve_multitrack_audio,
+    _resolve_multitrack_video,
+    _resolve_timeline_image_item,
+    _resize_multitrack_video,
+    _trim_track_audio,
+    _video_stream_source,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -351,7 +358,6 @@ def _video_frame_count_from_duration(
 # ---------------------------------------------------------------------------
 # prompt_override parsing helpers
 # ---------------------------------------------------------------------------
-_SLOT_ONE_BASED_INDEX_RE = re.compile(r'(?:image|audio|video)(\d+)$', re.IGNORECASE)
 _parse_override_segments = parse_override_segments
 
 
@@ -381,43 +387,6 @@ def _single_valid_audio(audio_input) -> 'dict | None':
         if _is_valid_audio(audio)
     ]
     return valid[0] if len(valid) == 1 else None
-
-
-def _slot_index(slot_name: str | None) -> int:
-    if not slot_name:
-        return 0
-    slot_text = str(slot_name)
-    m = _SLOT_ONE_BASED_INDEX_RE.search(slot_text)
-    if m:
-        return max(0, int(m.group(1)) - 1)
-    return 0
-
-
-def _unwrap_slot_input(value):
-    # With is_input_list (and lazy inputs), a value can arrive as a tuple or as a
-    # tuple-wrapped list; normalise to a plain list before indexing.
-    if isinstance(value, tuple):
-        value = list(value)
-    if isinstance(value, list) and len(value) == 1 and isinstance(value[0], (list, tuple)):
-        inner = value[0]
-        return list(inner) if isinstance(inner, tuple) else inner
-    return value
-
-
-def _parse_track_data(track_data: str | dict) -> dict:
-    if isinstance(track_data, str):
-        try:
-            parsed = json.loads(track_data)
-        except json.JSONDecodeError as exc:
-            raise ValueError("Invalid TRACK_DATA JSON.") from exc
-        if not isinstance(parsed, dict):
-            raise ValueError("TRACK_DATA must decode to an object.")
-        return parsed
-    if isinstance(track_data, dict):
-        return dict(track_data)
-    if track_data is None:
-        return {}
-    raise ValueError("TRACK_DATA must be a JSON string or object.")
 
 
 def _resolve_configured_dimensions(
@@ -533,83 +502,12 @@ def _resolution_needs_source_dimensions(resolution: str | dict) -> bool:
     return any(mode in normalized for mode in ("auto", "shortest", "longest"))
 
 
-def _as_list_input(value) -> list:
-    if value is None:
-        return []
-    # is_input_list/lazy plumbing can also deliver a tuple (or tuple-wrapped list).
-    if isinstance(value, tuple):
-        value = list(value)
-    if isinstance(value, list):
-        if len(value) == 1 and isinstance(value[0], (list, tuple)):
-            inner = value[0]
-            return list(inner) if isinstance(inner, tuple) else inner
-        return value
-    return [value]
-
-
-def _embedded_multitrack_media(info: dict, media_type: str) -> list:
-    """Return eager slot media carried by TRACKS_INFO itself."""
-    media = info.get("media")
-    if not isinstance(media, dict):
-        return []
-    return _as_list_input(media.get(media_type))
-
-
 def _multitrack_media_is_deferred(info: dict, media_type: str) -> bool:
     """Use per-type eager metadata, falling back to the legacy global mode."""
     eager_types = info.get("eager_media_types")
     if isinstance(eager_types, (list, tuple, set)):
         return media_type not in eager_types
     return info.get("media_loading") == "deferred"
-
-
-def _media_output_for_index(items: list, index: int):
-    if index < 0 or index >= len(items):
-        return None
-    return items[index]
-
-
-def _index_slot_video(video_input, slot_name: str | None):
-    items = _as_list_input(video_input)
-    return _media_output_for_index(items, _slot_index(slot_name))
-
-
-def _resolve_multitrack_video(content: dict, video_input):
-    slot_name = multitrack_slot_name(content)
-    if slot_name is not None:
-        return _index_slot_video(video_input, slot_name)
-    source_type = str(content.get("source_type", "input"))
-    if source_type == "preset":
-        return None
-    source = resolve_video_path(
-        source_type,
-        content.get("file_path"),
-        content.get("local_path"),
-        content.get("url"),
-    )
-    return InputImpl.VideoFromFile(source)
-
-
-def _resolve_multitrack_audio(content: dict, audio_input, sample_rate: int = 44100) -> 'dict | None':
-    slot_name = multitrack_slot_name(content)
-    if slot_name is not None:
-        return _index_slot_audio(audio_input, slot_name)
-    waveform = load_audio_waveform(
-        content.get("source_type", "input"),
-        content.get("file_path"),
-        content.get("local_path"),
-        content.get("url"),
-        sample_rate,
-    )
-    if waveform is None:
-        return None
-    return {"waveform": waveform, "sample_rate": sample_rate}
-
-
-def _video_resize_cache_key(video, width: int, height: int, resize_method: str) -> tuple:
-    source = _video_stream_source(video)
-    identity = ("source", source) if isinstance(source, str) else ("object", id(video))
-    return identity, width, height, resize_method
 
 
 def _deferred_video_dimensions(video_segments: list[tuple[int, int, dict]]) -> tuple[int, int] | None:
@@ -635,120 +533,6 @@ def _deferred_video_dimensions(video_segments: list[tuple[int, int, dict]]) -> t
         if width and height:
             return int(width), int(height)
     return None
-
-
-def _resize_multitrack_video(
-    video,
-    width: int,
-    height: int,
-    resize_method: str,
-    cache: dict[tuple, object],
-    progress_callback,
-):
-    if tuple(video.get_dimensions()) == (width, height):
-        progress_callback(1.0)
-        return video
-
-    cache_key = _video_resize_cache_key(video, width, height, resize_method)
-    cached = cache.get(cache_key)
-    if cached is not None:
-        progress_callback(1.0)
-        return cached
-
-    source = cache_key[0][1] if cache_key[0][0] == "source" else None
-    if resize_method in FFMPEG_RESIZE_METHODS and isinstance(source, str):
-        resized_path = resize_video_with_ffmpeg(
-            source,
-            width,
-            height,
-            resize_method,
-            progress_callback=progress_callback,
-        )
-        if resized_path is not None:
-            resized_video = InputImpl.VideoFromFile(resized_path)
-            cache[cache_key] = resized_video
-            return resized_video
-
-    components = video.get_components()
-    progress_callback(0.5)
-    resized_frames = resize_image(components.images, width, height, resize_method)
-    resized_video = InputImpl.VideoFromComponents(
-        Types.VideoComponents(
-            images=resized_frames,
-            audio=components.audio,
-            frame_rate=components.frame_rate,
-        )
-    )
-    cache[cache_key] = resized_video
-    progress_callback(1.0)
-    return resized_video
-
-
-def _resample_audio_waveform(
-    waveform: torch.Tensor,
-    source_rate: int,
-    target_rate: int,
-) -> torch.Tensor:
-    if source_rate == target_rate:
-        return waveform
-    target_samples = max(1, round(waveform.shape[-1] * target_rate / source_rate))
-    return F.interpolate(waveform, size=target_samples, mode="linear", align_corners=False)
-
-
-def _merge_audio_track(
-    segments: list[tuple[dict, dict]],
-    total_length: int,
-    frame_rate: float,
-    base_volume_db: float = 0.0,
-    muted: bool = False,
-) -> dict:
-    sample_rate = 44100
-    channels = 2
-    for _segment, audio in segments:
-        waveform = audio.get("waveform")
-        if isinstance(waveform, torch.Tensor):
-            sample_rate = int(audio.get("sample_rate", sample_rate))
-            channels = int(waveform.shape[1])
-            break
-
-    total_samples = max(1, round(total_length * sample_rate / frame_rate))
-    merged = torch.zeros(1, channels, total_samples)
-    if muted:
-        return {"waveform": merged, "sample_rate": sample_rate}
-    for segment, audio in sorted(segments, key=lambda item: int(item[0].get("start_frame", 0))):
-        waveform = audio.get("waveform")
-        if not isinstance(waveform, torch.Tensor):
-            continue
-        source_rate = int(audio.get("sample_rate", sample_rate))
-        waveform = _resample_audio_waveform(waveform, source_rate, sample_rate)
-        if waveform.shape[1] == 1 and channels > 1:
-            waveform = waveform.expand(-1, channels, -1)
-        elif waveform.shape[1] != channels:
-            waveform = waveform[:, :channels]
-
-        content = segment.get("content", {})
-        if not isinstance(content, dict):
-            content = {}
-        if audio_is_muted(content):
-            continue
-        gain = audio_db_to_gain(base_volume_db + audio_volume_db(content))
-
-        start_frame = max(0, int(segment.get("start_frame", 0)))
-        end_frame = min(total_length, max(start_frame, int(segment.get("end_frame", start_frame))))
-        start_sample = round(start_frame * sample_rate / frame_rate)
-        segment_samples = max(0, round((end_frame - start_frame) * sample_rate / frame_rate))
-        origin_start = int(segment.get("origin_start_frame", start_frame))
-        source_start_sample = max(0, round((start_frame - origin_start) * sample_rate / frame_rate))
-        copy_samples = min(
-            segment_samples,
-            max(0, waveform.shape[-1] - source_start_sample),
-            total_samples - start_sample,
-        )
-        if copy_samples > 0:
-            merged[..., start_sample:start_sample + copy_samples] = (
-                waveform[..., source_start_sample:source_start_sample + copy_samples] * gain
-            )
-    return {"waveform": merged, "sample_rate": sample_rate}
 
 
 _MAX_SHARED_AUDIO_REFERENCE_SECONDS = 15.0
@@ -798,20 +582,6 @@ def _build_shared_reference_audio(
         "waveform": reference * gain,
         "sample_rate": sample_rate,
     }
-
-
-def _video_stream_source(video) -> 'str | None':
-    try:
-        trim_start, trim_duration = video.get_active_trim_window()
-        if float(trim_start) != 0.0 or float(trim_duration) != 0.0:
-            return None
-    except (AttributeError, NotImplementedError, RuntimeError, TypeError, ValueError):
-        pass
-    try:
-        source = video.get_stream_source()
-    except (AttributeError, NotImplementedError, RuntimeError, ValueError):
-        return None
-    return source if isinstance(source, str) else None
 
 
 def _merge_video_track_tensor(
@@ -1295,82 +1065,6 @@ def _build_tracks_info_and_media_outputs(
         images_out,
         audio_result,
         video_result,
-    )
-
-
-def _index_slot_image(image_input, slot_name: str | None) -> 'torch.Tensor | None':
-    idx = _slot_index(slot_name)
-    image_input = _unwrap_slot_input(image_input)
-    if image_input is None:
-        return None
-    candidates = image_input if isinstance(image_input, (list, tuple)) else [image_input]
-    flattened: list[torch.Tensor] = []
-    for candidate in candidates:
-        # Tolerate a nested list/tuple of tensors produced by is_input_list plumbing.
-        if isinstance(candidate, (list, tuple)):
-            for sub in candidate:
-                if not isinstance(sub, torch.Tensor):
-                    continue
-                t2 = _normalize_image_tensor(sub)
-                if t2 is not None and not _is_empty_slot_image(t2):
-                    flattened.extend(t2[i:i + 1] for i in range(t2.shape[0]))
-            continue
-        if not isinstance(candidate, torch.Tensor):
-            continue
-        tensor = _normalize_image_tensor(candidate)
-        if tensor is None:
-            continue
-        if _is_empty_slot_image(tensor):
-            continue
-        flattened.extend(tensor[i:i + 1] for i in range(tensor.shape[0]))
-    return flattened[idx] if idx < len(flattened) else None
-
-
-def _normalize_image_tensor(tensor: torch.Tensor) -> 'torch.Tensor | None':
-    if tensor.dim() == 3:
-        if tensor.shape[0] in (1, 3, 4) and tensor.shape[-1] not in (1, 3, 4):
-            tensor = tensor.permute(1, 2, 0)
-        tensor = tensor.unsqueeze(0)
-    elif tensor.dim() == 4:
-        if tensor.shape[1] in (1, 3, 4) and tensor.shape[-1] not in (1, 3, 4):
-            tensor = tensor.permute(0, 2, 3, 1)
-    else:
-        return None
-    return tensor
-
-
-def _is_empty_slot_image(tensor: torch.Tensor) -> bool:
-    if tensor.dim() == 3:
-        return tensor.shape[0] == 1 and tensor.shape[1] == 1
-    if tensor.dim() == 4:
-        return tensor.shape[1] == 1 and tensor.shape[2] == 1
-    return False
-
-
-def _index_slot_audio(audio_input, slot_name: str | None) -> 'dict | None':
-    idx = _slot_index(slot_name)
-    audio_input = _unwrap_slot_input(audio_input)
-    if audio_input is None:
-        return None
-    if isinstance(audio_input, list):
-        if idx < len(audio_input):
-            audio = audio_input[idx]
-            return audio if isinstance(audio, dict) and 'waveform' in audio else None
-        return None
-    if isinstance(audio_input, dict) and 'waveform' in audio_input and idx == 0:
-        return audio_input
-    return None
-
-
-def _resolve_timeline_image_item(item: dict, image_input, image_loader=load_image_tensor) -> 'torch.Tensor | None':
-    slot_name = multitrack_slot_name(item)
-    if slot_name is not None:
-        return _index_slot_image(image_input, slot_name)
-    return image_loader(
-        item.get("source_type", "input"),
-        item.get("file_path"),
-        item.get("local_path"),
-        item.get("url"),
     )
 
 
@@ -2275,13 +1969,6 @@ def _multitrack_task_segments(info: dict) -> list[dict]:
     )
 
 
-def _multitrack_frame_value(value: object, default: int = 0) -> int:
-    try:
-        return int(value) if value is not None else default
-    except (TypeError, ValueError, OverflowError):
-        return default
-
-
 def _task_for_marker_range(tasks: list[dict], start_frame: int, end_frame: int) -> dict:
     if not tasks:
         return {}
@@ -2368,28 +2055,6 @@ def _multitrack_task_entries(info: dict) -> list[dict]:
         for start_frame, end_frame in zip(boundaries, boundaries[1:])
         if end_frame > start_frame
     ]
-
-
-def _multitrack_timeline_end(info: dict) -> int:
-    tracks = info.get("tracks", [])
-    segment_end = max(
-        (
-            max(0, _multitrack_frame_value(segment.get("end_frame")))
-            for track in tracks
-            if isinstance(track, dict)
-            for segment in track.get("segments", [])
-            if isinstance(segment, dict)
-        ),
-        default=0,
-    ) if isinstance(tracks, list) else 0
-    if info.get("timeline_total_length") is not None:
-        return max(
-            segment_end,
-            max(0, _multitrack_frame_value(info.get("timeline_total_length"))),
-        )
-    if segment_end > 0:
-        return segment_end
-    return max(0, _multitrack_frame_value(info.get("total_length")))
 
 
 def _audio_track_frame_range(track: object, frame_rate: float) -> tuple[int, int] | None:
@@ -2887,286 +2552,6 @@ def _multitrack_task_type(task: dict, image_count: int, has_video: bool) -> str:
         return "vi2v" if image_count > 0 else "v2v"
     return "i2v" if image_count > 0 else "t2v"
 
-
-def _trim_track_audio(
-    audio: dict,
-    start_frame: int,
-    length: int | None,
-    frame_rate: float,
-) -> dict:
-    waveform = audio.get("waveform")
-    sample_rate = int(audio.get("sample_rate", 44100))
-    if not isinstance(waveform, torch.Tensor):
-        return {"waveform": torch.zeros(1, 1, 1), "sample_rate": sample_rate}
-    start_sample = max(0, round(start_frame * sample_rate / frame_rate))
-    sample_count = (
-        max(1, waveform.shape[-1] - start_sample)
-        if length is None
-        else max(1, round(length * sample_rate / frame_rate))
-    )
-    end_sample = min(waveform.shape[-1], start_sample + sample_count)
-    trimmed = waveform[..., start_sample:end_sample]
-    if trimmed.shape[-1] < sample_count:
-        trimmed = F.pad(trimmed, (0, sample_count - trimmed.shape[-1]))
-    return {"waveform": trimmed, "sample_rate": sample_rate}
-
-
-def _project_track_is_audible(track: dict, info: dict, has_solo_track: bool) -> bool:
-    return not (
-        audio_is_muted(info)
-        or audio_is_muted(track)
-        or (has_solo_track and track.get("solo") is not True)
-    )
-
-
-def _project_source_audio(
-    track_type: str,
-    content: dict,
-    audio_items: list,
-    video_items: list,
-) -> 'dict | None':
-    if track_type == "audio":
-        return _resolve_multitrack_audio(content, audio_items)
-    video = _resolve_multitrack_video(content, video_items)
-    if video is None:
-        return None
-    components = video.get_components()
-    return components.audio if isinstance(components.audio, dict) else None
-
-
-def _project_shared_audio(content: dict, audio_items: list) -> 'dict | None':
-    raw_index = content.get("shared_media_index", content.get("speaker_media_index"))
-    try:
-        media_index = int(raw_index)
-    except (TypeError, ValueError):
-        media_index = -1
-    eager_audio = _media_output_for_index(audio_items, media_index)
-    if isinstance(eager_audio, dict):
-        return eager_audio
-    return _resolve_multitrack_audio(content, audio_items)
-
-
-def _project_shared_video(content: dict, video_items: list):
-    raw_index = content.get("shared_media_index", content.get("speaker_media_index"))
-    try:
-        media_index = int(raw_index)
-    except (TypeError, ValueError):
-        media_index = -1
-    eager_video = _media_output_for_index(video_items, media_index)
-    if eager_video is not None:
-        return eager_video
-    return _resolve_multitrack_video(content, video_items)
-
-
-def prepare_multitrack_project_media(
-    tracks_info: list | dict | str,
-) -> tuple[dict, list[torch.Tensor], list[dict], list[object], dict | None]:
-    """Materialize project-wide references and locked audio before its loop."""
-    info = _parse_track_data(_unwrap_list_scalar(tracks_info, {}))
-    task_info = dict(info)
-    task_info["tracks"] = deepcopy(info.get("tracks", []))
-    tracks = task_info.get("tracks", [])
-    if not isinstance(tracks, list):
-        return task_info, [], [], [], None
-
-    image_items = _embedded_multitrack_media(info, "images")
-    audio_items = _embedded_multitrack_media(info, "audio")
-    video_items = _embedded_multitrack_media(info, "video")
-    frame_rate = max(0.001, float(info.get("frame_rate", 24)))
-    timeline_end = _multitrack_timeline_end(info)
-    width = int(info.get("width", 544))
-    height = int(info.get("height", 960))
-    resize_method = str(info.get("resize_method", "stretch"))
-    has_solo_track = any(
-        isinstance(track, dict)
-        and track.get("type") in {"audio", "video"}
-        and track.get("solo") is True
-        for track in tracks
-    )
-
-    shared_images: list[torch.Tensor] = []
-    shared_audio: list[dict] = []
-    shared_video: list[object] = []
-    locked_audio: dict | None = None
-    shared_image_identities: set[tuple[str, str]] = set()
-    shared_audio_identities: set[tuple[str, str]] = set()
-    shared_video_identities: set[tuple[str, str]] = set()
-    resize_cache: dict[tuple, object] = {}
-
-    for track in tracks:
-        if not isinstance(track, dict):
-            continue
-        track_type = str(track.get("type", ""))
-        segments = track.get("segments", [])
-        if not isinstance(segments, list):
-            continue
-
-        if track_type == "task":
-            for segment in segments:
-                if not isinstance(segment, dict):
-                    continue
-                content = segment.get("content", {})
-                images = content.get("images", []) if isinstance(content, dict) else []
-                retained_images: list[dict] = []
-                for image_info in images if isinstance(images, list) else []:
-                    if not isinstance(image_info, dict):
-                        continue
-                    identity = multitrack_media_identity(image_info)
-                    if not multitrack_is_shared_reference(image_info):
-                        retained_images.append(image_info)
-                        continue
-                    if identity is not None and identity in shared_image_identities:
-                        continue
-                    image = _resolve_timeline_image_item(image_info, image_items)
-                    if image is None:
-                        continue
-                    panorama_view = image_info.get("panorama_view")
-                    if panorama_view is not None:
-                        image = equirectangular_to_perspective(
-                            image, panorama_view, width, height,
-                        )
-                    shared_images.append(image)
-                    if identity is not None:
-                        shared_image_identities.add(identity)
-                if isinstance(content, dict):
-                    content["images"] = retained_images
-            continue
-
-        if track_type not in {"audio", "video"}:
-            continue
-
-        track_volume_db = audio_volume_db(info) + audio_volume_db(track)
-        audible = _project_track_is_audible(track, info, has_solo_track)
-        if track.get("audio_locked") is True:
-            resolved_segments: list[tuple[dict, dict]] = []
-            for local_segment in multitrack_segments_in_window(track, 0, timeline_end):
-                content = local_segment.get("content", {})
-                source_audio = _project_source_audio(
-                    track_type, content, audio_items, video_items,
-                )
-                if source_audio is not None:
-                    resolved_segments.append((local_segment, source_audio))
-            if locked_audio is None and resolved_segments:
-                locked_audio = _merge_audio_track(
-                    resolved_segments,
-                    timeline_end,
-                    frame_rate,
-                    track_volume_db,
-                    not audible,
-                )
-            track["segments"] = []
-            track.pop("media_index", None)
-            continue
-
-        retained_segments: list[dict] = []
-        for segment in segments:
-            if not isinstance(segment, dict):
-                continue
-            content = segment.get("content", {})
-            if not isinstance(content, dict) or not multitrack_is_shared_reference(content):
-                retained_segments.append(segment)
-                continue
-            identity = multitrack_media_identity(content)
-            if track_type == "audio":
-                if identity is not None and identity in shared_audio_identities:
-                    continue
-                source_audio = _project_shared_audio(content, audio_items)
-                if source_audio is not None:
-                    waveform = source_audio.get("waveform")
-                    if isinstance(waveform, torch.Tensor):
-                        gain = (
-                            audio_db_to_gain(track_volume_db)
-                            if audible and not audio_is_muted(content)
-                            else 0.0
-                        )
-                        shared_audio.append({
-                            "waveform": waveform * gain,
-                            "sample_rate": int(source_audio.get("sample_rate", 44100)),
-                        })
-                        if identity is not None:
-                            shared_audio_identities.add(identity)
-            else:
-                if identity is not None and identity in shared_video_identities:
-                    continue
-                source_video = _project_shared_video(content, video_items)
-                if source_video is not None:
-                    shared_video.append(_resize_multitrack_video(
-                        source_video,
-                        width,
-                        height,
-                        resize_method,
-                        resize_cache,
-                        lambda _ratio: None,
-                    ))
-                    if identity is not None:
-                        shared_video_identities.add(identity)
-        track["segments"] = retained_segments
-        if not retained_segments:
-            track.pop("media_index", None)
-
-    if shared_image_identities:
-        for track in tracks:
-            if not isinstance(track, dict) or track.get("type") != "task":
-                continue
-            for segment in track.get("segments", []):
-                if not isinstance(segment, dict):
-                    continue
-                content = segment.get("content", {})
-                if not isinstance(content, dict):
-                    continue
-                images = content.get("images", [])
-                if isinstance(images, list):
-                    content["images"] = [
-                        image
-                        for image in images
-                        if not isinstance(image, dict)
-                        or multitrack_media_identity(image) not in shared_image_identities
-                    ]
-
-    return (
-        task_info,
-        shared_images[:MAX_MULTITRACK_PROJECT_IMAGES],
-        shared_audio,
-        shared_video,
-        locked_audio,
-    )
-
-
-def crop_multitrack_project_media(
-    shared_audio: list[dict],
-    shared_video: list[object],
-    locked_audio: dict | None,
-    start_frame: int,
-    duration_frames: int,
-    frame_rate: float,
-) -> tuple[list[dict], list[object], dict | None]:
-    """Create task-length views of media already loaded for the project."""
-    duration_frames = max(1, duration_frames)
-    frame_rate = max(0.001, frame_rate)
-    cropped_audio = [
-        _trim_track_audio(audio, 0, duration_frames, frame_rate)
-        for audio in shared_audio
-    ]
-    cropped_video: list[object] = []
-    for video in shared_video:
-        trimmed = video.as_trimmed(
-            start_time=0.0,
-            duration=duration_frames / frame_rate,
-            strict_duration=False,
-        )
-        if trimmed is not None:
-            cropped_video.append(trimmed)
-    cropped_locked_audio = (
-        _trim_track_audio(
-            locked_audio,
-            max(0, start_frame),
-            duration_frames,
-            frame_rate,
-        )
-        if isinstance(locked_audio, dict)
-        else None
-    )
-    return cropped_audio, cropped_video, cropped_locked_audio
 
 # code based on https://github.com/RH-RunningHub/ComfyUI-RH-Bernini/blob/main/nodes_bernini.py
 def _build_chat_prompts(system_prompt, api_prompt, original_prompt):

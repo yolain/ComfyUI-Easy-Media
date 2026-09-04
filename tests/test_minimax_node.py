@@ -193,6 +193,7 @@ def _load_minimax_node(monkeypatch):
     comfy_api_latest.InputImpl = types.SimpleNamespace(
         VideoFromFile=lambda path: types.SimpleNamespace(path=path)
     )
+    comfy_api_latest.Types = types.SimpleNamespace()
     comfy_api.latest = comfy_api_latest
 
     core_nodes = types.ModuleType("nodes")
@@ -285,6 +286,23 @@ def _load_minimax_node(monkeypatch):
     utils_package.instrument_node_timing = log_module.instrument_node_timing
     utils_package.synchronize_execution_device = log_module.synchronize_execution_device
     utils_package.save_audio_to_temp_wav = lambda _audio: None
+    utils_package.FFMPEG_RESIZE_METHODS = frozenset()
+    for name in (
+        "audio_db_to_gain",
+        "audio_is_muted",
+        "audio_volume_db",
+        "equirectangular_to_perspective",
+        "load_audio_waveform",
+        "load_image_tensor",
+        "multitrack_is_shared_reference",
+        "multitrack_media_identity",
+        "multitrack_segments_in_window",
+        "multitrack_slot_name",
+        "resize_image",
+        "resize_video_with_ffmpeg",
+        "resolve_video_path",
+    ):
+        setattr(utils_package, name, lambda *_args, **_kwargs: None)
     models_module = types.ModuleType("easy_media.utils.models")
     models_module.detect_turbo_model = lambda model: types.SimpleNamespace(
         is_turbo=False,
@@ -305,12 +323,45 @@ def _load_minimax_node(monkeypatch):
     assert h3_presets_spec is not None and h3_presets_spec.loader is not None
     h3_presets_module = importlib.util.module_from_spec(h3_presets_spec)
     h3_presets_spec.loader.exec_module(h3_presets_module)
+    monkeypatch.setitem(sys.modules, "comfy_api", comfy_api)
+    monkeypatch.setitem(sys.modules, "comfy_api.latest", comfy_api_latest)
+    monkeypatch.setitem(sys.modules, "folder_paths", folder_paths)
+    monkeypatch.setitem(sys.modules, "easy_media.utils", utils_package)
+    multitrack_spec = importlib.util.spec_from_file_location(
+        "easy_media.utils.multitrack", root / "utils" / "multitrack.py"
+    )
+    assert multitrack_spec is not None and multitrack_spec.loader is not None
+    multitrack_module = importlib.util.module_from_spec(multitrack_spec)
+    monkeypatch.setitem(
+        sys.modules,
+        "easy_media.utils.multitrack",
+        multitrack_module,
+    )
+    multitrack_spec.loader.exec_module(multitrack_module)
     h3_project_spec = importlib.util.spec_from_file_location(
         "easy_media.utils.h3_project", root / "utils" / "h3_project.py"
     )
     assert h3_project_spec is not None and h3_project_spec.loader is not None
     h3_project_module = importlib.util.module_from_spec(h3_project_spec)
+    monkeypatch.setitem(
+        sys.modules,
+        "easy_media.utils.h3_project",
+        h3_project_module,
+    )
     h3_project_spec.loader.exec_module(h3_project_module)
+    h3_project_module.prepare_multitrack_project_media = (
+        lambda info: basic_module.prepare_multitrack_project_media(info)
+    )
+    h3_project_module.crop_multitrack_project_media = (
+        lambda shared_audio, shared_video, locked_audio, *args: (
+            basic_module.crop_multitrack_project_media(
+                shared_audio,
+                shared_video,
+                locked_audio,
+                *args,
+            )
+        )
+    )
     utils_spec = importlib.util.spec_from_file_location(
         "easy_media.utils.minimax", root / "utils" / "minimax.py"
     )
@@ -344,6 +395,7 @@ def _load_minimax_node(monkeypatch):
         "easy_media.modules.motion_context": motion_context_package,
         "easy_media.modules.motion_context.core": motion_context_module,
         "easy_media.utils": utils_package,
+        "easy_media.utils.multitrack": multitrack_module,
         "easy_media.utils.h3_presets": h3_presets_module,
         "easy_media.utils.h3_project": h3_project_module,
         "easy_media.utils.models": models_module,
@@ -364,7 +416,22 @@ def _load_minimax_node(monkeypatch):
         if spec is None or spec.loader is None:
             return None
         module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
         spec.loader.exec_module(module)
+        project_spec = importlib.util.spec_from_file_location(
+            "easy_media.nodes.project",
+            root / "nodes" / "project.py",
+        )
+        if project_spec is None or project_spec.loader is None:
+            return None
+        project_module = importlib.util.module_from_spec(project_spec)
+        sys.modules[project_spec.name] = project_module
+        project_spec.loader.exec_module(project_module)
+        module.EasyMultiTrackProject = project_module.EasyMultiTrackProject
+        module.EasyMultiTrackProjectVideoCombine = (
+            project_module.EasyMultiTrackProjectVideoCombine
+        )
+        module._project_module = project_module
         return module
     except (FileNotFoundError, ImportError):
         raise
@@ -703,7 +770,7 @@ def test_multitrack_h3_project_does_not_log_execution_events_while_expanding(
     module = _load_minimax_node(monkeypatch)
     messages = []
     monkeypatch.setattr(
-        module,
+        module._project_module,
         "log_node_info",
         lambda node_name, message: messages.append((node_name, message)),
     )
@@ -953,7 +1020,7 @@ def test_multitrack_h3_project_render_returns_video_and_filename_prefix(monkeypa
     compose_calls = []
     notifications = []
     monkeypatch.setattr(
-        module,
+        module._project_module,
         "compose_h3_project_video",
         lambda project_name, data: compose_calls.append((project_name, data))
         or Path("/temp/demo.mp4"),
@@ -986,7 +1053,7 @@ def test_multitrack_h3_project_render_returns_video_and_filename_prefix(monkeypa
 def test_project_video_combine_blocks_both_outputs_when_auto_combine_is_disabled(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     compose = monkeypatch.setattr(
-        module,
+        module._project_module,
         "compose_h3_project_video",
         lambda *_args: pytest.fail("disabled auto combine must not compose video"),
     )
@@ -1130,7 +1197,7 @@ def test_multitrack_h3_project_expands_single_task_sampling_pipeline(monkeypatch
     assert module is not None
     log_messages = []
     monkeypatch.setattr(
-        module,
+        module._project_module,
         "log_node_info",
         lambda node_name, message=None: log_messages.append((node_name, message)),
     )
@@ -1214,7 +1281,7 @@ def test_multitrack_h3_project_logs_steps_and_reports_progress(monkeypatch):
     assert module is not None
     log_messages = []
     monkeypatch.setattr(
-        module,
+        module._project_module,
         "log_node_info",
         lambda node_name, message=None: log_messages.append((node_name, message)),
     )
@@ -1401,7 +1468,7 @@ def test_multitrack_project_clears_remaining_old_segments_only_for_unlimited_ove
     module = _load_minimax_node(monkeypatch)
     clear_calls = []
     monkeypatch.setattr(
-        module,
+        module._project_module,
         "clear_h3_project_segments_from",
         lambda project_name, start_index, output_directory: clear_calls.append(
             (project_name, start_index, output_directory)
@@ -2412,7 +2479,7 @@ def test_multitrack_h3_project_uses_prompt_graph_as_last_turbo_fallback(
     )
     graph_calls = []
     monkeypatch.setattr(
-        module,
+        module._project_module,
         "detect_turbo_lora_from_prompt",
         lambda received_prompt, node_id: graph_calls.append(
             (received_prompt, node_id)
@@ -2445,13 +2512,17 @@ def test_multitrack_h3_project_skips_prompt_graph_after_model_turbo_match(
             "patch_count": 1,
         },
     )
-    monkeypatch.setattr(module, "detect_turbo_model", lambda model: model_result)
+    monkeypatch.setattr(
+        module._project_module,
+        "detect_turbo_model",
+        lambda model: model_result,
+    )
 
     def fail_graph_fallback(prompt, node_id):
         raise AssertionError("graph fallback must not run after a model match")
 
     monkeypatch.setattr(
-        module, "detect_turbo_lora_from_prompt", fail_graph_fallback
+        module._project_module, "detect_turbo_lora_from_prompt", fail_graph_fallback
     )
 
     module.EasyMultiTrackProject.execute(**_h3_project_inputs())
@@ -3345,7 +3416,7 @@ def test_audio_only_artifact_writes_wav_manifest_and_cleans_up(monkeypatch, tmp_
     ).values[0]["samples"].unbind()
     assert loaded_video.shape[2] == 7
     assert loaded_audio.shape[-1] == 37
-    module.clear_h3_project_segments_from("audio-demo", 0, tmp_path)
+    module._project_module.clear_h3_project_segments_from("audio-demo", 0, tmp_path)
     assert not list(project_dir.glob("*.wav"))
     assert not list(project_dir.glob("*.safetensors"))
 
@@ -3366,7 +3437,7 @@ def test_audio_only_project_rejects_video_combine_before_any_project_changes(mon
         pytest.fail("Unsupported audio/video combination must fail before project or sampling work")
 
     for name in ("initialize_h3_project", "clear_h3_project_segments_from", "GraphBuilder", "detect_turbo_model"):
-        monkeypatch.setattr(module, name, unexpected_work)
+        monkeypatch.setattr(module._project_module, name, unexpected_work)
     with pytest.raises(ValueError, match="Project audio merging is not implemented yet"):
         module.EasyMultiTrackProject.execute(**inputs)
 
@@ -3430,7 +3501,11 @@ def test_project_timing_keeps_native_nodes_and_inputs(monkeypatch):
     assert any("low_context_1_video_encode" in label for label in labels)
     assert any("low_context_1_audio_encode" in label for label in labels)
 
-    monkeypatch.setattr(module, "_timed_h3_project_graph", lambda graph, _name: graph.finalize())
+    monkeypatch.setattr(
+        module._project_module,
+        "_timed_h3_project_graph",
+        lambda graph, _name: graph.finalize(),
+    )
     module.GraphBuilder.set_default_prefix("timing", 0, 0)
     without_timing = module.EasyMultiTrackProject.execute(**inputs)
     graph_without_metadata = {
