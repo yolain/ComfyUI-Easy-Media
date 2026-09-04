@@ -27,6 +27,7 @@ from utils.h3_project import (  # noqa: E402
     minimax_frame_count,
     initialize_h3_project,
     parse_tracks_info,
+    prepare_multitrack_project_task_info,
     safe_h3_project_name,
     select_h3_task_entries,
 )
@@ -87,6 +88,27 @@ def test_parse_tracks_info_extracts_dimensions_and_fps():
 def test_parse_tracks_info_rejects_invalid_dimensions():
     with pytest.raises(ValueError, match="width and height"):
         parse_tracks_info({"width": 0, "height": 768, "tracks": []})
+
+
+def test_prepare_project_task_info_attaches_preloaded_media_without_mutation():
+    info = _tracks_info()
+    image = object()
+    audio = {"waveform": object(), "sample_rate": 1}
+    video = object()
+
+    result = prepare_multitrack_project_task_info(
+        info,
+        [image],
+        [audio],
+        [video],
+    )
+
+    assert "_preloaded_media" not in info
+    assert result["_preloaded_media"] == {
+        "images": [image],
+        "audio": [audio],
+        "video": [video],
+    }
 
 
 def test_select_h3_task_entries_clamps_count_to_remaining_tasks():

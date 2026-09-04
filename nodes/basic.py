@@ -2707,6 +2707,9 @@ class MultiTrackTaskOutput(io.ComfyNode):
         del previous
         raw_info = _unwrap_list_scalar(tracks_info, {})
         info = _parse_track_data(raw_info)
+        preloaded_media = info.get("_preloaded_media", {})
+        if not isinstance(preloaded_media, dict):
+            preloaded_media = {}
         image_items = _as_list_input(images)
         audio_items = _as_list_input(audio)
         video_items = _as_list_input(video)
@@ -2786,7 +2789,11 @@ class MultiTrackTaskOutput(io.ComfyNode):
             f"segment {requested_index} / media_loading ｜ "
             f"{info.get('width', 544)}x{info.get('height', 960)}",
         ):
-            selected_images: list[torch.Tensor] = []
+            selected_images = [
+                item
+                for item in _as_list_input(preloaded_media.get("images"))
+                if isinstance(item, torch.Tensor)
+            ]
             selected_image_indexes: set[int] = set()
             selected_shared_image_identities: set[tuple[str, str]] = set()
             marker_image_frames: list[int] = []
@@ -2856,11 +2863,19 @@ class MultiTrackTaskOutput(io.ComfyNode):
                     duration_frames,
                 )
 
-            selected_audio: list[dict] = []
+            selected_audio = list(
+                iter_valid_audio_inputs(
+                    _as_list_input(preloaded_media.get("audio"))
+                )
+            )
             locked_audio: dict | None = None
-            selected_video: list = []
+            selected_video = [
+                item
+                for item in _as_list_input(preloaded_media.get("video"))
+                if item is not None
+            ]
             deferred_shared_video_cache: dict[tuple, object] = {}
-            has_video = False
+            has_video = bool(selected_video)
             global_volume_db = audio_volume_db(info)
             global_muted = audio_is_muted(info)
             has_solo_track = any(

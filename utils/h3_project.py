@@ -1297,8 +1297,11 @@ def prepare_multitrack_project_media(
                     track_volume_db,
                     not audible,
                 )
-            track["segments"] = []
-            track.pop("media_index", None)
+            if track_type == "audio":
+                # The project-level locked audio replaces this track for every
+                # task, so retaining it would add the same audio a second time.
+                track["segments"] = []
+                track.pop("media_index", None)
             continue
 
         retained_segments: list[dict] = []
@@ -1414,3 +1417,19 @@ def crop_multitrack_project_media(
         else None
     )
     return cropped_audio, cropped_video, cropped_locked_audio
+
+
+def prepare_multitrack_project_task_info(
+    tracks_info: dict[str, Any],
+    images: list[torch.Tensor],
+    audio: list[dict[str, Any]],
+    video: list[object],
+) -> dict[str, Any]:
+    """Attach already-loaded project references to one task's runtime context."""
+    task_info = dict(tracks_info)
+    task_info["_preloaded_media"] = {
+        "images": list(images),
+        "audio": list(audio),
+        "video": list(video),
+    }
+    return task_info

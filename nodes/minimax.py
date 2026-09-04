@@ -1433,9 +1433,6 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
                 io.Image.Input("images", optional=True),
                 io.Audio.Input("audios", optional=True),
                 io.Video.Input("videos", optional=True),
-                io.Image.Input("shared_images", optional=True),
-                io.Audio.Input("shared_audios", optional=True),
-                io.Video.Input("shared_videos", optional=True),
                 io.String.Input(
                     "prompt", default="", multiline=True, dynamic_prompts=True
                 ),
@@ -1488,9 +1485,6 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
         images: list[Any] | Any | None = None,
         audios: list[Any] | Any | None = None,
         videos: list[Any] | Any | None = None,
-        shared_images: list[Any] | Any | None = None,
-        shared_audios: list[Any] | Any | None = None,
-        shared_videos: list[Any] | Any | None = None,
         prompt: list[str] | str = "",
         mode: list[str] | str = "reference",
         width: list[int] | int = 1344,
@@ -1512,9 +1506,9 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
         target_width = int(_first_input(width, 1344))
         target_height = int(_first_input(height, 768))
         target_length = int(_first_input(length, 124))
-        expanded_images = expand_image_inputs([shared_images, images])
-        video_inputs = flatten_media_inputs([shared_videos, videos])
-        standalone_audios = _audio_inputs([shared_audios, audios])
+        expanded_images = expand_image_inputs(images)
+        video_inputs = flatten_media_inputs(videos)
+        standalone_audios = _audio_inputs(audios)
         graph = GraphBuilder()
         try:
             import comfy.utils
@@ -1593,7 +1587,8 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
                     video=video,
                 )
                 node_inputs[f"ref_video_{index}"] = components.out(0)
-                node_inputs[f"ref_video_audio_{index}"] = components.out(1)
+                if components.out(1) is not None:
+                    node_inputs[f"ref_video_audio_{index}"] = components.out(1)
                 advance_progress()
             for index, audio in enumerate(standalone_audios):
                 node_inputs[f"ref_audio_{index}"] = audio

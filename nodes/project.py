@@ -26,6 +26,7 @@ from ..utils.h3_project import (
     parse_tracks_info,
     crop_multitrack_project_media,
     prepare_multitrack_project_media,
+    prepare_multitrack_project_task_info,
     safe_h3_project_name,
     select_h3_task_entries,
     validate_h3_project_outputs,
@@ -765,19 +766,6 @@ class EasyMultiTrackProject(io.ComfyNode):
             )
             report_segment_step(0.0)
             report_segment_step(0.04)
-            task_output = graph.node(
-                "easy multiTrackTaskOutput",
-                id=f"task_{task_index}",
-                tracks_info=task_tracks_info_base,
-                **(
-                    {"previous": previous_artifact}
-                    if previous_artifact is not None
-                    else {}
-                ),
-                task_index=task_index,
-                prompt_format="default",
-            )
-            base_task_length: Any = task_output.out(3)
             task_start_frame = max(0, int(entry.get("start_frame", 0)))
             task_end_frame = max(
                 task_start_frame,
@@ -795,6 +783,25 @@ class EasyMultiTrackProject(io.ComfyNode):
                 task_end_frame - task_start_frame,
                 fps,
             )
+            task_tracks_info = prepare_multitrack_project_task_info(
+                task_tracks_info_base,
+                shared_images,
+                task_shared_audio if generation_mode == "reference" else [],
+                task_shared_video if generation_mode == "reference" else [],
+            )
+            task_output = graph.node(
+                "easy multiTrackTaskOutput",
+                id=f"task_{task_index}",
+                tracks_info=task_tracks_info,
+                **(
+                    {"previous": previous_artifact}
+                    if previous_artifact is not None
+                    else {}
+                ),
+                task_index=task_index,
+                prompt_format="default",
+            )
+            base_task_length: Any = task_output.out(3)
             task_length: Any = base_task_length
             will_have_context_continuity = (
                 continuity_mode == "context"
@@ -814,7 +821,6 @@ class EasyMultiTrackProject(io.ComfyNode):
                 "vae": vae,
                 "audio_vae": audio_vae,
                 "images": task_output.out(4),
-                "shared_images": shared_images,
                 "prompt": task_output.out(1),
                 "mode": generation_mode,
                 "width": first_pass_width,
@@ -825,8 +831,6 @@ class EasyMultiTrackProject(io.ComfyNode):
             if generation_mode == "reference":
                 conditioning_inputs["audios"] = task_output.out(5)
                 conditioning_inputs["videos"] = task_output.out(6)
-                conditioning_inputs["shared_audios"] = task_shared_audio
-                conditioning_inputs["shared_videos"] = task_shared_video
             report_segment_step(0.10)
             conditioning = graph.node(
                 "easy minimaxH3ToVideo",

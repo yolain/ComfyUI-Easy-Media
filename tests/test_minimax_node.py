@@ -327,6 +327,24 @@ def _load_minimax_node(monkeypatch):
     monkeypatch.setitem(sys.modules, "comfy_api.latest", comfy_api_latest)
     monkeypatch.setitem(sys.modules, "folder_paths", folder_paths)
     monkeypatch.setitem(sys.modules, "easy_media.utils", utils_package)
+    audio_gain_module = types.ModuleType("easy_media.utils.audio_gain")
+    audio_gain_module.audio_db_to_gain = utils_package.audio_db_to_gain
+    audio_gain_module.audio_is_muted = utils_package.audio_is_muted
+    audio_gain_module.audio_volume_db = utils_package.audio_volume_db
+    panorama_module = types.ModuleType("easy_media.utils.panorama")
+    panorama_module.equirectangular_to_perspective = (
+        utils_package.equirectangular_to_perspective
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "easy_media.utils.audio_gain",
+        audio_gain_module,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "easy_media.utils.panorama",
+        panorama_module,
+    )
     multitrack_spec = importlib.util.spec_from_file_location(
         "easy_media.utils.multitrack", root / "utils" / "multitrack.py"
     )
@@ -584,9 +602,6 @@ def test_schema_exposes_list_media_inputs_without_image_position(monkeypatch):
         "images",
         "audios",
         "videos",
-        "shared_images",
-        "shared_audios",
-        "shared_videos",
         "prompt",
         "mode",
         "width",
@@ -688,6 +703,60 @@ def test_multitrack_h3_project_loads_segment_media_from_tracks_info(monkeypatch)
         "task_index",
         "prompt_format",
     }
+
+
+def test_multitrack_h3_project_prepends_shared_media_before_h3_conditioning(
+    monkeypatch,
+):
+    module = _load_minimax_node(monkeypatch)
+    shared_image = _image_values(1)
+    shared_audio = {"waveform": torch.ones(1, 1, 1), "sample_rate": 1}
+    shared_video = object()
+    inputs = _h3_project_inputs()
+    inputs["tracks_info"][0]["tracks"][0]["segments"][0]["content"][
+        "task_mode"
+    ] = "ref"
+    monkeypatch.setattr(
+        module._project_module,
+        "prepare_multitrack_project_media",
+        lambda info: (
+            info,
+            [shared_image],
+            [shared_audio],
+            [shared_video],
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        module._project_module,
+        "crop_multitrack_project_media",
+        lambda shared_audios, shared_videos, locked_audio, *_args: (
+            shared_audios,
+            shared_videos,
+            locked_audio,
+        ),
+    )
+
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    conditioning = _graph_node(result, "easy minimaxH3ToVideo")
+    task_node_id, task_node = next(
+        (node_id, node)
+        for node_id, node in result.expand.items()
+        if node["class_type"] == "easy multiTrackTaskOutput"
+    )
+    preloaded_media = task_node["inputs"]["tracks_info"]["_preloaded_media"]
+
+    assert preloaded_media["images"][0] is shared_image
+    assert preloaded_media["audio"][0] is shared_audio
+    assert preloaded_media["video"][0] is shared_video
+    assert conditioning["inputs"]["images"] == [task_node_id, 4]
+    assert conditioning["inputs"]["audios"] == [task_node_id, 5]
+    assert conditioning["inputs"]["videos"] == [task_node_id, 6]
+    assert not any(name.startswith("shared_") for name in conditioning["inputs"])
+    assert not any(
+        node["class_type"] == "easy h3ProjectMediaPreprocessor"
+        for node in result.expand.values()
+    )
 
 
 def test_multitrack_h3_minus_one_defers_each_task_media_until_its_loop(monkeypatch):

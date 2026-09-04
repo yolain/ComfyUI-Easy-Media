@@ -349,6 +349,16 @@ def _load_basic_module():
         "folder_paths": folder_paths,
         "easy_media": package,
         "easy_media.utils": utils_module,
+        "easy_media.utils.audio_gain": types.SimpleNamespace(
+            audio_db_to_gain=utils_module.audio_db_to_gain,
+            audio_is_muted=utils_module.audio_is_muted,
+            audio_volume_db=utils_module.audio_volume_db,
+        ),
+        "easy_media.utils.panorama": types.SimpleNamespace(
+            equirectangular_to_perspective=(
+                utils_module.equirectangular_to_perspective
+            ),
+        ),
     })
     h3_project_path = Path(__file__).parents[1] / "utils" / "h3_project.py"
     h3_project_spec = importlib.util.spec_from_file_location(
@@ -2605,6 +2615,41 @@ def test_multitrack_task_output_schema_and_task_media_selection():
     assert locked_result.values[8]["waveform"].flatten().tolist() == list(range(4, 12))
 
 
+def test_multitrack_task_output_prepends_project_preloaded_images():
+    module = _load_basic_module()
+    shared_image = torch.zeros(1, 2, 2, 3)
+    local_image = torch.ones(1, 2, 2, 3)
+    tracks_info = {
+        "frame_rate": 24,
+        "format": "MiniMax",
+        "_preloaded_media": {
+            "images": [shared_image],
+            "audio": [],
+            "video": [],
+        },
+        "tracks": [{
+            "type": "task",
+            "segments": [{
+                "start_frame": 0,
+                "end_frame": 120,
+                "content": {
+                    "task_mode": "ref",
+                    "images": [{"media_index": 0}],
+                },
+            }],
+        }],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(
+        tracks_info,
+        images=[local_image],
+        task_index=0,
+        prompt_format="default",
+    )
+
+    assert result.values[4] == [shared_image, local_image]
+
+
 def test_multitrack_task_output_uses_selected_user_prompt_variant():
     module = _load_basic_module()
     tracks_info = {
@@ -3537,6 +3582,78 @@ def test_prepare_multitrack_project_media_extracts_shared_and_locked_audio(monke
     assert task_info["tracks"][0]["segments"][0]["content"]["images"] == []
     assert task_info["tracks"][1]["segments"] == []
     assert task_info["tracks"][2]["segments"] == []
+
+
+def test_prepare_multitrack_project_media_keeps_locked_video_as_task_reference(
+    monkeypatch,
+):
+    module = _load_basic_module()
+    project_module = sys.modules["easy_media.utils.h3_project"]
+    video_audio = {
+        "waveform": torch.arange(8, dtype=torch.float32).reshape(1, 1, 8),
+        "sample_rate": 2,
+    }
+    audio_only = {
+        "waveform": torch.full((1, 1, 8), 9.0),
+        "sample_rate": 2,
+    }
+    video = _FakeVideo(
+        _VideoComponents(torch.zeros(8, 2, 2, 3), video_audio, Fraction(2)),
+    )
+    monkeypatch.setattr(
+        project_module,
+        "_resolve_multitrack_video",
+        lambda *_args: video,
+    )
+    tracks_info = {
+        "frame_rate": 2,
+        "timeline_total_length": 8,
+        "media": {"audio": [audio_only], "video": [video]},
+        "tracks": [
+            {"type": "task", "segments": [{
+                "start_frame": 2,
+                "end_frame": 6,
+                "content": {"media_type": "none", "images": []},
+            }]},
+            {
+                "type": "video",
+                "media_index": 0,
+                "audio_locked": True,
+                "segments": [{
+                    "id": "locked-video",
+                    "start_frame": 0,
+                    "end_frame": 8,
+                    "content": {"media_type": "video", "media_index": 0},
+                }],
+            },
+            {
+                "type": "audio",
+                "media_index": 0,
+                "audio_locked": True,
+                "segments": [{
+                    "id": "locked-audio",
+                    "start_frame": 0,
+                    "end_frame": 8,
+                    "content": {"media_type": "audio", "media_index": 0},
+                }],
+            },
+        ],
+    }
+
+    task_info, _images, _audios, _videos, locked = (
+        project_module.prepare_multitrack_project_media(tracks_info)
+    )
+
+    assert locked["waveform"].flatten().tolist() == list(range(8))
+    assert task_info["tracks"][1] == tracks_info["tracks"][1]
+    assert task_info["tracks"][2]["segments"] == []
+    assert "media_index" not in task_info["tracks"][2]
+
+    task_result = module.MultiTrackTaskOutput.execute(task_info, task_index=0)
+
+    assert task_result.values[5] == []
+    assert task_result.values[6] == [video]
+    assert video.trim_calls[-1] == (1.0, 2.0, False)
 
 
 def test_crop_multitrack_project_media_crops_reused_audio_and_video():
