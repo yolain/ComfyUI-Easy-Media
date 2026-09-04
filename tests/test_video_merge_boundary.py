@@ -65,8 +65,10 @@ def test_video_merge_pads_each_segment_to_its_exact_timeline_frame_count(
 
     assert output is not None
     filter_graph = commands[0][commands[0].index("-filter_complex") + 1]
-    assert "trim=start_frame=12:end_frame=36" in filter_graph
-    assert "setpts=PTS-STARTPTS,fps=fps=24:start_time=0" in filter_graph
+    assert (
+        "setpts=PTS-STARTPTS,fps=fps=24:start_time=0,"
+        "trim=start_frame=12:end_frame=36,setpts=PTS-STARTPTS"
+    ) in filter_graph
     assert "tpad=stop_mode=clone:stop_duration=1.0,trim=end_frame=24" in filter_graph
     assert "setpts=PTS-STARTPTS+24" in filter_graph
     assert "enable='between(round(t*24),24,47)'" in filter_graph
@@ -162,7 +164,10 @@ def test_video_merge_uses_separate_original_audio_for_locked_segment(
         str(original_audio),
     ]
     filter_graph = command[command.index("-filter_complex") + 1]
-    assert "[2:v]trim=start_frame=12:end_frame=60" in filter_graph
+    assert (
+        "[2:v]setpts=PTS-STARTPTS,fps=fps=24:start_time=0,"
+        "trim=start_frame=12:end_frame=60"
+    ) in filter_graph
     assert "[3:a]aresample=44100:first_pts=0" in filter_graph
     assert "atrim=start_sample=22050:end_sample=110250" in filter_graph
 
@@ -235,6 +240,83 @@ def test_video_merge_clones_the_last_frame_when_source_decodes_two_frames_short(
     assert decode_result.stdout
     blue_channel = decode_result.stdout[2::3]
     assert sum(blue_channel) / len(blue_channel) > 200
+
+
+@pytest.mark.skipif(
+    shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
+    reason="FFmpeg is required for the source-frame-rate regression test",
+)
+def test_video_merge_normalizes_source_rate_before_trimming_timeline_frames(
+    tmp_path: Path,
+):
+    module = _load_video_utils_module(tmp_path)
+    ffmpeg = shutil.which("ffmpeg")
+    assert ffmpeg is not None
+    source = tmp_path / "five-seconds-at-30fps.mp4"
+    create_result = subprocess.run(
+        [
+            ffmpeg,
+            "-y",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=red:s=64x64:r=30:d=4",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=blue:s=64x64:r=30:d=1",
+            "-filter_complex",
+            "[0:v][1:v]concat=n=2:v=1:a=0[v]",
+            "-map",
+            "[v]",
+            "-frames:v",
+            "150",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(source),
+        ],
+        capture_output=True,
+    )
+    assert create_result.returncode == 0, create_result.stderr.decode(errors="replace")
+
+    output = module.merge_video_track_with_ffmpeg(
+        [{"source": str(source), "start_frame": 0, "end_frame": 120}],
+        total_length=120,
+        frame_rate=24,
+        width=64,
+        height=64,
+    )
+
+    assert output is not None
+    decode_result = subprocess.run(
+        [
+            ffmpeg,
+            "-v",
+            "error",
+            "-i",
+            output,
+            "-vf",
+            "select=eq(n\\,108)",
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-",
+        ],
+        capture_output=True,
+    )
+    assert decode_result.returncode == 0, decode_result.stderr.decode(errors="replace")
+    assert decode_result.stdout
+    red_channel = decode_result.stdout[0::3]
+    blue_channel = decode_result.stdout[2::3]
+    assert sum(blue_channel) / len(blue_channel) > 200
+    assert sum(red_channel) / len(red_channel) < 30
 
 
 @pytest.mark.skipif(

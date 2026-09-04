@@ -247,10 +247,17 @@ def merge_video_track_with_ffmpeg(
             continue
         clip_label = f"clipv{index}"
         output_label = f"timelinev{index}"
+        # source_start_frame and frame_count are expressed in timeline frames,
+        # not in the source file's native frame rate. Normalize the source to
+        # the timeline rate before applying those frame boundaries. Trimming
+        # first would turn 120 timeline frames into only four seconds of a
+        # 30 fps source on a 24 fps timeline, after which tpad would visibly
+        # freeze the last frame for the missing second.
         video_filters = [
-            f"trim=start_frame={source_start_frame}:end_frame={source_end_frame}",
             "setpts=PTS-STARTPTS",
             f"fps=fps={frame_rate}:start_time=0",
+            f"trim=start_frame={source_start_frame}:end_frame={source_end_frame}",
+            "setpts=PTS-STARTPTS",
         ]
         if resize_filter is not None:
             video_filters.append(resize_filter)
