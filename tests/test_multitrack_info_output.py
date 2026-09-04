@@ -2494,6 +2494,7 @@ def test_multitrack_task_output_schema_and_task_media_selection():
     assert schema.is_input_list is True
     assert [input_.name for input_ in schema.inputs] == [
         "tracks_info", "images", "audio", "video", "task_index", "prompt_format",
+        "previous",
     ]
     assert [output.name for output in schema.outputs] == [
         "SYSTEM_PROMPT", "USER_PROMPT", "TYPE", "LENGTH", "IMAGES", "AUDIO", "VIDEO",
@@ -3434,6 +3435,85 @@ def test_multitrack_task_output_minus_one_does_not_stop_at_the_next_minimax_task
 
     assert result.values[5][0]["waveform"].flatten().tolist() == list(range(8))
     assert result.values[8]["waveform"].flatten().tolist() == list(range(8))
+
+
+def test_prepare_multitrack_project_media_extracts_shared_and_locked_audio(monkeypatch):
+    module = _load_basic_module()
+    shared_image = torch.ones(1, 2, 2, 3)
+    source_audio = {
+        "waveform": torch.arange(8, dtype=torch.float32).reshape(1, 1, 8),
+        "sample_rate": 2,
+    }
+    monkeypatch.setattr(module, "_resolve_timeline_image_item", lambda *_args: shared_image)
+    monkeypatch.setattr(module, "_resolve_multitrack_audio", lambda *_args: source_audio)
+    tracks_info = {
+        "media_loading": "deferred",
+        "frame_rate": 2,
+        "timeline_total_length": 8,
+        "width": 2,
+        "height": 2,
+        "tracks": [
+            {"type": "task", "segments": [{
+                "start_frame": 0,
+                "end_frame": 4,
+                "content": {"images": [{
+                    "file_path": "shared.png",
+                    "shared_reference": True,
+                }]},
+            }]},
+            {"type": "audio", "segments": [{
+                "start_frame": 0,
+                "end_frame": 8,
+                "content": {
+                    "media_type": "audio",
+                    "file_path": "shared.wav",
+                    "shared_reference": True,
+                },
+            }]},
+            {"type": "audio", "audio_locked": True, "segments": [{
+                "start_frame": 0,
+                "end_frame": 8,
+                "content": {"media_type": "audio", "file_path": "locked.wav"},
+            }]},
+        ],
+    }
+
+    task_info, images, audios, videos, locked = (
+        module.prepare_multitrack_project_media(tracks_info)
+    )
+
+    assert images == [shared_image]
+    assert audios[0]["waveform"].flatten().tolist() == list(range(8))
+    assert videos == []
+    assert locked["waveform"].flatten().tolist() == list(range(8))
+    assert task_info["tracks"][0]["segments"][0]["content"]["images"] == []
+    assert task_info["tracks"][1]["segments"] == []
+    assert task_info["tracks"][2]["segments"] == []
+
+
+def test_crop_multitrack_project_media_crops_reused_audio_and_video():
+    module = _load_basic_module()
+    shared_audio = {
+        "waveform": torch.arange(8, dtype=torch.float32).reshape(1, 1, 8),
+        "sample_rate": 2,
+    }
+    shared_video = _FakeVideo(
+        _VideoComponents(torch.ones(8, 2, 2, 3), None, Fraction(2))
+    )
+
+    audios, videos, locked = module.crop_multitrack_project_media(
+        [shared_audio],
+        [shared_video],
+        shared_audio,
+        2,
+        4,
+        2,
+    )
+
+    assert audios[0]["waveform"].flatten().tolist() == [0, 1, 2, 3]
+    assert shared_video.trim_calls == [(0.0, 2.0, False)]
+    assert videos
+    assert locked["waveform"].flatten().tolist() == [2, 3, 4, 5]
 
 
 def test_multitrack_audio_output_schema_is_basic_and_exposes_mode_and_two_tracks():

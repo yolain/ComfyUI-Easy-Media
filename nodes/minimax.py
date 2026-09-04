@@ -50,6 +50,7 @@ from ..utils.minimax import (
     h3_phase_aligned_context_start,
     remove_output_files_by_prefix,
 )
+from .basic import crop_multitrack_project_media, prepare_multitrack_project_media
 
 
 CATEGORY_MINIMAX = "EasyUse/MiniMax"
@@ -1970,10 +1971,6 @@ class EasyMultiTrackProject(io.ComfyNode):
             folder_paths.get_output_directory(),
         )
         all_entries = h3_task_entries(info)
-        has_locked_audio = any(
-            h3_locked_audio_track(entry, info) is not None
-            for entry in all_entries
-        )
         segment_start_number = int(_first_input(kwargs.get("segment_start_number"), 1))
         if segment_start_number < 1:
             raise ValueError("segment_start_number must be at least 1")
@@ -2033,6 +2030,13 @@ class EasyMultiTrackProject(io.ComfyNode):
             )
         report_step(25)
 
+        (
+            task_tracks_info_base,
+            shared_images,
+            shared_audio,
+            shared_video,
+            full_locked_audio,
+        ) = prepare_multitrack_project_media(info)
         graph = GraphBuilder()
         report_step(27)
         preset_name = str(_first_input(kwargs.get("sampling_plan"), "medium"))
@@ -2145,11 +2149,33 @@ class EasyMultiTrackProject(io.ComfyNode):
             task_output = graph.node(
                 "easy multiTrackTaskOutput",
                 id=f"task_{task_index}",
-                tracks_info=info,
+                tracks_info=task_tracks_info_base,
+                **(
+                    {"previous": previous_artifact}
+                    if previous_artifact is not None
+                    else {}
+                ),
                 task_index=task_index,
                 prompt_format="default",
             )
             base_task_length: Any = task_output.out(3)
+            task_start_frame = max(0, int(entry.get("start_frame", 0)))
+            task_end_frame = max(
+                task_start_frame,
+                int(entry.get("end_frame", task_start_frame)),
+            )
+            (
+                task_shared_audio,
+                task_shared_video,
+                task_locked_audio,
+            ) = crop_multitrack_project_media(
+                shared_audio,
+                shared_video,
+                full_locked_audio,
+                task_start_frame,
+                task_end_frame - task_start_frame,
+                fps,
+            )
             task_length: Any = base_task_length
             will_have_context_continuity = (
                 continuity_mode == "context"
@@ -2169,6 +2195,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                 "vae": vae,
                 "audio_vae": audio_vae,
                 "images": task_output.out(4),
+                "shared_images": shared_images,
                 "prompt": task_output.out(1),
                 "mode": generation_mode,
                 "width": first_pass_width,
@@ -2179,6 +2206,8 @@ class EasyMultiTrackProject(io.ComfyNode):
             if generation_mode == "reference":
                 conditioning_inputs["audios"] = task_output.out(5)
                 conditioning_inputs["videos"] = task_output.out(6)
+                conditioning_inputs["shared_audios"] = task_shared_audio
+                conditioning_inputs["shared_videos"] = task_shared_video
             report_segment_step(0.10)
             conditioning = graph.node(
                 "easy minimaxH3ToVideo",
@@ -2256,7 +2285,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     id=f"audio_lock_{task_index}",
                     latent=initial_latent,
                     audio_vae=audio_vae,
-                    audio=task_output.out(8),
+                    audio=task_locked_audio,
                     remix_strength=1.0,
                     short_audio_mode="silence",
                     prepend_frames=(
@@ -2489,7 +2518,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                         project_low_context_latent = project_hires_context_latent
                 report_segment_step(0.89)
                 saved_media_inputs = {
-                    "audio": task_output.out(8) if has_task_locked_audio else output_audio,
+                    "audio": task_locked_audio if has_task_locked_audio else output_audio,
                 }
             else:
                 report_segment_step(0.76)
@@ -2594,7 +2623,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     input_mode="images+audio",
                     **{
                         "input_mode.images": output_images,
-                        "input_mode.audio": task_output.out(8) if has_task_locked_audio else output_audio,
+                        "input_mode.audio": task_locked_audio if has_task_locked_audio else output_audio,
                         "input_mode.fps": fps,
                         "output_mode": "hide&save",
                     },
@@ -2667,15 +2696,6 @@ class EasyMultiTrackProject(io.ComfyNode):
         if last_project_output is None:
             log_node_info(node_name, "Project graph produced no task output")
             raise RuntimeError("H3 project graph produced no task output")
-        full_locked_audio: Any | None = None
-        if has_locked_audio:
-            full_locked_audio = graph.node(
-                "easy multiTrackTaskOutput",
-                id="full_locked_audio",
-                tracks_info=info,
-                task_index=-1,
-                prompt_format="default",
-            ).out(8)
         report_step(100)
         return io.NodeOutput(
             last_project_output,
@@ -2770,6 +2790,9 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
                 io.Image.Input("images", optional=True),
                 io.Audio.Input("audios", optional=True),
                 io.Video.Input("videos", optional=True),
+                io.Image.Input("shared_images", optional=True),
+                io.Audio.Input("shared_audios", optional=True),
+                io.Video.Input("shared_videos", optional=True),
                 io.String.Input(
                     "prompt", default="", multiline=True, dynamic_prompts=True
                 ),
@@ -2822,6 +2845,9 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
         images: list[Any] | Any | None = None,
         audios: list[Any] | Any | None = None,
         videos: list[Any] | Any | None = None,
+        shared_images: list[Any] | Any | None = None,
+        shared_audios: list[Any] | Any | None = None,
+        shared_videos: list[Any] | Any | None = None,
         prompt: list[str] | str = "",
         mode: list[str] | str = "reference",
         width: list[int] | int = 1344,
@@ -2843,9 +2869,9 @@ class EasyMiniMaxH3ToVideo(io.ComfyNode):
         target_width = int(_first_input(width, 1344))
         target_height = int(_first_input(height, 768))
         target_length = int(_first_input(length, 124))
-        expanded_images = expand_image_inputs(images)
-        video_inputs = flatten_media_inputs(videos)
-        standalone_audios = _audio_inputs(audios)
+        expanded_images = expand_image_inputs([shared_images, images])
+        video_inputs = flatten_media_inputs([shared_videos, videos])
+        standalone_audios = _audio_inputs([shared_audios, audios])
         graph = GraphBuilder()
         try:
             import comfy.utils

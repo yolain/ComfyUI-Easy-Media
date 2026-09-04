@@ -251,6 +251,24 @@ def _load_minimax_node(monkeypatch):
     package.__path__ = []
     nodes_package = types.ModuleType("easy_media.nodes")
     nodes_package.__path__ = []
+    basic_module = types.ModuleType("easy_media.nodes.basic")
+
+    def prepare_multitrack_project_media(info):
+        has_locked_audio = any(
+            isinstance(track, dict) and track.get("audio_locked") is True
+            for track in info.get("tracks", [])
+        )
+        locked_audio = {"prepared_locked_audio": True} if has_locked_audio else None
+        return info, [], [], [], locked_audio
+
+    basic_module.prepare_multitrack_project_media = prepare_multitrack_project_media
+    basic_module.crop_multitrack_project_media = (
+        lambda shared_audio, shared_video, locked_audio, *_args: (
+            shared_audio,
+            shared_video,
+            locked_audio,
+        )
+    )
     project_modules_package = types.ModuleType("easy_media.modules")
     project_modules_package.__path__ = []
     motion_context_package = types.ModuleType("easy_media.modules.motion_context")
@@ -321,6 +339,7 @@ def _load_minimax_node(monkeypatch):
         "server": server,
         "easy_media": package,
         "easy_media.nodes": nodes_package,
+        "easy_media.nodes.basic": basic_module,
         "easy_media.modules": project_modules_package,
         "easy_media.modules.motion_context": motion_context_package,
         "easy_media.modules.motion_context.core": motion_context_module,
@@ -498,6 +517,9 @@ def test_schema_exposes_list_media_inputs_without_image_position(monkeypatch):
         "images",
         "audios",
         "videos",
+        "shared_images",
+        "shared_audios",
+        "shared_videos",
         "prompt",
         "mode",
         "width",
@@ -601,6 +623,34 @@ def test_multitrack_h3_project_loads_segment_media_from_tracks_info(monkeypatch)
     }
 
 
+def test_multitrack_h3_minus_one_defers_each_task_media_until_its_loop(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    inputs = _h3_project_inputs(segment_count=[-1])
+    inputs["tracks_info"][0]["tracks"][0]["segments"].append({
+        "start_frame": 120,
+        "end_frame": 240,
+        "content": {"user_prompt": "second", "task_mode": "default"},
+    })
+
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    task_nodes = sorted(
+        (
+            (node_id, node)
+            for node_id, node in result.expand.items()
+            if node["class_type"] == "easy multiTrackTaskOutput"
+        ),
+        key=lambda item: item[1]["inputs"]["task_index"],
+    )
+    first_artifact_id = next(
+        node_id
+        for node_id, node in result.expand.items()
+        if node["class_type"] == "easy h3ProjectArtifact"
+        and node["inputs"]["segment_index"] == 0
+    )
+    assert "previous" not in task_nodes[0][1]["inputs"]
+    assert task_nodes[1][1]["inputs"]["previous"] == [first_artifact_id, 0]
+
+
 def test_multitrack_h3_project_outputs_locked_audio_used_by_generation(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     inputs = _h3_project_inputs()
@@ -616,31 +666,20 @@ def test_multitrack_h3_project_outputs_locked_audio_used_by_generation(monkeypat
 
     result = module.EasyMultiTrackProject.execute(**inputs)
     audio_lock = _graph_node(result, "easy minimaxH3AudioLock")
-    task_outputs = [
-        (node_id, node)
-        for node_id, node in result.expand.items()
-        if node["class_type"] == "easy multiTrackTaskOutput"
-    ]
-    full_audio_id, full_audio = next(
-        (node_id, node)
-        for node_id, node in task_outputs
-        if node["inputs"]["task_index"] == -1
-    )
-    segment_audio_id, _segment_audio = next(
-        (node_id, node)
-        for node_id, node in task_outputs
-        if node["inputs"]["task_index"] == 0
-    )
     align = _graph_node(result, "easy h3LockedAudioDurationAlign")
     saved_video = _graph_node(result, "easy saveVideo")
 
-    assert result.values[1] == [full_audio_id, 8]
-    assert audio_lock["inputs"]["audio"] == [segment_audio_id, 8]
+    assert result.values[1] == {"prepared_locked_audio": True}
+    assert audio_lock["inputs"]["audio"] == {"prepared_locked_audio": True}
     artifact = _graph_node(result, "easy h3ProjectArtifact")
     assert "locked_audio" not in artifact["inputs"]
     assert align["inputs"]["fps"] == 24.0
-    assert saved_video["inputs"]["input_mode.audio"] == [segment_audio_id, 8]
-    assert full_audio["inputs"]["prompt_format"] == "default"
+    assert saved_video["inputs"]["input_mode.audio"] == {"prepared_locked_audio": True}
+    assert not any(
+        node["class_type"] == "easy multiTrackTaskOutput"
+        and node["inputs"]["task_index"] == -1
+        for node in result.expand.values()
+    )
 
 
 def test_multitrack_h3_project_outputs_none_without_locked_audio(monkeypatch):
@@ -1227,11 +1266,6 @@ def test_multitrack_h3_project_locks_task_audio_before_sampling(monkeypatch):
         for node_id, node in nodes.items()
         if node["class_type"] == "easy minimaxH3ToVideo"
     )
-    task_id = next(
-        node_id
-        for node_id, node in nodes.items()
-        if node["class_type"] == "easy multiTrackTaskOutput"
-    )
     sampling_start = next(
         node
         for node in nodes.values()
@@ -1239,7 +1273,7 @@ def test_multitrack_h3_project_locks_task_audio_before_sampling(monkeypatch):
     )
 
     assert audio_lock["inputs"]["latent"] == [conditioning_id, 1]
-    assert audio_lock["inputs"]["audio"] == [task_id, 8]
+    assert audio_lock["inputs"]["audio"] == {"prepared_locked_audio": True}
     assert audio_lock["inputs"]["remix_strength"] == 1.0
     assert audio_lock["inputs"]["prepend_frames"] == 0
     assert audio_lock["inputs"]["frame_rate"] == 24.0
@@ -1932,7 +1966,9 @@ def test_multitrack_h3_context_chain_uses_previous_segment_latent(monkeypatch):
         and node["inputs"]["input_mode.images"] == [trim_id, 0]
     )
     # The task audio already excludes the context prefix; do not trim it again.
-    assert context_video["inputs"]["input_mode.audio"] == [task_length_link[0], 8]
+    assert context_video["inputs"]["input_mode.audio"] == {
+        "prepared_locked_audio": True,
+    }
     artifacts = [
         (node_id, node)
         for node_id, node in result.expand.items()
@@ -3262,10 +3298,7 @@ def test_audio_only_project_saves_original_locked_audio(monkeypatch):
     })
     result = module.EasyMultiTrackProject.execute(**inputs)
     artifact = _graph_node(result, "easy h3ProjectArtifact")
-    source_id, output_index = artifact["inputs"]["audio"]
-    assert result.expand[source_id]["class_type"] == "easy multiTrackTaskOutput"
-    assert result.expand[source_id]["inputs"]["task_index"] == 0
-    assert output_index == 8
+    assert artifact["inputs"]["audio"] == {"prepared_locked_audio": True}
 
 
 def test_audio_only_context_trims_samples_and_retains_encoded_audio(monkeypatch):
