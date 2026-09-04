@@ -1324,12 +1324,12 @@ export function setExclusiveMultiTrackAudioTrackLock(
   locked: boolean,
 ): TrackData {
   const target = data.tracks.find((track) => track.id === trackId)
-  if (!target || target.type !== 'audio') return data
+  if (!target || (target.type !== 'audio' && target.type !== 'video')) return data
 
   return {
     ...data,
     tracks: data.tracks.map((track) => (
-      track.type === 'audio'
+      track.type === 'audio' || track.type === 'video'
         ? { ...track, audio_locked: locked && track.id === trackId }
         : track
     )),
@@ -1339,7 +1339,7 @@ export function setExclusiveMultiTrackAudioTrackLock(
 function normalizeExclusiveMultiTrackAudioLock(tracks: MultiTrack[]): MultiTrack[] {
   let keptLockedAudio = false
   return tracks.map((track) => {
-    if (track.type !== 'audio' || track.audio_locked !== true) return track
+    if ((track.type !== 'audio' && track.type !== 'video') || track.audio_locked !== true) return track
     if (!keptLockedAudio) {
       keptLockedAudio = true
       return track
@@ -1665,7 +1665,7 @@ export function normalizeTrackData(raw: LegacyTrackData): TrackData {
   const frameRate = Math.max(1, Math.round(raw.frame_rate ?? MULTITRACK_DEFAULT_FRAME_RATE))
   const tracks = raw.tracks.map((track) => {
     const normalizedTrack = omitLegacyVolume(track)
-    const legacyAudioLocked = track.type === 'audio' && track.segments.some((segment) => (
+    const legacyAudioLocked = (track.type === 'audio' || track.type === 'video') && track.segments.some((segment) => (
       (segment.content as MultiTrackSegment['content'] & { audio_locked?: unknown }).audio_locked === true
     ))
     const segments = normalizeTrackSegments(track)
@@ -1692,7 +1692,7 @@ export function normalizeTrackData(raw: LegacyTrackData): TrackData {
         ...normalizedTrack,
         ...audioSettings,
         type: track.type,
-        audio_locked: track.type === 'audio'
+        audio_locked: track.type === 'audio' || track.type === 'video'
           ? track.audio_locked === true || legacyAudioLocked
           : undefined,
         visible: track.type === 'subtitle' ? track.visible !== false : track.visible,

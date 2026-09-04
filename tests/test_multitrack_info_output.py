@@ -1715,6 +1715,53 @@ def test_multitrack_task_output_returns_the_locked_track_deferred_audio():
     assert result.values[8]["waveform"].flatten().tolist() == [0.0, 1.0, 2.0, 3.0]
 
 
+def test_multitrack_task_output_returns_locked_audio_from_deferred_video():
+    module = _load_basic_module()
+    source_audio = {
+        "waveform": torch.arange(8, dtype=torch.float32).reshape(1, 1, 8),
+        "sample_rate": 2,
+    }
+    source_frames = torch.zeros(8, 2, 2, 3)
+    source_video = _FakeVideo(_VideoComponents(source_frames, source_audio, Fraction(2)))
+    module._resolve_multitrack_video = lambda content, video_input: source_video
+    tracks_info = {
+        "media_loading": "deferred",
+        "format": "MiniMax",
+        "width": 2,
+        "height": 2,
+        "total_length": 4,
+        "frame_rate": 2,
+        "tracks": [
+            {
+                "type": "task",
+                "segments": [{
+                    "start_frame": 0,
+                    "end_frame": 4,
+                    "content": {"media_type": "none", "images": []},
+                }],
+            },
+            {
+                "type": "video",
+                "audio_locked": True,
+                "segments": [{
+                    "id": "locked-video",
+                    "start_frame": 0,
+                    "end_frame": 4,
+                    "content": {
+                        "media_type": "video",
+                        "source_type": "input",
+                        "file_path": "video.mp4",
+                    },
+                }],
+            },
+        ],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(tracks_info, task_index=0)
+
+    assert result.values[8]["waveform"].flatten().tolist() == [0.0, 1.0, 2.0, 3.0]
+
+
 def test_multitrack_task_output_uses_the_locked_audio_track_index():
     module = _load_basic_module()
     first_audio = {"waveform": torch.ones(1, 1, 4), "sample_rate": 2}

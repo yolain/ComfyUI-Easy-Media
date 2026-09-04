@@ -163,6 +163,17 @@ def test_locked_audio_track_applies_when_it_overlaps_the_task_range():
     assert h3_locked_audio_track(first, info) is None
 
 
+def test_locked_video_track_audio_applies_when_it_overlaps_the_task_range():
+    info = _tracks_info()
+    video_track = next(track for track in info["tracks"] if track["type"] == "video")
+    video_track["audio_locked"] = True
+    video_track["segments"][0]["content"]["media_type"] = "video"
+    first, second = h3_task_entries(info)
+
+    assert h3_locked_audio_track(first, info) is None
+    assert h3_locked_audio_track(second, info) is video_track
+
+
 def test_minimax_frame_count_matches_nearest_17k_plus_5_grid():
     assert minimax_frame_count(5) == 5
     assert minimax_frame_count(120) == 124

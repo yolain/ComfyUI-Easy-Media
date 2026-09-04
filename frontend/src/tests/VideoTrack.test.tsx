@@ -35,8 +35,10 @@ vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/MultiTrackSegmentBlock', () => ({
-  MultiTrackSegmentBlock: ({ segment, sharedReference, onSharedReferenceToggle, onDoubleClick }: {
+  MultiTrackSegmentBlock: ({ segment, audioLocked, onAudioLockToggle, sharedReference, onSharedReferenceToggle, onDoubleClick }: {
     segment: { id: string }
+    audioLocked?: boolean
+    onAudioLockToggle?: (locked: boolean) => void
     sharedReference?: boolean
     onSharedReferenceToggle?: (enabled: boolean) => void
     onDoubleClick?: (segmentId: string, event: React.MouseEvent) => void
@@ -50,6 +52,12 @@ vi.mock('@/components/widgets/multitrack/MultiTrackSegmentBlock', () => ({
         aria-label={`shared-${segment.id}`}
         aria-pressed={sharedReference}
         onClick={() => onSharedReferenceToggle?.(!sharedReference)}
+      />
+      <button
+        type="button"
+        aria-label={`audio-lock-${segment.id}`}
+        aria-pressed={audioLocked}
+        onClick={() => onAudioLockToggle?.(!audioLocked)}
       />
     </>
   ),
@@ -79,6 +87,50 @@ function videoTrack(): MultiTrack {
 }
 
 describe('VideoTrack', () => {
+  it('toggles the audio lock for the whole video track', () => {
+    const track = videoTrack()
+    track.audio_locked = true
+    const onTrackAudioSettingsChange = vi.fn()
+
+    render(
+      <TooltipProvider>
+        <VideoTrack
+          track={track}
+          totalLength={24}
+          frameRate={24}
+          width={480}
+          canvasScale={1}
+          selectedSegmentIds={new Set()}
+          node={null}
+          app={null}
+          onAddVideo={vi.fn()}
+          onSelectSegment={vi.fn()}
+          onDeleteSegment={vi.fn()}
+          canDeleteTrack={false}
+          onDeleteTrack={vi.fn()}
+          onTrackAudioSettingsChange={onTrackAudioSettingsChange}
+          onResizeSegment={vi.fn()}
+          onResizeSegmentPreview={vi.fn()}
+          onMoveSegment={vi.fn()}
+          onDragPreviewChange={vi.fn()}
+          onDragPreviewEnd={vi.fn()}
+          onReplaceVideo={vi.fn()}
+          onSmartSplit={vi.fn()}
+          onSmartSplitTasks={vi.fn()}
+          cutMode={false}
+          onCutSegment={vi.fn()}
+          onCloneSegment={vi.fn()}
+          audioLockEnabled
+        />
+      </TooltipProvider>,
+    )
+
+    const lock = screen.getByRole('button', { name: 'audio-lock-video-segment' })
+    expect(lock.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(lock)
+    expect(onTrackAudioSettingsChange).toHaveBeenCalledWith('video-track', { audio_locked: false })
+  })
+
   it('adds a video using the exact internal gap range', () => {
     const track = videoTrack()
     track.segments[0].content.shared_reference = true

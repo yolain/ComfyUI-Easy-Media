@@ -41,7 +41,7 @@ import {
 } from '@/lib/multitrack-utils'
 
 describe('multitrack utilities', () => {
-  it('locks one audio track and replaces the previous track lock', () => {
+  it('keeps one audio lock across video and audio tracks', () => {
     const data = createDefaultTrackData()
     const audioTrack = (id: string, audioLocked: boolean) => ({
       id,
@@ -55,9 +55,24 @@ describe('multitrack utilities', () => {
     })
     data.tracks.push(audioTrack('audio-a', true), audioTrack('audio-b', false))
 
-    const updated = setExclusiveMultiTrackAudioTrackLock(data, 'audio-b', true)
-    expect(updated.tracks.filter((track) => track.type === 'audio').map((track) => track.audio_locked)).toEqual([false, true])
+    const videoLocked = setExclusiveMultiTrackAudioTrackLock(data, data.tracks[1].id, true)
+    expect(videoLocked.tracks.filter((track) => track.type === 'video' || track.type === 'audio').map((track) => track.audio_locked)).toEqual([true, false, false])
+
+    const updated = setExclusiveMultiTrackAudioTrackLock(videoLocked, 'audio-b', true)
+    expect(updated.tracks.filter((track) => track.type === 'video' || track.type === 'audio').map((track) => track.audio_locked)).toEqual([false, false, true])
     expect(setExclusiveMultiTrackAudioTrackLock(data, 'missing', true)).toBe(data)
+  })
+
+  it('normalizes multiple video and audio locks to the first audio-bearing track', () => {
+    const data = createDefaultTrackData()
+    data.tracks[1].audio_locked = true
+    data.tracks.push({
+      id: 'audio', name: 'Audio', type: 'audio', color: 'var(--multitrack-audio-bg)',
+      muted: false, locked: false, audio_locked: true, segments: [],
+    })
+
+    const normalized = normalizeTrackData(data)
+    expect(normalized.tracks.filter((track) => track.type === 'video' || track.type === 'audio').map((track) => track.audio_locked)).toEqual([true, false])
   })
 
   it('migrates a legacy segment lock to its audio track', () => {

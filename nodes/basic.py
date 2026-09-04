@@ -3225,21 +3225,31 @@ class MultiTrackTaskOutput(io.ComfyNode):
                     selected_video = list(video_items)
                     has_video = any(item is not None for item in selected_video)
                 for track in media_tracks if isinstance(media_tracks, list) else []:
-                    if (
-                        deferred_audio
-                        or not isinstance(track, dict)
-                        or track.get("type") != "audio"
-                    ):
+                    if not isinstance(track, dict):
                         continue
                     media_index = _track_output_index(track)
                     if (
                         locked_audio is None
                         and track.get("audio_locked") is True
-                        and media_index is not None
-                        and 0 <= media_index < len(audio_items)
-                        and isinstance(audio_items[media_index], dict)
                     ):
-                        locked_audio = audio_items[media_index]
+                        if (
+                            track.get("type") == "audio"
+                            and not deferred_audio
+                            and media_index is not None
+                            and 0 <= media_index < len(audio_items)
+                            and isinstance(audio_items[media_index], dict)
+                        ):
+                            locked_audio = audio_items[media_index]
+                        elif (
+                            track.get("type") == "video"
+                            and not deferred_video
+                            and media_index is not None
+                            and 0 <= media_index < len(video_items)
+                            and video_items[media_index] is not None
+                        ):
+                            video_audio = video_items[media_index].get_components().audio
+                            if isinstance(video_audio, dict):
+                                locked_audio = video_audio
                 media_tracks = [
                     track
                     for track in media_tracks
@@ -3255,7 +3265,8 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 media_index = _track_output_index(track)
                 shared_segment = _shared_reference_segment(track) if not output_full_timeline else None
                 locked_audio_track = (
-                    track.get("type") == "audio" and track.get("audio_locked") is True
+                    track.get("type") in {"audio", "video"}
+                    and track.get("audio_locked") is True
                 )
                 if shared_segment is not None:
                     shared_content = shared_segment.get("content", {})
@@ -3379,7 +3390,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
                         resolved_video_segments.append((local_segment, resolved_video))
                     has_video = has_video or bool(local_segments)
                     if not is_minimax or resolved_video_segments:
-                        selected_video.append(_merge_video_track(
+                        merged_video = _merge_video_track(
                             resolved_video_segments,
                             local_duration,
                             frame_rate,
@@ -3388,7 +3399,17 @@ class MultiTrackTaskOutput(io.ComfyNode):
                             track_volume_db,
                             track_muted,
                             resize_method=str(info.get("resize_method", "stretch")),
-                        ))
+                        )
+                        selected_video.append(merged_video)
+                        if locked_audio is None and locked_audio_track:
+                            video_audio = merged_video.get_components().audio
+                            if isinstance(video_audio, dict):
+                                locked_audio = _trim_track_audio(
+                                    video_audio,
+                                    0,
+                                    duration_frames,
+                                    frame_rate,
+                                )
                     continue
                 if track.get("type") == "audio" and media_index is not None and 0 <= media_index < len(audio_items):
                     track_audio = audio_items[media_index]
@@ -3404,6 +3425,15 @@ class MultiTrackTaskOutput(io.ComfyNode):
                             locked_audio = task_audio
                 elif track.get("type") == "video" and media_index is not None and 0 <= media_index < len(video_items):
                     track_video = video_items[media_index]
+                    if locked_audio is None and locked_audio_track:
+                        video_audio = track_video.get_components().audio
+                        if isinstance(video_audio, dict):
+                            locked_audio = _trim_track_audio(
+                                video_audio,
+                                start_frame,
+                                track_media_duration_frames if is_minimax else duration_frames,
+                                frame_rate,
+                            )
                     video_duration = duration_frames / frame_rate
                     if is_minimax:
                         video_duration = (

@@ -50,6 +50,7 @@ interface VideoTrackProps {
   onRecognizeSubtitles?: (segmentId: string, method: SubtitleRecognitionMethod) => void
   cutMode: boolean
   onCutSegment: (segmentId: string, splitFrame: number) => void
+  audioLockEnabled?: boolean
 }
 
 function sourceTypeToTab(sourceType: MultiTrackSourceType | undefined): MediaTab {
@@ -89,6 +90,7 @@ export function VideoTrack({
   onRecognizeSubtitles = () => {},
   cutMode,
   onCutSegment,
+  audioLockEnabled = false,
 }: Readonly<VideoTrackProps>) {
   const t = useT()
   const contentRef = useRef<HTMLDivElement>(null)
@@ -152,6 +154,11 @@ export function VideoTrack({
             onDragPreviewChange={onDragPreviewChange}
             getDragPreviewStart={getDragPreviewStart}
             onDragPreviewEnd={onDragPreviewEnd}
+            audioLocked={audioLockEnabled && track.audio_locked === true}
+            audioLockEnabled={audioLockEnabled}
+            onAudioLockToggle={(locked) => {
+              onTrackAudioSettingsChange(track.id, { audio_locked: locked })
+            }}
             sharedReference={segment.content.shared_reference === true}
             onSharedReferenceToggle={(enabled) => {
               onSharedReferenceChange(track.id, segment.id, enabled)

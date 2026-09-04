@@ -530,7 +530,7 @@ export function MultiTrackSegmentBlock({
                   data-testid={`${trackType}-shared-reference`}
                   aria-label={sharedReference ? t('multitrack.disableSharedReference') : t('multitrack.enableSharedReference')}
                   aria-pressed={sharedReference}
-                  className={`absolute ${trackType === 'audio' && audioLockEnabled ? 'right-8' : 'right-2'} top-0.5 z-20 h-5 w-5 cursor-pointer bg-background/80 shadow-sm [&_svg]:!size-3 ${sharedReference ? 'text-highlight' : 'text-muted-foreground'}`}
+                  className={`absolute ${audioLockEnabled ? 'right-8' : 'right-2'} top-0.5 z-20 h-5 w-5 cursor-pointer bg-background/80 shadow-sm [&_svg]:!size-3 ${sharedReference ? 'text-highlight' : 'text-muted-foreground'}`}
                   onMouseDown={(event) => {
                     event.preventDefault()
                     event.stopPropagation()
@@ -550,7 +550,7 @@ export function MultiTrackSegmentBlock({
               </Tooltip>
             </TooltipProvider>
           ) : null}
-          {trackType === 'audio' && audioLockEnabled ? (
+          {(trackType === 'audio' || trackType === 'video') && audioLockEnabled ? (
             <>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -558,7 +558,7 @@ export function MultiTrackSegmentBlock({
                     type="button"
                     size="icon"
                     variant={audioLocked ? 'secondary' : 'ghost'}
-                    data-testid="audio-segment-lock"
+                    data-testid={trackType === 'audio' ? 'audio-segment-lock' : 'video-segment-audio-lock'}
                     aria-label={audioLocked ? t('multitrack.unlockAudio') : t('multitrack.lockAudio')}
                     aria-pressed={audioLocked}
                     className={`absolute right-2 top-0.5 z-20 h-5 w-5 cursor-pointer bg-background/80 shadow-sm [&_svg]:!size-3 ${audioLocked ? 'text-highlight' : 'text-muted-foreground'}`}

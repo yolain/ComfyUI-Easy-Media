@@ -604,6 +604,7 @@ export function TrackArea({
               onDragPreviewChange={updateDragPlaceholder}
               getDragPreviewStart={snappedMoveStartTime}
               onDragPreviewEnd={() => setDragPlaceholder(null)}
+              audioLockEnabled={format === 'MiniMax'}
             />
           )
         }

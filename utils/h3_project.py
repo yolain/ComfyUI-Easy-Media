@@ -384,20 +384,20 @@ def h3_task_type(entry: dict[str, Any], info: dict[str, Any]) -> str:
 def h3_locked_audio_track(
     entry: dict[str, Any], info: dict[str, Any]
 ) -> dict[str, Any] | None:
-    """Return the locked audio track when it has media in the task range."""
+    """Return the locked audio-bearing track when it has media in the task range."""
     start_frame = _frame_value(entry.get("start_frame"))
     end_frame = _frame_value(entry.get("end_frame"))
     for track in info.get("tracks", []):
         if (
             not isinstance(track, dict)
-            or track.get("type") != "audio"
+            or track.get("type") not in {"audio", "video"}
             or track.get("audio_locked") is not True
         ):
             continue
         if any(
             isinstance(segment, dict)
             and isinstance(segment.get("content"), dict)
-            and segment["content"].get("media_type") == "audio"
+            and segment["content"].get("media_type") == track.get("type")
             and _frame_value(segment.get("start_frame")) < end_frame
             and _frame_value(segment.get("end_frame")) > start_frame
             for segment in track.get("segments", [])
