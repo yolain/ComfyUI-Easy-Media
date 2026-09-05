@@ -142,7 +142,7 @@ describe('TaskSegmentEditor', () => {
     fireEvent.click(screen.getByRole('option', { name: 'Context' }))
     expect(onContentChange).toHaveBeenCalledWith({ continuity_mode: 'context' })
     fireEvent.click(continuitySelect)
-    fireEvent.click(screen.getByRole('option', { name: 'Character swap' }))
+    fireEvent.click(screen.getByRole('option', { name: 'Swap Context' }))
     expect(onContentChange).toHaveBeenCalledWith({ continuity_mode: 'context_swap' })
 
     rerender(

@@ -358,7 +358,7 @@ def test_template_metadata_matches_documented_asset():
     assert len(workflow["nodes"]) == 21
     assert len(workflow["links"]) == 26
     assert hashlib.sha256(TEMPLATE.read_bytes()).hexdigest() == (
-        "2ef2c9928026f3adea96762b9364bcd5eae50f60c58e6169d0e1212bd4a7fed3"
+        "fc1b8a0add02688ef28e4d8b204bb05138f0d49315d3a7e82f2f030ee32e7975"
     )
     assert [51, 11, 0, 13, 0, "MODEL"] in workflow["links"]
     assert [56, 13, 0, 26, 0, "MODEL"] in workflow["links"]
