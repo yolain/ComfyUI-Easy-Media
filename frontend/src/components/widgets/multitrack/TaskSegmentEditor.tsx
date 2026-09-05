@@ -274,29 +274,57 @@ export function TaskSegmentEditor({
         slot_name: image.slot_name,
       }) ?? undefined,
     }))
-    const trackResources = (['audio', 'video'] as const).flatMap((type) => (
-      mediaTracks
-        .filter((track) => (
-          track.type === type
-          && track.segments.some((item) => item.content.media_type === type)
-        ))
-        .map((track, index) => {
-          const resourceIndex = index + 1
-          const labelKey = type === 'audio' ? 'multitrack.referenceAudioItem' : 'multitrack.referenceVideoItem'
-          const label = t(labelKey, { n: resourceIndex })
-          return {
-            id: `${type}:${track.id}`,
-            type,
-            index: resourceIndex,
-            label,
-            detail: track.name,
-            token: `@${label}`,
-            color: getSegmentTrackPresentation(type).waveformColor
-              ?? getSegmentTrackPresentation(type).backgroundColor,
-          }
-        })
+    const videoTracks = mediaTracks.filter((track) => (
+      track.type === 'video'
+      && track.segments.some((item) => item.content.media_type === 'video')
     ))
-    return [...imageResources, ...trackResources]
+    const audioTracks = mediaTracks.filter((track) => (
+      track.type === 'audio'
+      && track.segments.some((item) => item.content.media_type === 'audio')
+    ))
+    const videoAudioResources = videoTracks.map((track, index) => {
+      const resourceIndex = index + 1
+      const label = t('multitrack.referenceAudioItem', { n: resourceIndex })
+      return {
+        id: `video-audio:${track.id}`,
+        type: 'audio' as const,
+        index: resourceIndex,
+        label,
+        detail: track.name,
+        token: `@${label}`,
+        color: getSegmentTrackPresentation('video').waveformColor
+          ?? getSegmentTrackPresentation('video').backgroundColor,
+      }
+    })
+    const audioResources = audioTracks.map((track, index) => {
+      const resourceIndex = videoTracks.length + index + 1
+      const label = t('multitrack.referenceAudioItem', { n: resourceIndex })
+      return {
+        id: `audio:${track.id}`,
+        type: 'audio' as const,
+        index: resourceIndex,
+        label,
+        detail: track.name,
+        token: `@${label}`,
+        color: getSegmentTrackPresentation('audio').waveformColor
+          ?? getSegmentTrackPresentation('audio').backgroundColor,
+      }
+    })
+    const videoResources = videoTracks.map((track, index) => {
+      const resourceIndex = index + 1
+      const label = t('multitrack.referenceVideoItem', { n: resourceIndex })
+      return {
+        id: `video:${track.id}`,
+        type: 'video' as const,
+        index: resourceIndex,
+        label,
+        detail: track.name,
+        token: `@${label}`,
+        color: getSegmentTrackPresentation('video').waveformColor
+          ?? getSegmentTrackPresentation('video').backgroundColor,
+      }
+    })
+    return [...imageResources, ...videoAudioResources, ...audioResources, ...videoResources]
   }, [images, mediaTracks, t])
 
   useEffect(() => {
@@ -857,6 +885,7 @@ export function TaskSegmentEditor({
                   value={promptValue}
                   resources={promptResources}
                   mentionsEnabled
+                  highlightPromptSemantics
                   highlightPipes
                   onChange={handlePromptChange}
                 />
@@ -873,6 +902,7 @@ export function TaskSegmentEditor({
                 value={promptValue}
                 resources={promptResources}
                 mentionsEnabled
+                highlightPromptSemantics
                 onChange={handlePromptChange}
               />
             </div>

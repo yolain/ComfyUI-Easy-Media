@@ -42,6 +42,9 @@ class _NodeOutput:
         self.kwargs = kwargs
         self.expand = kwargs.get("expand")
 
+    def __getitem__(self, index):
+        return self.values[index]
+
 
 class _GraphNode:
     def __init__(self, class_type, node_id, inputs):
@@ -4198,7 +4201,7 @@ def test_multitrack_prompt_enhance_to_project_schema_reuses_enhancer_widgets():
     }["return_async"]
     assert "always waits" in project_return_async.kwargs["tooltip"]
     assert [output.name for output in schema.outputs] == ["TRACKS_INFO", "PROMPTS"]
-    assert schema.outputs[1].kwargs["is_output_list"] is True
+    assert "is_output_list" not in schema.outputs[1].kwargs
     assert all(input_port.kwargs.get("tooltip") for input_port in schema.inputs)
     assert all(output_port.kwargs.get("tooltip") for output_port in schema.outputs)
 
@@ -4209,9 +4212,17 @@ def test_multitrack_prompt_enhance_to_project_updates_each_task_in_time_order(
     module = _load_basic_module()
     calls = []
 
+    class PublicNodeOutput:
+        def __init__(self, *args, expand=None):
+            self.args = args
+            self.expand = expand
+
+        def __getitem__(self, index):
+            return self.args[index]
+
     def fake_enhance(cls, **kwargs):
         calls.append(kwargs)
-        return module.io.NodeOutput(f"enhanced-{len(calls)}", "", "")
+        return PublicNodeOutput(f"enhanced-{len(calls)}", "", "")
 
     monkeypatch.setattr(
         module.MultiTrackPromptEnhancer,
@@ -4233,13 +4244,17 @@ def test_multitrack_prompt_enhance_to_project_updates_each_task_in_time_order(
                             "user_prompt_variant": "b",
                             "user_prompt": "unused-a",
                             "user_prompt_b": "later @prompt",
+                            "task_mode": "ref",
                         },
                     },
                     {
                         "id": "earlier",
                         "start_frame": 0,
                         "end_frame": 120,
-                        "content": {"user_prompt": "earlier @prompt"},
+                        "content": {
+                            "user_prompt": "earlier @prompt",
+                            "images": [{"media_index": 0}],
+                        },
                     },
                 ],
             },
@@ -4249,6 +4264,14 @@ def test_multitrack_prompt_enhance_to_project_updates_each_task_in_time_order(
                     "start_frame": 0,
                     "end_frame": 240,
                     "content": {"user_prompt": "must not change"},
+                }],
+            },
+            {
+                "type": "video",
+                "segments": [{
+                    "start_frame": 120,
+                    "end_frame": 240,
+                    "content": {"media_type": "video"},
                 }],
             },
         ],
@@ -4276,12 +4299,17 @@ def test_multitrack_prompt_enhance_to_project_updates_each_task_in_time_order(
         ["earlier prompt"],
         ["later prompt"],
     ]
-    assert all(call["type"] == ["t2v"] for call in calls)
+    assert [call["type"] for call in calls] == [["i2v"], ["rv2v"]]
+    prompt_builder_calls = sys.modules["easy_media.utils.prompt_builder"].calls
+    assert [call[0] for call in prompt_builder_calls[-2:]] == ["i2v", "rv2v"]
     assert all(call["model"][0]["return_async"] is False for call in calls)
     assert all(
         set(call).isdisjoint({"images", "video", "audio", "files"})
         for call in calls
     )
+    segment_progress = _ProgressBar.instances[-1]
+    assert segment_progress.total == 2
+    assert segment_progress.updates == [0, 1, 2]
 
 
 def test_multitrack_prompt_enhance_to_project_disabled_preserves_prompts(monkeypatch):
@@ -4317,6 +4345,8 @@ def test_multitrack_prompt_enhance_to_project_disabled_preserves_prompts(monkeyp
 
 def test_multitrack_prompt_enhance_to_project_apply_updates_expanded_prompts():
     module = _load_basic_module()
+    apply_schema = module.MultiTrackPromptEnhanceToProjectApply.define_schema()
+    assert "is_output_list" not in apply_schema.outputs[1].kwargs
     tracks_info = {
         "tracks": [{
             "type": "task",
@@ -4344,9 +4374,11 @@ def test_multitrack_prompt_enhance_to_project_apply_updates_expanded_prompts():
 def test_multitrack_prompt_enhance_to_project_collects_local_expansion(monkeypatch):
     module = _load_basic_module()
     call_count = 0
+    calls = []
 
     def fake_expand(cls, **kwargs):
         nonlocal call_count
+        calls.append(kwargs)
         node_id = f"local-prompt-{call_count}"
         call_count += 1
         return module.io.NodeOutput(
@@ -4373,7 +4405,7 @@ def test_multitrack_prompt_enhance_to_project_collects_local_expansion(monkeypat
 
     output = module.MultiTrackPromptEnhanceToProject.execute(
         tracks_info=[tracks_info],
-        model=[{"model": module.LLAMACPP_MODEL}],
+        model=[{"model": module.LLAMACPP_MODEL, "force_offload": True}],
     )
 
     apply_node = output.expand["multitrack_prompt_project_apply"]
@@ -4389,6 +4421,7 @@ def test_multitrack_prompt_enhance_to_project_collects_local_expansion(monkeypat
         "local-prompt-1",
         "multitrack_prompt_project_apply",
     }
+    assert [call["model"][0]["force_offload"] for call in calls] == [False, True]
 
 
 def test_multitrack_prompt_enhance_to_project_has_chinese_localization():

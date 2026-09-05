@@ -2,7 +2,7 @@
 
 ---
 
-## [1.3.1] - 2026-09-05
+## [1.3.1] - 2026-09-06
 
 ### ✨ New Features
 
@@ -63,6 +63,7 @@ The tapered context-noise approach used by Character Swap Context is adapted fro
 - **Compare Video**: Added `Side-by-side Compare` mode, support for directly selecting media for comparison, and `Watch Output History` mode
 - **Media Selector**: Added support for multi-selecting image items and selecting all images in current path
 - **Multi-Track Prompt Enhancer**: Added this node, supports prompt enhancement for models like h3-context-ir, supports local model usage
+- **Multi-Track Prompt Enhancer to Project**: Added `easy multiTrackPromptEnhanceToProject` node, supports directly applying the output of the multi-track prompt enhancer to the multi-track project
 - **Multi-Track Editor**: Added user prompt A/B output, supports selecting different user prompt outputs
 - **Multi-Track Editor**: Added user prompt reference functionality, supports referencing resources via `<Picture 1>`, `<Audio 1>`, `<Video 1>`, `@图片1` and similar methods, supports multi-element combinations
 
