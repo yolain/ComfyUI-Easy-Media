@@ -799,7 +799,7 @@ describe('PreviewArea', () => {
 
     const continuitySelect = screen.getByTestId('task-continuity-mode-select')
     expect(continuitySelect.textContent).toContain('Shot')
-    expect(continuitySelect.className).toContain('w-16')
+    expect(continuitySelect.className).toContain('w-24')
     expect(screen.getByTestId('task-mode-select').className).toContain('w-12')
     expect(continuitySelect.compareDocumentPosition(screen.getByTestId('task-mode-select')))
       .toBe(Node.DOCUMENT_POSITION_FOLLOWING)

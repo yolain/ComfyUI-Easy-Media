@@ -2,6 +2,24 @@
 
 ---
 
+## [1.3.1] - 2026-09-05
+
+### ✨ New Features
+
+- **Character Swap Context**: Added the `context_swap` continuity mode for MiniMax H3 task segments. It preserves motion continuity while weakening the previous character's appearance with disposable tapered latent noise.
+- **Dual-Pass Swap Continuity**: Apply swap noise independently to the low-resolution first-pass context and the high-resolution second-pass context. Audio remains untouched, and only clean trimmed/re-encoded context latents are saved for later segments.
+- **Video-Track Audio Lock**: Video tracks can provide the locked project audio used to guide MiniMax H3 generation.
+
+### ⚡ Improvements
+
+- **MultiTrack Project Media Preparation**: Consolidated task-scoped image, audio, video, shared-media, and locked-audio preparation so project expansion loads and forwards only the media required by each segment.
+
+### 🐛 Bug Fixes
+
+- **Frame-Accurate Video Trimming**: Normalize source frame rates before trimming merged video inputs to keep segment boundaries aligned with the project timeline.
+
+The tapered context-noise approach used by Character Swap Context is adapted from [MacroSony/minimax-h3-chained-character-swap](https://github.com/MacroSony/minimax-h3-chained-character-swap).
+
 ## [1.3.0] - 2026-09-03
 
 ### ✨ New Features

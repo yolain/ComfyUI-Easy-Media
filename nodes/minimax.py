@@ -14,6 +14,7 @@ from comfy_api.latest import io
 from comfy_execution.graph_utils import GraphBuilder
 
 from ..modules.motion_context.core import (
+    apply_context_swap_noise,
     apply_hires_continuity,
     apply_motion_context,
     build_hard_motion_context,
@@ -727,6 +728,54 @@ class EasyMiniMaxH3MotionContextHard(io.ComfyNode):
         return io.NodeOutput(output, trim_frames, hard_latent)
 
 
+class EasyMiniMaxH3ContextSwapNoise(io.ComfyNode):
+    """Build a disposable noised context for appearance replacement."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy MiniMaxH3ContextSwapNoise",
+            display_name="Easy MiniMax H3 Context Swap Noise",
+            category=CATEGORY_MINIMAX,
+            description=(
+                "Temporarily weaken appearance information in an H3 video "
+                "context while preserving its audio stream."
+            ),
+            inputs=[
+                io.Latent.Input("context_latent"),
+                io.Combo.Input(
+                    "context_length",
+                    options=["22", "5", "39", "56"],
+                    default="22",
+                ),
+                io.Int.Input(
+                    "seed",
+                    default=0,
+                    min=0,
+                    max=0xFFFFFFFFFFFFFFFF,
+                    control_after_generate=io.ControlAfterGenerate.fixed,
+                ),
+            ],
+            outputs=[io.Latent.Output("context_latent")],
+            is_dev_only=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        context_latent: dict[str, Any],
+        context_length: str = "22",
+        seed: int = 0,
+    ) -> io.NodeOutput:
+        return io.NodeOutput(
+            apply_context_swap_noise(
+                context_latent,
+                context_length=context_length,
+                seed=seed,
+            )
+        )
+
+
 class EasyMiniMaxH3HiResContinuity(io.ComfyNode):
     """Prepare a context-linked high-resolution H3 second-pass latent."""
 
@@ -1207,7 +1256,11 @@ class EasyH3ProjectArtifact(io.ComfyNode):
                 io.Latent.Input("context_latent_low", optional=True),
                 io.String.Input("video_path", default="", optional=True),
                 TYPE_TRACKS_INFO.Input("tracks_info"),
-                io.Combo.Input("continuity_mode", options=['shot', 'context'],default="shot"),
+                io.Combo.Input(
+                    "continuity_mode",
+                    options=["shot", "context", "context_swap"],
+                    default="shot",
+                ),
                 io.Combo.Input(
                     "sampling_pass",
                     options=["single", "first", "second"],
@@ -1246,6 +1299,11 @@ class EasyH3ProjectArtifact(io.ComfyNode):
             raise ValueError("project_save must be 'new' or 'override'")
         if sampling_pass not in {"single", "first", "second"}:
             raise ValueError("sampling_pass must be 'single', 'first', or 'second'")
+        continuity_mode = str(continuity_mode).lower()
+        if continuity_mode not in {"shot", "context", "context_swap"}:
+            raise ValueError(
+                "continuity_mode must be 'shot', 'context', or 'context_swap'"
+            )
         generation = choose_h3_generation(
             project_dir,
             int(segment_index),
@@ -1378,9 +1436,7 @@ class EasyH3ProjectArtifact(io.ComfyNode):
             )
         versions[str(generation)] = generation_manifest
         segment_manifest["active_generation"] = generation
-        segment_manifest["continuity_mode"] = (
-            "context" if str(continuity_mode).lower() == "context" else "shot"
-        )
+        segment_manifest["continuity_mode"] = continuity_mode
         task_segments = manifest.get("task_segments", [])
         if isinstance(task_segments, list) and 0 <= int(segment_index) < len(task_segments):
             task_segment = task_segments[int(segment_index)]

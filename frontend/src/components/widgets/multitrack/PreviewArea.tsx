@@ -1112,7 +1112,7 @@ export function PreviewArea({
                     <SelectTrigger
                       data-testid="task-continuity-mode-select"
                       aria-label={t('multitrack.continuityMode')}
-                      className="h-5 min-h-0 w-16 shrink-0 cursor-pointer border-none bg-transparent px-1 text-[9px] leading-4 text-primary shadow-none focus-visible:ring-1 focus-visible:ring-ring [&_svg]:size-3"
+                      className="h-5 min-h-0 w-24 shrink-0 cursor-pointer border-none bg-transparent px-1 text-[9px] leading-4 text-primary shadow-none focus-visible:ring-1 focus-visible:ring-ring [&_svg]:size-3"
                       onClick={(event) => event.stopPropagation()}
                       onDoubleClick={(event) => event.stopPropagation()}
                     >

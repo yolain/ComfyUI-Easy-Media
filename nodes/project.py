@@ -37,6 +37,7 @@ from ..utils.models import detect_turbo_lora_from_prompt, detect_turbo_model
 TYPE_FAST_MODEL_LOADER = io.Custom(io_type="FAST_MODEL_LOADER")
 TYPE_TRACKS_INFO = io.Custom(io_type="TRACKS_INFO")
 TYPE_PROJECT_DATA = io.Custom(io_type="PROJECT_DATA")
+H3_CONTEXT_CONTINUITY_MODES = {"context", "context_swap"}
 
 
 def _first_input(value: Any, default: Any = None) -> Any:
@@ -703,7 +704,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                 and isinstance(entry["task"].get("content"), dict)
                 and str(
                     entry["task"]["content"].get("continuity_mode", "shot")
-                ).lower() == "context"
+                ).lower() in H3_CONTEXT_CONTINUITY_MODES
                 for task_index, entry in selected_entries
             )
             if has_context_second_pass:
@@ -757,6 +758,8 @@ class EasyMultiTrackProject(io.ComfyNode):
                 if isinstance(content, dict)
                 else "shot"
             )
+            uses_context = continuity_mode in H3_CONTEXT_CONTINUITY_MODES
+            uses_swap_noise = continuity_mode == "context_swap"
             has_task_locked_audio = h3_locked_audio_track(entry, info) is not None
 
             ref_image_size = (
@@ -804,7 +807,7 @@ class EasyMultiTrackProject(io.ComfyNode):
             base_task_length: Any = task_output.out(3)
             task_length: Any = base_task_length
             will_have_context_continuity = (
-                continuity_mode == "context"
+                uses_context
                 and (previous_hires_context_latent is not None or task_index > 0)
             )
             context_source_frames = 22
@@ -861,7 +864,7 @@ class EasyMultiTrackProject(io.ComfyNode):
             initial_latent = conditioning.out(1)
 
             if (
-                continuity_mode == "context"
+                uses_context
                 and previous_hires_context_latent is None
                 and task_index > 0
             ):
@@ -893,8 +896,16 @@ class EasyMultiTrackProject(io.ComfyNode):
                 if has_second_pass
                 else previous_hires_context_latent
             )
+            if uses_swap_noise and first_pass_context_latent is not None:
+                first_pass_context_latent = graph.node(
+                    "easy MiniMaxH3ContextSwapNoise",
+                    id=f"first_pass_context_swap_noise_{task_index}",
+                    context_latent=first_pass_context_latent,
+                    context_length=str(context_source_frames),
+                    seed=(first_pass_seed + task_index) & 0xFFFFFFFFFFFFFFFF,
+                ).out(0)
             has_context_continuity = (
-                continuity_mode == "context"
+                uses_context
                 and first_pass_context_latent is not None
             )
             # Lock task audio after the context source is known so its timeline
@@ -994,7 +1005,7 @@ class EasyMultiTrackProject(io.ComfyNode):
             if run_second_pass:
                 segment_second_pass_sigmas = second_pass_sigmas
                 if (
-                    continuity_mode == "context"
+                    uses_context
                     and previous_hires_context_latent is not None
                     and context_second_pass_sigmas is not None
                 ):
@@ -1058,15 +1069,25 @@ class EasyMultiTrackProject(io.ComfyNode):
                     ).out(0)
 
                 if (
-                    continuity_mode == "context"
+                    uses_context
                     and previous_hires_context_latent is not None
                 ):
                     report_segment_step(0.59)
+                    hires_context_latent = previous_hires_context_latent
+                    if uses_swap_noise:
+                        hires_context_latent = graph.node(
+                            "easy MiniMaxH3ContextSwapNoise",
+                            id=f"hires_context_swap_noise_{task_index}",
+                            context_latent=hires_context_latent,
+                            context_length=str(context_source_frames),
+                            seed=(second_pass_seed + task_index + 1)
+                            & 0xFFFFFFFFFFFFFFFF,
+                        ).out(0)
                     hires_continuity = graph.node(
                         "easy MiniMaxH3HiResContinuity",
                         id=f"hires_continuity_{task_index}",
                         current_hires_latent=upscaled_latent,
-                        previous_hires_latent=previous_hires_context_latent,
+                        previous_hires_latent=hires_context_latent,
                         context_length="22",
                         video_transition_steps=4,
                     )

@@ -162,6 +162,15 @@ def test_compact_project_tasks_keep_only_modes_and_index():
     )
 
 
+def test_compact_project_tasks_preserve_context_swap_mode():
+    info = _tracks_info()
+    info["tracks"][0]["segments"][1]["content"]["continuity_mode"] = (
+        "context_swap"
+    )
+
+    assert compact_h3_task_segments(info)[1]["continuity_mode"] == "context_swap"
+
+
 def test_locked_audio_track_applies_when_it_overlaps_the_task_range():
     info = _tracks_info()
     info["tracks"].append({
@@ -525,6 +534,28 @@ def test_load_h3_project_data_marks_shot_and_context(monkeypatch, tmp_path):
     assert data["clips"][0]["video_files"][0]["locked_audio_path"] == str(
         (project_dir / "locked_audio_0_1.wav").relative_to(tmp_path)
     )
+
+
+def test_load_h3_project_data_preserves_context_swap(monkeypatch, tmp_path):
+    project_dir = _write_render_project(tmp_path)
+    manifest_path = project_dir / "project.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["segments"]["1"]["continuity_mode"] = "context_swap"
+    manifest_path.write_text(json.dumps(manifest))
+    monkeypatch.setattr(
+        "utils.h3_project.folder_paths.get_output_directory",
+        lambda: str(tmp_path),
+    )
+    monkeypatch.setattr(
+        "utils.video.ffprobe_info",
+        lambda path: {
+            "frame_count": 120 if path.endswith("video_0_1.mp4") else 96
+        },
+    )
+
+    data = load_h3_project_data("demo")
+
+    assert data["clips"][1]["continuity_mode"] == "context_swap"
 
 
 def test_load_h3_project_data_lists_all_video_files_for_the_same_index(monkeypatch, tmp_path):

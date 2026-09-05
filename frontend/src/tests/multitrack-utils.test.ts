@@ -1364,6 +1364,24 @@ describe('multitrack utilities', () => {
     })
   })
 
+  it('preserves character swap continuity while normalizing track data', () => {
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [{
+      id: 'swap-task',
+      start_frame: 0,
+      end_frame: 120,
+      color: data.tracks[0].color,
+      content: {
+        media_type: 'none',
+        continuity_mode: 'context_swap',
+      },
+    }]
+
+    const normalized = normalizeTrackData(data)
+
+    expect(normalized.tracks[0].segments[0].content.continuity_mode).toBe('context_swap')
+  })
+
   it('does not add a default task segment when the range already has task coverage', () => {
     const data = createDefaultTrackData()
     const withTask = addDefaultTaskSegmentIfRangeEmpty(data.tracks, 2, 5)

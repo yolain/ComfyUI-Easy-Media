@@ -2337,6 +2337,69 @@ def test_multitrack_h3_dual_context_uses_separate_low_and_hires_latents(monkeypa
         ]
 
 
+def test_multitrack_h3_context_swap_noises_both_passes_without_replacing_context(
+    monkeypatch,
+):
+    module = _load_minimax_node(monkeypatch)
+    module.comfy_nodes.NODE_CLASS_MAPPINGS.update(
+        {
+            "ImageResizeKJv2": _ImageResizeKJWithNvidia,
+            "MiniMaxH3MotionContextTrim": _MiniMaxMotionContextTrim,
+        }
+    )
+    info = _h3_project_inputs()["tracks_info"][0]
+    info["tracks"][0]["segments"].append(
+        {
+            "start_frame": 120,
+            "end_frame": 240,
+            "content": {
+                "task_mode": "ref",
+                "continuity_mode": "context_swap",
+                "images": [{"media_index": 0}],
+                "user_prompt": "replace the character and preserve motion",
+            },
+        }
+    )
+
+    result = module.EasyMultiTrackProject.execute(
+        **_h3_project_inputs(
+            tracks_info=[info],
+            sampling_mode=["dual"],
+            sampling_plan=["light"],
+        )
+    )
+
+    noise_nodes = [
+        (node_id, node)
+        for node_id, node in result.expand.items()
+        if node["class_type"] == "easy MiniMaxH3ContextSwapNoise"
+    ]
+    assert len(noise_nodes) == 2
+    first_noise_id, first_noise = next(
+        item for item in noise_nodes if "first_pass_context_swap_noise" in item[0]
+    )
+    hires_noise_id, hires_noise = next(
+        item for item in noise_nodes if "hires_context_swap_noise" in item[0]
+    )
+    motion = _graph_node(result, "easy MiniMaxH3MotionContextHard")
+    hires = _graph_node(result, "easy MiniMaxH3HiResContinuity")
+    assert motion["inputs"]["context_latent"] == [first_noise_id, 0]
+    assert hires["inputs"]["previous_hires_latent"] == [hires_noise_id, 0]
+    assert first_noise["inputs"]["context_length"] == "22"
+    assert hires_noise["inputs"]["context_length"] == "22"
+    artifacts = [
+        node
+        for node in result.expand.values()
+        if node["class_type"] == "easy h3ProjectArtifact"
+    ]
+    assert artifacts[1]["inputs"]["continuity_mode"] == "context_swap"
+    assert all(
+        artifact["inputs"]["context_latent"]
+        not in ([first_noise_id, 0], [hires_noise_id, 0])
+        for artifact in artifacts
+    )
+
+
 def test_multitrack_h3_connected_second_pass_sampling_overrides_context_preset(
     monkeypatch,
 ):

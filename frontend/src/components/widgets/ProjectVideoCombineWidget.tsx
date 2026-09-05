@@ -883,9 +883,11 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
                           <span className="truncate text-[11px] font-medium">{t('projectVideoCombine.clipLabel', { number: clip.index + 1 })}</span>
                           <span className="truncate text-[9px] text-muted-foreground">
                             {t('projectVideoCombine.clipContinuity', {
-                              mode: t(clip.continuity_mode === 'context'
-                                ? 'projectVideoCombine.continuityContext'
-                                : 'projectVideoCombine.continuityShot'),
+                              mode: t(clip.continuity_mode === 'shot'
+                                ? 'projectVideoCombine.continuityShot'
+                                : clip.continuity_mode === 'context_swap'
+                                  ? 'projectVideoCombine.continuityContextSwap'
+                                  : 'projectVideoCombine.continuityContext'),
                             })}
                           </span>
                         </div>

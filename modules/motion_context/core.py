@@ -12,6 +12,9 @@ FPS = 24
 FRAME_RESCALE = 5.0 / 3.0
 AUDIO_HZ = 40.0
 VIDEO_RUN_GRID = (124, 107, 90, 73, 56, 39, 22, 5, 1)
+CONTEXT_SWAP_NOISE_ALPHA = 0.20
+CONTEXT_SWAP_NOISE_ALPHA_END = 0.05
+CONTEXT_SWAP_NOISE_RAMP_STEPS = 2
 
 
 def _pixel_frames(latent_steps: int) -> int:
@@ -220,6 +223,75 @@ def trim_motion_context_latent(
         for stream in (video, audio)
     )
     return {"samples": _official_nested_tensor(streams)}
+
+
+def apply_context_swap_noise(
+    latent: dict[str, Any],
+    context_length: int | str = "22",
+    seed: int = 0,
+    alpha: float = CONTEXT_SWAP_NOISE_ALPHA,
+    alpha_end: float = CONTEXT_SWAP_NOISE_ALPHA_END,
+    ramp_steps: int = CONTEXT_SWAP_NOISE_RAMP_STEPS,
+) -> dict[str, Any]:
+    """Return a disposable context copy with tapered video-latent noise."""
+    alpha = float(alpha)
+    alpha_end = float(alpha_end)
+    if not 0.0 <= alpha_end <= alpha <= 1.0:
+        raise ValueError(
+            "easy h3 context swap: expected 0 <= alpha_end <= alpha <= 1"
+        )
+
+    parts = _streams_from_latent(latent)
+    source_video, start, steps, covered = _video_tail_bounds(
+        latent,
+        int(context_length),
+    )
+    ramp = min(max(1, int(ramp_steps)), steps)
+    output_video = source_video.clone()
+    tail = output_video[:, :, start : start + steps]
+    scale = float(tail.detach().float().std().item())
+    if scale != scale or scale in {float("inf"), float("-inf")} or scale <= 0.0:
+        LOGGER.warning(
+            "Context swap latent has a degenerate standard deviation; using unit noise"
+        )
+        scale = 1.0
+
+    generator = torch.Generator(device="cpu").manual_seed(
+        int(seed) & 0xFFFFFFFFFFFFFFFF
+    )
+    schedule: list[float] = []
+    for index in range(steps):
+        from_end = steps - 1 - index
+        amount = (
+            alpha
+            if from_end >= ramp
+            else alpha + (alpha_end - alpha) * (ramp - from_end) / ramp
+        )
+        schedule.append(round(amount, 4))
+        block = output_video[:, :, start + index]
+        noise = torch.randn(
+            tuple(block.shape),
+            generator=generator,
+            dtype=torch.float32,
+        ).mul_(scale)
+        noise = noise.to(device=block.device, dtype=block.dtype)
+        output_video[:, :, start + index] = (
+            block * (1.0 - amount) + noise * amount
+        )
+
+    if parts[0].ndim == 4:
+        output_video = output_video[0]
+    output_parts = list(parts)
+    output_parts[0] = output_video
+    output = latent.copy()
+    output["samples"] = _official_nested_tensor(tuple(output_parts))
+    LOGGER.info(
+        "Context swap noise: video=%d steps/%d frames alpha=%s; audio untouched",
+        steps,
+        covered,
+        schedule,
+    )
+    return output
 
 
 def _resize_frames(

@@ -956,7 +956,7 @@ export function TaskSegmentEditor({
               <TooltipProvider delayDuration={300}>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <SelectTrigger aria-label={t('multitrack.continuityMode')} className="h-8 w-20 bg-card text-[10px]">
+                    <SelectTrigger aria-label={t('multitrack.continuityMode')} className="h-8 w-28 bg-card text-[10px]">
                       <SelectValue />
                     </SelectTrigger>
                   </TooltipTrigger>

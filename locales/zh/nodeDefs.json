@@ -1158,6 +1158,18 @@
       "2": { "name": "潜空间" }
     }
   },
+  "easy MiniMaxH3ContextSwapNoise": {
+    "display_name": "简易 MiniMax H3 局部替换上下文噪声",
+    "description": "为局部替换创建一次性上下文副本：仅对视频潜空间添加锥形噪声，音频保持不变。",
+    "inputs": {
+      "context_latent": { "name": "上下文潜空间" },
+      "context_length": { "name": "上下文长度" },
+      "seed": { "name": "噪声种子" }
+    },
+    "outputs": {
+      "0": { "name": "临时上下文潜空间" }
+    }
+  },
   "easy MiniMaxH3HiResContinuity": {
     "display_name": "简易 MiniMax H3 高分辨率连续性",
     "description": "用于二采上下文衔接：将上一片段最终高分辨率视频潜空间尾部复制到当前放大后的潜空间，并冻结当前音频。",

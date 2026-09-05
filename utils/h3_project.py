@@ -450,8 +450,9 @@ def compact_h3_task_segments(info: dict[str, Any]) -> list[dict[str, Any]]:
         compact.append({
             "index": index,
             "continuity_mode": (
-                "context"
-                if str(content.get("continuity_mode", "shot")).lower() == "context"
+                str(content.get("continuity_mode", "shot")).lower()
+                if str(content.get("continuity_mode", "shot")).lower()
+                in {"context", "context_swap"}
                 else "shot"
             ),
             "task_mode": str(content.get("task_mode", "default")),
@@ -965,7 +966,10 @@ def _h3_project_data(
             "source_frame_count": active_file["source_frame_count"],
             "updated_at": float(segment.get("updated_at", 0) or 0),
             "continuity_mode": (
-                "context" if str(segment.get("continuity_mode", "shot")).lower() == "context" else "shot"
+                str(segment.get("continuity_mode", "shot")).lower()
+                if str(segment.get("continuity_mode", "shot")).lower()
+                in {"context", "context_swap"}
+                else "shot"
             ),
             "audio_locked": task_segment.get("audio_locked") is True,
             "enabled": True,
