@@ -307,7 +307,7 @@ def validate_track_data(
 
     track_ids: set[str] = set()
     segment_ids: set[str] = set()
-    locked_audio_tracks: list[tuple[str, int]] = []
+    locked_media_tracks: list[tuple[str, int, str]] = []
     shared_media_references: list[tuple[str, str, str]] = []
     task_ranges: list[tuple[int, int]] = []
     max_end = 0
@@ -326,11 +326,11 @@ def validate_track_data(
         if "audio_locked" in track and not isinstance(track.get("audio_locked"), bool):
             raise WorkflowError(f"Track {track_id} audio_locked must be a boolean")
         if track.get("audio_locked") is True:
-            if track_type != "audio":
+            if track_type not in {"audio", "video"}:
                 raise WorkflowError(
-                    f"Only audio tracks may set audio_locked: true (track {track_id})"
+                    f"Only audio/video tracks may set audio_locked: true (track {track_id})"
                 )
-            locked_audio_tracks.append((track_id, track_index))
+            locked_media_tracks.append((track_id, track_index, str(track_type)))
         segments = track.get("segments")
         if not isinstance(segments, list):
             raise WorkflowError(f"tracks[{track_index}].segments must be an array")
@@ -362,6 +362,13 @@ def validate_track_data(
                 raise WorkflowError(f"{where}.content must be an object")
             if track_type in {"video", "audio"} and content.get("media_type") != track_type:
                 raise WorkflowError(f"{where}.content.media_type must be {track_type!r}")
+            if track_type == "task" and "continuity_mode" in content:
+                continuity_mode = content.get("continuity_mode")
+                if continuity_mode not in {"shot", "context", "context_swap"}:
+                    raise WorkflowError(
+                        f"{where}.content.continuity_mode must be 'shot', 'context', "
+                        "or 'context_swap'"
+                    )
             if "shared_reference" in content:
                 if not isinstance(content.get("shared_reference"), bool):
                     raise WorkflowError(
@@ -398,9 +405,9 @@ def validate_track_data(
                             f"{where}.content.images[{image_index}].shared_reference must be a boolean"
                         )
 
-    if len(locked_audio_tracks) > 1:
-        locked_ids = [track_id for track_id, _ in locked_audio_tracks]
-        raise WorkflowError(f"Only one audio track may be locked; found {locked_ids}")
+    if len(locked_media_tracks) > 1:
+        locked_ids = [track_id for track_id, _, _ in locked_media_tracks]
+        raise WorkflowError(f"Only one audio/video track may be locked; found {locked_ids}")
     shared_media_tracks = [track_id for track_id, _, _ in shared_media_references]
     duplicate_shared_media_tracks = sorted({
         track_id
@@ -412,16 +419,18 @@ def validate_track_data(
             "Each audio/video track may contain only one shared reference; found multiple in "
             f"{duplicate_shared_media_tracks}"
         )
-    if locked_audio_tracks:
-        locked_id, locked_index = locked_audio_tracks[0]
+    if locked_media_tracks:
+        locked_id, locked_index, locked_type = locked_media_tracks[0]
         locked_segments = tracks[locked_index].get("segments", [])
         if not any(
             isinstance(segment, dict)
             and isinstance(segment.get("content"), dict)
-            and segment["content"].get("media_type") == "audio"
+            and segment["content"].get("media_type") == locked_type
             for segment in locked_segments
         ):
-            raise WorkflowError(f"Locked audio track {locked_id} contains no audio segments")
+            raise WorkflowError(
+                f"Locked {locked_type} track {locked_id} contains no {locked_type} segments"
+            )
         selected_task_ranges = task_ranges[segment_start_index:]
         if segment_count >= 0:
             selected_task_ranges = selected_task_ranges[:segment_count]
@@ -437,7 +446,7 @@ def validate_track_data(
         ]
         if uncovered_task_ranges:
             raise WorkflowError(
-                f"Locked audio track {locked_id} does not overlap task segments: "
+                f"Locked {locked_type} track {locked_id} does not overlap task segments: "
                 f"{uncovered_task_ranges}"
             )
 

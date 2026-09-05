@@ -193,6 +193,71 @@ def test_locked_audio_must_overlap_every_task_segment(patch_workflow_module):
     assert report["project_changes"]["segment_count"] == {"from": -1, "to": 1}
 
 
+def test_locked_video_accepts_context_swap_tasks(patch_workflow_module):
+    track_data = {
+        "frame_rate": 24,
+        "total_length": 360,
+        "tracks": [
+            {
+                "id": "tasks",
+                "type": "task",
+                "segments": [
+                    {
+                        "id": f"task-{index + 1}",
+                        "start_frame": index * 240,
+                        "end_frame": min((index + 1) * 240, 360),
+                        "content": {
+                            "images": [],
+                            "continuity_mode": "context_swap",
+                        },
+                    }
+                    for index in range(2)
+                ],
+            },
+            {
+                "id": "reference-video",
+                "type": "video",
+                "audio_locked": True,
+                "segments": [{
+                    "id": "video-1",
+                    "start_frame": 0,
+                    "end_frame": 360,
+                    "content": {
+                        "media_type": "video",
+                        "source_type": "input",
+                        "file_path": "reference.mp4",
+                    },
+                }],
+            },
+        ],
+    }
+
+    patch_workflow_module.validate_track_data(track_data, recalculate=False)
+
+
+def test_rejects_unknown_task_continuity_mode(patch_workflow_module):
+    track_data = {
+        "frame_rate": 24,
+        "total_length": 24,
+        "tracks": [{
+            "id": "tasks",
+            "type": "task",
+            "segments": [{
+                "id": "task-1",
+                "start_frame": 0,
+                "end_frame": 24,
+                "content": {"images": [], "continuity_mode": "swap"},
+            }],
+        }],
+    }
+
+    with pytest.raises(
+        patch_workflow_module.WorkflowError,
+        match="continuity_mode must be 'shot', 'context', or 'context_swap'",
+    ):
+        patch_workflow_module.validate_track_data(track_data, recalculate=False)
+
+
 def test_shared_media_accepts_task_images_audio_video_and_legacy_audio(
     patch_workflow_module,
 ):
