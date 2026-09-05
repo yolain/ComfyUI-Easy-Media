@@ -73,6 +73,7 @@ The new **continuity mode** determines how a task follows the previous segment. 
 |-----------------|---------------------|-----------|
 | **Shot (`shot`)** | Generates independently, without inheriting motion or audio context from the previous segment | New shots, scene changes, and deliberate cuts |
 | **Context (`context`)** | Uses the tail of the previous result's audio/video latent to continue motion and sound | Continuous action, long takes, and ongoing audio |
+| **Character Swap Context (`context_swap`)** | Uses disposable tapered noise on the previous video context in both sampling passes while preserving its audio | Character or appearance replacement that should retain the previous motion |
 
 The first segment starts in Shot mode. Set subsequent segments individually or select multiple tasks to change them together. For example, “Shot → Context → Context → Shot” creates three connected segments followed by a new shot. This setting affects **generation**, rather than adding a crossfade during assembly. Context does not guarantee seamless continuity across arbitrary scene or prompt changes.
 
@@ -136,9 +137,9 @@ If an older workflow connects directly to the editor's media outputs, insert `Mu
 - **Read only dimensions, frame rate, total frames, and task count:** Use `MultiTrack Info Output`; complete media loading is unnecessary for this metadata.
 - **Use the project pipeline:** MultiTrack Project calls Task Output internally, so no extra Task Output node is needed between the editor and the project.
 
-#### v1.3.0 Task and Audio Settings
+#### v1.3.x Task and Audio Settings
 
-- **Task track:** Adds Shot / Context continuity modes. Select multiple task segments to change their task mode, continuity mode, and reference image size together.
+- **Task track:** Adds Shot / Context / Character Swap Context continuity modes. Select multiple task segments to change their task mode, continuity mode, and reference image size together.
 - **Lock audio:** In MultiTrack Project, the input audio constrains visual generation, and the delivered video uses the original task audio instead of regenerating it. This differs from using audio only as a reference.
 - **Reuse audio:** Share the same reference audio across tasks without copying it under every segment. Up to 15 seconds are used, without truncating it to a shorter task duration.
 
@@ -488,6 +489,7 @@ bun run build:release
 - [VoxCPM2](https://github.com/OpenBMB/VoxCPM)
 - [Bernini S2V](https://huggingface.co/rzgar/Bernini-R-S2V)
 - [H3-Motion-Context](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context)
+- [MiniMax H3 Chained Character Swap](https://github.com/MacroSony/minimax-h3-chained-character-swap)
 - [MiniMax H3 Latent Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler)
 
 ## Source of Inspiration

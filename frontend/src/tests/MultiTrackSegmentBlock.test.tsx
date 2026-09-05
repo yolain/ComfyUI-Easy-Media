@@ -142,6 +142,35 @@ describe('MultiTrackSegmentBlock context menu', () => {
     fireEvent.click(sharedButton)
     expect(onSharedReferenceToggle).toHaveBeenCalledWith(false)
   })
+
+  it('shows the same audio lock control on a video segment', () => {
+    const onAudioLockToggle = vi.fn()
+    render(
+      <TooltipProvider>
+        <MultiTrackSegmentBlock
+          trackType="video"
+          segmentIndex={0}
+          segment={segment('video')}
+          totalLength={1000}
+          frameRate={24}
+          areaWidth={20}
+          canvasScale={1}
+          selected
+          onSelect={vi.fn()}
+          onDelete={vi.fn()}
+          onResize={vi.fn()}
+          onResizePreview={vi.fn()}
+          onMove={vi.fn()}
+          audioLockEnabled
+          onAudioLockToggle={onAudioLockToggle}
+        />
+      </TooltipProvider>,
+    )
+
+    fireEvent.click(screen.getByTestId('video-segment-audio-lock'))
+    expect(onAudioLockToggle).toHaveBeenCalledWith(true)
+    expect(screen.getByTestId('video-shared-reference').className).toContain('right-8')
+  })
   it('offers distribute, clone, split, and delete actions for task segments', () => {
     const { onDelete, onDistribute, onClone, onSplitTask } = renderBlock('task')
 

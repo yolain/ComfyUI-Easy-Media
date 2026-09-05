@@ -203,6 +203,7 @@ function selectProjectVideoFile(clip: ProjectClip, file: ProjectVideoFile): Proj
     source_start_frame: sourceStartFrame,
     source_end_frame: Math.max(sourceStartFrame + 1, Math.min(clip.source_end_frame, sourceFrameCount)),
     source_frame_count: sourceFrameCount,
+    continuity_mode: file.continuity_mode ?? clip.continuity_mode,
   }
 }
 
@@ -883,9 +884,11 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
                           <span className="truncate text-[11px] font-medium">{t('projectVideoCombine.clipLabel', { number: clip.index + 1 })}</span>
                           <span className="truncate text-[9px] text-muted-foreground">
                             {t('projectVideoCombine.clipContinuity', {
-                              mode: t(clip.continuity_mode === 'context'
-                                ? 'projectVideoCombine.continuityContext'
-                                : 'projectVideoCombine.continuityShot'),
+                              mode: t(clip.continuity_mode === 'shot'
+                                ? 'projectVideoCombine.continuityShot'
+                                : clip.continuity_mode === 'context_swap'
+                                  ? 'projectVideoCombine.continuityContextSwap'
+                                  : 'projectVideoCombine.continuityContext'),
                             })}
                           </span>
                         </div>

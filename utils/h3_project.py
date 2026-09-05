@@ -8,11 +8,33 @@ import re
 import shutil
 import tempfile
 import time
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import folder_paths
 import torch
+from .audio_gain import (
+    audio_db_to_gain,
+    audio_is_muted,
+    audio_volume_db,
+)
+from .panorama import equirectangular_to_perspective
+from .multitrack import (
+    _embedded_multitrack_media,
+    _media_output_for_index,
+    _merge_audio_track,
+    _multitrack_timeline_end,
+    _parse_track_data,
+    _resolve_multitrack_audio,
+    _resolve_multitrack_video,
+    _resolve_timeline_image_item,
+    _resize_multitrack_video,
+    _trim_track_audio,
+    multitrack_is_shared_reference,
+    multitrack_media_identity,
+    multitrack_segments_in_window,
+)
 
 
 H3_FRAME_STEP = 17
@@ -214,6 +236,11 @@ def _frame_value(value: Any, default: int = 0) -> int:
         return default
 
 
+def _h3_continuity_mode(value: Any) -> str:
+    normalized = str(value or "shot").lower()
+    return normalized if normalized in {"context", "context_swap"} else "shot"
+
+
 def h3_task_segments(info: dict[str, Any]) -> list[dict[str, Any]]:
     return sorted(
         [
@@ -328,11 +355,13 @@ def select_h3_task_entries(
     return list(enumerate(entries[safe_start:safe_end], start=safe_start))
 
 
-def minimax_frame_count(duration_frames: int | float) -> int:
+def minimax_frame_count(
+    duration_frames: int | float, *, round_up: bool = False
+) -> int:
+    """Snap to H3's grid, optionally ensuring the entire source span fits."""
     duration = max(float(H3_FRAME_REMAINDER), float(duration_frames))
-    grid_index = math.floor(
-        (duration - H3_FRAME_REMAINDER) / H3_FRAME_STEP + 0.5
-    )
+    grid_position = (duration - H3_FRAME_REMAINDER) / H3_FRAME_STEP
+    grid_index = math.ceil(grid_position) if round_up else math.floor(grid_position + 0.5)
     return H3_FRAME_REMAINDER + max(0, grid_index) * H3_FRAME_STEP
 
 
@@ -384,20 +413,20 @@ def h3_task_type(entry: dict[str, Any], info: dict[str, Any]) -> str:
 def h3_locked_audio_track(
     entry: dict[str, Any], info: dict[str, Any]
 ) -> dict[str, Any] | None:
-    """Return the locked audio track when it has media in the task range."""
+    """Return the locked audio-bearing track when it has media in the task range."""
     start_frame = _frame_value(entry.get("start_frame"))
     end_frame = _frame_value(entry.get("end_frame"))
     for track in info.get("tracks", []):
         if (
             not isinstance(track, dict)
-            or track.get("type") != "audio"
+            or track.get("type") not in {"audio", "video"}
             or track.get("audio_locked") is not True
         ):
             continue
         if any(
             isinstance(segment, dict)
             and isinstance(segment.get("content"), dict)
-            and segment["content"].get("media_type") == "audio"
+            and segment["content"].get("media_type") == track.get("type")
             and _frame_value(segment.get("start_frame")) < end_frame
             and _frame_value(segment.get("end_frame")) > start_frame
             for segment in track.get("segments", [])
@@ -428,8 +457,9 @@ def compact_h3_task_segments(info: dict[str, Any]) -> list[dict[str, Any]]:
         compact.append({
             "index": index,
             "continuity_mode": (
-                "context"
-                if str(content.get("continuity_mode", "shot")).lower() == "context"
+                str(content.get("continuity_mode", "shot")).lower()
+                if str(content.get("continuity_mode", "shot")).lower()
+                in {"context", "context_swap"}
                 else "shot"
             ),
             "task_mode": str(content.get("task_mode", "default")),
@@ -909,6 +939,10 @@ def _h3_project_data(
                 "file_name": candidate_source.name,
                 "media_revision": str(candidate_source.stat().st_mtime_ns),
                 "source_frame_count": candidate_frame_count,
+                "continuity_mode": _h3_continuity_mode(candidate.get(
+                    "continuity_mode",
+                    segment.get("continuity_mode", "shot"),
+                )),
                 **(
                     {
                         "locked_audio_path": _project_child_path(
@@ -942,9 +976,7 @@ def _h3_project_data(
             "source_end_frame": active_file["source_frame_count"],
             "source_frame_count": active_file["source_frame_count"],
             "updated_at": float(segment.get("updated_at", 0) or 0),
-            "continuity_mode": (
-                "context" if str(segment.get("continuity_mode", "shot")).lower() == "context" else "shot"
-            ),
+            "continuity_mode": active_file["continuity_mode"],
             "audio_locked": task_segment.get("audio_locked") is True,
             "enabled": True,
             "video_files": video_files,
@@ -1107,3 +1139,307 @@ def compose_h3_project_video(project_name: Any, project_data: Any = None) -> Pat
 def h3_project_filename_prefix(project_name: Any) -> str:
     safe_name = safe_h3_project_name(project_name)
     return f"easy_media/projects/{safe_name}/out/{safe_name}"
+MAX_MULTITRACK_PROJECT_IMAGES = 9
+
+
+def _unwrap_list_scalar(value: object, default: object = None) -> object:
+    if isinstance(value, list):
+        return value[0] if value else default
+    return value if value is not None else default
+
+
+def _project_track_is_audible(
+    track: dict,
+    info: dict,
+    has_solo_track: bool,
+) -> bool:
+    return not (
+        audio_is_muted(info)
+        or audio_is_muted(track)
+        or (has_solo_track and track.get("solo") is not True)
+    )
+
+
+def _project_source_audio(
+    track_type: str,
+    content: dict,
+    audio_items: list,
+    video_items: list,
+) -> 'dict | None':
+    if track_type == "audio":
+        return _resolve_multitrack_audio(content, audio_items)
+    video = _resolve_multitrack_video(content, video_items)
+    if video is None:
+        return None
+    components = video.get_components()
+    return components.audio if isinstance(components.audio, dict) else None
+
+
+def _project_shared_audio(
+    content: dict,
+    audio_items: list,
+) -> 'dict | None':
+    raw_index = content.get("shared_media_index", content.get("speaker_media_index"))
+    try:
+        media_index = int(raw_index)
+    except (TypeError, ValueError):
+        media_index = -1
+    eager_audio = _media_output_for_index(audio_items, media_index)
+    if isinstance(eager_audio, dict):
+        return eager_audio
+    return _resolve_multitrack_audio(content, audio_items)
+
+
+def _project_shared_video(
+    content: dict,
+    video_items: list,
+):
+    raw_index = content.get("shared_media_index", content.get("speaker_media_index"))
+    try:
+        media_index = int(raw_index)
+    except (TypeError, ValueError):
+        media_index = -1
+    eager_video = _media_output_for_index(video_items, media_index)
+    if eager_video is not None:
+        return eager_video
+    return _resolve_multitrack_video(content, video_items)
+
+
+def prepare_multitrack_project_media(
+    tracks_info: list | dict | str,
+) -> tuple[dict, list[torch.Tensor], list[dict], list[object], dict | None]:
+    """Materialize project-wide references and locked audio before its loop."""
+    info = _parse_track_data(_unwrap_list_scalar(tracks_info, {}))
+    task_info = dict(info)
+    task_info["tracks"] = deepcopy(info.get("tracks", []))
+    tracks = task_info.get("tracks", [])
+    if not isinstance(tracks, list):
+        return task_info, [], [], [], None
+
+    image_items = _embedded_multitrack_media(info, "images")
+    audio_items = _embedded_multitrack_media(info, "audio")
+    video_items = _embedded_multitrack_media(info, "video")
+    frame_rate = max(0.001, float(info.get("frame_rate", 24)))
+    timeline_end = _multitrack_timeline_end(info)
+    width = int(info.get("width", 544))
+    height = int(info.get("height", 960))
+    resize_method = str(info.get("resize_method", "stretch"))
+    has_solo_track = any(
+        isinstance(track, dict)
+        and track.get("type") in {"audio", "video"}
+        and track.get("solo") is True
+        for track in tracks
+    )
+
+    shared_images: list[torch.Tensor] = []
+    shared_audio: list[dict] = []
+    shared_video: list[object] = []
+    locked_audio: dict | None = None
+    shared_image_identities: set[tuple[str, str]] = set()
+    shared_audio_identities: set[tuple[str, str]] = set()
+    shared_video_identities: set[tuple[str, str]] = set()
+    resize_cache: dict[tuple, object] = {}
+
+    for track in tracks:
+        if not isinstance(track, dict):
+            continue
+        track_type = str(track.get("type", ""))
+        segments = track.get("segments", [])
+        if not isinstance(segments, list):
+            continue
+
+        if track_type == "task":
+            for segment in segments:
+                if not isinstance(segment, dict):
+                    continue
+                content = segment.get("content", {})
+                images = content.get("images", []) if isinstance(content, dict) else []
+                retained_images: list[dict] = []
+                for image_info in images if isinstance(images, list) else []:
+                    if not isinstance(image_info, dict):
+                        continue
+                    identity = multitrack_media_identity(image_info)
+                    if not multitrack_is_shared_reference(image_info):
+                        retained_images.append(image_info)
+                        continue
+                    if identity is not None and identity in shared_image_identities:
+                        continue
+                    image = _resolve_timeline_image_item(image_info, image_items)
+                    if image is None:
+                        continue
+                    panorama_view = image_info.get("panorama_view")
+                    if panorama_view is not None:
+                        image = equirectangular_to_perspective(
+                            image, panorama_view, width, height,
+                        )
+                    shared_images.append(image)
+                    if identity is not None:
+                        shared_image_identities.add(identity)
+                if isinstance(content, dict):
+                    content["images"] = retained_images
+            continue
+
+        if track_type not in {"audio", "video"}:
+            continue
+
+        track_volume_db = (
+            audio_volume_db(info) + audio_volume_db(track)
+        )
+        audible = _project_track_is_audible(
+            track, info, has_solo_track,
+        )
+        if track.get("audio_locked") is True:
+            resolved_segments: list[tuple[dict, dict]] = []
+            for local_segment in multitrack_segments_in_window(
+                track, 0, timeline_end,
+            ):
+                content = local_segment.get("content", {})
+                source_audio = _project_source_audio(
+                    track_type, content, audio_items, video_items,
+                )
+                if source_audio is not None:
+                    resolved_segments.append((local_segment, source_audio))
+            if locked_audio is None and resolved_segments:
+                locked_audio = _merge_audio_track(
+                    resolved_segments,
+                    timeline_end,
+                    frame_rate,
+                    track_volume_db,
+                    not audible,
+                )
+            if track_type == "audio":
+                # The project-level locked audio replaces this track for every
+                # task, so retaining it would add the same audio a second time.
+                track["segments"] = []
+                track.pop("media_index", None)
+            continue
+
+        retained_segments: list[dict] = []
+        for segment in segments:
+            if not isinstance(segment, dict):
+                continue
+            content = segment.get("content", {})
+            if (
+                not isinstance(content, dict)
+                or not multitrack_is_shared_reference(content)
+            ):
+                retained_segments.append(segment)
+                continue
+            identity = multitrack_media_identity(content)
+            if track_type == "audio":
+                if identity is not None and identity in shared_audio_identities:
+                    continue
+                source_audio = _project_shared_audio(content, audio_items)
+                if source_audio is not None:
+                    waveform = source_audio.get("waveform")
+                    if isinstance(waveform, torch.Tensor):
+                        gain = (
+                            audio_db_to_gain(track_volume_db)
+                            if audible and not audio_is_muted(content)
+                            else 0.0
+                        )
+                        shared_audio.append({
+                            "waveform": waveform * gain,
+                            "sample_rate": int(source_audio.get("sample_rate", 44100)),
+                        })
+                        if identity is not None:
+                            shared_audio_identities.add(identity)
+            else:
+                if identity is not None and identity in shared_video_identities:
+                    continue
+                source_video = _project_shared_video(content, video_items)
+                if source_video is not None:
+                    shared_video.append(_resize_multitrack_video(
+                        source_video,
+                        width,
+                        height,
+                        resize_method,
+                        resize_cache,
+                        lambda _ratio: None,
+                    ))
+                    if identity is not None:
+                        shared_video_identities.add(identity)
+        track["segments"] = retained_segments
+        if not retained_segments:
+            track.pop("media_index", None)
+
+    if shared_image_identities:
+        for track in tracks:
+            if not isinstance(track, dict) or track.get("type") != "task":
+                continue
+            for segment in track.get("segments", []):
+                if not isinstance(segment, dict):
+                    continue
+                content = segment.get("content", {})
+                if not isinstance(content, dict):
+                    continue
+                images = content.get("images", [])
+                if isinstance(images, list):
+                    content["images"] = [
+                        image
+                        for image in images
+                        if not isinstance(image, dict)
+                        or multitrack_media_identity(image)
+                        not in shared_image_identities
+                    ]
+
+    return (
+        task_info,
+        shared_images[:MAX_MULTITRACK_PROJECT_IMAGES],
+        shared_audio,
+        shared_video,
+        locked_audio,
+    )
+
+
+def crop_multitrack_project_media(
+    shared_audio: list[dict],
+    shared_video: list[object],
+    locked_audio: dict | None,
+    start_frame: int,
+    duration_frames: int,
+    frame_rate: float,
+) -> tuple[list[dict], list[object], dict | None]:
+    """Create task-length views of media already loaded for the project."""
+    duration_frames = max(1, duration_frames)
+    frame_rate = max(0.001, frame_rate)
+    cropped_audio = [
+        _trim_track_audio(audio, 0, duration_frames, frame_rate)
+        for audio in shared_audio
+    ]
+    cropped_video: list[object] = []
+    for video in shared_video:
+        trimmed = video.as_trimmed(
+            start_time=0.0,
+            duration=duration_frames / frame_rate,
+            strict_duration=False,
+        )
+        if trimmed is not None:
+            cropped_video.append(trimmed)
+    cropped_locked_audio = (
+        _trim_track_audio(
+            locked_audio,
+            max(0, start_frame),
+            duration_frames,
+            frame_rate,
+        )
+        if isinstance(locked_audio, dict)
+        else None
+    )
+    return cropped_audio, cropped_video, cropped_locked_audio
+
+
+def prepare_multitrack_project_task_info(
+    tracks_info: dict[str, Any],
+    images: list[torch.Tensor],
+    audio: list[dict[str, Any]],
+    video: list[object],
+) -> dict[str, Any]:
+    """Attach already-loaded project references to one task's runtime context."""
+    task_info = dict(tracks_info)
+    task_info["_preloaded_media"] = {
+        "images": list(images),
+        "audio": list(audio),
+        "video": list(video),
+    }
+    return task_info

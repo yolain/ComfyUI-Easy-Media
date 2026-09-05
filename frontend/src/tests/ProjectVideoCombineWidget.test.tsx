@@ -660,6 +660,7 @@ describe('ProjectVideoCombineWidget', () => {
             file_name: 'video_0_2.mp4',
             media_revision: '1000000002',
             source_frame_count: 96,
+            continuity_mode: 'context_swap',
           },
           {
             file_path: 'easy_media/projects/demo/video_0_3.mp4',
@@ -702,8 +703,40 @@ describe('ProjectVideoCombineWidget', () => {
         media_revision: '1000000002',
         source_end_frame: 96,
         source_frame_count: 96,
+        continuity_mode: 'context_swap',
       })],
     })
+  })
+
+  it('shows the continuity mode saved with the selected generation', () => {
+    const alternate = {
+      file_path: 'easy_media/projects/demo/video_0_2.mp4',
+      file_name: 'video_0_2.mp4',
+      source_frame_count: 96,
+      continuity_mode: 'context_swap' as const,
+    }
+    const initial = {
+      ...projectData,
+      clips: [{
+        ...projectData.clips[0],
+        video_files: [projectData.clips[0], alternate],
+      }],
+    }
+    const { props } = widgetProps({ value: initial })
+
+    function Widget() {
+      const [value, setValue] = useState<ProjectData>(initial)
+      return <ProjectVideoCombineWidget {...props} value={value} onChange={setValue} />
+    }
+
+    render(<Widget />)
+    const fileSelect = screen.getByRole('button', { name: 'Select up to two videos for segment 1' })
+    fireEvent.click(fileSelect)
+    const original = screen.getByRole('checkbox', { name: projectData.clips[0].file_name })
+    fireEvent.click(screen.getByRole('checkbox', { name: alternate.file_name }))
+    fireEvent.click(original)
+
+    expect(screen.getByText('Swap Context')).not.toBeNull()
   })
 
   it('cancels deletion without changing selection or bubbling the delete click', async () => {

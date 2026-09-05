@@ -212,6 +212,7 @@ def _load_basic_module():
     nodes_package = types.ModuleType("easy_media.nodes")
     nodes_package.__path__ = []
     utils_module = types.ModuleType("easy_media.utils")
+    utils_module.__path__ = []
     utils_module.FFMPEG_RESIZE_METHODS = frozenset({
         "stretch", "resize", "pad", "pad (white)", "crop",
     })
@@ -319,12 +320,17 @@ def _load_basic_module():
     for name in prompt_override_module.__all__:
         setattr(utils_module, name, getattr(prompt_override_module, name))
 
+    sys.modules.update({
+        "easy_media": package,
+        "easy_media.utils": utils_module,
+    })
     multitrack_path = Path(__file__).parents[1] / "utils" / "multitrack.py"
     multitrack_spec = importlib.util.spec_from_file_location(
         "easy_media.utils.multitrack",
         multitrack_path,
     )
     multitrack_module = importlib.util.module_from_spec(multitrack_spec)
+    sys.modules[multitrack_spec.name] = multitrack_module
     multitrack_spec.loader.exec_module(multitrack_module)
     from contextlib import nullcontext
     utils_module.log_stage_time = lambda *_args, **_kwargs: nullcontext()
@@ -336,6 +342,32 @@ def _load_basic_module():
     utils_module.multitrack_slot_name = multitrack_module.multitrack_slot_name
     utils_module.multitrack_slot_media_types = multitrack_module.multitrack_slot_media_types
     utils_module.multitrack_task_images_with_shared = multitrack_module.multitrack_task_images_with_shared
+
+    sys.modules.update({
+        "comfy_api": comfy_api,
+        "comfy_api.latest": comfy_api_latest,
+        "folder_paths": folder_paths,
+        "easy_media": package,
+        "easy_media.utils": utils_module,
+        "easy_media.utils.audio_gain": types.SimpleNamespace(
+            audio_db_to_gain=utils_module.audio_db_to_gain,
+            audio_is_muted=utils_module.audio_is_muted,
+            audio_volume_db=utils_module.audio_volume_db,
+        ),
+        "easy_media.utils.panorama": types.SimpleNamespace(
+            equirectangular_to_perspective=(
+                utils_module.equirectangular_to_perspective
+            ),
+        ),
+    })
+    h3_project_path = Path(__file__).parents[1] / "utils" / "h3_project.py"
+    h3_project_spec = importlib.util.spec_from_file_location(
+        "easy_media.utils.h3_project",
+        h3_project_path,
+    )
+    h3_project_module = importlib.util.module_from_spec(h3_project_spec)
+    sys.modules[h3_project_spec.name] = h3_project_module
+    h3_project_spec.loader.exec_module(h3_project_module)
 
     prompt_builder_module = types.ModuleType("easy_media.utils.prompt_builder")
     prompt_builder_module.calls = []
@@ -363,6 +395,7 @@ def _load_basic_module():
         "easy_media.utils": utils_module,
         "easy_media.utils.prompt_builder": prompt_builder_module,
         "easy_media.utils.prompt_override": prompt_override_module,
+        "easy_media.utils.h3_project": h3_project_module,
     })
 
     path = Path(__file__).parents[1] / "nodes" / "basic.py"
@@ -370,6 +403,8 @@ def _load_basic_module():
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
+    module._h3_project_module = h3_project_module
+    module._multitrack_module = multitrack_module
     return module
 
 
@@ -967,7 +1002,7 @@ def test_multitrack_editor_uses_first_video_for_auto_and_rebuilds_all_videos():
         resize_calls.append((images.shape, width, height, method))
         return torch.zeros(images.shape[0], height, width, images.shape[-1])
 
-    module.resize_image = fake_resize
+    module._multitrack_module.resize_image = module.resize_image = fake_resize
     audio = {"waveform": torch.ones(1, 2, 100), "sample_rate": 48000}
     first_video = _FakeVideo(
         _VideoComponents(torch.zeros(2, 360, 640, 3), audio, Fraction(30))
@@ -1415,8 +1450,12 @@ def test_multitrack_editor_splits_connected_image_batches_into_list_items():
 
 def test_multitrack_editor_defers_path_video_loading():
     module = _load_basic_module()
-    module.resolve_video_path = lambda source_type, file_path, local_path, url: "resolved/video.mp4"
-    module.resize_image = lambda images, width, height, method: images
+    module._multitrack_module.resolve_video_path = module.resolve_video_path = (
+        lambda source_type, file_path, local_path, url: "resolved/video.mp4"
+    )
+    module._multitrack_module.resize_image = module.resize_image = (
+        lambda images, width, height, method: images
+    )
     track_data = {
         "tracks": [{
             "id": "video-track",
@@ -1444,7 +1483,9 @@ def test_multitrack_editor_probes_deferred_url_dimensions_without_downloading():
     module = _load_basic_module()
     probes = []
     module.ffprobe_info = lambda source: probes.append(source) or {"width": 1280, "height": 720}
-    module.resolve_video_path = lambda *args: pytest.fail("URL metadata must not use the download resolver")
+    module._multitrack_module.resolve_video_path = module.resolve_video_path = (
+        lambda *args: pytest.fail("URL metadata must not use the download resolver")
+    )
     track_data = {
         "tracks": [{
             "type": "video",
@@ -1561,7 +1602,9 @@ def test_multitrack_editor_materializes_only_the_referenced_audio_slot(monkeypat
 
 def test_multitrack_task_output_loads_only_deferred_task_video():
     module = _load_basic_module()
-    module.resolve_video_path = lambda source_type, file_path, local_path, url: f"resolved/{file_path}"
+    module._multitrack_module.resolve_video_path = module.resolve_video_path = (
+        lambda source_type, file_path, local_path, url: f"resolved/{file_path}"
+    )
     track_data = {
         "total_length": 12,
         "frame_rate": 2,
@@ -1704,6 +1747,53 @@ def test_multitrack_task_output_returns_the_locked_track_deferred_audio():
                         "media_type": "audio",
                         "source_type": "input",
                         "file_path": "audio.wav",
+                    },
+                }],
+            },
+        ],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(tracks_info, task_index=0)
+
+    assert result.values[8]["waveform"].flatten().tolist() == [0.0, 1.0, 2.0, 3.0]
+
+
+def test_multitrack_task_output_returns_locked_audio_from_deferred_video():
+    module = _load_basic_module()
+    source_audio = {
+        "waveform": torch.arange(8, dtype=torch.float32).reshape(1, 1, 8),
+        "sample_rate": 2,
+    }
+    source_frames = torch.zeros(8, 2, 2, 3)
+    source_video = _FakeVideo(_VideoComponents(source_frames, source_audio, Fraction(2)))
+    module._resolve_multitrack_video = lambda content, video_input: source_video
+    tracks_info = {
+        "media_loading": "deferred",
+        "format": "MiniMax",
+        "width": 2,
+        "height": 2,
+        "total_length": 4,
+        "frame_rate": 2,
+        "tracks": [
+            {
+                "type": "task",
+                "segments": [{
+                    "start_frame": 0,
+                    "end_frame": 4,
+                    "content": {"media_type": "none", "images": []},
+                }],
+            },
+            {
+                "type": "video",
+                "audio_locked": True,
+                "segments": [{
+                    "id": "locked-video",
+                    "start_frame": 0,
+                    "end_frame": 4,
+                    "content": {
+                        "media_type": "video",
+                        "source_type": "input",
+                        "file_path": "video.mp4",
                     },
                 }],
             },
@@ -1891,7 +1981,9 @@ def test_multitrack_editor_uses_ffmpeg_for_supported_file_video_resize():
             progress_callback(1.0)
         return "resized.mp4"
 
-    module.resize_video_with_ffmpeg = fake_ffmpeg
+    module._multitrack_module.resize_video_with_ffmpeg = (
+        module.resize_video_with_ffmpeg
+    ) = fake_ffmpeg
     track_data = {
         "tracks": [{
             "id": "video-track",
@@ -2156,7 +2248,9 @@ def test_multitrack_editor_reuses_cached_ffmpeg_result_for_duplicate_video():
         ffmpeg_calls.append((source, width, height, method))
         return "cached-resize.mp4"
 
-    module.resize_video_with_ffmpeg = fake_ffmpeg
+    module._multitrack_module.resize_video_with_ffmpeg = (
+        module.resize_video_with_ffmpeg
+    ) = fake_ffmpeg
     track_data = {
         "tracks": [{
             "id": "video-track",
@@ -2186,10 +2280,10 @@ def test_multitrack_editor_falls_back_to_tensor_for_unmapped_ffmpeg_method():
         _VideoComponents(torch.zeros(2, 360, 640, 3), None, Fraction(24)),
         source="source.mp4",
     )
-    module.resize_video_with_ffmpeg = lambda *args, **kwargs: (_ for _ in ()).throw(
+    module._multitrack_module.resize_video_with_ffmpeg = module.resize_video_with_ffmpeg = lambda *args, **kwargs: (_ for _ in ()).throw(
         AssertionError("FFmpeg must not run for pillarbox_blur")
     )
-    module.resize_image = lambda images, width, height, method: torch.zeros(
+    module._multitrack_module.resize_image = module.resize_image = lambda images, width, height, method: torch.zeros(
         images.shape[0], height, width, images.shape[-1]
     )
     track_data = {
@@ -2388,7 +2482,7 @@ def test_slot_media_flows_downstream_through_tracks_info_only():
 
 def test_multitrack_editor_minimax_stops_media_at_each_track_last_segment():
     module = _load_basic_module()
-    module.resize_image = lambda images, width, height, _method: torch.ones(
+    module._multitrack_module.resize_image = module.resize_image = lambda images, width, height, _method: torch.ones(
         images.shape[0], height, width, images.shape[-1]
     )
     video = _FakeVideo(
@@ -2447,6 +2541,7 @@ def test_multitrack_task_output_schema_and_task_media_selection():
     assert schema.is_input_list is True
     assert [input_.name for input_ in schema.inputs] == [
         "tracks_info", "images", "audio", "video", "task_index", "prompt_format",
+        "previous",
     ]
     assert [output.name for output in schema.outputs] == [
         "SYSTEM_PROMPT", "USER_PROMPT", "TYPE", "LENGTH", "IMAGES", "AUDIO", "VIDEO",
@@ -2518,6 +2613,41 @@ def test_multitrack_task_output_schema_and_task_media_selection():
         [tracks_info], [images], [[audio_track]], [[video_track]], [0], ["default"]
     )
     assert locked_result.values[8]["waveform"].flatten().tolist() == list(range(4, 12))
+
+
+def test_multitrack_task_output_prepends_project_preloaded_images():
+    module = _load_basic_module()
+    shared_image = torch.zeros(1, 2, 2, 3)
+    local_image = torch.ones(1, 2, 2, 3)
+    tracks_info = {
+        "frame_rate": 24,
+        "format": "MiniMax",
+        "_preloaded_media": {
+            "images": [shared_image],
+            "audio": [],
+            "video": [],
+        },
+        "tracks": [{
+            "type": "task",
+            "segments": [{
+                "start_frame": 0,
+                "end_frame": 120,
+                "content": {
+                    "task_mode": "ref",
+                    "images": [{"media_index": 0}],
+                },
+            }],
+        }],
+    }
+
+    result = module.MultiTrackTaskOutput.execute(
+        tracks_info,
+        images=[local_image],
+        task_index=0,
+        prompt_format="default",
+    )
+
+    assert result.values[4] == [shared_image, local_image]
 
 
 def test_multitrack_task_output_uses_selected_user_prompt_variant():
@@ -3260,7 +3390,9 @@ def test_multitrack_task_output_minus_one_materializes_the_complete_deferred_tim
     module._resolve_multitrack_audio = lambda content, audio_input: source_audio
     module._resolve_multitrack_video = lambda content, video_input: source_video
     module.merge_video_track_with_ffmpeg = lambda *args, **kwargs: None
-    module.resize_image = lambda images, width, height, method: images
+    module._multitrack_module.resize_image = module.resize_image = (
+        lambda images, width, height, method: images
+    )
     tracks_info = {
         "media_loading": "deferred",
         "format": "None",
@@ -3387,6 +3519,167 @@ def test_multitrack_task_output_minus_one_does_not_stop_at_the_next_minimax_task
 
     assert result.values[5][0]["waveform"].flatten().tolist() == list(range(8))
     assert result.values[8]["waveform"].flatten().tolist() == list(range(8))
+
+
+def test_prepare_multitrack_project_media_extracts_shared_and_locked_audio(monkeypatch):
+    _load_basic_module()
+    project_module = sys.modules["easy_media.utils.h3_project"]
+    shared_image = torch.ones(1, 2, 2, 3)
+    source_audio = {
+        "waveform": torch.arange(8, dtype=torch.float32).reshape(1, 1, 8),
+        "sample_rate": 2,
+    }
+    monkeypatch.setattr(
+        project_module,
+        "_resolve_timeline_image_item",
+        lambda *_args: shared_image,
+    )
+    monkeypatch.setattr(
+        project_module,
+        "_resolve_multitrack_audio",
+        lambda *_args: source_audio,
+    )
+    tracks_info = {
+        "media_loading": "deferred",
+        "frame_rate": 2,
+        "timeline_total_length": 8,
+        "width": 2,
+        "height": 2,
+        "tracks": [
+            {"type": "task", "segments": [{
+                "start_frame": 0,
+                "end_frame": 4,
+                "content": {"images": [{
+                    "file_path": "shared.png",
+                    "shared_reference": True,
+                }]},
+            }]},
+            {"type": "audio", "segments": [{
+                "start_frame": 0,
+                "end_frame": 8,
+                "content": {
+                    "media_type": "audio",
+                    "file_path": "shared.wav",
+                    "shared_reference": True,
+                },
+            }]},
+            {"type": "audio", "audio_locked": True, "segments": [{
+                "start_frame": 0,
+                "end_frame": 8,
+                "content": {"media_type": "audio", "file_path": "locked.wav"},
+            }]},
+        ],
+    }
+
+    task_info, images, audios, videos, locked = (
+        project_module.prepare_multitrack_project_media(tracks_info)
+    )
+
+    assert images == [shared_image]
+    assert audios[0]["waveform"].flatten().tolist() == list(range(8))
+    assert videos == []
+    assert locked["waveform"].flatten().tolist() == list(range(8))
+    assert task_info["tracks"][0]["segments"][0]["content"]["images"] == []
+    assert task_info["tracks"][1]["segments"] == []
+    assert task_info["tracks"][2]["segments"] == []
+
+
+def test_prepare_multitrack_project_media_keeps_locked_video_as_task_reference(
+    monkeypatch,
+):
+    module = _load_basic_module()
+    project_module = sys.modules["easy_media.utils.h3_project"]
+    video_audio = {
+        "waveform": torch.arange(8, dtype=torch.float32).reshape(1, 1, 8),
+        "sample_rate": 2,
+    }
+    audio_only = {
+        "waveform": torch.full((1, 1, 8), 9.0),
+        "sample_rate": 2,
+    }
+    video = _FakeVideo(
+        _VideoComponents(torch.zeros(8, 2, 2, 3), video_audio, Fraction(2)),
+    )
+    monkeypatch.setattr(
+        project_module,
+        "_resolve_multitrack_video",
+        lambda *_args: video,
+    )
+    tracks_info = {
+        "frame_rate": 2,
+        "timeline_total_length": 8,
+        "media": {"audio": [audio_only], "video": [video]},
+        "tracks": [
+            {"type": "task", "segments": [{
+                "start_frame": 2,
+                "end_frame": 6,
+                "content": {"media_type": "none", "images": []},
+            }]},
+            {
+                "type": "video",
+                "media_index": 0,
+                "audio_locked": True,
+                "segments": [{
+                    "id": "locked-video",
+                    "start_frame": 0,
+                    "end_frame": 8,
+                    "content": {"media_type": "video", "media_index": 0},
+                }],
+            },
+            {
+                "type": "audio",
+                "media_index": 0,
+                "audio_locked": True,
+                "segments": [{
+                    "id": "locked-audio",
+                    "start_frame": 0,
+                    "end_frame": 8,
+                    "content": {"media_type": "audio", "media_index": 0},
+                }],
+            },
+        ],
+    }
+
+    task_info, _images, _audios, _videos, locked = (
+        project_module.prepare_multitrack_project_media(tracks_info)
+    )
+
+    assert locked["waveform"].flatten().tolist() == list(range(8))
+    assert task_info["tracks"][1] == tracks_info["tracks"][1]
+    assert task_info["tracks"][2]["segments"] == []
+    assert "media_index" not in task_info["tracks"][2]
+
+    task_result = module.MultiTrackTaskOutput.execute(task_info, task_index=0)
+
+    assert task_result.values[5] == []
+    assert task_result.values[6] == [video]
+    assert video.trim_calls[-1] == (1.0, 2.0, False)
+
+
+def test_crop_multitrack_project_media_crops_reused_audio_and_video():
+    _load_basic_module()
+    project_module = sys.modules["easy_media.utils.h3_project"]
+    shared_audio = {
+        "waveform": torch.arange(8, dtype=torch.float32).reshape(1, 1, 8),
+        "sample_rate": 2,
+    }
+    shared_video = _FakeVideo(
+        _VideoComponents(torch.ones(8, 2, 2, 3), None, Fraction(2))
+    )
+
+    audios, videos, locked = project_module.crop_multitrack_project_media(
+        [shared_audio],
+        [shared_video],
+        shared_audio,
+        2,
+        4,
+        2,
+    )
+
+    assert audios[0]["waveform"].flatten().tolist() == [0, 1, 2, 3]
+    assert shared_video.trim_calls == [(0.0, 2.0, False)]
+    assert videos
+    assert locked["waveform"].flatten().tolist() == [2, 3, 4, 5]
 
 
 def test_multitrack_audio_output_schema_is_basic_and_exposes_mode_and_two_tracks():

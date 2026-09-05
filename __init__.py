@@ -92,6 +92,7 @@ class EasyMediaExtension(ComfyExtension):
             APIWorkflowGate,
             # MiniMax
             EasyMiniMaxH3MotionContextHard,
+            EasyMiniMaxH3ContextSwapNoise,
             EasyMiniMaxH3HiResContinuity,
             EasyH3MotionContextLatentTrim,
             EasyH3ProjectContextLatentLoad,

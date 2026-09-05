@@ -136,11 +136,14 @@ describe('TaskSegmentEditor', () => {
     )
 
     const continuitySelect = screen.getByRole('combobox', { name: 'Continuity mode' })
-    expect(continuitySelect.className).toContain('w-20')
+    expect(continuitySelect.className).toContain('w-28')
     expect(screen.getByRole('combobox', { name: 'Task mode' }).className).toContain('w-24')
     fireEvent.click(continuitySelect)
     fireEvent.click(screen.getByRole('option', { name: 'Context' }))
     expect(onContentChange).toHaveBeenCalledWith({ continuity_mode: 'context' })
+    fireEvent.click(continuitySelect)
+    fireEvent.click(screen.getByRole('option', { name: 'Swap Context' }))
+    expect(onContentChange).toHaveBeenCalledWith({ continuity_mode: 'context_swap' })
 
     rerender(
       <TaskSegmentEditor

@@ -8,6 +8,7 @@ indexing helpers only handled ``list``, so the referenced media was silently dro
 (images fell back to ``t2v``; video indexing returned the wrapper tuple).
 """
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -29,7 +30,8 @@ _load_basic_module = _load_harness()._load_basic_module
 
 @pytest.fixture(scope="module")
 def basic():
-    return _load_basic_module()
+    _load_basic_module()
+    return sys.modules["easy_media.utils.multitrack"]
 
 
 def _containers(first, second=None):

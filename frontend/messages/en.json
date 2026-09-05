@@ -67,6 +67,7 @@
     "selectClipFilesHint": "Select one video for the project, or two to compare.",
     "continuityShot": "Shot",
     "continuityContext": "Context",
+    "continuityContextSwap": "Swap Context",
     "emptyPreview": "Refresh the project to preview its generated clips.",
     "refreshFailed": "Project refresh failed",
     "combineFailed": "Project combine failed",
@@ -154,7 +155,7 @@
     "taskMode": "Task mode",
     "taskModeTooltip": "Choose how this segment generates video.",
     "continuityMode": "Continuity mode",
-    "continuityModeTooltip": "Choose whether this segment starts a new shot or continues with context from the previous segment.",
+    "continuityModeTooltip": "Start a new shot, continue normally, or preserve motion while replacing the character appearance.",
     "refImageSize": "Reference image size",
     "refImageSizeTooltip": "Match scales reference images to the generation area; Max keeps a larger reference for stronger identity fidelity but can be much slower.",
     "lockAudio": "Lock audio",
@@ -280,7 +281,8 @@
   },
   "multitrackContinuityModes": {
     "shot": "Shot",
-    "context": "Context"
+    "context": "Context",
+    "context_swap": "Swap Context"
   },
   "multitrackRefImageSizes": {
     "match": "Match",

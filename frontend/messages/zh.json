@@ -67,6 +67,7 @@
     "selectClipFilesHint": "选择一个视频用于项目，选择两个视频进行对比。",
     "continuityShot": "分镜",
     "continuityContext": "上下文",
+    "continuityContextSwap": "上下文(替换)",
     "emptyPreview": "请刷新项目以预览已生成的视频片段。",
     "refreshFailed": "项目刷新失败",
     "combineFailed": "项目合并失败",
@@ -154,7 +155,7 @@
     "taskMode": "任务模式",
     "taskModeTooltip": "选择当前片段的视频生成方式。",
     "continuityMode": "衔接模式",
-    "continuityModeTooltip": "选择当前片段开启新镜头，或承接上一片段的上下文。",
+    "continuityModeTooltip": "选择开启新分镜、正常承接上下文，或在保留动作连续性的同时替换角色外观。",
     "refImageSize": "参考图像尺寸",
     "refImageSizeTooltip": "匹配尺寸会按生成画面面积缩放参考图；最大尺寸会保留更大的参考图以提升主体一致性，但生成速度可能慢数倍。",
     "lockAudio": "锁定音频",
@@ -280,7 +281,8 @@
   },
   "multitrackContinuityModes": {
     "shot": "分镜",
-    "context": "上下文"
+    "context": "上下文",
+    "context_swap": "上下文(主体替换)"
   },
   "multitrackRefImageSizes": {
     "match": "匹配尺寸",
