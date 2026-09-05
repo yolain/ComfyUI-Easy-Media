@@ -3,6 +3,7 @@ import math
 import os
 import re
 import tempfile
+from copy import deepcopy
 from enum import Enum
 from pathlib import Path
 
@@ -208,6 +209,9 @@ CATEGORY_VIDEO = "EasyUse/Video"
 PROMPT_FORMAT_OPTIONS = ["default", "promptRelay"]
 LLAMA_CPP_INSTRUCT_NODE_ID = "llama_cpp_instruct_adv"
 LLAMA_CPP_IMAGE_LIST_BRIDGE_NODE_ID = "easy multiTrackPromptEnhancerImageListBridge"
+MULTITRACK_PROMPT_PROJECT_APPLY_NODE_ID = (
+    "easy multiTrackPromptEnhanceToProjectApply"
+)
 STRING_COMPARE_NODE_ID = "StringCompare"
 STRING_REPLACE_NODE_ID = "StringReplace"
 STRING_TRIM_NODE_ID = "StringTrim"
@@ -3192,7 +3196,7 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
         )
 
     @classmethod
-    def _model_options(cls) -> list:
+    def _model_options(cls, force_synchronous: bool = False) -> list:
         options: list = []
         for model_name in PROMPT_ENHANCER_MODELS:
             inputs: list = []
@@ -3214,7 +3218,10 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                             "return_async",
                             default=False,
                             tooltip=(
-                                "Only effective for h3-context-ir. When enabled, "
+                                "Project prompt replacement always waits for the final "
+                                "text, so this option is ignored."
+                                if force_synchronous
+                                else "Only effective for h3-context-ir. When enabled, "
                                 "return the task ID without polling the task status."
                             ),
                         ),
@@ -3429,7 +3436,7 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
         selected_max_size = model_config.get("max_size")
         selected_max_tokens = model_config.get("max_tokens")
         selected_inference_mode = model_config.get(
-            "inference_mode", "one by one"
+            "inference_mode", "images"
         )
         selected_force_offload = model_config.get("force_offload", True)
         selected_ratio_value = model_config.get("ratio", "adaptive")
@@ -3473,7 +3480,7 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                 "custom_prompt": user_text,
                 "system_prompt": system_text,
                 "inference_mode": str(
-                    _unwrap_list_scalar(selected_inference_mode, "one by one")
+                    _unwrap_list_scalar(selected_inference_mode, "images")
                 ),
                 "max_frames": 24,
                 "max_size": local_max_size,
@@ -3644,6 +3651,327 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
             result.prompt,
             result.task_id if selected_model == MINIMAX_MODEL else "",
             result.file_ids if selected_model == MINIMAX_MODEL else "",
+        )
+
+
+def _multitrack_prompt_value(content: dict) -> str:
+    """Return the currently selected prompt variant without normalizing its text."""
+    if str(content.get("user_prompt_variant", "a")).lower() == "b":
+        return str(content.get("user_prompt_b") or "")
+    return str(content.get("user_prompt") or content.get("text") or "")
+
+
+def _apply_multitrack_enhanced_prompts(info: dict, prompts: list[str]) -> dict:
+    """Copy track metadata and replace each task segment's selected prompt."""
+    output_info = dict(info)
+    output_info["tracks"] = deepcopy(info.get("tracks", []))
+    task_segments = _multitrack_task_segments(output_info)
+    if len(task_segments) != len(prompts):
+        raise ValueError(
+            "Prompt count does not match the number of multitrack task segments."
+        )
+    for segment, prompt in zip(task_segments, prompts):
+        content = segment.get("content")
+        if not isinstance(content, dict):
+            content = {}
+            segment["content"] = content
+        prompt_key = (
+            "user_prompt_b"
+            if str(content.get("user_prompt_variant", "a")).lower() == "b"
+            else "user_prompt"
+        )
+        content[prompt_key] = str(prompt)
+    return output_info
+
+
+def _multitrack_task_has_video(info: dict, task: dict) -> bool:
+    start_frame = _multitrack_frame_value(task.get("start_frame"))
+    end_frame = _multitrack_frame_value(task.get("end_frame"), start_frame)
+    if end_frame <= start_frame:
+        return False
+    tracks = info.get("tracks", [])
+    if not isinstance(tracks, list):
+        return False
+    return any(
+        isinstance(track, dict)
+        and track.get("type") == "video"
+        and any(
+            isinstance(segment, dict)
+            and _multitrack_frame_value(segment.get("start_frame")) < end_frame
+            and _multitrack_frame_value(segment.get("end_frame"), -1) > start_frame
+            for segment in track.get("segments", [])
+        )
+        for track in tracks
+    )
+
+
+def _multitrack_project_prompt_request(
+    info: dict,
+    task: dict,
+) -> tuple[str, str, str, int]:
+    """Build a text-only enhancer request for one multitrack task segment."""
+    content = task.get("content", {})
+    if not isinstance(content, dict):
+        content = {}
+    task_images = content.get("images", [])
+    image_count = len(task_images) if isinstance(task_images, list) else 0
+    task_type = _multitrack_task_type(
+        task,
+        image_count,
+        _multitrack_task_has_video(info, task),
+    )
+    raw_prompt = _multitrack_prompt_value(content).replace("@", "")
+    system_prompt, api_prompt, _json_mode = build_prompt_request(
+        task_type,
+        raw_prompt,
+        images=[],
+        video=None,
+        custom_system_prompt=(
+            str(content.get("system_prompt")).replace("@", "")
+            if content.get("system_prompt")
+            else None
+        ),
+        video_format=info.get("format"),
+        task_mode=content.get("task_mode", "default"),
+    )
+    chat_system_prompt, chat_user_prompt = _build_chat_prompts(
+        system_prompt,
+        api_prompt,
+        raw_prompt,
+    )
+    start_frame = max(0, _multitrack_frame_value(task.get("start_frame")))
+    end_frame = max(
+        start_frame,
+        _multitrack_frame_value(task.get("end_frame"), start_frame),
+    )
+    duration_frames = end_frame - start_frame
+    frame_rate = float(info.get("frame_rate", 24))
+    length = (
+        _video_frame_count_from_duration(duration_frames, frame_rate, "MiniMax")
+        if info.get("format") == "MiniMax"
+        else duration_frames + 1
+    )
+    return chat_system_prompt, chat_user_prompt, task_type, max(1, length)
+
+
+class MultiTrackPromptEnhanceToProject(MultiTrackPromptEnhancer):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy multitrackPromptEnhanceToProject",
+            display_name="MultiTrack Prompt Enhance To Project",
+            category=CATEGORY_MULTITRACK,
+            description=(
+                "Enhance every task prompt in TRACKS_INFO using text-only inference, "
+                "write each result back to its task segment, and return the updated "
+                "project data plus the ordered prompt list."
+            ),
+            is_input_list=True,
+            not_idempotent=True,
+            enable_expand=True,
+            inputs=[
+                TYPE_TRACKS_INFO.Input(
+                    "tracks_info",
+                    tooltip="Multitrack project data whose task prompts will be enhanced.",
+                ),
+                TYPE_LLAMACPP_MODEL.Input(
+                    "llama_model",
+                    optional=True,
+                    lazy=True,
+                    raw_link=True,
+                    tooltip=(
+                        "Local llama.cpp model input; evaluated only when the local "
+                        "provider is selected. Requires llama_cpp_instruct_adv from "
+                        f"{LLAMA_CPP_INSTALL_URL}."
+                    ),
+                ),
+                io.DynamicCombo.Input(
+                    "model",
+                    options=cls._model_options(force_synchronous=True),
+                    tooltip="Provider and model used to enhance every task prompt.",
+                ),
+                io.Int.Input(
+                    "seed",
+                    default=0,
+                    min=0,
+                    max=0xFFFFFFFFFFFFFFFF,
+                    control_after_generate=True,
+                    tooltip="ComfyUI generation seed used for every task segment.",
+                ),
+                io.Boolean.Input(
+                    "enabled",
+                    default=True,
+                    tooltip=(
+                        "Enhance and replace every task prompt when enabled; otherwise "
+                        "return an unchanged project copy and its current prompt list."
+                    ),
+                ),
+                TYPE_PROMPT_ENHANCER_ACCOUNT.Input(
+                    "api_account",
+                    tooltip=(
+                        "Provider balance and API key management. This widget is for "
+                        "account status only and does not affect prompt enhancement."
+                    ),
+                ),
+            ],
+            outputs=[
+                TYPE_TRACKS_INFO.Output(
+                    "TRACKS_INFO",
+                    tooltip="Project data with enhanced prompts written into task segments.",
+                ),
+                io.AnyType.Output(
+                    "PROMPTS",
+                    tooltip=(
+                        "Enhanced prompts passed as one complete list in chronological "
+                        "task-segment order."
+                    ),
+                ),
+            ],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        tracks_info: list | dict | str,
+        llama_model: list | object | None = None,
+        model: list[dict] | dict | None = None,
+        seed: list[int] | int | None = None,
+        enabled: list[bool] | bool | None = None,
+        api_account: list[str] | str | None = None,
+    ) -> io.NodeOutput:
+        info = _parse_track_data(_unwrap_list_scalar(tracks_info, {}))
+        tasks = _multitrack_task_segments(info)
+        current_prompts = [
+            _multitrack_prompt_value(
+                task.get("content", {})
+                if isinstance(task.get("content"), dict)
+                else {}
+            )
+            for task in tasks
+        ]
+        if not bool(_unwrap_list_scalar(enabled, True)) or not tasks:
+            return io.NodeOutput(
+                _apply_multitrack_enhanced_prompts(info, current_prompts),
+                current_prompts,
+            )
+
+        model_config = _unwrap_list_scalar(model, {})
+        if not isinstance(model_config, dict):
+            raise TypeError("model must be a DynamicCombo configuration dictionary.")
+        synchronous_model_config = dict(model_config)
+        # Project output must have final text available before it can update TRACKS_INFO.
+        synchronous_model_config["return_async"] = False
+        selected_model = str(
+            _unwrap_list_scalar(
+                synchronous_model_config.get("model"),
+                MINIMAX_MODEL,
+            )
+        )
+        configured_force_offload = bool(
+            _unwrap_list_scalar(
+                synchronous_model_config.get("force_offload"),
+                True,
+            )
+        )
+        selected_seed = int(_unwrap_list_scalar(seed, 0))
+
+        enhanced_prompts: list[object] = []
+        expanded_graph: dict[str, dict] = {}
+        segment_progress = ProgressBar(len(tasks)) if len(tasks) > 1 else None
+        if segment_progress is not None:
+            segment_progress.update_absolute(0, len(tasks))
+        for task_index, task in enumerate(tasks):
+            (
+                system_prompt,
+                user_prompt,
+                task_type,
+                length,
+            ) = _multitrack_project_prompt_request(info, task)
+            segment_model_config = dict(synchronous_model_config)
+            if selected_model == LLAMACPP_MODEL and len(tasks) > 1:
+                segment_model_config["force_offload"] = (
+                    configured_force_offload and task_index == len(tasks) - 1
+                )
+            result = MultiTrackPromptEnhancer.execute(
+                system_prompt=[system_prompt],
+                user_prompt=[user_prompt],
+                type=[task_type],
+                length=[length],
+                llama_model=llama_model,
+                model=[segment_model_config],
+                seed=[selected_seed],
+                enabled=[True],
+                api_account=api_account,
+            )
+            enhanced_prompts.append(result[0])
+            if result.expand:
+                expanded_graph.update(result.expand)
+            if segment_progress is not None:
+                segment_progress.update_absolute(task_index + 1, len(tasks))
+
+        if expanded_graph:
+            graph = GraphBuilder()
+            apply_inputs: dict[str, object] = {
+                "tracks_info": info,
+                "prompt_count": len(enhanced_prompts),
+            }
+            apply_inputs.update(
+                {
+                    f"prompt_{index}": prompt
+                    for index, prompt in enumerate(enhanced_prompts)
+                }
+            )
+            apply_node = graph.node(
+                MULTITRACK_PROMPT_PROJECT_APPLY_NODE_ID,
+                id="multitrack_prompt_project_apply",
+                **apply_inputs,
+            )
+            expanded_graph.update(graph.finalize())
+            return io.NodeOutput(
+                apply_node.out(0),
+                apply_node.out(1),
+                expand=expanded_graph,
+            )
+
+        prompt_texts = [str(prompt) for prompt in enhanced_prompts]
+        return io.NodeOutput(
+            _apply_multitrack_enhanced_prompts(info, prompt_texts),
+            prompt_texts,
+        )
+
+
+class MultiTrackPromptEnhanceToProjectApply(io.ComfyNode):
+    """Apply dynamically expanded local llama.cpp results to project task prompts."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id=MULTITRACK_PROMPT_PROJECT_APPLY_NODE_ID,
+            display_name="MultiTrack Prompt Enhance To Project Apply",
+            category="_easy_media/internal",
+            is_dev_only=True,
+            accept_all_inputs=True,
+            inputs=[
+                TYPE_TRACKS_INFO.Input("tracks_info"),
+                io.Int.Input("prompt_count", min=0),
+            ],
+            outputs=[
+                TYPE_TRACKS_INFO.Output("TRACKS_INFO"),
+                io.AnyType.Output("PROMPTS"),
+            ],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        tracks_info: dict,
+        prompt_count: int,
+        **kwargs: object,
+    ) -> io.NodeOutput:
+        prompts = [str(kwargs.get(f"prompt_{index}", "")) for index in range(prompt_count)]
+        return io.NodeOutput(
+            _apply_multitrack_enhanced_prompts(tracks_info, prompts),
+            prompts,
         )
 
 

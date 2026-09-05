@@ -28,6 +28,7 @@ interface PromptContentEditorProps {
   mentionsEnabled?: boolean
   interactivePlaceholder?: boolean
   highlightSystemVariables?: boolean
+  highlightPromptSemantics?: boolean
   highlightPipes?: boolean
   className?: string
   testId?: string
@@ -42,8 +43,39 @@ interface MentionState {
   activeIndex: number
 }
 
-const TOKEN_PATTERN = /<[^<>\n]*>|@(?:图片|音频|视频|Picture|Image|Audio|Video)\s*\d+|\{[^{}\n]*\}|[|｜]/gi
+const H3_LANGUAGE_LABELS = new Set([
+  'arabic',
+  'chinese',
+  'english',
+  'french',
+  'german',
+  'hindi',
+  'indonesian',
+  'italian',
+  'japanese',
+  'korean',
+  'malay',
+  'portuguese',
+  'russian',
+  'spanish',
+  'thai',
+  'turkish',
+  'vietnamese',
+])
+const TOKEN_PATTERN = /<[^<>\n]*>|@(?:图片|音频|视频|Picture|Image|Audio|Video)\s*\d+|\{[^{}\n]*\}|\[[^\[\]\n]*\]|\(S\d+(?:\s*,\s*S?\d+)*\)|[|｜]/gi
 const REFERENCE_CHIP_CLASS = 'prompt-reference-chip inline-flex h-[1.6em] max-w-full items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5 mx-1 align-middle font-semibold leading-none shadow-sm'
+
+function isH3PromptSemantic(token: string): boolean {
+  if (/^<Subject\s+\d+>$/i.test(token)) return true
+  if (/^<\/?d>$/i.test(token) || /^<(?:scenetrans|cutoff)>$/i.test(token)) return true
+  if (/^\[Shot\s+\d+\]$/i.test(token) || /^\(S\d+(?:\s*,\s*S?\d+)*\)$/i.test(token)) return true
+  const language = token.match(/^\[([A-Za-z]+)\]$/)?.[1].toLowerCase()
+  return language !== undefined && H3_LANGUAGE_LABELS.has(language)
+}
+
+function isH3ThemeSemantic(token: string): boolean {
+  return /^\[Shot\s+\d+\]$/i.test(token)
+}
 
 function normalizedReference(token: string): { type: PromptReferenceType; index: number } | null {
   const match = token.match(/^@?(图片|音频|视频|Picture|Image|Audio|Video)\s*(\d+)>?$/i)
@@ -107,6 +139,7 @@ function caretOffset(editor: HTMLElement): number {
 function valueDecorationKey(
   value: string,
   highlightSystemVariables: boolean,
+  highlightPromptSemantics: boolean,
   highlightPipes: boolean,
 ): string {
   const decorations: string[] = []
@@ -116,6 +149,8 @@ function valueDecorationKey(
     const reference = normalizedReference(token)
     if (reference && !highlightSystemVariables) {
       decorations.push(`reference:${reference.type}:${reference.index}`)
+    } else if (highlightPromptSemantics && isH3PromptSemantic(token)) {
+      decorations.push(`semantic:${token.toLowerCase()}`)
     } else if (highlightSystemVariables && (token.startsWith('{') || token.startsWith('<'))) {
       decorations.push('system')
     } else if (highlightPipes && (token === '|' || token === '｜')) {
@@ -127,7 +162,7 @@ function valueDecorationKey(
 
 function editorDecorationKey(editor: HTMLElement): string {
   return Array.from(editor.querySelectorAll<HTMLElement>(
-    '[data-prompt-reference-token], [data-system-prompt-variable], [data-pipe]',
+    '[data-prompt-reference-token], [data-prompt-semantic-token], [data-system-prompt-variable], [data-pipe]',
   )).map((element) => {
     const token = element.dataset.promptReferenceToken
     if (token !== undefined) {
@@ -135,6 +170,9 @@ function editorDecorationKey(editor: HTMLElement): string {
       return reference ? `reference:${reference.type}:${reference.index}` : 'reference:unknown'
     }
     if (element.dataset.systemPromptVariable !== undefined) return 'system'
+    if (element.dataset.promptSemanticToken !== undefined) {
+      return `semantic:${element.dataset.promptSemanticToken.toLowerCase()}`
+    }
     return 'pipe'
   }).join('|')
 }
@@ -198,6 +236,18 @@ function appendText(container: HTMLElement | DocumentFragment, text: string) {
   text.split('\n').forEach((part, index) => {
     if (index > 0) container.append(document.createElement('br'))
     if (part) container.append(document.createTextNode(part))
+  })
+}
+
+function appendDialogueText(container: HTMLElement, text: string) {
+  text.split('\n').forEach((part, index) => {
+    if (index > 0) container.append(document.createElement('br'))
+    if (!part) return
+    const dialogue = document.createElement('span')
+    dialogue.dataset.promptDialogueContent = 'true'
+    dialogue.className = 'text-highlight'
+    dialogue.textContent = part
+    container.append(dialogue)
   })
 }
 
@@ -289,19 +339,32 @@ function renderValue(
   value: string,
   resources: PromptReferenceResource[],
   highlightSystemVariables: boolean,
+  highlightPromptSemantics: boolean,
   highlightPipes: boolean,
 ) {
   editor.textContent = ''
   let cursor = 0
+  let inDialogue = false
   TOKEN_PATTERN.lastIndex = 0
   for (const match of value.matchAll(TOKEN_PATTERN)) {
     const index = match.index ?? 0
-    appendText(editor, value.slice(cursor, index))
+    const precedingText = value.slice(cursor, index)
+    if (inDialogue) appendDialogueText(editor, precedingText)
+    else appendText(editor, precedingText)
     const token = match[0]
+    const opensDialogue = /^<d>$/i.test(token)
+    const closesDialogue = /^<\/d>$/i.test(token)
+    if (closesDialogue) inDialogue = false
     const reference = normalizedReference(token)
     if (reference && !highlightSystemVariables) {
       const resource = resources.find((item) => item.type === reference.type && item.index === reference.index)
       appendReferenceChip(editor, token, resource)
+    } else if (highlightPromptSemantics && isH3PromptSemantic(token)) {
+      const semantic = document.createElement('span')
+      semantic.dataset.promptSemanticToken = token
+      semantic.className = isH3ThemeSemantic(token) ? 'text-highlight' : 'text-prompt-semantic'
+      semantic.textContent = token
+      editor.append(semantic)
     } else if (highlightSystemVariables && (token.startsWith('{') || token.startsWith('<'))) {
       const variable = document.createElement('span')
       variable.dataset.systemPromptVariable = 'true'
@@ -314,12 +377,17 @@ function renderValue(
       pipe.className = 'text-highlight'
       pipe.textContent = '|'
       editor.append(pipe)
+    } else if (inDialogue) {
+      appendDialogueText(editor, token)
     } else {
       appendText(editor, token)
     }
+    if (highlightPromptSemantics && opensDialogue) inDialogue = true
     cursor = index + token.length
   }
-  appendText(editor, value.slice(cursor))
+  const trailingText = value.slice(cursor)
+  if (inDialogue) appendDialogueText(editor, trailingText)
+  else appendText(editor, trailingText)
 }
 
 function ReferenceIcon({ type }: Readonly<{ type: PromptReferenceType }>) {
@@ -337,6 +405,7 @@ export function PromptContentEditor({
   mentionsEnabled = false,
   interactivePlaceholder = false,
   highlightSystemVariables = false,
+  highlightPromptSemantics = false,
   highlightPipes = false,
   className,
   testId,
@@ -358,6 +427,7 @@ export function PromptContentEditor({
   const renderKey = useMemo(() => JSON.stringify({
     value,
     highlightSystemVariables,
+    highlightPromptSemantics,
     highlightPipes,
     resources: resources.map((resource) => [
       resource.id,
@@ -368,7 +438,7 @@ export function PromptContentEditor({
       resource.color,
       resource.thumbnailUrl,
     ]),
-  }), [highlightPipes, highlightSystemVariables, resources, value])
+  }), [highlightPipes, highlightPromptSemantics, highlightSystemVariables, resources, value])
 
   useEffect(() => {
     setEditorEmpty(value.length === 0)
@@ -376,10 +446,10 @@ export function PromptContentEditor({
     if (!editor || lastRenderKeyRef.current === renderKey) return
     const focused = document.activeElement === editor
     const offset = focused ? caretOffset(editor) : 0
-    renderValue(editor, value, resources, highlightSystemVariables, highlightPipes)
+    renderValue(editor, value, resources, highlightSystemVariables, highlightPromptSemantics, highlightPipes)
     if (focused) setCaretOffset(editor, Math.min(offset, value.length))
     lastRenderKeyRef.current = renderKey
-  }, [highlightPipes, highlightSystemVariables, renderKey, resources, value])
+  }, [highlightPipes, highlightPromptSemantics, highlightSystemVariables, renderKey, resources, value])
 
   function syncMention(valueText: string, offset: number) {
     if (!mentionsEnabled) {
@@ -437,12 +507,13 @@ export function PromptContentEditor({
     const needsDecorationRender = nextValue.length === 0 || editorDecorationKey(editor) !== valueDecorationKey(
       nextValue,
       highlightSystemVariables,
+      highlightPromptSemantics,
       highlightPipes,
     )
     if (needsDecorationRender) {
       const scrollTop = editor.scrollTop
       const scrollLeft = editor.scrollLeft
-      renderValue(editor, nextValue, resources, highlightSystemVariables, highlightPipes)
+      renderValue(editor, nextValue, resources, highlightSystemVariables, highlightPromptSemantics, highlightPipes)
       setCaretOffset(editor, offset)
       editor.scrollTop = scrollTop
       editor.scrollLeft = scrollLeft
@@ -451,6 +522,7 @@ export function PromptContentEditor({
     lastRenderKeyRef.current = JSON.stringify({
       value: nextValue,
       highlightSystemVariables,
+      highlightPromptSemantics,
       highlightPipes,
       resources: resources.map((resource) => [
         resource.id,
@@ -471,7 +543,7 @@ export function PromptContentEditor({
     if (!editor || !mention) return
     const currentValue = serializeEditor(editor)
     const nextValue = `${currentValue.slice(0, mention.start)}${resource.token}${currentValue.slice(mention.end)}`
-    renderValue(editor, nextValue, resources, highlightSystemVariables, highlightPipes)
+    renderValue(editor, nextValue, resources, highlightSystemVariables, highlightPromptSemantics, highlightPipes)
     setEditorEmpty(false)
     setCaretOffset(editor, mention.start + resource.token.length)
     lastRenderKeyRef.current = ''
@@ -487,7 +559,7 @@ export function PromptContentEditor({
     const deletion = referenceDeletionRange(currentValue, caretOffset(editor), key)
     if (!deletion) return false
     const nextValue = `${currentValue.slice(0, deletion.start)}${currentValue.slice(deletion.end)}`
-    renderValue(editor, nextValue, resources, highlightSystemVariables, highlightPipes)
+    renderValue(editor, nextValue, resources, highlightSystemVariables, highlightPromptSemantics, highlightPipes)
     setEditorEmpty(nextValue.length === 0)
     setCaretOffset(editor, deletion.start)
     lastRenderKeyRef.current = ''

@@ -688,8 +688,11 @@ describe('TaskSegmentEditor', () => {
     expect(menu.textContent).toContain('Picture 1')
     expect(menu.textContent).toContain('Picture 2')
     expect(menu.textContent).toContain('Audio 1')
+    expect(menu.textContent).toContain('Audio 2')
     expect(menu.textContent).toContain('Video 1')
     expect(menu.textContent).not.toContain('Empty video track')
+    expect(screen.getByRole('option', { name: /Audio 1 Source video track/ })).not.toBeNull()
+    expect(screen.getByRole('option', { name: /Audio 2 Voice track/ })).not.toBeNull()
 
     expect(screen.getByRole('option', { name: /Picture 1/ }).getAttribute('aria-selected')).toBe('true')
     fireEvent.keyDown(prompt, { key: 'Enter' })
@@ -775,7 +778,7 @@ describe('TaskSegmentEditor', () => {
 
   it('highlights official media tags with thumbnails, Lucide icons, and track colors', () => {
     const segment = taskSegment()
-    segment.content.user_prompt = '<Picture 1> <Audio 1> <Video 1>'
+    segment.content.user_prompt = '<Picture 1> <Audio 1> <Audio 2> <Video 1>'
     const audio = videoSegment(0, 3)
     audio.id = 'audio-segment'
     audio.content = { media_type: 'audio', file_path: 'voice.wav' }
@@ -792,10 +795,11 @@ describe('TaskSegmentEditor', () => {
 
     const prompt = screen.getByRole('textbox', { name: 'Prompt' })
     const chips = prompt.querySelectorAll('[data-prompt-reference-token]')
-    expect(chips).toHaveLength(3)
+    expect(chips).toHaveLength(4)
     expect(chips[0].querySelector('img')?.getAttribute('src')).toContain('a.png')
     expect(chips[1].querySelector('[data-reference-icon="audio"] svg.lucide')).not.toBeNull()
-    expect(chips[2].querySelector('[data-reference-icon="video"] svg.lucide')).not.toBeNull()
+    expect(chips[2].querySelector('[data-reference-icon="audio"] svg.lucide')).not.toBeNull()
+    expect(chips[3].querySelector('[data-reference-icon="video"] svg.lucide')).not.toBeNull()
     expect((chips[0] as HTMLElement).className).toContain('align-middle')
     expect((chips[0] as HTMLElement).className).toContain('items-center')
     expect((chips[0] as HTMLElement).className).toContain('leading-none')
@@ -803,8 +807,41 @@ describe('TaskSegmentEditor', () => {
     expect((chips[0] as HTMLElement).className).toContain('bg-background')
     expect((chips[0] as HTMLElement).className).toContain('border-border')
     expect(chips[0].querySelector('span:last-child')?.className).toContain('items-center')
-    expect((chips[1] as HTMLElement).style.color).toBe('var(--multitrack-audio-waveform)')
-    expect((chips[2] as HTMLElement).style.color).toBe('var(--multitrack-video-waveform)')
+    expect((chips[1] as HTMLElement).style.color).toBe('var(--multitrack-video-waveform)')
+    expect((chips[2] as HTMLElement).style.color).toBe('var(--multitrack-audio-waveform)')
+    expect((chips[3] as HTMLElement).style.color).toBe('var(--multitrack-video-waveform)')
+  })
+
+  it('uses orange for H3 language and speaker tags and theme color for dialogue text', () => {
+    const segment = taskSegment()
+    segment.content.user_prompt = '<Subject 12> (S1,S2) says <d>[Chinese] 你好</d> [English] [Shot 3] <scenetrans> <cutoff> [reference generation]'
+    render(<TaskSegmentEditor segment={segment} onContentChange={vi.fn()} />)
+
+    const prompt = screen.getByRole('textbox', { name: 'Prompt' })
+    const semantics = prompt.querySelectorAll('[data-prompt-semantic-token]')
+    expect(Array.from(semantics, (item) => item.textContent)).toEqual([
+      '<Subject 12>',
+      '(S1,S2)',
+      '<d>',
+      '[Chinese]',
+      '</d>',
+      '[English]',
+      '[Shot 3]',
+      '<scenetrans>',
+      '<cutoff>',
+    ])
+    expect(semantics[0].className).toContain('text-prompt-semantic')
+    expect(semantics[1].className).toContain('text-prompt-semantic')
+    expect(semantics[2].className).toContain('text-prompt-semantic')
+    expect(semantics[3].className).toContain('text-prompt-semantic')
+    expect(semantics[4].className).toContain('text-prompt-semantic')
+    expect(semantics[6].className).toContain('text-highlight')
+    expect(Array.from(semantics).filter((_, index) => index !== 6)
+      .every((item) => item.className.includes('text-prompt-semantic'))).toBe(true)
+    const dialogue = prompt.querySelector('[data-prompt-dialogue-content]')
+    expect(dialogue?.className).toContain('text-highlight')
+    expect(dialogue?.textContent).toBe(' 你好')
+    expect(prompt.textContent).toContain('[reference generation]')
   })
 
   it('keeps reference tokens stable when typing adjacent text', () => {

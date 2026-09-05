@@ -59,6 +59,8 @@ class EasyMediaExtension(ComfyExtension):
             MultiTrackEditor,
             MultiTrackTaskOutput,
             MultiTrackPromptEnhancer,
+            MultiTrackPromptEnhanceToProject,
+            MultiTrackPromptEnhanceToProjectApply,
             MultiTrackPromptEnhancerImageListBridge,
             MultiTrackInfoOutput,
             MultiTrackAudioOutput,

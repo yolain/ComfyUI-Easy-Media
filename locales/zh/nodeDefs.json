@@ -820,6 +820,40 @@
       "2": { "name": "文件 ID", "tooltip": "MiniMax 已上传图像、视频和音频的文件 ID，多个 ID 使用英文逗号分隔；没有上传媒体时返回空字符串。" }
     }
   },
+  "easy multitrackPromptEnhanceToProject": {
+    "display_name": "多轨提示词增强到项目",
+    "description": "以纯文本方式逐个增强轨道信息中的任务片段提示词，将结果写回对应片段，并输出更新后的项目数据与分段提示词列表。",
+    "inputs": {
+      "tracks_info": { "name": "轨道信息", "tooltip": "需要逐片段增强任务提示词的多轨项目数据。" },
+      "llama_model": { "name": "llama.cpp 模型", "tooltip": "本地 llama.cpp 模型输入，仅选择本地模型时才会加载。需要安装 ComfyUI-llama-cpp_vlm 提供的 llama_cpp_instruct_adv 节点：https://github.com/lihaoyun6/ComfyUI-llama-cpp_vlm" },
+      "model": { "name": "模型", "tooltip": "选择用于增强每个任务片段提示词的服务厂商与模型。" },
+      "inference_mode": { "name": "推理模式", "tooltip": "保留与原提示词增强器一致的本地 llama.cpp 推理配置；本节点仅执行纯文本推理。" },
+      "force_offload": { "name": "强制卸载", "tooltip": "每次本地推理完成后卸载 llama.cpp 模型以释放内存。" },
+      "ratio": { "name": "宽高比", "tooltip": "海螺官方接口的输出宽高比；纯文本 adaptive 请求使用 16:9。" },
+      "return_async": { "name": "异步返回", "tooltip": "为保证增强文本可以写回项目，本节点始终等待每个任务完成。" },
+      "apikey": { "name": "API 密钥", "tooltip": "服务 API 密钥。留空时从 config.yaml 或环境变量读取对应厂商的密钥。" },
+      "max_size": { "name": "最大尺寸", "tooltip": "保留与原提示词增强器一致的本地 llama.cpp 配置；纯文本推理不会使用图片尺寸。" },
+      "max_tokens": { "name": "最大令牌数", "tooltip": "第三方模型最多生成的输出令牌数。" },
+      "seed": { "name": "随机种", "tooltip": "对每个任务片段使用的 ComfyUI 随机种。" },
+      "enabled": { "name": "启用", "tooltip": "开启时增强并覆盖全部任务提示词；关闭时返回未修改的项目副本及当前提示词列表。" },
+      "api_account": { "name": "API 账户", "tooltip": "显示当前厂商余额并提供余额页面和 API Key 管理入口，不参与提示词增强执行。" }
+    },
+    "outputs": {
+      "0": { "name": "轨道信息", "tooltip": "已将增强提示词写回任务片段的项目数据。" },
+      "1": { "name": "分段提示词", "tooltip": "按任务片段时间顺序排列的增强提示词列表。" }
+    }
+  },
+  "easy multiTrackPromptEnhanceToProjectApply": {
+    "display_name": "多轨提示词增强到项目写回",
+    "inputs": {
+      "tracks_info": { "name": "轨道信息" },
+      "prompt_count": { "name": "提示词数量" }
+    },
+    "outputs": {
+      "0": { "name": "轨道信息" },
+      "1": { "name": "分段提示词" }
+    }
+  },
   "easy multiTrackPromptEnhancerImageListBridge": {
     "display_name": "多轨提示词增强器图片列表桥接",
     "description": "内部节点，用于在本地 llama.cpp 展开子图中保持图片列表语义。",
