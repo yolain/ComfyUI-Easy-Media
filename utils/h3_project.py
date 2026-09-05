@@ -236,6 +236,11 @@ def _frame_value(value: Any, default: int = 0) -> int:
         return default
 
 
+def _h3_continuity_mode(value: Any) -> str:
+    normalized = str(value or "shot").lower()
+    return normalized if normalized in {"context", "context_swap"} else "shot"
+
+
 def h3_task_segments(info: dict[str, Any]) -> list[dict[str, Any]]:
     return sorted(
         [
@@ -350,11 +355,13 @@ def select_h3_task_entries(
     return list(enumerate(entries[safe_start:safe_end], start=safe_start))
 
 
-def minimax_frame_count(duration_frames: int | float) -> int:
+def minimax_frame_count(
+    duration_frames: int | float, *, round_up: bool = False
+) -> int:
+    """Snap to H3's grid, optionally ensuring the entire source span fits."""
     duration = max(float(H3_FRAME_REMAINDER), float(duration_frames))
-    grid_index = math.floor(
-        (duration - H3_FRAME_REMAINDER) / H3_FRAME_STEP + 0.5
-    )
+    grid_position = (duration - H3_FRAME_REMAINDER) / H3_FRAME_STEP
+    grid_index = math.ceil(grid_position) if round_up else math.floor(grid_position + 0.5)
     return H3_FRAME_REMAINDER + max(0, grid_index) * H3_FRAME_STEP
 
 
@@ -932,6 +939,10 @@ def _h3_project_data(
                 "file_name": candidate_source.name,
                 "media_revision": str(candidate_source.stat().st_mtime_ns),
                 "source_frame_count": candidate_frame_count,
+                "continuity_mode": _h3_continuity_mode(candidate.get(
+                    "continuity_mode",
+                    segment.get("continuity_mode", "shot"),
+                )),
                 **(
                     {
                         "locked_audio_path": _project_child_path(
@@ -965,12 +976,7 @@ def _h3_project_data(
             "source_end_frame": active_file["source_frame_count"],
             "source_frame_count": active_file["source_frame_count"],
             "updated_at": float(segment.get("updated_at", 0) or 0),
-            "continuity_mode": (
-                str(segment.get("continuity_mode", "shot")).lower()
-                if str(segment.get("continuity_mode", "shot")).lower()
-                in {"context", "context_swap"}
-                else "shot"
-            ),
+            "continuity_mode": active_file["continuity_mode"],
             "audio_locked": task_segment.get("audio_locked") is True,
             "enabled": True,
             "video_files": video_files,

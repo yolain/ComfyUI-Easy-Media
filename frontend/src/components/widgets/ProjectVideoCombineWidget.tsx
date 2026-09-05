@@ -203,6 +203,7 @@ function selectProjectVideoFile(clip: ProjectClip, file: ProjectVideoFile): Proj
     source_start_frame: sourceStartFrame,
     source_end_frame: Math.max(sourceStartFrame + 1, Math.min(clip.source_end_frame, sourceFrameCount)),
     source_frame_count: sourceFrameCount,
+    continuity_mode: file.continuity_mode ?? clip.continuity_mode,
   }
 }
 

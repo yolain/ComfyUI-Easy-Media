@@ -18,7 +18,7 @@
 
 - **视频裁剪帧率对齐**：合并视频输入时先规范源视频帧率再执行裁剪，使片段边界与项目时间线保持帧级对齐。
 
-“角色替换上下文”采用的锥形上下文噪声方案参考并改编自 [MacroSony/minimax-h3-chained-character-swap](https://github.com/MacroSony/minimax-h3-chained-character-swap)。
+“主体替换上下文”采用的锥形上下文噪声方案参考并改编自 [MacroSony/minimax-h3-chained-character-swap](https://github.com/MacroSony/minimax-h3-chained-character-swap)。
 
 ## [1.3.0] - 2026-09-03
 

@@ -17,6 +17,7 @@ from ..utils.h3_project import (
     compose_h3_project_video,
     h3_generation_mode,
     h3_locked_audio_track,
+    minimax_frame_count,
     h3_project_filename_prefix,
     h3_second_pass_dimensions,
     has_h3_first_pass_checkpoint,
@@ -760,7 +761,13 @@ class EasyMultiTrackProject(io.ComfyNode):
             )
             uses_context = continuity_mode in H3_CONTEXT_CONTINUITY_MODES
             uses_swap_noise = continuity_mode == "context_swap"
-            has_task_locked_audio = h3_locked_audio_track(entry, info) is not None
+            locked_audio_track = h3_locked_audio_track(entry, info)
+            has_task_locked_audio = locked_audio_track is not None
+            preserve_video_timing = (
+                not audio_only
+                and locked_audio_track is not None
+                and locked_audio_track.get("type") == "video"
+            )
 
             ref_image_size = (
                 str(content.get("ref_image_size", "match")).lower()
@@ -805,7 +812,14 @@ class EasyMultiTrackProject(io.ComfyNode):
                 prompt_format="default",
             )
             base_task_length: Any = task_output.out(3)
-            task_length: Any = base_task_length
+            if preserve_video_timing:
+                # Keep the source duration separately for delivery and context.
+                base_task_length = max(1, task_end_frame - task_start_frame)
+            task_length: Any = (
+                minimax_frame_count(base_task_length, round_up=True)
+                if preserve_video_timing
+                else base_task_length
+            )
             will_have_context_continuity = (
                 uses_context
                 and (previous_hires_context_latent is not None or task_index > 0)
@@ -1181,14 +1195,16 @@ class EasyMultiTrackProject(io.ComfyNode):
                 )
                 output_images = decoded_images.out(0)
                 output_audio = decoded_audio.out(0)
-                if context_trim_frames is not None:
+                if context_trim_frames is not None or preserve_video_timing:
                     report_segment_step(0.84)
                     trimmed = graph.node(
                         "easy h3ContextMediaTrim",
                         id=f"motion_context_trim_{task_index}",
                         images=output_images,
                         audio=output_audio,
-                        trim_frames=context_trim_frames,
+                        trim_frames=(
+                            context_trim_frames if context_trim_frames is not None else 0
+                        ),
                         output_frames=base_task_length,
                         pad_audio=not has_task_locked_audio,
                         fps=fps,
@@ -1212,12 +1228,9 @@ class EasyMultiTrackProject(io.ComfyNode):
                 project_low_context_latent = (
                     first_pass_latent if has_second_pass else final_latent
                 )
-                if context_trim_frames is not None:
-                    # A context generation contains both the copied head and H3's
-                    # temporal-grid tail. The saved sampling latent still contains
-                    # both even though the delivered media has been trimmed. Build
-                    # the next segment's context from the exact delivered span so
-                    # consecutive context tasks cannot copy the stale grid tail.
+                if context_trim_frames is not None or preserve_video_timing:
+                    # Rebuild continuity from the delivered span after removing
+                    # the optional context head and temporal-grid tail.
                     project_hires_context_latent = _h3_encode_context_media(
                         graph,
                         output_images,
@@ -1244,7 +1257,11 @@ class EasyMultiTrackProject(io.ComfyNode):
                             id=f"low_context_trim_{task_index}",
                             images=low_context_images.out(0),
                             audio=low_context_audio.out(0),
-                            trim_frames=first_pass_context_trim_frames,
+                            trim_frames=(
+                                first_pass_context_trim_frames
+                                if first_pass_context_trim_frames is not None
+                                else 0
+                            ),
                             output_frames=base_task_length,
                             fps=fps,
                         )
@@ -1307,18 +1324,24 @@ class EasyMultiTrackProject(io.ComfyNode):
                 if first_pass_only and has_second_pass
                 else "second" if has_second_pass else "single"
             )
+            # A pass-two resume needs the full sampled span, while continuity
+            # uses the re-encoded delivered span (also saved as low context).
+            checkpoint_latent = (
+                first_pass_latent if preserve_video_timing else saved_hires_context_latent
+            )
             artifact_inputs: dict[str, Any] = {
                 "project_name": safe_project_name,
                 "project_save": project_save,
                 "segment_index": task_index,
                 "context_latent": (
-                    saved_hires_context_latent
+                    checkpoint_latent
                     if completed_sampling_pass == "first"
                     else runtime_hires_context_latent
                 ),
                 **saved_media_inputs,
                 "tracks_info": output_info,
                 "continuity_mode": continuity_mode,
+                "seed": first_pass_seed,
                 "sampling_pass": completed_sampling_pass,
             }
             if has_second_pass:

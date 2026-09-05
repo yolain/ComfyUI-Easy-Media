@@ -5,6 +5,7 @@ export interface ProjectVideoFile {
   file_name: string
   media_revision?: string
   source_frame_count: number
+  continuity_mode?: ProjectContinuityMode
 }
 
 export interface ProjectClip {

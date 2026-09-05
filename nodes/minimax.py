@@ -1266,6 +1266,14 @@ class EasyH3ProjectArtifact(io.ComfyNode):
                     options=["single", "first", "second"],
                     default="single",
                 ),
+                io.Int.Input(
+                    "seed",
+                    default=0,
+                    min=0,
+                    max=0xFFFFFFFFFFFFFFFF,
+                    step=1,
+                    optional=True,
+                ),
                 io.AnyType.Input("previous", optional=True),
                 io.Audio.Input("audio", optional=True),
             ],
@@ -1285,6 +1293,7 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         tracks_info: dict[str, Any],
         continuity_mode: str = "shot",
         sampling_pass: str = "single",
+        seed: int = 0,
         context_latent_low: dict[str, Any] | None = None,
         previous: Any | None = None,
         video_path: str = "",
@@ -1427,6 +1436,8 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         generation_manifest = {
             "context_latent": target_context_latent.name,
             ("audio" if audio_only else "video"): target_media.name,
+            "continuity_mode": continuity_mode,
+            "seed": int(seed),
             "sampling_pass": sampling_pass,
             "updated_at": time.time(),
         }

@@ -569,6 +569,8 @@ def test_load_h3_project_data_lists_all_video_files_for_the_same_index(monkeypat
     manifest["segments"]["0"]["generations"]["2"] = {
         "video": alternate.name,
         "locked_audio": alternate_audio.name,
+        "continuity_mode": "context_swap",
+        "seed": 123,
     }
     manifest["segments"]["0"]["generations"]["3"] = {"video": alternate.name}
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -585,6 +587,38 @@ def test_load_h3_project_data_lists_all_video_files_for_the_same_index(monkeypat
         "video_0_2.mp4",
     ]
     assert [file["source_frame_count"] for file in data["clips"][0]["video_files"]] == [120, 96]
+    assert [file["continuity_mode"] for file in data["clips"][0]["video_files"]] == [
+        "shot",
+        "context_swap",
+    ]
+
+
+def test_load_h3_project_data_uses_active_generation_continuity_mode(monkeypatch, tmp_path):
+    project_dir = _write_render_project(tmp_path)
+    alternate = project_dir / "video_0_2.mp4"
+    alternate.write_bytes(b"video-0-alternate")
+    manifest_path = project_dir / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["segments"]["0"]["generations"]["2"] = {
+        "video": alternate.name,
+        "continuity_mode": "context_swap",
+        "seed": 456,
+    }
+    manifest["segments"]["0"]["active_generation"] = 2
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(
+        "utils.h3_project.folder_paths.get_output_directory", lambda: str(tmp_path)
+    )
+    monkeypatch.setattr(
+        "utils.video.ffprobe_info", lambda _path: {"frame_count": 120}
+    )
+
+    data = load_h3_project_data("demo")
+
+    assert data["clips"][0]["file_name"] == alternate.name
+    assert data["clips"][0]["continuity_mode"] == "context_swap"
+    assert data["clips"][0]["video_files"][0]["continuity_mode"] == "shot"
+    assert data["clips"][0]["video_files"][1]["continuity_mode"] == "context_swap"
 
 
 def test_compose_h3_project_video_uses_selected_file_for_same_index(monkeypatch, tmp_path):
