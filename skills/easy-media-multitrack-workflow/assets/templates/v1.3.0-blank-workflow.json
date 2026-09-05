@@ -56,7 +56,7 @@
         ""
       ],
       "widgets_values_named": {
-        "max_resolution": 1024,
+        "max_resolution": 640,
         "jpeg_quality": 80,
         "suppress_default_preview": true,
         "preview_frames": 48,
@@ -295,7 +295,7 @@
         1011859974239154,
         "randomize",
         "medium",
-        "dual",
+        "single",
         false,
         false,
         1.5,
@@ -309,10 +309,10 @@
         "seed": 1011859974239154,
         "fixed": "randomize",
         "sampling_plan": "medium",
-        "sampling_mode": "dual",
+        "sampling_mode": "single",
         "1st_pass_only": false,
         "disable_2nd_noise": false,
-        "upscale_by": 1.5,
+        "upscale_by": 1.25,
         "upscale_model": "minimax_h3_latent_upscaler_3d_fp16.safetensors"
       }
     },
@@ -776,11 +776,11 @@
         "Node name for S&R": "LoraLoaderModelOnly"
       },
       "widgets_values": [
-        "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+        "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
         1
       ],
       "widgets_values_named": {
-        "lora_name": "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
+        "lora_name": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors",
         "strength_model": 1
       }
     },
