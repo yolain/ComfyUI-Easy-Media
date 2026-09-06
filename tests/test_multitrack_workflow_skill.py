@@ -183,6 +183,49 @@ def test_locked_audio_must_overlap_every_task_segment(patch_workflow_module):
     ):
         patch_workflow_module.validate_track_data(track_data, recalculate=False)
 
+
+def test_audio_and_video_tracks_may_be_locked_together(patch_workflow_module):
+    track_data = {
+        "frame_rate": 24,
+        "total_length": 120,
+        "tracks": [
+            {
+                "id": "tasks",
+                "type": "task",
+                "segments": [{
+                    "id": "task-1",
+                    "start_frame": 0,
+                    "end_frame": 120,
+                    "content": {"images": []},
+                }],
+            },
+            {
+                "id": "locked-video",
+                "type": "video",
+                "audio_locked": True,
+                "segments": [{
+                    "id": "video-1",
+                    "start_frame": 0,
+                    "end_frame": 120,
+                    "content": {"media_type": "video"},
+                }],
+            },
+            {
+                "id": "locked-audio",
+                "type": "audio",
+                "audio_locked": True,
+                "segments": [{
+                    "id": "audio-1",
+                    "start_frame": 0,
+                    "end_frame": 120,
+                    "content": {"media_type": "audio"},
+                }],
+            },
+        ],
+    }
+
+    patch_workflow_module.validate_track_data(track_data, recalculate=False)
+
     _result, report = patch_workflow_module.apply_plan(
         _template_workflow(),
         {

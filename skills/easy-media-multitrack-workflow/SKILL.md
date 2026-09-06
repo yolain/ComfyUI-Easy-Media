@@ -35,8 +35,8 @@ description: "Create, edit, and optionally run ComfyUI Easy Media MultiTrack wor
 ## 关键决策
 
 - **分辨率**：用户未表达意图时保留现值。`16:9 0.9mp` 等表达选择 megapixels 模式，并映射完整 `aspect_ratio`；精确尺寸、auto、短/长边和 custom 规则见 schema 参考。
-- **上下文主体替换**：用户提供视频作为主体或局部替换参考时，将全部目标 task segment 的 `content.continuity_mode` 设为 `context_swap`，并在该视频轨设置唯一的 `audio_locked: true` 以保留其原声和时间。用户未指定片段长度时，默认把任务范围按连续 10 秒拆分，末段使用剩余时长；完整规则见 schema 参考。
-- **主音频/视频原声**：需要原样沿用并驱动任务时长/节奏时，在唯一的 audio 或 video 轨设置 `audio_locked: true`；切换时显式取消其他媒体轨的锁定。
+- **上下文主体替换**：用户提供视频作为主体或局部替换参考时，将全部目标 task segment 的 `content.continuity_mode` 设为 `context_swap`，并在该视频轨设置 `audio_locked: true` 以保留画面时间线。未另设音频锁时沿用视频原声；另有锁定 audio track 时优先用其音频替换。用户未指定片段长度时，默认把任务范围按连续 10 秒拆分，末段使用剩余时长；完整规则见 schema 参考。
+- **主音频/视频原声**：需要原样沿用并驱动任务时长/节奏时，在目标 audio 或 video 轨设置 `audio_locked: true`。同类型最多锁一条；video 与 audio 可各锁一条，并存时 audio 优先执行音频锁定，video 继续约束画面时间线。
 - **公用媒体**：上下文分段需要使用同一张图片、同一段音频或同一段视频作为参考时，将对应媒体设置为 `shared_reference: true`。任务图片把字段写在 `content.images[]` 项上；音频/视频把字段写在媒体片段的 `content` 上。公用图片会排在各任务私有图片之前且每个任务合计仍最多 9 张；同一音频或视频轨最多一个公用片段，公用音频最多使用源文件开头 15 秒。它是跨任务参考，不等于轨道级 `audio_locked`。`speaker_reference` 仅作为旧工作流兼容字段，新工作流不再写入。
 - **项目范围**：排队前复核 `segment_start_number`、`segment_count`、`project_save` 和 sampling 设置，尤其是 `override` 的覆盖范围。
 

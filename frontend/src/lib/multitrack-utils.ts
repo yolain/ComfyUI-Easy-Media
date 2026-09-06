@@ -1318,7 +1318,7 @@ export interface MultiTrackPreviewResolutionInput {
   format?: string
 }
 
-export function setExclusiveMultiTrackAudioTrackLock(
+export function setMultiTrackAudioTrackLock(
   data: TrackData,
   trackId: string,
   locked: boolean,
@@ -1329,19 +1329,19 @@ export function setExclusiveMultiTrackAudioTrackLock(
   return {
     ...data,
     tracks: data.tracks.map((track) => (
-      track.type === 'audio' || track.type === 'video'
+      track.type === target.type
         ? { ...track, audio_locked: locked && track.id === trackId }
         : track
     )),
   }
 }
 
-function normalizeExclusiveMultiTrackAudioLock(tracks: MultiTrack[]): MultiTrack[] {
-  let keptLockedAudio = false
+function normalizeMultiTrackAudioLocks(tracks: MultiTrack[]): MultiTrack[] {
+  const lockedTrackTypes = new Set<MultiTrack['type']>()
   return tracks.map((track) => {
     if ((track.type !== 'audio' && track.type !== 'video') || track.audio_locked !== true) return track
-    if (!keptLockedAudio) {
-      keptLockedAudio = true
+    if (!lockedTrackTypes.has(track.type)) {
+      lockedTrackTypes.add(track.type)
       return track
     }
     return { ...track, audio_locked: false }
@@ -1726,7 +1726,7 @@ export function normalizeTrackData(raw: LegacyTrackData): TrackData {
     const typeName = track.type.charAt(0).toUpperCase() + track.type.slice(1)
     return { ...track, name: `${typeName} ${index}` }
   })
-  const normalizedAudioLocks = normalizeExclusiveMultiTrackAudioLock(namedTracks)
+  const normalizedAudioLocks = normalizeMultiTrackAudioLocks(namedTracks)
   const normalizedSharedImages = synchronizeSharedTaskImages(normalizedAudioLocks)
   const totalLength = normalizeTotalLength(normalizedSharedImages, frameRate)
   const taskMarkers = normalizeTaskMarkers(raw.task_markers, totalLength)

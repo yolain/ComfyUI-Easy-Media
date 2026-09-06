@@ -3456,7 +3456,10 @@ def test_multitrack_task_output_minus_one_reuses_eager_full_timeline_media():
     module = _load_basic_module()
     image = torch.ones(1, 2, 2, 3)
     audio = {"waveform": torch.ones(1, 1, 4), "sample_rate": 2}
-    video = _FakeVideo(_VideoComponents(torch.ones(4, 2, 2, 3), None, Fraction(2)))
+    video_audio = {"waveform": torch.zeros(1, 1, 4), "sample_rate": 2}
+    video = _FakeVideo(
+        _VideoComponents(torch.ones(4, 2, 2, 3), video_audio, Fraction(2))
+    )
     tracks_info = {
         "media_loading": "eager",
         "frame_rate": 2,
@@ -3467,15 +3470,15 @@ def test_multitrack_task_output_minus_one_reuses_eager_full_timeline_media():
                 "end_frame": 4,
                 "content": {"user_prompt": "full", "images": [{"media_index": 0}]},
             }]},
+            {"type": "video", "media_index": 0, "audio_locked": True, "segments": [{
+                "start_frame": 0,
+                "end_frame": 4,
+                "content": {"media_type": "video", "media_index": 0},
+            }]},
             {"type": "audio", "media_index": 0, "audio_locked": True, "segments": [{
                 "start_frame": 0,
                 "end_frame": 4,
                 "content": {"media_type": "audio", "media_index": 0},
-            }]},
-            {"type": "video", "media_index": 0, "segments": [{
-                "start_frame": 0,
-                "end_frame": 4,
-                "content": {"media_type": "video", "media_index": 0},
             }]},
         ],
     }
@@ -3587,7 +3590,7 @@ def test_prepare_multitrack_project_media_extracts_shared_and_locked_audio(monke
     assert task_info["tracks"][2]["segments"] == []
 
 
-def test_prepare_multitrack_project_media_keeps_locked_video_as_task_reference(
+def test_prepare_multitrack_project_media_prefers_audio_lock_and_keeps_locked_video_reference(
     monkeypatch,
 ):
     module = _load_basic_module()
@@ -3607,6 +3610,11 @@ def test_prepare_multitrack_project_media_keeps_locked_video_as_task_reference(
         project_module,
         "_resolve_multitrack_video",
         lambda *_args: video,
+    )
+    monkeypatch.setattr(
+        project_module,
+        "_resolve_multitrack_audio",
+        lambda *_args: audio_only,
     )
     tracks_info = {
         "frame_rate": 2,
@@ -3647,7 +3655,7 @@ def test_prepare_multitrack_project_media_keeps_locked_video_as_task_reference(
         project_module.prepare_multitrack_project_media(tracks_info)
     )
 
-    assert locked["waveform"].flatten().tolist() == list(range(8))
+    assert locked["waveform"].flatten().tolist() == [9.0] * 8
     assert task_info["tracks"][1] == tracks_info["tracks"][1]
     assert task_info["tracks"][2]["segments"] == []
     assert "media_index" not in task_info["tracks"][2]

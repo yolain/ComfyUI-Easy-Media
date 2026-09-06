@@ -576,7 +576,11 @@ export function MultiTrackSegmentBlock({
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="max-w-72">
-                  {t('multitrack.audioLockTooltip')}
+                  {t(
+                    trackType === 'video'
+                      ? 'multitrack.videoAudioLockTooltip'
+                      : 'multitrack.audioLockTooltip',
+                  )}
                 </TooltipContent>
               </Tooltip>
             </>
