@@ -34,6 +34,11 @@ from ..utils.h3_project import (
     validate_h3_project_outputs,
 )
 from ..utils.models import detect_turbo_lora_from_prompt, detect_turbo_model
+from ..utils.project_memory import (
+    BOUNDARY_META,
+    SEGMENT_META,
+    install_project_memory_cleanup,
+)
 
 
 TYPE_FAST_MODEL_LOADER = io.Custom(io_type="FAST_MODEL_LOADER")
@@ -227,8 +232,12 @@ def _h3_encode_audio_context(
     ).out(0)
     return trimmed, context
 
-def _timed_h3_project_graph(graph: GraphBuilder, project_name: str) -> dict[str, Any]:
-    """Tag native operations for timing without changing node types or inputs."""
+def _timed_h3_project_graph(
+    graph: GraphBuilder,
+    project_name: str,
+    segment_nodes: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """Tag timing and segment cache lifetimes without changing node inputs."""
     expanded = graph.finalize()
     timed_types = {
         "SamplerCustomAdvanced",
@@ -238,6 +247,10 @@ def _timed_h3_project_graph(graph: GraphBuilder, project_name: str) -> dict[str,
         "VAEDecodeAudio",
     }
     for node_id, node in expanded.items():
+        if segment_nodes is not None and node_id in segment_nodes:
+            node.setdefault("_meta", {})[SEGMENT_META] = segment_nodes[node_id]
+            if node["class_type"] == "easy h3ProjectArtifact":
+                node["_meta"][BOUNDARY_META] = True
         if node["class_type"] not in timed_types:
             continue
         target = _h3_node_mapping(node["class_type"])
@@ -245,6 +258,8 @@ def _timed_h3_project_graph(graph: GraphBuilder, project_name: str) -> dict[str,
             instrument_node_timing(target)
         operation = node_id.rsplit(".", 1)[-1]
         node.setdefault("_meta", {})["easy_media_timing"] = f"{project_name} / {operation}"
+    if segment_nodes:
+        install_project_memory_cleanup()
     return expanded
 
 def _h3_resolve_pass_sampling(
@@ -741,7 +756,9 @@ class EasyMultiTrackProject(io.ComfyNode):
         report_step(35)
 
         segment_total = len(selected_entries)
+        segment_nodes: dict[str, int] = {}
         for segment_position, (task_index, entry) in enumerate(selected_entries):
+            previous_graph_nodes = set(graph.nodes)
             def report_segment_step(
                 phase: float,
                 *,
@@ -1357,6 +1374,10 @@ class EasyMultiTrackProject(io.ComfyNode):
             last_project_output = artifact.out(0)
             previous_hires_context_latent = runtime_hires_context_latent
             previous_low_context_latent = runtime_low_context_latent
+            segment_nodes.update({
+                node_id: task_index
+                for node_id in graph.nodes.keys() - previous_graph_nodes
+            })
             report_segment_step(1.0)
 
         if last_project_output is None:
@@ -1366,7 +1387,7 @@ class EasyMultiTrackProject(io.ComfyNode):
         return io.NodeOutput(
             last_project_output,
             full_locked_audio,
-            expand=_timed_h3_project_graph(graph, safe_project_name),
+            expand=_timed_h3_project_graph(graph, safe_project_name, segment_nodes),
         )
 
 

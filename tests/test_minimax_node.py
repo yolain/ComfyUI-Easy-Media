@@ -275,7 +275,7 @@ def _load_minimax_node(monkeypatch):
     motion_context_package = types.ModuleType("easy_media.modules.motion_context")
     motion_context_package.__path__ = []
     utils_package = types.ModuleType("easy_media.utils")
-    utils_package.__path__ = []
+    utils_package.__path__ = [str(Path(__file__).parents[1] / "utils")]
     utils_package.log_node_info = lambda *_args, **_kwargs: None
     log_spec = importlib.util.spec_from_file_location(
         "stage_log_under_test", Path(__file__).parents[1] / "utils" / "log.py"
@@ -445,6 +445,7 @@ def _load_minimax_node(monkeypatch):
         project_module = importlib.util.module_from_spec(project_spec)
         sys.modules[project_spec.name] = project_module
         project_spec.loader.exec_module(project_module)
+        monkeypatch.setattr(project_module, "install_project_memory_cleanup", lambda: None)
         module.EasyMultiTrackProject = project_module.EasyMultiTrackProject
         module.EasyMultiTrackProjectVideoCombine = (
             project_module.EasyMultiTrackProjectVideoCombine
@@ -628,7 +629,7 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
     assert schema.node_id == "easy multitrackProject"
     assert schema.is_input_list is True
     assert schema.enable_expand is True
-    assert schema.is_output_node is True
+    assert not getattr(schema, "is_output_node", False)
     assert schema.not_idempotent is True
     assert schema.hidden == ["PROMPT", "UNIQUE_ID"]
     assert list(inputs) == [
@@ -703,6 +704,31 @@ def test_multitrack_h3_project_loads_segment_media_from_tracks_info(monkeypatch)
         "task_index",
         "prompt_format",
     }
+
+
+@pytest.mark.parametrize("sampling_mode,first_only", [("single", False), ("dual", False), ("dual", True)])
+def test_project_memory_boundaries_follow_artifact_saves(monkeypatch, sampling_mode, first_only):
+    module = _load_minimax_node(monkeypatch)
+    installed = []
+    monkeypatch.setattr(module._project_module, "install_project_memory_cleanup", lambda: installed.append(True))
+    result = module.EasyMultiTrackProject.execute(**_h3_project_inputs(
+        sampling_mode=_h3_sampling_mode(sampling_mode, **{"1st_pass_only": [first_only]}),
+        upscale_by=[1.0],
+    ))
+    assert installed == [True]
+    tagged = [node for node in result.expand.values() if "easy_media_segment" in node.get("_meta", {})]
+    assert tagged
+    assert all(node["_meta"]["easy_media_segment"] == 0 for node in tagged)
+    boundaries = [node for node in tagged if node["_meta"].get("easy_media_segment_saved")]
+    assert len(boundaries) == 1
+    assert boundaries[0]["class_type"] == "easy h3ProjectArtifact"
+    assert "video_path" in boundaries[0]["inputs"]
+    assert "context_latent" in boundaries[0]["inputs"]
+    assert all(
+        "easy_media_segment" not in node.get("_meta", {})
+        for node in result.expand.values()
+        if node["class_type"] in {"KSamplerSelect", "ManualSigmas"}
+    )
 
 
 def test_multitrack_h3_project_prepends_shared_media_before_h3_conditioning(
@@ -3642,7 +3668,7 @@ def test_project_timing_keeps_native_nodes_and_inputs(monkeypatch):
     monkeypatch.setattr(
         module._project_module,
         "_timed_h3_project_graph",
-        lambda graph, _name: graph.finalize(),
+        lambda graph, _name, _segments=None: graph.finalize(),
     )
     module.GraphBuilder.set_default_prefix("timing", 0, 0)
     without_timing = module.EasyMultiTrackProject.execute(**inputs)
