@@ -162,6 +162,7 @@
     "unlockAudio": "Unlock audio",
     "audioLockedMarker": "Audio track locked",
     "audioLockTooltip": "(Only effective in MultiTrack Project) After locking audio, video generation will no longer regenerate the audio and will instead coordinate the video visuals with the original audio.",
+    "videoAudioLockTooltip": "(Only effective in MultiTrack Project) Locking makes video generation follow this video track's visual timeline. Video and audio track locks can be enabled together; when both are enabled, the audio track takes priority for audio locking and replacement.",
     "enableSpeakerReference": "Reuse as speaker audio",
     "disableSpeakerReference": "Stop reusing speaker audio",
     "speakerReferenceTooltip": "(MiniMax only) Reuse this clip as this audio track's @Audio reference in every task. Audio longer than 15 seconds is truncated to its first 15 seconds.",

@@ -17,6 +17,7 @@ from ..utils.h3_project import (
     compose_h3_project_video,
     h3_generation_mode,
     h3_locked_audio_track,
+    h3_locked_video_track,
     minimax_frame_count,
     h3_project_filename_prefix,
     h3_second_pass_dimensions,
@@ -372,7 +373,6 @@ class EasyMultiTrackProject(io.ComfyNode):
             ),
             is_input_list=True,
             enable_expand=True,
-            is_output_node=True,
             not_idempotent=True,
             inputs=[
                 TYPE_TRACKS_INFO.Input("tracks_info"),
@@ -765,8 +765,7 @@ class EasyMultiTrackProject(io.ComfyNode):
             has_task_locked_audio = locked_audio_track is not None
             preserve_video_timing = (
                 not audio_only
-                and locked_audio_track is not None
-                and locked_audio_track.get("type") == "video"
+                and h3_locked_video_track(entry, info) is not None
             )
 
             ref_image_size = (

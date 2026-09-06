@@ -152,7 +152,7 @@ custom 示例：
 
 - 将本次范围内所有 task segment 的 `content.continuity_mode` 设为 `context_swap`；不要只修改第二段或后续片段。首段虽然没有前序生成上下文，也保持同一模式，以便项目元数据和后续重生成一致。
 - 参考视频放在 video track，并覆盖全部目标 task segment 的时间范围。若它还需要跨任务作为模型参考，在视频片段 `content` 上设置 `shared_reference: true`。
-- 在该 video track 设置轨道级 `audio_locked: true`，以原样保留参考视频的音频并让源视频时间驱动生成；同时把其他 audio/video track 的 `audio_locked` 显式设为 `false`。锁定前确认视频包含可用音轨并覆盖全部目标 task segment。
+- 在该 video track 设置轨道级 `audio_locked: true`，让源视频时间驱动生成；同时只把其他 video track 的 `audio_locked` 显式设为 `false`。若要替换原声，可另锁定一条 audio track，后者会优先作为音频来源。仅沿用视频原声时，锁定前确认视频包含可用音轨并覆盖全部目标 task segment。
 - 用户明确指定片段长度或边界时以用户要求为准。否则按连续 10 秒拆分 task segment：每段帧数为 `round(10 * frame_rate)`，最后一段使用参考视频的剩余帧，不补齐、不丢弃余数，也不创建空末段。参考视频本身可保留为覆盖完整范围的单个 video segment，无需为每个 task segment 重复复制。
 - 用户明确要求去掉、替换或不保留参考视频原声时，不自动锁定该 video track，并按用户指定的音频方案处理。
 
@@ -175,7 +175,7 @@ custom 示例：
 
 ## 音频锁定决策
 
-`audio_locked` 是 audio/video 轨道级字段，用来指定 MultiTrack Project 唯一的主音频来源。锁定 audio track 会沿用其音频；锁定 video track 会沿用视频原声并保留源视频时间。两者都会按媒体与任务片段的重叠范围调度视频帧。它与轨道的 `locked` 不同：`locked` 只禁止时间线编辑，不能代替 `audio_locked`。
+`audio_locked` 是 audio/video 轨道级字段。锁定 audio track 会沿用其音频；锁定 video track 会让生成画面遵循视频轨道时间线，并在没有锁定 audio track 时沿用视频原声。两种锁可以同时存在；此时 audio track 优先作为 `audio_lock` 的音频来源，video track 仍负责画面时间线。它与轨道的 `locked` 不同：`locked` 只禁止时间线编辑，不能代替 `audio_locked`。
 
 ```json
 {
@@ -200,7 +200,7 @@ custom 示例：
 }
 ```
 
-同一个 TrackData 最多只能有一条 `audio_locked: true` 的 audio/video 轨。切换锁定来源时，应把所有其他 audio/video track 的 `audio_locked` 显式设为 `false`。不要把 `audio_locked` 写进媒体片段的 `content`；旧版片段级字段仅用于兼容迁移。
+同一个 TrackData 最多可有一条 `audio_locked: true` 的 audio track 和一条 `audio_locked: true` 的 video track。切换同类型锁定来源时，应把该类型的其他轨道显式设为 `false`，不要清除另一种类型的锁。不要把 `audio_locked` 写进媒体片段的 `content`；旧版片段级字段仅用于兼容迁移。
 
 根据上下文按以下顺序判断：
 

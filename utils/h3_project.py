@@ -410,16 +410,17 @@ def h3_task_type(entry: dict[str, Any], info: dict[str, Any]) -> str:
     return "i2v" if image_count > 0 else "t2v"
 
 
-def h3_locked_audio_track(
-    entry: dict[str, Any], info: dict[str, Any]
+def _h3_locked_track(
+    entry: dict[str, Any],
+    info: dict[str, Any],
+    track_type: str,
 ) -> dict[str, Any] | None:
-    """Return the locked audio-bearing track when it has media in the task range."""
     start_frame = _frame_value(entry.get("start_frame"))
     end_frame = _frame_value(entry.get("end_frame"))
     for track in info.get("tracks", []):
         if (
             not isinstance(track, dict)
-            or track.get("type") not in {"audio", "video"}
+            or track.get("type") != track_type
             or track.get("audio_locked") is not True
         ):
             continue
@@ -433,6 +434,22 @@ def h3_locked_audio_track(
         ):
             return track
     return None
+
+
+def h3_locked_audio_track(
+    entry: dict[str, Any], info: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Return the locked audio source, preferring an audio track over video audio."""
+    return _h3_locked_track(entry, info, "audio") or _h3_locked_track(
+        entry, info, "video"
+    )
+
+
+def h3_locked_video_track(
+    entry: dict[str, Any], info: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Return the locked video track that controls the task's visual timeline."""
+    return _h3_locked_track(entry, info, "video")
 
 
 def h3_generation_mode(task_type: str) -> str:
@@ -1235,6 +1252,7 @@ def prepare_multitrack_project_media(
     shared_audio: list[dict] = []
     shared_video: list[object] = []
     locked_audio: dict | None = None
+    locked_audio_priority = 0
     shared_image_identities: set[tuple[str, str]] = set()
     shared_audio_identities: set[tuple[str, str]] = set()
     shared_video_identities: set[tuple[str, str]] = set()
@@ -1299,7 +1317,8 @@ def prepare_multitrack_project_media(
                 )
                 if source_audio is not None:
                     resolved_segments.append((local_segment, source_audio))
-            if locked_audio is None and resolved_segments:
+            lock_priority = 2 if track_type == "audio" else 1
+            if resolved_segments and lock_priority > locked_audio_priority:
                 locked_audio = _merge_audio_track(
                     resolved_segments,
                     timeline_end,
@@ -1307,6 +1326,7 @@ def prepare_multitrack_project_media(
                     track_volume_db,
                     not audible,
                 )
+                locked_audio_priority = lock_priority
             if track_type == "audio":
                 # The project-level locked audio replaces this track for every
                 # task, so retaining it would add the same audio a second time.

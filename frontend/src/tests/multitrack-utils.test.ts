@@ -31,7 +31,7 @@ import {
   remapTrackDataFrameRate,
   resizeTaskSegmentEnd,
   secondsToFrame,
-  setExclusiveMultiTrackAudioTrackLock,
+  setMultiTrackAudioTrackLock,
   splitMultiTrackSegmentByFrames,
   snapMultiTrackMoveStartTime,
   snapMultiTrackResizeTime,
@@ -41,7 +41,7 @@ import {
 } from '@/lib/multitrack-utils'
 
 describe('multitrack utilities', () => {
-  it('keeps one audio lock across video and audio tracks', () => {
+  it('keeps video and audio locks independent while allowing one per type', () => {
     const data = createDefaultTrackData()
     const audioTrack = (id: string, audioLocked: boolean) => ({
       id,
@@ -55,15 +55,15 @@ describe('multitrack utilities', () => {
     })
     data.tracks.push(audioTrack('audio-a', true), audioTrack('audio-b', false))
 
-    const videoLocked = setExclusiveMultiTrackAudioTrackLock(data, data.tracks[1].id, true)
-    expect(videoLocked.tracks.filter((track) => track.type === 'video' || track.type === 'audio').map((track) => track.audio_locked)).toEqual([true, false, false])
+    const videoLocked = setMultiTrackAudioTrackLock(data, data.tracks[1].id, true)
+    expect(videoLocked.tracks.filter((track) => track.type === 'video' || track.type === 'audio').map((track) => track.audio_locked)).toEqual([true, true, false])
 
-    const updated = setExclusiveMultiTrackAudioTrackLock(videoLocked, 'audio-b', true)
-    expect(updated.tracks.filter((track) => track.type === 'video' || track.type === 'audio').map((track) => track.audio_locked)).toEqual([false, false, true])
-    expect(setExclusiveMultiTrackAudioTrackLock(data, 'missing', true)).toBe(data)
+    const updated = setMultiTrackAudioTrackLock(videoLocked, 'audio-b', true)
+    expect(updated.tracks.filter((track) => track.type === 'video' || track.type === 'audio').map((track) => track.audio_locked)).toEqual([true, false, true])
+    expect(setMultiTrackAudioTrackLock(data, 'missing', true)).toBe(data)
   })
 
-  it('normalizes multiple video and audio locks to the first audio-bearing track', () => {
+  it('normalizes multiple locks to the first locked track of each media type', () => {
     const data = createDefaultTrackData()
     data.tracks[1].audio_locked = true
     data.tracks.push({
@@ -72,7 +72,7 @@ describe('multitrack utilities', () => {
     })
 
     const normalized = normalizeTrackData(data)
-    expect(normalized.tracks.filter((track) => track.type === 'video' || track.type === 'audio').map((track) => track.audio_locked)).toEqual([true, false])
+    expect(normalized.tracks.filter((track) => track.type === 'video' || track.type === 'audio').map((track) => track.audio_locked)).toEqual([true, true])
   })
 
   it('migrates a legacy segment lock to its audio track', () => {

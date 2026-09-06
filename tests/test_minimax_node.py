@@ -3712,6 +3712,40 @@ def test_audio_lock_preserves_source_span_in_both_passes(
     assert len(encodes) == 2
 
 
+def test_audio_lock_priority_keeps_locked_video_timing(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    inputs = _h3_project_inputs(sampling_mode=_h3_sampling_mode("single"))
+    info = inputs["tracks_info"][0]
+    info["tracks"][0]["segments"][0]["end_frame"] = 125
+    info["tracks"].extend([
+        {
+            "type": "video",
+            "audio_locked": True,
+            "segments": [{
+                "start_frame": 0,
+                "end_frame": 125,
+                "content": {"media_type": "video"},
+            }],
+        },
+        {
+            "type": "audio",
+            "audio_locked": True,
+            "segments": [{
+                "start_frame": 0,
+                "end_frame": 125,
+                "content": {"media_type": "audio"},
+            }],
+        },
+    ])
+
+    result = module.EasyMultiTrackProject.execute(**inputs)
+
+    conditioning = _graph_node(result, "easy minimaxH3ToVideo")
+    assert conditioning["inputs"]["length"] == 141
+    audio_lock = _graph_node(result, "easy minimaxH3AudioLock")
+    assert audio_lock["inputs"]["audio"] == {"prepared_locked_audio": True}
+
+
 @pytest.mark.parametrize("track_type,locked,audio_only", [
     ("video", False, False), ("audio", False, False), ("audio", True, False),
     ("video", True, True), ("audio", True, True),

@@ -405,9 +405,16 @@ def validate_track_data(
                             f"{where}.content.images[{image_index}].shared_reference must be a boolean"
                         )
 
-    if len(locked_media_tracks) > 1:
-        locked_ids = [track_id for track_id, _, _ in locked_media_tracks]
-        raise WorkflowError(f"Only one audio/video track may be locked; found {locked_ids}")
+    for locked_type in ("audio", "video"):
+        locked_ids = [
+            track_id
+            for track_id, _, track_type in locked_media_tracks
+            if track_type == locked_type
+        ]
+        if len(locked_ids) > 1:
+            raise WorkflowError(
+                f"Only one {locked_type} track may be audio locked; found {locked_ids}"
+            )
     shared_media_tracks = [track_id for track_id, _, _ in shared_media_references]
     duplicate_shared_media_tracks = sorted({
         track_id
@@ -419,8 +426,7 @@ def validate_track_data(
             "Each audio/video track may contain only one shared reference; found multiple in "
             f"{duplicate_shared_media_tracks}"
         )
-    if locked_media_tracks:
-        locked_id, locked_index, locked_type = locked_media_tracks[0]
+    for locked_id, locked_index, locked_type in locked_media_tracks:
         locked_segments = tracks[locked_index].get("segments", [])
         if not any(
             isinstance(segment, dict)
@@ -635,8 +641,7 @@ def summarize_track(track: dict[str, Any]) -> dict[str, Any]:
     if track_type not in {"audio", "video"}:
         return summary
 
-    if track_type == "audio":
-        summary["audio_locked"] = track.get("audio_locked") is True
+    summary["audio_locked"] = track.get("audio_locked") is True
     summary["media"] = [
         {
             "file_name": content.get("file_name"),

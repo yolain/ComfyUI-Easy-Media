@@ -35,7 +35,7 @@ import {
   splitMultiTrackSegmentByFrames,
   snapSecondsToFrame,
   snapTimeToFrame,
-  setExclusiveMultiTrackAudioTrackLock,
+  setMultiTrackAudioTrackLock,
   syncMatchingTasksToPrimaryVideoTrack,
   syncMatchingTasksToPrimaryVideoSegment,
   updateMultiTrackSegmentContent,
@@ -628,7 +628,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   ) {
     if ('audio_locked' in patch) {
       commitNormalizedTrackChange(
-        setExclusiveMultiTrackAudioTrackLock(data, trackId, patch.audio_locked === true),
+        setMultiTrackAudioTrackLock(data, trackId, patch.audio_locked === true),
       )
       return
     }
