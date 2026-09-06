@@ -16,6 +16,7 @@
 
 ### 🐛 Bug Fixes
 
+- **Responsive Width Preservation**: Fixed an issue where all custom easymedia components would shrink in width after clicking the ComfyUI properties panel.
 - **Frame-Accurate Video Trimming**: Normalize source frame rates before trimming merged video inputs to keep segment boundaries aligned with the project timeline.
 
 The tapered context-noise approach used by Character Swap Context is adapted from [MacroSony/minimax-h3-chained-character-swap](https://github.com/MacroSony/minimax-h3-chained-character-swap).

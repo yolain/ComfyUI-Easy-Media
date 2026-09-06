@@ -14,6 +14,7 @@ import { LocaleContext } from '@/lib/i18n'
 import { useCanvasScale } from '@/hooks/use-canvas-scale'
 import { useElementWidth } from '@/hooks/use-element-width'
 import { useLatestRef } from '@/hooks/use-latest-ref'
+import { CUSTOM_NODE_CLASS } from '@/lib/constants'
 
 function ensureDefaults(raw: unknown): TimelineData {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
@@ -76,6 +77,7 @@ export function TimelineWidget({ value, onChange, app, node }: Readonly<ReactWid
   const data = ensureDefaults(value)
   const [displayFormat, setDisplayFormat] = useState<TimeDisplayFormat>('frames')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const contentWidth = useElementWidth(scrollContainerRef)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -342,6 +344,17 @@ export function TimelineWidget({ value, onChange, app, node }: Readonly<ReactWid
     ? maintainTrack.segments.find((s) => s.id === selectedId) as MaintainSegment | null ?? null
     : null
 
+  // The editor extends below the DOM widget. Temporarily opt this widget out of
+  // paint containment while an editor is open so the panel is not clipped.
+  useEffect(() => {
+    const widgetElement = rootRef.current?.closest('.comfyui-react-widget')
+    if (!widgetElement) return
+
+    const editorOpenClass = `${CUSTOM_NODE_CLASS}-timeline-editor-open`
+    widgetElement.classList.toggle(editorOpenClass, selectedSegment !== null)
+    return () => widgetElement.classList.remove(editorOpenClass)
+  }, [selectedSegment])
+
   function handleContentChange(patch: { text?: string; images?: unknown[] }) {
     if (!maintainTrack || !selectedId) return
     updateSegments(maintainTrack.id, maintainTrack.segments.map((s) =>
@@ -425,6 +438,7 @@ export function TimelineWidget({ value, onChange, app, node }: Readonly<ReactWid
     <TooltipProvider>
       {/* Root: relative so the EditPanel overlay can position against it; no overflow-hidden here */}
       <div
+        ref={rootRef}
         className={`relative flex flex-col h-full w-full text-foreground font-sans text-xs select-none${isNodeV2 ? ' nodeNew' : ''}`}
         onContextMenu={handleContextMenu}
         onClick={handleGlobalClick}

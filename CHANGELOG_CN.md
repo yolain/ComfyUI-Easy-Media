@@ -17,6 +17,7 @@
 
 ### 🐛 问题修复
 
+- **保持响应式宽度**：修复easymedia的所有自定义组件在点击ComfyUI属性面板后，宽度缩短的问题
 - **视频裁剪帧率对齐**：合并视频输入时先规范源视频帧率再执行裁剪，使片段边界与项目时间线保持帧级对齐。
 
 “主体替换上下文”采用的锥形上下文噪声方案参考并改编自 [MacroSony/minimax-h3-chained-character-swap](https://github.com/MacroSony/minimax-h3-chained-character-swap)。

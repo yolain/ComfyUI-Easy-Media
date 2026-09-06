@@ -69,18 +69,21 @@ comfyApp.registerExtension({
     return {
       TIMELINE: createReactWidget<TimelineData>(TimelineWidget, {
         defaultValue: DEFAULT_TIMELINE_VALUE,
+        keepResponsiveWidthInLiteGraph: true,
         domWidgetOptions: {
           getMinHeight: () => 180,
         },
       }),
       TRACK_DATA: createReactWidget<TrackData>(MultiTrackWidget, {
         defaultValue: DEFAULT_TRACK_DATA_VALUE,
+        keepResponsiveWidthInLiteGraph: true,
         domWidgetOptions: {
           getMinHeight: () => 320,
         },
       }),
       PROJECT_DATA: createReactWidget<ProjectData>(ProjectVideoCombineWidget, {
         defaultValue: JSON.stringify(DEFAULT_PROJECT_DATA),
+        keepResponsiveWidthInLiteGraph: true,
         domWidgetOptions: {
           getMinHeight: () => 520,
           hideOnZoom: false,
@@ -89,6 +92,7 @@ comfyApp.registerExtension({
       }),
       EASY_COMPARE_VIDEO: createReactWidget<CompareVideoSettings>(CompareVideoWidget, {
         defaultValue: DEFAULT_COMPARE_VIDEO_VALUE,
+        keepResponsiveWidthInLiteGraph: true,
         domWidgetOptions: {
           getMinHeight: () => 360,
           hideOnZoom: false,
@@ -97,6 +101,7 @@ comfyApp.registerExtension({
       }),
       EASY_API_ACCOUNT: createReactWidget<string>(PromptEnhancerAccountWidget, {
         defaultValue: '',
+        keepResponsiveWidthInLiteGraph: true,
         height: 44,
         domWidgetOptions: {
           getMinHeight: () => 44,

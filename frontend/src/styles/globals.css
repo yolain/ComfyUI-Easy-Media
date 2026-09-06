@@ -268,6 +268,13 @@
   contain: size layout paint;
 }
 
+/* Timeline's segment editor intentionally extends below the widget slot. */
+.comfyui-react-widget.__CUSTOM_NODE_CLASS__.__CUSTOM_NODE_CLASS__-timeline-editor-open {
+  overflow: visible;
+  contain: size layout;
+  z-index: 9999;
+}
+
 /* ── Overlay management ─────────────────────────────────────────────────────
  * When a Popover or ContextMenu is open, the widget container is elevated so
  * it stays interactive above the dismiss backdrop (z-9997).
