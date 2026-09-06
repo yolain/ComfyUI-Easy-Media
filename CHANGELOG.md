@@ -13,6 +13,7 @@
 ### ⚡ Improvements
 
 - **MultiTrack Project Media Preparation**: Consolidated task-scoped image, audio, video, shared-media, and locked-audio preparation so project expansion loads and forwards only the media required by each segment.
+- Clear Redundant Subgraph Cache: Fixed an issue where execution_cache in multi-track project subgraphs was unnecessarily storing video objects, causing additional memory accumulation.
 
 ### 🐛 Bug Fixes
 
