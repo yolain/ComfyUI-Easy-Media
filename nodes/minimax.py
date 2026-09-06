@@ -36,6 +36,7 @@ from ..utils.minimax import (
     h3_phase_aligned_context_start,
     remove_output_files_by_prefix,
 )
+from ..utils.prompt_override import build_minimax_prompt_override_json
 
 
 CATEGORY_MINIMAX = "EasyUse/MiniMax"
@@ -51,6 +52,144 @@ MAX_REF_AUDIOS = 3
 REFERENCE_BRIDGE_NODE_ID = "easy MiniMaxH3ReferenceToVideoBridge"
 TYPE_TRACKS_INFO = io.Custom(io_type="TRACKS_INFO")
 MULTITRACK_PROJECT_REFRESH_EVENT = "easy_multitrack_project_refresh"
+
+
+class EasyMinimaxPromptOverride(io.ComfyNode):
+    """Assemble MiniMax H3 per-segment prompt override JSON."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy minimaxPromptOverride",
+            display_name="MiniMax Prompt Override",
+            category=CATEGORY_MINIMAX,
+            description=(
+                "Assemble per-segment MiniMax H3 prompts, durations, generation "
+                "types, continuity modes, and track locks into a prompt_override "
+                "JSON string."
+            ),
+            inputs=[
+                io.String.Input(
+                    "system_prompt",
+                    optional=True,
+                    force_input=True,
+                    multiline=True,
+                    tooltip=(
+                        "Optional system prompt. When non-empty, this value is "
+                        "written into every task segment's system_prompt in the "
+                        "resulting TRACKS_INFO."
+                    ),
+                ),
+                io.Autogrow.Input(
+                    "prompts",
+                    template=io.Autogrow.TemplatePrefix(
+                        input=io.String.Input(
+                            "prompt",
+                            multiline=True,
+                            dynamic_prompts=True,
+                        ),
+                        prefix="prompt_",
+                        min=1,
+                        max=100,
+                    ),
+                    tooltip=(
+                        "One prompt per MiniMax H3 clip. Use @图片N/@音频N/@视频N "
+                        "or <Picture N>/<Audio N>/<Video N> to reference media slots."
+                    ),
+                ),
+                io.String.Input(
+                    "duration",
+                    default="10",
+                    tooltip=(
+                        "Seconds per clip. A single value like 10 applies to every "
+                        "clip; comma-separated values like 10,5,10 assign seconds "
+                        "in order, and missing values reuse the last value. Each "
+                        "value must be between 2 and 15 seconds."
+                    ),
+                ),
+                io.String.Input(
+                    "generation_type",
+                    default="r2v",
+                    tooltip=(
+                        "Generation type per clip. Supported values are r2v, i2v, "
+                        "and l2v; a single value applies to every clip, while "
+                        "comma-separated values like r2v,i2v,r2v assign types in "
+                        "order and reuse the last value when fewer are provided."
+                    ),
+                ),
+                io.String.Input(
+                    "continuity_mode",
+                    default="shot",
+                    tooltip=(
+                        "Continuity mode per clip. Supported values are shot, "
+                        "context, and context_swap; a single value applies to every "
+                        "clip, while comma-separated values like shot,context,context "
+                        "assign modes in order and reuse the last value when fewer "
+                        "are provided."
+                    ),
+                ),
+                io.Int.Input(
+                    "video_track_lock",
+                    default=0,
+                    min=0,
+                    max=3,
+                    step=1,
+                    tooltip=(
+                        "1-based index of the video track to lock; 0 disables "
+                        "video track locking."
+                    ),
+                ),
+                io.Int.Input(
+                    "audio_track_lock",
+                    default=0,
+                    min=0,
+                    max=3,
+                    step=1,
+                    tooltip=(
+                        "1-based index of the audio track to lock; 0 disables "
+                        "audio track locking."
+                    ),
+                ),
+            ],
+            outputs=[io.AnyType.Output("prompt_override")],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        prompts: io.Autogrow.Type,
+        duration: str = "10",
+        generation_type: str = "r2v",
+        continuity_mode: str = "shot",
+        system_prompt: str | None = None,
+        video_track_lock: int = 0,
+        audio_track_lock: int = 0,
+    ) -> io.NodeOutput:
+        prompt_values = [
+            value
+            for _key, value in sorted(
+                prompts.items(),
+                key=lambda item: _minimax_prompt_slot_index(item[0]),
+            )
+            if value is not None
+        ]
+        payload = build_minimax_prompt_override_json(
+            prompt_values,
+            str(duration),
+            str(generation_type),
+            str(continuity_mode),
+            system_prompt or "",
+            int(video_track_lock or 0),
+            int(audio_track_lock or 0),
+        )
+        return io.NodeOutput(payload)
+
+
+def _minimax_prompt_slot_index(name: str) -> int:
+    try:
+        return int(str(name).rsplit("_", 1)[1])
+    except (IndexError, ValueError):
+        return 0
 
 
 def _notify_multitrack_project_refresh(
@@ -835,7 +974,7 @@ class EasyH3MotionContextLatentTrim(io.ComfyNode):
         return io.Schema(
             node_id="easy h3MotionContextLatentTrim",
             display_name="H3 Motion Context Latent Trim",
-            category="_EasyUse/H3",
+            category="EasyUse/H3/dev",
             description=(
                 "Internal H3 context-tail copier used to release full-resolution "
                 "segment latents before the next segment starts."
@@ -937,7 +1076,7 @@ class EasyH3SegmentSamplingStart(io.ComfyNode):
         return io.Schema(
             node_id="easy h3SegmentSamplingStart",
             display_name="H3 Segment Sampling Start",
-            category="_EasyUse/H3",
+            category="EasyUse/H3/dev",
             inputs=[
                 io.Noise.Input("noise"),
                 io.Guider.Input("guider"),
@@ -998,7 +1137,7 @@ class EasyH3SegmentSaveEnd(io.ComfyNode):
         return io.Schema(
             node_id="easy h3SegmentSaveEnd",
             display_name="H3 Segment Save End",
-            category="_EasyUse/H3",
+            category="EasyUse/H3/dev",
             inputs=[
                 io.String.Input("video_path"),
                 io.String.Input("project_name"),
@@ -1028,7 +1167,7 @@ class EasyH3AudioContextLatent(io.ComfyNode):
         return io.Schema(
             node_id="easy h3AudioContextLatent",
             display_name="H3 Audio Context Latent",
-            category="_EasyUse/H3",
+            category="EasyUse/H3/dev",
             inputs=[
                 io.Latent.Input("audio_latent"),
                 io.Int.Input("output_frames", min=1),
@@ -1058,7 +1197,7 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
         return io.Schema(
             node_id="easy h3ContextMediaTrim",
             display_name="H3 Context Media Trim",
-            category="_EasyUse/H3",
+            category="EasyUse/H3/dev",
             description=(
                 "Internal exact-duration trim for context-linked H3 project clips."
             ),
@@ -1151,7 +1290,7 @@ class EasyH3LockedAudioDurationAlign(io.ComfyNode):
         return io.Schema(
             node_id="easy h3LockedAudioDurationAlign",
             display_name="H3 Locked Audio Duration Align",
-            category="_EasyUse/H3",
+            category="EasyUse/H3/dev",
             description=(
                 "Internal sub-frame duration correction for locked H3 audio."
             ),
@@ -1242,7 +1381,7 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         return io.Schema(
             node_id="easy h3ProjectArtifact",
             display_name="H3 Project Artifact",
-            category="_EasyUse/H3",
+            category="EasyUse/H3/dev",
             description="Internal H3 project artifact writer.",
             inputs=[
                 io.String.Input("project_name"),

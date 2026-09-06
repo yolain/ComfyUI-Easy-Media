@@ -19,6 +19,7 @@ from ..utils import (
     audio_db_to_gain,
     audio_is_muted,
     audio_volume_db,
+    build_minimax_multitrack_data_from_prompt_override,
     build_multitrack_data_from_prompt_override,
     burn_subtitles_with_ffmpeg,
     collect_multitrack_subtitle_segments,
@@ -30,6 +31,7 @@ from ..utils import (
     log_node_info,
     log_stage_time,
     iter_valid_audio_inputs,
+    is_minimax_prompt_override,
     merge_audio_inputs,
     audio_data_uris,
     image_tensor_data_uris,
@@ -41,6 +43,7 @@ from ..utils import (
     PromptEnhancerClient,
     prompt_enhancer_video_inputs,
     minimax_length_to_seconds,
+    minimax_prompt_override_media_types,
     merge_video_track_with_ffmpeg,
     canonicalize_multitrack_slot_content,
     multitrack_is_shared_reference,
@@ -540,6 +543,7 @@ def _deferred_video_dimensions(video_segments: list[tuple[int, int, dict]]) -> t
 
 
 _MAX_SHARED_AUDIO_REFERENCE_SECONDS = 15.0
+_MAX_SHARED_VIDEO_REFERENCE_SECONDS = 15.0
 
 
 def _shared_reference_segment(track: dict) -> 'dict | None':
@@ -586,6 +590,24 @@ def _build_shared_reference_audio(
         "waveform": reference * gain,
         "sample_rate": sample_rate,
     }
+
+
+def _build_shared_reference_video(video: object) -> object | None:
+    """Return the complete shared video, capped at 15 seconds when necessary."""
+    if video is None:
+        return None
+    try:
+        duration = float(video.get_duration())
+    except (AttributeError, TypeError, ValueError):
+        return video
+    if duration <= _MAX_SHARED_VIDEO_REFERENCE_SECONDS:
+        return video
+    trimmed = video.as_trimmed(
+        start_time=0.0,
+        duration=_MAX_SHARED_VIDEO_REFERENCE_SECONDS,
+        strict_duration=False,
+    )
+    return trimmed if trimmed is not None else video
 
 
 def _merge_video_track_tensor(
@@ -1023,9 +1045,11 @@ def _build_tracks_info_and_media_outputs(
                     None,
                 )
                 if shared_source is not None:
-                    shared_media_index = len(video_out)
-                    video_out.append(shared_source)
-                    shared_segment["content"]["shared_media_index"] = shared_media_index
+                    shared_video = _build_shared_reference_video(shared_source)
+                    if shared_video is not None:
+                        shared_media_index = len(video_out)
+                        video_out.append(shared_video)
+                        shared_segment["content"]["shared_media_index"] = shared_media_index
         normalized_tracks.append(normalized_track)
 
     if progress is not None and progress_value < progress.total:
@@ -1774,17 +1798,21 @@ class MultiTrackEditor(io.ComfyNode):
         audio: object = None,
         video: object = None,
     ) -> list[str]:
-        del resolution, format
+        del resolution
+        raw_format = format[0] if isinstance(format, list) and format else format
         raw_track_data = track_data[0] if isinstance(track_data, list) and track_data else track_data
         raw_override = (
             prompt_override[0]
             if isinstance(prompt_override, list) and len(prompt_override) == 1
             else prompt_override
         )
-        data = _parse_track_data(raw_track_data)
-        if prompt_override_has_value(raw_override):
-            data = build_multitrack_data_from_prompt_override(data, raw_override)
-        slot_types = multitrack_slot_media_types(data)
+        if raw_format == "MiniMax" and is_minimax_prompt_override(raw_override):
+            slot_types = minimax_prompt_override_media_types(raw_override)
+        else:
+            data = _parse_track_data(raw_track_data)
+            if prompt_override_has_value(raw_override):
+                data = build_multitrack_data_from_prompt_override(data, raw_override)
+            slot_types = multitrack_slot_media_types(data)
         values = {"image": image, "audio": audio, "video": video}
 
         def _missing_lazy_input(v):
@@ -1819,7 +1847,9 @@ class MultiTrackEditor(io.ComfyNode):
             prompt_override = prompt_override[0]
 
         data = _parse_track_data(track_data)
-        if prompt_override_has_value(prompt_override):
+        if format == "MiniMax" and is_minimax_prompt_override(prompt_override):
+            data = build_minimax_multitrack_data_from_prompt_override(data, prompt_override)
+        elif prompt_override_has_value(prompt_override):
             data = build_multitrack_data_from_prompt_override(data, prompt_override)
         materialize_media = multitrack_slot_media_types(data)
         tracks_info, images_out, audio_out, video_out = _build_tracks_info_and_media_outputs(
@@ -3959,7 +3989,7 @@ class MultiTrackPromptEnhanceToProjectApply(io.ComfyNode):
         return io.Schema(
             node_id=MULTITRACK_PROMPT_PROJECT_APPLY_NODE_ID,
             display_name="MultiTrack Prompt Enhance To Project Apply",
-            category="_easy_media/internal",
+            category=CATEGORY_MULTITRACK+"/internal",
             is_dev_only=True,
             accept_all_inputs=True,
             inputs=[
@@ -3992,7 +4022,7 @@ class MultiTrackPromptEnhancerImageListBridge(io.ComfyNode):
         return io.Schema(
             node_id=LLAMA_CPP_IMAGE_LIST_BRIDGE_NODE_ID,
             display_name="MultiTrack Prompt Enhancer Image List Bridge",
-            category="_easy_media/internal",
+            category=CATEGORY_MULTITRACK+"/internal",
             description=(
                 "Internal bridge that preserves list-style image inputs for the local "
                 "llama.cpp expansion graph."

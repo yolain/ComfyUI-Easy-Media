@@ -1327,6 +1327,43 @@
     },
     "outputs": { "0": { "name": "潜空间" } }
   },
+  "easy minimaxPromptOverride": {
+    "display_name": "MiniMax 提示词覆盖",
+    "description": "将每个 MiniMax H3 片段的提示词、生成时长、生成类型、衔接模式和轨道锁定组装为 prompt_override JSON 字符串。",
+    "inputs": {
+      "prompts": {
+        "name": "提示词列表",
+        "tooltip": "每个 MiniMax H3 片段对应一个提示词。可使用 @图片N/@音频N/@视频N 或 <Picture N>/<Audio N>/<Video N> 引用媒体输入；未使用的前置编号会自动向前递减。"
+      },
+      "duration": {
+        "name": "生成时长",
+        "tooltip": "每个片段的秒数。单个值如 10 会应用到所有片段；逗号分隔值如 10,5,10 会按顺序设置，少于片段数时复用最后一个值。每个值必须在 2～15 秒之间。"
+      },
+      "generation_type": {
+        "name": "生成类型",
+        "tooltip": "每个片段的生成类型。支持 r2v、t2v、i2v、v2v、l2v(尾帧)；单个值会应用到所有片段，逗号分隔值如 r2v,i2v,r2v 会按顺序设置，少于片段数时复用最后一个值。"
+      },
+      "continuity_mode": {
+        "name": "衔接模式",
+        "tooltip": "每个片段的衔接模式。支持 shot、context、context_swap；单个值会应用到所有片段，逗号分隔值如 shot,context,context 会按顺序设置，少于片段数时复用最后一个值。"
+      },
+      "system_prompt": {
+        "name": "系统提示词",
+        "tooltip": "可选。非空时会写入最终 tracks_info 中每个任务片段的 system_prompt。"
+      },
+      "video_track_lock": {
+        "name": "视频轨锁定",
+        "tooltip": "要锁定的视频轨序号（从 1 开始）；0 表示不锁定。"
+      },
+      "audio_track_lock": {
+        "name": "音频轨锁定",
+        "tooltip": "要锁定的音频轨序号（从 1 开始）；0 表示不锁定。"
+      }
+    },
+    "outputs": {
+      "0": { "name": "提示词覆盖" }
+    }
+  },
   "easy minimaxH3ToVideo": {
     "display_name": "简易 MiniMax H3 视频生成",
     "description": "统一生成 MiniMax H3 文生视频、参考生视频、首尾帧生视频和尾帧生视频条件。支持图像批次及图像、视频、音频列表；参考视频会自动拆分为图像序列和音频。",

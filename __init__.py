@@ -107,6 +107,7 @@ class EasyMediaExtension(ComfyExtension):
             EasyMultiTrackProject,
             EasyMultiTrackProjectVideoCombine,
             EasyMiniMaxH3ToVideo,
+            EasyMinimaxPromptOverride,
             EasyMiniMaxH3ReferenceToVideoBridge,
             EasyRemoveH3MotionContextLatent,
             # Wan

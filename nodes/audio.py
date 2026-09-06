@@ -69,7 +69,7 @@ class MakeAudioList(io.ComfyNode):
             category=CATEGORY_AUDIO,
             description="Combine up to 10 optional audio inputs into an audio list.",
             inputs=[
-                io.Boolean.Input("skip_empty", default=False, label_on="Skip", label_off="Fill"),
+                io.Boolean.Input("skip_empty", default=True, label_on="Skip", label_off="Fill"),
                 io.Audio.Input("audio1", optional=True),
                 io.Audio.Input("audio2", optional=True),
                 io.Audio.Input("audio3", optional=True),
