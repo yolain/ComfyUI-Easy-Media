@@ -3835,3 +3835,55 @@ def test_audio_lock_first_pass_checkpoint_keeps_full_sampling_latent(monkeypatch
     # The clean low context is still used for continuing the next segment.
     low = artifact["context_latent_low"]
     assert result.expand[low[0]]["class_type"] == "LTXVConcatAVLatent"
+
+
+def test_minimax_prompt_override_node_serializes_ordered_prompts(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    result = module.EasyMinimaxPromptOverride.execute(
+        {
+            "prompt_1": "second prompt",
+            "prompt_0": "@图片1 first prompt",
+            "prompt_2": None,
+        },
+        duration="10,5,10",
+        generation_type="r2v,i2v,l2v",
+        continuity_mode="shot,context,context_swap",
+        system_prompt="custom system prompt",
+        video_track_lock=1,
+        audio_track_lock=2,
+    )
+
+    payload = json.loads(result.values[0])
+    assert payload["type"] == "minimax_prompt_override"
+    assert payload["prompts"] == ["@图片1 first prompt", "second prompt"]
+    assert payload["duration"] == "10,5,10"
+    assert payload["generation_type"] == "r2v,i2v,l2v"
+    assert payload["continuity_mode"] == "shot,context,context_swap"
+    assert payload["system_prompt"] == "custom system prompt"
+    assert payload["video_track_lock"] == 1
+    assert payload["audio_track_lock"] == 2
+
+
+def test_minimax_prompt_override_node_has_complete_chinese_localization():
+    node_defs = json.loads(
+        (Path(__file__).parents[1] / "locales" / "zh" / "nodeDefs.json").read_text()
+    )
+    translation = node_defs["easy minimaxPromptOverride"]
+
+    assert translation["display_name"] == "MiniMax 提示词覆盖"
+    assert set(translation["inputs"]) == {
+        "prompts",
+        "duration",
+        "generation_type",
+        "continuity_mode",
+        "system_prompt",
+        "video_track_lock",
+        "audio_track_lock",
+    }
+    assert translation["inputs"]["duration"]["name"] == "生成时长"
+    assert translation["inputs"]["generation_type"]["name"] == "生成类型"
+    assert translation["inputs"]["continuity_mode"]["name"] == "衔接模式"
+    assert translation["inputs"]["system_prompt"]["name"] == "系统提示词"
+    assert translation["inputs"]["video_track_lock"]["name"] == "视频轨锁定"
+    assert translation["inputs"]["audio_track_lock"]["name"] == "音频轨锁定"
+    assert translation["outputs"] == {"0": {"name": "提示词覆盖"}}

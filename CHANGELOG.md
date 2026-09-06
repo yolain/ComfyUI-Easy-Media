@@ -2,13 +2,14 @@
 
 ---
 
-## [1.3.1] - 2026-09-06
+## [1.3.1] - 2026-09-07
 
 ### ✨ New Features
 
 - **Character Swap Context**: Added the `context_swap` continuity mode for MiniMax H3 task segments. It preserves motion continuity while weakening the previous character's appearance with disposable tapered latent noise.
 - **Dual-Pass Swap Continuity**: Apply swap noise independently to the low-resolution first-pass context and the high-resolution second-pass context. Audio remains untouched, and only clean trimmed/re-encoded context latents are saved for later segments.
 - **Video-Track Audio Lock**: Lock a video track segment as the timeline constraint for MiniMax H3 generation, ensuring the output duration matches the video; once locked, the audio is synchronized and locked as well. To replace the audio lock, you can lock another audio track as the new audio source while keeping the video track unchanged for the visual. (Mainly used for motion transfer and character replacement.)
+- **Minimax Prompt Override**: Added the `easy minimaxPromptOverride` node, which supports assembling prompts and other parameters into the multitrack editor's prompt_override, suitable for explicit passing in.
 
 ### ⚡ Improvements
 

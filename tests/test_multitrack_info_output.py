@@ -1531,6 +1531,28 @@ def test_multitrack_editor_lazy_inputs_include_prompt_override_slots():
     ) == ["audio", "image", "video"]
 
 
+def test_multitrack_editor_lazy_inputs_include_minimax_prompt_override_slots():
+    module = _load_basic_module()
+    payload = json.dumps(
+        {
+            "type": "minimax_prompt_override",
+            "version": 1,
+            "prompts": ["@图片2 first", "@视频1 second"],
+            "duration": "10,10",
+            "video_track_lock": 0,
+            "audio_track_lock": 0,
+        },
+        ensure_ascii=False,
+    )
+
+    assert module.MultiTrackEditor.check_lazy_status(
+        {"resolution": "640 x 360"},
+        "MiniMax",
+        {"total_length": 8, "frame_rate": 2, "tracks": []},
+        prompt_override=payload,
+    ) == ["image", "video"]
+
+
 def test_multitrack_editor_materializes_only_the_referenced_audio_slot(monkeypatch):
     module = _load_basic_module()
     source_audio = {"waveform": torch.ones(1, 1, 4), "sample_rate": 2}
@@ -5047,3 +5069,270 @@ def test_multitrack_editor_preserves_audio_only_custom_resolution():
         {"total_length": 120, "frame_rate": 24, "tracks": []},
     )
     assert (result.values[0]["width"], result.values[0]["height"]) == (32, 32)
+
+
+def test_minimax_prompt_override_renumbers_and_skips_unreferenced_slots():
+    module = _load_basic_module()
+    images = [torch.full((1, 2, 2, 3), float(value)) for value in (1, 2, 3)]
+    audios = [
+        {"waveform": torch.full((1, 1, 4), float(value)), "sample_rate": 2}
+        for value in (1, 2, 3)
+    ]
+    payload = json.dumps(
+        {
+            "type": "minimax_prompt_override",
+            "version": 1,
+            "prompts": ["@图片2 @音频2 first", "@图片3 @音频3 second", "third"],
+            "duration": "2,2,2",
+            "video_track_lock": 0,
+            "audio_track_lock": 0,
+        },
+        ensure_ascii=False,
+    )
+
+    result = module.MultiTrackEditor.execute(
+        {"resolution": "1344 x 768 (16:9)"},
+        "MiniMax",
+        {"total_length": 1, "frame_rate": 2, "tracks": []},
+        prompt_override=payload,
+        image=images,
+        audio=audios,
+    )
+
+    tracks_info, image_out, audio_out, _video_out = result.values
+    task_track = tracks_info["tracks"][0]
+    assert [segment["content"]["text"] for segment in task_track["segments"]] == [
+        "<Picture 1> <Audio 1> first",
+        "<Picture 2> <Audio 2> second",
+        "third",
+    ]
+    assert [
+        image_info["media_index"]
+        for segment in task_track["segments"]
+        for image_info in segment["content"]["images"]
+    ] == [0, 1]
+    assert len(image_out) == 2
+    assert torch.equal(image_out[0], images[1])
+    assert torch.equal(image_out[1], images[2])
+
+    audio_tracks = [
+        track for track in tracks_info["tracks"] if track["type"] == "audio"
+    ]
+    assert [track["name"] for track in audio_tracks] == ["Audio 2", "Audio 3"]
+    assert len(audio_out) == 4
+    assert audio_tracks[0]["segments"][0]["content"]["shared_reference"] is True
+    assert audio_tracks[1]["segments"][0]["content"]["shared_reference"] is True
+    assert audio_tracks[0]["segments"][0]["content"]["shared_media_index"] == 1
+    assert audio_tracks[1]["segments"][0]["content"]["shared_media_index"] == 3
+    assert audio_out[1]["waveform"].flatten().tolist() == [2.0, 2.0, 2.0, 2.0]
+    assert audio_out[3]["waveform"].flatten().tolist() == [3.0, 3.0, 3.0, 3.0]
+    assert audio_out[0]["waveform"].flatten().tolist() == [2.0, 2.0, 2.0, 2.0]
+    assert audio_out[2]["waveform"].flatten().tolist() == [
+        0.0, 0.0, 0.0, 0.0, 3.0, 3.0, 3.0, 3.0,
+    ]
+
+
+def test_minimax_prompt_override_builds_locked_media_tracks():
+    module = _load_basic_module()
+    payload = json.dumps(
+        {
+            "type": "minimax_prompt_override",
+            "version": 1,
+            "prompts": ["@视频1 @音频1 first", "@视频2 @音频2 second"],
+            "duration": "10,10",
+            "video_track_lock": 2,
+            "audio_track_lock": 1,
+        },
+        ensure_ascii=False,
+    )
+
+    data = module.build_minimax_multitrack_data_from_prompt_override(
+        {"total_length": 1, "frame_rate": 24, "tracks": []},
+        payload,
+    )
+
+    video_tracks = [track for track in data["tracks"] if track["type"] == "video"]
+    audio_tracks = [track for track in data["tracks"] if track["type"] == "audio"]
+    assert [track["name"] for track in video_tracks] == ["Video 1", "Video 2"]
+    assert video_tracks[0].get("audio_locked") is not True
+    assert video_tracks[1]["audio_locked"] is True
+    assert [track["name"] for track in audio_tracks] == ["Audio 1", "Audio 2"]
+    assert audio_tracks[0]["audio_locked"] is True
+    assert audio_tracks[1].get("audio_locked") is not True
+
+
+def test_minimax_prompt_override_applies_generation_and_continuity_modes():
+    module = _load_basic_module()
+    payload = json.dumps(
+        {
+            "type": "minimax_prompt_override",
+            "version": 1,
+            "prompts": ["first", "second", "third"],
+            "duration": "10,5,10",
+            "generation_type": "r2v,i2v,l2v",
+            "continuity_mode": "shot,context,context",
+            "video_track_lock": 0,
+            "audio_track_lock": 0,
+        },
+        ensure_ascii=False,
+    )
+
+    data = module.build_minimax_multitrack_data_from_prompt_override(
+        {"total_length": 1, "frame_rate": 24, "tracks": []},
+        payload,
+    )
+    task_segments = data["tracks"][0]["segments"]
+
+    assert [
+        (
+            segment["content"]["task_type"],
+            segment["content"]["task_mode"],
+            segment["content"]["continuity_mode"],
+        )
+        for segment in task_segments
+    ] == [
+        ("r2v", "ref", "shot"),
+        ("i2v", "default", "context"),
+        ("l2v", "l2v", "context"),
+    ]
+
+
+def test_minimax_prompt_override_duration_values_are_bounded_to_2_through_15():
+    module = _load_basic_module()
+
+    def build_with_duration(duration):
+        payload = json.dumps(
+            {
+                "type": "minimax_prompt_override",
+                "version": 1,
+                "prompts": ["single prompt"],
+                "duration": duration,
+                "generation_type": "r2v",
+                "continuity_mode": "shot",
+                "video_track_lock": 0,
+                "audio_track_lock": 0,
+            },
+            ensure_ascii=False,
+        )
+        return module.build_minimax_multitrack_data_from_prompt_override(
+            {"total_length": 1, "frame_rate": 24, "tracks": []},
+            payload,
+        )
+
+    assert build_with_duration("2")["tracks"][0]["segments"][0]["end_frame"] == 48
+    assert build_with_duration("15")["tracks"][0]["segments"][0]["end_frame"] == 360
+    for invalid in ("1", "16", "10,1", "10,16"):
+        with pytest.raises(ValueError, match="between 2 and 15"):
+            build_with_duration(invalid)
+
+
+def test_minimax_prompt_override_applies_system_prompt_when_present():
+    module = _load_basic_module()
+    payload = json.dumps(
+        {
+            "type": "minimax_prompt_override",
+            "version": 1,
+            "prompts": ["first", "second"],
+            "duration": "10,5",
+            "generation_type": "r2v,i2v",
+            "continuity_mode": "shot,context",
+            "system_prompt": "custom system prompt",
+            "video_track_lock": 0,
+            "audio_track_lock": 0,
+        },
+        ensure_ascii=False,
+    )
+
+    data = module.build_minimax_multitrack_data_from_prompt_override(
+        {"total_length": 1, "frame_rate": 24, "tracks": []},
+        payload,
+    )
+    task_segments = data["tracks"][0]["segments"]
+
+    assert [
+        segment["content"]["system_prompt"]
+        for segment in task_segments
+    ] == ["custom system prompt", "custom system prompt"]
+
+
+def test_minimax_prompt_override_video_reference_keeps_source_duration():
+    module = _load_basic_module()
+    source_video = _FakeVideo(
+        _VideoComponents(
+            torch.zeros(4, 32, 32, 3),
+            None,
+            Fraction(1),
+        )
+    )
+    payload = json.dumps(
+        {
+            "type": "minimax_prompt_override",
+            "version": 1,
+            "prompts": ["@视频1 first"],
+            "duration": "2",
+            "generation_type": "r2v",
+            "continuity_mode": "shot",
+            "video_track_lock": 0,
+            "audio_track_lock": 0,
+        },
+        ensure_ascii=False,
+    )
+
+    result = module.MultiTrackEditor.execute(
+        {"resolution": "32 x 32 (1:1)"},
+        "MiniMax",
+        {"total_length": 1, "frame_rate": 1, "tracks": []},
+        prompt_override=payload,
+        video=[source_video],
+    )
+    tracks_info, _images, _audio, videos = result.values
+    video_track = next(
+        track for track in tracks_info["tracks"] if track["type"] == "video"
+    )
+    shared_content = video_track["segments"][0]["content"]
+
+    assert shared_content["shared_reference"] is True
+    assert shared_content["shared_media_index"] == 1
+
+    task_result = module.MultiTrackTaskOutput.execute(
+        tracks_info,
+        video=videos,
+        task_index=0,
+    )
+    assert task_result.values[6][0] is videos[1]
+    assert task_result.values[6][0].get_components().images.shape[0] == 4
+
+
+def test_build_shared_reference_video_caps_source_to_15_seconds():
+    module = _load_basic_module()
+    video = _FakeVideo(
+        _VideoComponents(
+            torch.zeros(20, 2, 2, 3),
+            None,
+            Fraction(1),
+        )
+    )
+
+    result = module._build_shared_reference_video(video)
+
+    assert result is video
+    assert video.trim_calls == [(0.0, 15.0, False)]
+
+
+def test_minimax_prompt_override_media_types_only_includes_referenced_media():
+    module = _load_basic_module()
+    payload = json.dumps(
+        {
+            "type": "minimax_prompt_override",
+            "version": 1,
+            "prompts": ["@图片2 first", "@视频1 second"],
+            "duration": "10,10",
+            "video_track_lock": 0,
+            "audio_track_lock": 0,
+        },
+        ensure_ascii=False,
+    )
+
+    assert module.minimax_prompt_override_media_types(payload) == {"image", "video"}
+    assert module.is_minimax_prompt_override(payload) is True
+    assert module.is_minimax_prompt_override("@图片1 legacy override") is False
