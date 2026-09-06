@@ -4236,6 +4236,18 @@ def test_multitrack_prompt_enhance_to_project_schema_reuses_enhancer_widgets():
     assert all(output_port.kwargs.get("tooltip") for output_port in schema.outputs)
 
 
+def test_multitrack_prompt_enhance_to_project_does_not_inherit_enhancer_types():
+    module = _load_basic_module()
+
+    # ComfyUI V3 caches RETURN_TYPES on the base node class. Keeping this node
+    # as a sibling instead of a subclass prevents it from inheriting the
+    # enhancer's STRING outputs for its TRACKS_INFO output.
+    assert not issubclass(
+        module.MultiTrackPromptEnhanceToProject,
+        module.MultiTrackPromptEnhancer,
+    )
+
+
 def test_multitrack_prompt_enhance_to_project_updates_each_task_in_time_order(
     monkeypatch,
 ):

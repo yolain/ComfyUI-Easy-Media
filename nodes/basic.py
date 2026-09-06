@@ -3795,7 +3795,11 @@ def _multitrack_project_prompt_request(
     return chat_system_prompt, chat_user_prompt, task_type, max(1, length)
 
 
-class MultiTrackPromptEnhanceToProject(MultiTrackPromptEnhancer):
+# Deliberately do not subclass MultiTrackPromptEnhancer. ComfyUI V3 caches
+# RETURN_TYPES and related schema-derived attributes on the first class that
+# accesses them; a subclass would inherit the enhancer's STRING outputs instead
+# of re-evaluating this node's TRACKS_INFO output.
+class MultiTrackPromptEnhanceToProject(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
@@ -3828,7 +3832,9 @@ class MultiTrackPromptEnhanceToProject(MultiTrackPromptEnhancer):
                 ),
                 io.DynamicCombo.Input(
                     "model",
-                    options=cls._model_options(force_synchronous=True),
+                    options=MultiTrackPromptEnhancer._model_options(
+                        force_synchronous=True,
+                    ),
                     tooltip="Provider and model used to enhance every task prompt.",
                 ),
                 io.Int.Input(
