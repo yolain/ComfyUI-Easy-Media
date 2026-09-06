@@ -373,7 +373,6 @@ class EasyMultiTrackProject(io.ComfyNode):
             ),
             is_input_list=True,
             enable_expand=True,
-            is_output_node=True,
             not_idempotent=True,
             inputs=[
                 TYPE_TRACKS_INFO.Input("tracks_info"),
