@@ -777,7 +777,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                 else "shot"
             )
             uses_context = continuity_mode in H3_CONTEXT_CONTINUITY_MODES
-            uses_swap_noise = continuity_mode == "context_swap"
+            uses_swap = continuity_mode == "context_swap"
             locked_audio_track = h3_locked_audio_track(entry, info)
             has_task_locked_audio = locked_audio_track is not None
             preserve_video_timing = (
@@ -953,7 +953,7 @@ class EasyMultiTrackProject(io.ComfyNode):
             first_pass_sampling_model = model
             if has_context_continuity:
                 report_segment_step(0.22)
-                if uses_swap_noise:
+                if uses_swap:
                     context_swap = graph.node(
                         "easy MiniMaxH3ContextSwap",
                         id=f"first_pass_context_swap_noise_{task_index}",
