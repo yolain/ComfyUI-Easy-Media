@@ -867,13 +867,13 @@ class EasyMiniMaxH3MotionContextHard(io.ComfyNode):
         return io.NodeOutput(output, trim_frames, hard_latent)
 
 
-class EasyMiniMaxH3ContextSwapNoise(io.ComfyNode):
+class EasyMiniMaxH3ContextSwap(io.ComfyNode):
     """Use pure Drift-Control AV for context_swap without any context noise."""
 
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            node_id="easy MiniMaxH3ContextSwapNoise",
+            node_id="easy MiniMaxH3ContextSwap",
             display_name="Easy MiniMax H3 Context Swap Pure Drift-Control AV",
             category=CATEGORY_MINIMAX,
             description=(

@@ -955,7 +955,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                 report_segment_step(0.22)
                 if uses_swap_noise:
                     context_swap = graph.node(
-                        "easy MiniMaxH3ContextSwapNoise",
+                        "easy MiniMaxH3ContextSwap",
                         id=f"first_pass_context_swap_noise_{task_index}",
                         model=model,
                         latent=initial_latent,
