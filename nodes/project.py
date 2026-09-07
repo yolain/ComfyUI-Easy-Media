@@ -926,14 +926,6 @@ class EasyMultiTrackProject(io.ComfyNode):
                 if has_second_pass
                 else previous_hires_context_latent
             )
-            if uses_swap_noise and first_pass_context_latent is not None:
-                first_pass_context_latent = graph.node(
-                    "easy MiniMaxH3ContextSwapNoise",
-                    id=f"first_pass_context_swap_noise_{task_index}",
-                    context_latent=first_pass_context_latent,
-                    context_length=str(context_source_frames),
-                    seed=(first_pass_seed + task_index) & 0xFFFFFFFFFFFFFFFF,
-                ).out(0)
             has_context_continuity = (
                 uses_context
                 and first_pass_context_latent is not None
@@ -958,24 +950,42 @@ class EasyMultiTrackProject(io.ComfyNode):
                     frame_rate=fps,
                 ).out(0)
 
-            # 使用优化后的 MotionContext
+            first_pass_sampling_model = model
             if has_context_continuity:
                 report_segment_step(0.22)
-                motion_context = graph.node(
-                    "easy MiniMaxH3MotionContextHard",
-                    id=f"hard_motion_context_{task_index}",
-                    conditioning=positive,
-                    vae=vae,
-                    latent=initial_latent,
-                    context_latent=first_pass_context_latent,
-                    context_length=str(context_source_frames),
-                    video_transition_steps=4,
-                    audio_transition_steps=4,
-                )
-                positive = motion_context.out(0)
-                first_pass_context_trim_frames = motion_context.out(1)
-                context_trim_frames = first_pass_context_trim_frames
-                initial_latent = motion_context.out(2)
+                if uses_swap_noise:
+                    context_swap = graph.node(
+                        "easy MiniMaxH3ContextSwapNoise",
+                        id=f"first_pass_context_swap_noise_{task_index}",
+                        model=model,
+                        latent=initial_latent,
+                        context_latent=first_pass_context_latent,
+                        sigmas=first_pass_sigmas,
+                        context_length=str(context_source_frames),
+                        seed=(first_pass_seed + task_index) & 0xFFFFFFFFFFFFFFFF,
+                        continue_audio=True,
+                        freeze_audio=False,
+                    )
+                    first_pass_sampling_model = context_swap.out(0)
+                    initial_latent = context_swap.out(1)
+                    first_pass_context_trim_frames = context_swap.out(2)
+                    context_trim_frames = first_pass_context_trim_frames
+                else:
+                    motion_context = graph.node(
+                        "easy MiniMaxH3MotionContextHard",
+                        id=f"hard_motion_context_{task_index}",
+                        conditioning=positive,
+                        vae=vae,
+                        latent=initial_latent,
+                        context_latent=first_pass_context_latent,
+                        context_length=str(context_source_frames),
+                        video_transition_steps=4,
+                        audio_transition_steps=4,
+                    )
+                    positive = motion_context.out(0)
+                    first_pass_context_trim_frames = motion_context.out(1)
+                    context_trim_frames = first_pass_context_trim_frames
+                    initial_latent = motion_context.out(2)
             else:
                 report_segment_step(0.22)
 
@@ -983,7 +993,7 @@ class EasyMultiTrackProject(io.ComfyNode):
             first_pass_guider = graph.node(
                 "BasicGuider",
                 id=f"first_pass_guider_{task_index}",
-                model=model,
+                model=first_pass_sampling_model,
                 conditioning=positive,
             )
             if task_index == resume_task_index:
@@ -1098,26 +1108,19 @@ class EasyMultiTrackProject(io.ComfyNode):
                         audio_latent=separated.out(1),
                     ).out(0)
 
+                second_pass_sampling_model = second_model
                 if (
                     uses_context
                     and previous_hires_context_latent is not None
                 ):
                     report_segment_step(0.59)
-                    hires_context_latent = previous_hires_context_latent
-                    if uses_swap_noise:
-                        hires_context_latent = graph.node(
-                            "easy MiniMaxH3ContextSwapNoise",
-                            id=f"hires_context_swap_noise_{task_index}",
-                            context_latent=hires_context_latent,
-                            context_length=str(context_source_frames),
-                            seed=(second_pass_seed + task_index + 1)
-                            & 0xFFFFFFFFFFFFFFFF,
-                        ).out(0)
+                    # Second pass is deliberately kept as an ordinary hi-res refine path.
+                    # No context noise, no split-prior, and no Drift-Control patching here.
                     hires_continuity = graph.node(
                         "easy MiniMaxH3HiResContinuity",
                         id=f"hires_continuity_{task_index}",
                         current_hires_latent=upscaled_latent,
-                        previous_hires_latent=hires_context_latent,
+                        previous_hires_latent=previous_hires_context_latent,
                         context_length="22",
                         video_transition_steps=4,
                     )
@@ -1134,7 +1137,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                 second_pass_guider = graph.node(
                     "BasicGuider",
                     id=f"second_pass_guider_{task_index}",
-                    model=second_model,
+                    model=second_pass_sampling_model,
                     conditioning=second_pass_positive,
                 )
                 report_segment_step(0.71)

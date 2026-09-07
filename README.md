@@ -488,8 +488,8 @@ bun run build:release
 - [Whisper](https://github.com/openai/whisper)
 - [VoxCPM2](https://github.com/OpenBMB/VoxCPM)
 - [Bernini S2V](https://huggingface.co/rzgar/Bernini-R-S2V)
-- [H3-Motion-Context](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context)
-- [MiniMax H3 Chained Character Swap](https://github.com/MacroSony/minimax-h3-chained-character-swap)
+- [H3 Motion Context](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context)
+- [Drive Control for h3 motion context](https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop)
 - [MiniMax H3 Latent Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler)
 
 ## Source of Inspiration

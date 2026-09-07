@@ -13,6 +13,7 @@
 
 ### ⚡ Improvements
 
+- **Character Swap Context (drive_control)**: Switched from the previous noise-based approach to `drive_control`. Testing shows drive_control is more stable and preserves more motion details. Although it may appear slightly less sharp visually than the noise approach, it is better suited for preserving source motion in character replacement and motion transfer scenarios.
 - **MultiTrack Project Media Preparation**: Consolidated task-scoped image, audio, video, shared-media, and locked-audio preparation so project expansion loads and forwards only the media required by each segment.
 - Clear Redundant Subgraph Cache: Fixed an issue where execution_cache in multi-track project subgraphs was unnecessarily storing video objects, causing additional memory accumulation.
 
