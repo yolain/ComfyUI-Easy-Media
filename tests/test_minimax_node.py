@@ -2401,7 +2401,7 @@ def test_multitrack_h3_context_swap_noises_both_passes_without_replacing_context
     noise_nodes = [
         (node_id, node)
         for node_id, node in result.expand.items()
-        if node["class_type"] == "easy MiniMaxH3ContextSwapNoise"
+        if node["class_type"] == "easy MiniMaxH3ContextSwap"
     ]
     assert len(noise_nodes) == 2
     first_noise_id, first_noise = next(

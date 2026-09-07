@@ -1192,9 +1192,9 @@
       "2": { "name": "潜空间" }
     }
   },
-  "easy MiniMaxH3ContextSwapNoise": {
-    "display_name": "简易 MiniMax H3 局部替换上下文噪声",
-    "description": "为局部替换创建一次性上下文副本：仅对视频潜空间添加锥形噪声，音频保持不变。",
+  "easy MiniMaxH3ContextSwap": {
+    "display_name": "简易 MiniMax H3 局部替换上下文",
+    "description": "为局部替换创建一次性上下文，音频保持不变。",
     "inputs": {
       "context_latent": { "name": "上下文潜空间" },
       "context_length": { "name": "上下文长度" },

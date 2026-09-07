@@ -527,30 +527,66 @@ def detect_turbo_lora_from_prompt(
         return None
 
     for node_id, node in _upstream_nodes(prompt_graph, [loader_node_id]):
-        if node.get("class_type") != "fast lorasLoader":
-            continue
-        inputs = node.get("inputs")
-        if not isinstance(inputs, Mapping):
-            continue
-        for index in range(1, 11):
-            key = f"lora_{index}"
-            if key not in inputs:
-                break
-            lora_config = inputs[key]
-            if not isinstance(lora_config, Mapping):
+        class_type = node.get("class_type")
+
+        # fast lorasLoader — check lora_1..lora_10 entries
+        if class_type == "fast lorasLoader":
+            inputs = node.get("inputs")
+            if not isinstance(inputs, Mapping):
                 continue
-            lora_name = lora_config.get("lora")
-            if _has_turbo_name(lora_name) and _is_enabled(
-                lora_config.get("enabled")
-            ):
-                return TurboModelDetection(
-                    status="turbo",
-                    source="graph_prompt",
-                    evidence=(
-                        f"upstream fast lorasLoader node {node_id} input {key} "
-                        f"enables Turbo LoRA: {lora_name}"
-                    ),
-                )
+            for index in range(1, 11):
+                key = f"lora_{index}"
+                if key not in inputs:
+                    break
+                lora_config = inputs[key]
+                if not isinstance(lora_config, Mapping):
+                    continue
+                lora_name = lora_config.get("lora")
+                if _has_turbo_name(lora_name) and _is_enabled(
+                    lora_config.get("enabled")
+                ):
+                    return TurboModelDetection(
+                        status="turbo",
+                        source="graph_prompt",
+                        evidence=(
+                            f"upstream fast lorasLoader node {node_id} input {key} "
+                            f"enables Turbo LoRA: {lora_name}"
+                        ),
+                    )
+            continue
+
+        # UNETLoader — check unet_name for turbo
+        if class_type == "UNETLoader":
+            inputs = node.get("inputs")
+            if isinstance(inputs, Mapping):
+                unet_name = inputs.get("unet_name")
+                if _has_turbo_name(unet_name):
+                    return TurboModelDetection(
+                        status="turbo",
+                        source="graph_prompt",
+                        evidence=(
+                            f"upstream UNETLoader node {node_id} uses "
+                            f"Turbo UNET: {unet_name}"
+                        ),
+                    )
+            continue
+
+        # fast h3Loader — check main_model and parent_model for turbo
+        if class_type == "fast h3Loader":
+            inputs = node.get("inputs")
+            if not isinstance(inputs, Mapping):
+                continue
+            for model_key in ("main_model", "parent_model"):
+                model_value = inputs.get(model_key)
+                if _has_turbo_name(model_value):
+                    return TurboModelDetection(
+                        status="turbo",
+                        source="graph_prompt",
+                        evidence=(
+                            f"upstream fast h3Loader node {node_id} "
+                            f"{model_key} is Turbo: {model_value}"
+                        ),
+                    )
     return None
 
 

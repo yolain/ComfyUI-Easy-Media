@@ -14,12 +14,12 @@ from comfy_api.latest import io
 from comfy_execution.graph_utils import GraphBuilder
 
 from ..modules.motion_context.core import (
-    apply_context_swap_noise,
     apply_hires_continuity,
     apply_motion_context,
     build_hard_motion_context,
     trim_motion_context_latent,
 )
+from ..modules.motion_context.drift_control_av import apply_context_swap_drift_control
 from ..utils import log_node_info, log_stage_time, synchronize_execution_device
 from ..utils.h3_project import (
     choose_h3_generation,
@@ -867,21 +867,27 @@ class EasyMiniMaxH3MotionContextHard(io.ComfyNode):
         return io.NodeOutput(output, trim_frames, hard_latent)
 
 
-class EasyMiniMaxH3ContextSwapNoise(io.ComfyNode):
-    """Build a disposable noised context for appearance replacement."""
+class EasyMiniMaxH3ContextSwap(io.ComfyNode):
+    """Use pure Drift-Control AV for context_swap without any context noise."""
 
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            node_id="easy MiniMaxH3ContextSwapNoise",
-            display_name="Easy MiniMax H3 Context Swap Noise",
+            node_id="easy MiniMaxH3ContextSwap",
+            display_name="Easy MiniMax H3 Context Swap Pure Drift-Control AV",
             category=CATEGORY_MINIMAX,
             description=(
-                "Temporarily weaken appearance information in an H3 video "
-                "context while preserving its audio stream."
+                "Internal context_swap continuation: copy the previous sampled "
+                "H3 AV latent tail directly into the disposable target prefix, "
+                "keep the saved predecessor clean, and release the video prefix "
+                "with a sigma-matched dynamic denoise mask. No context noise or "
+                "detail-refresh branch is applied."
             ),
             inputs=[
+                io.Model.Input("model"),
+                io.Latent.Input("latent"),
                 io.Latent.Input("context_latent"),
+                io.Sigmas.Input("sigmas"),
                 io.Combo.Input(
                     "context_length",
                     options=["22", "5", "39", "56"],
@@ -893,26 +899,62 @@ class EasyMiniMaxH3ContextSwapNoise(io.ComfyNode):
                     min=0,
                     max=0xFFFFFFFFFFFFFFFF,
                     control_after_generate=io.ControlAfterGenerate.fixed,
+                    tooltip=(
+                        "Retained only for graph compatibility with older context_swap "
+                        "patches. Pure Drift-Control ignores this value."
+                    ),
+                ),
+                io.Boolean.Input(
+                    "continue_audio",
+                    default=True,
+                    tooltip=(
+                        "Copy the previous audio-latent tail and use an 8-tick "
+                        "half-cosine soft release at the seam."
+                    ),
+                ),
+                io.Boolean.Input(
+                    "freeze_audio",
+                    default=False,
+                    tooltip=(
+                        "Keep the current audio latent fully frozen. This is used "
+                        "only when explicitly calling the node for hi-res video-prefix "
+                        "continuity, but the default project patch uses ordinary hi-res refine."
+                    ),
                 ),
             ],
-            outputs=[io.Latent.Output("context_latent")],
+            outputs=[
+                io.Model.Output("model"),
+                io.Latent.Output("latent"),
+                io.Int.Output("trim_frames"),
+            ],
             is_dev_only=True,
         )
 
     @classmethod
     def execute(
         cls,
+        model: Any,
+        latent: dict[str, Any],
         context_latent: dict[str, Any],
+        sigmas: Any,
         context_length: str = "22",
         seed: int = 0,
+        continue_audio: bool = True,
+        freeze_audio: bool = False,
     ) -> io.NodeOutput:
-        return io.NodeOutput(
-            apply_context_swap_noise(
-                context_latent,
+        _ = seed
+        patched_model, prepared_latent, trim_frames = (
+            apply_context_swap_drift_control(
+                model=model,
+                target_latent=latent,
+                context_latent=context_latent,
+                sigmas=sigmas,
                 context_length=context_length,
-                seed=seed,
+                continue_audio=continue_audio,
+                freeze_audio=freeze_audio,
             )
         )
+        return io.NodeOutput(patched_model, prepared_latent, trim_frames)
 
 
 class EasyMiniMaxH3HiResContinuity(io.ComfyNode):
