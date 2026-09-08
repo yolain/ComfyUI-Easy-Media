@@ -13,7 +13,7 @@ A ComfyUI custom node package for streamlined media loading and video pipeline a
 [![][github-license-shield]][github-license-link]
 [![][workflow-shield]][workflow-link]
 
-<img src="https://github.com/user-attachments/assets/493947f1-3fff-4503-b2d3-408591b7597f" style="width:100%">
+<img src="https://github.com/user-attachments/assets/cb2ff081-cb73-4d26-87f0-49380c4d6360" style="width:100%">
 </div>
 
 ## 📦 Installation
@@ -489,7 +489,7 @@ bun run build:release
 - [VoxCPM2](https://github.com/OpenBMB/VoxCPM)
 - [Bernini S2V](https://huggingface.co/rzgar/Bernini-R-S2V)
 - [H3 Motion Context](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context)
-- [Drive Control for h3 motion context](https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop)
+- [Drift Control for h3 motion context](https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop)
 - [MiniMax H3 Latent Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler)
 
 ## Source of Inspiration
