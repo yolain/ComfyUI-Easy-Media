@@ -56,7 +56,7 @@ from .utils.media import (
     list_dir_shallow,
     list_recent_media_files,
 )
-from .modules.subtitle_recognition import (
+from .modules.asr.subtitle_recognition import (
     MissingSubtitleRecognitionDependenciesError,
     recognize_audio_subtitles,
     subtitle_recognition_options,

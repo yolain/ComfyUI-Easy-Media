@@ -56,7 +56,9 @@ def _load_node_module():
     nodes_package.__path__ = []
     modules_package = types.ModuleType("easy_media.modules")
     modules_package.__path__ = []
-    recognition_module = types.ModuleType("easy_media.modules.subtitle_recognition")
+    asr_package = types.ModuleType("easy_media.modules.asr")
+    asr_package.__path__ = []
+    recognition_module = types.ModuleType("easy_media.modules.asr.subtitle_recognition")
     recognition_module.SUBTITLE_RECOGNITION_METHODS = ["qwen3-asr", "whisper-large-v3"]
     recognition_module.recognize_audio_subtitles = lambda *args: []
     utils_module = types.ModuleType("easy_media.utils")
@@ -71,7 +73,8 @@ def _load_node_module():
         "easy_media": package,
         "easy_media.nodes": nodes_package,
         "easy_media.modules": modules_package,
-        "easy_media.modules.subtitle_recognition": recognition_module,
+        "easy_media.modules.asr": asr_package,
+        "easy_media.modules.asr.subtitle_recognition": recognition_module,
         "easy_media.utils": utils_module,
     })
     path = Path(__file__).parents[1] / "nodes" / "subtitle.py"

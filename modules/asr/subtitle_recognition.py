@@ -5,8 +5,8 @@ from threading import Lock
 
 from . import qwen_asr, whisper_asr
 try:
-    from ..utils.models import require_qwen_asr_model_dirs, require_whisper_large_v3_model_path
-    from ..utils.subtitles import smart_split_subtitle_segments
+    from ...utils.models import require_qwen_asr_model_dirs, require_whisper_large_v3_model_path
+    from ...utils.subtitles import smart_split_subtitle_segments
 except ImportError:
     from utils.models import require_qwen_asr_model_dirs, require_whisper_large_v3_model_path
     from utils.subtitles import smart_split_subtitle_segments

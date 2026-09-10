@@ -8,7 +8,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from utils import subtitles
-from modules import qwen_asr, whisper_asr
+from modules.asr import qwen_asr, whisper_asr
 
 
 class _FakeCuda:

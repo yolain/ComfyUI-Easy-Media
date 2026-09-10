@@ -6,8 +6,8 @@ from pathlib import Path
 import re
 
 try:
-    from ..utils.model_memory import cleanup_model_memory
-    from ..utils.subtitles import (
+    from ...utils.model_memory import cleanup_model_memory
+    from ...utils.subtitles import (
         _detect_language,
         _detect_text,
         _restore_subtitle_punctuation,

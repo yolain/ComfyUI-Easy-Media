@@ -5,7 +5,7 @@ from pathlib import Path
 
 from comfy_api.latest import Types, io
 
-from ..modules.subtitle_recognition import (
+from ..modules.asr.subtitle_recognition import (
     SUBTITLE_RECOGNITION_METHODS,
     recognize_audio_subtitles,
 )

@@ -5,7 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from modules import subtitle_recognition
+from modules.asr import subtitle_recognition
 
 
 def test_recognize_audio_subtitles_dispatches_qwen3_asr(monkeypatch, tmp_path):
