@@ -48,15 +48,35 @@ def _tile_payload(payload, context, video, audio, axis, start, end):
     if payload.get("keyframes"):
         keyframes = []
         for keyframe in payload["keyframes"]:
-            latent = keyframe["latent"]
+            latent = keyframe.get("latent")
+            if latent is None:
+                keyframes.append(dict(keyframe))
+                continue
             if latent.shape[-2:] != (height, width):
-                raise ValueError("SelfLift: tiled H3 keyframes must match the target latent height and width")
+                raise ValueError(
+                    "SelfLift: tiled H3 keyframes must match the target latent "
+                    "height and width"
+                )
             region = latent.narrow(axis, start, end - start)
-            keyframes.append({**keyframe, "latent": comfy.ldm.common_dit.pad_to_patch_size(
-                region, (1, 2, 2)).contiguous()})
+            keyframes.append(
+                {
+                    **keyframe,
+                    "latent": comfy.ldm.common_dit.pad_to_patch_size(
+                        region,
+                        (1, 2, 2),
+                    ).contiguous(),
+                }
+            )
         tiled["keyframes"] = keyframes
-        if not payload.get("refs"):
-            tiled["cond_video_latents"] = [keyframe["latent"] for keyframe in keyframes]
+        tiled["cond_video_latents"] = [
+            keyframe["latent"]
+            for keyframe in keyframes
+            if keyframe.get("latent") is not None
+        ] + [
+            reference["latent"]
+            for reference in payload.get("refs") or []
+            if reference.get("latent") is not None
+        ]
     tile_height = end - start if axis == 3 else height
     tile_width = end - start if axis == 4 else width
     layout = _packed_layout((context.shape[1], video.shape[2], (tile_height + 1) // 2 * 2,
@@ -69,6 +89,28 @@ def _tile_payload(payload, context, video, audio, axis, start, end):
         layout.position_ids[target_start:target_end].copy_(positions)
     tiled["layout"] = layout
     return tiled
+
+
+def _tile_denoise_mask(mask, video, axis, start, end):
+    """Crop a spatial H3 denoise mask to the same region as its video tile."""
+    if mask is None or not isinstance(mask, torch.Tensor):
+        return mask
+    if mask.ndim != video.ndim:
+        raise ValueError(
+            "SelfLift: tiled H3 video denoise mask must have the same number "
+            "of dimensions as the video latent"
+        )
+    if mask.shape[2] != video.shape[2] or any(
+        mask.shape[spatial_axis] not in (1, video.shape[spatial_axis])
+        for spatial_axis in (3, 4)
+    ):
+        raise ValueError(
+            "SelfLift: tiled H3 video denoise mask does not match the target "
+            "latent temporal/spatial shape"
+        )
+    if mask.shape[axis] == 1:
+        return mask
+    return mask.narrow(axis, start, end - start).contiguous()
 
 
 def _tiled_forward(executor, streams, timestep, context, transformer_options, minimax_payload=None,
@@ -84,13 +126,28 @@ def _tiled_forward(executor, streams, timestep, context, transformer_options, mi
     # Keep the stitched accumulator on CPU so previous tiles do not remain on
     # the accelerator while the next tile is evaluated.
     video_output = torch.zeros(video.shape, dtype=torch.float32, device="cpu")
-    audio_output = None
+    audio_output = torch.zeros(audio.shape, dtype=torch.float32, device="cpu")
+    audio_weight_total = 0.0
     weights = torch.zeros(length, dtype=torch.float32, device="cpu")
     for index, (start, end) in enumerate(regions):
         tile = video.narrow(axis, start, end - start).contiguous()
         payload = _tile_payload(minimax_payload or {}, context, video, audio, axis, start, end)
+        tile_kwargs = kwargs.copy()
+        tile_kwargs["denoise_mask"] = _tile_denoise_mask(
+            tile_kwargs.get("denoise_mask"),
+            video,
+            axis,
+            start,
+            end,
+        )
         predicted_video, predicted_audio = executor(
-            [tile, audio], timestep, context, transformer_options.copy(), minimax_payload=payload, **kwargs)
+            [tile, audio],
+            timestep,
+            context,
+            transformer_options.copy(),
+            minimax_payload=payload,
+            **tile_kwargs,
+        )
         window = torch.ones(end - start, device=video.device, dtype=torch.float32)
         if index > 0:
             overlap = min(end, regions[index - 1][1]) - start
@@ -101,15 +158,20 @@ def _tiled_forward(executor, streams, timestep, context, transformer_options, mi
         predicted_video = predicted_video.float().cpu()
         window = window.cpu()
         weights[start:end].add_(window)
+        audio_weight = float(window.sum().item())
+        audio_output.add_(predicted_audio.float().cpu(), alpha=audio_weight)
+        audio_weight_total += audio_weight
         window_shape = [1] * video.ndim
         window_shape[axis] = end - start
         video_output.narrow(axis, start, end - start).addcmul_(predicted_video.float(), window.view(window_shape))
-        if audio_output is None:
-            audio_output = predicted_audio.float().clone()
         del tile, payload, predicted_video, predicted_audio, window
     window_shape[axis] = length
     video_output.div_(weights.view(window_shape))
-    return [video_output.to(device=video.device, dtype=video.dtype), audio_output.to(audio.dtype)]
+    audio_output.div_(audio_weight_total)
+    return [
+        video_output.to(device=video.device, dtype=video.dtype),
+        audio_output.to(device=audio.device, dtype=audio.dtype),
+    ]
 
 
 def _condition_elements(condition, tile_height, tile_width, channels):
