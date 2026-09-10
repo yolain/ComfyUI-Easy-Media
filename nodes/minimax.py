@@ -1171,6 +1171,147 @@ class EasyH3SegmentSamplingStart(io.ComfyNode):
         return io.NodeOutput(noise, guider, sampler, sigmas, latent_image)
 
 
+class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
+    """Run an NFE-preserving low-to-high-resolution MiniMax H3 sample."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy minimaxH3SelfLiftSampler",
+            display_name="MiniMax H3 SelfLift Sampler",
+            category=CATEGORY_MINIMAX,
+            description=(
+                "Sample the early denoiser evaluations at low resolution, lift "
+                "the clean endpoint, and finish the same Euler schedule at the "
+                "target resolution. The sampler is always standard Euler."
+            ),
+            inputs=[
+                io.Model.Input("model"),
+                io.Conditioning.Input("positive"),
+                io.Vae.Input("vae"),
+                io.Latent.Input("latent_image"),
+                io.Sigmas.Input("sigmas"),
+                io.Int.Input(
+                    "seed",
+                    default=0,
+                    min=0,
+                    max=0xFFFFFFFFFFFFFFFF,
+                    control_after_generate=io.ControlAfterGenerate.fixed,
+                ),
+                io.Float.Input(
+                    "transition_ratio",
+                    default=0.6,
+                    min=0.05,
+                    max=0.95,
+                    step=0.05,
+                    tooltip=(
+                        "Fraction of denoiser evaluations performed at low "
+                        "resolution. This is an NFE ratio, not a sigma-value cutoff."
+                    ),
+                ),
+                io.Float.Input(
+                    "lowres_scale",
+                    default=0.6,
+                    min=0.25,
+                    max=1.0,
+                    step=0.001,
+                    round=0.001,
+                    extra_dict={"precision": 3},
+                    tooltip=(
+                        "Scale of the low-resolution prefix relative to the "
+                        "target latent."
+                    ),
+                ),
+                io.Combo.Input(
+                    "upscaler_model",
+                    options=["None"]
+                    + folder_paths.get_filename_list("latent_upscale_models"),
+                    default="None",
+                    tooltip=(
+                        "Optional MiniMax H3 latent upscaler. None uses nearest "
+                        "latent lifting without a pixel/VAE round trip."
+                    ),
+                ),
+                io.String.Input("project_name", default="", optional=True),
+                io.Int.Input("segment_index", default=0, min=0, optional=True),
+            ],
+            outputs=[io.Latent.Output("latent")],
+            is_dev_only=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        model: Any,
+        positive: Any,
+        vae: Any,
+        latent_image: dict[str, Any],
+        sigmas: torch.Tensor,
+        seed: int,
+        transition_ratio: float = 0.6,
+        lowres_scale: float = 0.6,
+        upscaler_model: str = "None",
+        project_name: str = "",
+        segment_index: int = 0,
+    ) -> io.NodeOutput:
+        from ..modules.selflift.sampling import progressive_sample_h3
+
+        lowres_factor = float(lowres_scale)
+        if not math.isfinite(lowres_factor) or not 0.25 <= lowres_factor <= 1.0:
+            raise ValueError(
+                "MiniMax H3 SelfLift lowres_scale must be between 0.25 and 1"
+            )
+
+        selected_upscaler = str(upscaler_model)
+        latent_lifter = None
+        if selected_upscaler != "None":
+            from ..modules.selflift.h3_latent_upscale import learned_latent_lift
+
+            def latent_lifter(
+                latent: torch.Tensor,
+                target_size: tuple[int, int],
+            ) -> torch.Tensor:
+                return learned_latent_lift(
+                    latent,
+                    target_size,
+                    selected_upscaler,
+                )
+
+        if project_name:
+            _notify_multitrack_project_refresh(
+                project_name,
+                "before",
+                int(segment_index),
+                "single",
+            )
+        log_node_info(
+            "MiniMax H3 SelfLift Sampler",
+            f"Sampling segment {int(segment_index)} with forced Euler, "
+            f"transition_ratio={float(transition_ratio):.3f}, "
+            f"lowres_scale={lowres_factor:.3f}, "
+            f"upscaler_model={selected_upscaler}",
+        )
+        try:
+            sampled = progressive_sample_h3(
+                model=model,
+                positive=positive,
+                vae=vae,
+                latent_image=latent_image,
+                sigmas=sigmas,
+                seed=int(seed),
+                transition_ratio=float(transition_ratio),
+                lowres_scale=lowres_factor,
+                latent_lifter=latent_lifter,
+                # Match the original H3 default: latent-only lifting. Keeping the
+                # pixel route disabled avoids a full-video VAE round trip and leaves
+                # a clean extension point for later artifact correction work.
+                rho=0.0,
+            )
+        except (RuntimeError, TypeError, ValueError) as error:
+            raise RuntimeError(f"MiniMax H3 SelfLift sampling failed: {error}") from error
+        return io.NodeOutput(sampled)
+
+
 class EasyH3SegmentSaveEnd(io.ComfyNode):
     """Forward a staged project segment video path."""
 

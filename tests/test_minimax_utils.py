@@ -86,3 +86,21 @@ def test_h3_phase_aligned_context_start_rejects_invalid_context(context_frames):
 
     with pytest.raises(ValueError):
         module.h3_phase_aligned_context_start(120, context_frames)
+
+
+@pytest.mark.parametrize(
+    ("step_count", "ratio", "expected"),
+    [(8, 0.6, 5), (10, 0.6, 6), (12, 0.6, 7), (2, 0.95, 1)],
+)
+def test_selflift_transition_step_uses_nfe_ratio(step_count, ratio, expected):
+    module = _load_minimax_utils()
+
+    assert module.selflift_transition_step(step_count, ratio) == expected
+
+
+@pytest.mark.parametrize("step_count,ratio", [(1, 0.6), (8, 0.0), (8, 1.0)])
+def test_selflift_transition_step_rejects_invalid_boundaries(step_count, ratio):
+    module = _load_minimax_utils()
+
+    with pytest.raises(ValueError):
+        module.selflift_transition_step(step_count, ratio)

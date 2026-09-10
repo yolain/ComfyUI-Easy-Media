@@ -178,6 +178,7 @@ def _load_minimax_node(monkeypatch):
         Image=_PortType,
         Int=_PortType,
         Latent=_PortType,
+        Model=_PortType,
         NodeOutput=_NodeOutput,
         Noise=_PortType,
         Sampler=_PortType,
@@ -393,6 +394,16 @@ def _load_minimax_node(monkeypatch):
     assert motion_context_spec is not None and motion_context_spec.loader is not None
     motion_context_module = importlib.util.module_from_spec(motion_context_spec)
     motion_context_spec.loader.exec_module(motion_context_module)
+    drift_control_module = types.ModuleType(
+        "easy_media.modules.motion_context.drift_control_av"
+    )
+    drift_control_module.apply_context_swap_drift_control = (
+        lambda model, target_latent, context_latent, **kwargs: (
+            model,
+            target_latent,
+            int(kwargs.get("context_length", 22)),
+        )
+    )
 
     modules = {
         "comfy_api": comfy_api,
@@ -412,6 +423,7 @@ def _load_minimax_node(monkeypatch):
         "easy_media.modules": project_modules_package,
         "easy_media.modules.motion_context": motion_context_package,
         "easy_media.modules.motion_context.core": motion_context_module,
+        "easy_media.modules.motion_context.drift_control_av": drift_control_module,
         "easy_media.utils": utils_package,
         "easy_media.utils.multitrack": multitrack_module,
         "easy_media.utils.h3_presets": h3_presets_module,
@@ -671,7 +683,7 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
     assert json.loads(json.dumps(sampling_plan_options)) == sampling_plan_options
     assert inputs["sampling_plan"].kwargs["default"] == "light"
     sampling_mode_options = inputs["sampling_mode"].kwargs["options"]
-    assert sampling_mode_options == ["single", "dual"]
+    assert sampling_mode_options == ["single", "dual", "selflift"]
     for name in ("sampler_2nd", "sigmas_2nd", "model_loader_2nd"):
         assert inputs[name].kwargs["optional"] is True
     assert inputs["1st_pass_only"].kwargs["default"] is False
@@ -706,7 +718,15 @@ def test_multitrack_h3_project_loads_segment_media_from_tracks_info(monkeypatch)
     }
 
 
-@pytest.mark.parametrize("sampling_mode,first_only", [("single", False), ("dual", False), ("dual", True)])
+@pytest.mark.parametrize(
+    "sampling_mode,first_only",
+    [
+        ("single", False),
+        ("dual", False),
+        ("dual", True),
+        ("selflift", False),
+    ],
+)
 def test_project_memory_boundaries_follow_artifact_saves(monkeypatch, sampling_mode, first_only):
     module = _load_minimax_node(monkeypatch)
     installed = []
@@ -1509,6 +1529,124 @@ def test_multitrack_h3_fast_dual_non_turbo_uses_preset_sigmas_and_pixel_upscale(
     ]
     assert sampler_names == ["euler", "sa_solver"]
     assert any(node["class_type"] == "DisableNoise" for node in nodes)
+
+
+def test_multitrack_h3_selflift_uses_target_size_and_one_progressive_sample(
+    monkeypatch,
+):
+    module = _load_minimax_node(monkeypatch)
+
+    result = module.EasyMultiTrackProject.execute(
+        **_h3_project_inputs(
+            sampling_mode=_h3_sampling_mode("selflift"),
+            sampling_plan=["medium"],
+            upscale_by=[1.25],
+            upscale_model=["None"],
+        )
+    )
+
+    nodes = list(result.expand.values())
+    selflift = next(
+        node
+        for node in nodes
+        if node["class_type"] == "easy minimaxH3SelfLiftSampler"
+    )
+    artifact = next(
+        node
+        for node in nodes
+        if node["class_type"] == "easy h3ProjectArtifact"
+    )
+    conditioning = next(
+        node for node in nodes if node["class_type"] == "easy minimaxH3ToVideo"
+    )
+    sigma_nodes = [node for node in nodes if node["class_type"] == "ManualSigmas"]
+
+    assert len(sigma_nodes) == 1
+    assert sigma_nodes[0]["inputs"]["sigmas"].startswith("1.0000, 0.9956")
+    assert not any(node["class_type"] == "KSamplerSelect" for node in nodes)
+    assert not any(node["class_type"] == "SamplerCustomAdvanced" for node in nodes)
+    assert not any(node["class_type"] == "VAEEncode" for node in nodes)
+    assert not any(node["class_type"] == "ImageResizeKJv2" for node in nodes)
+    assert (conditioning["inputs"]["width"], conditioning["inputs"]["height"]) == (
+        1344,
+        768,
+    )
+    assert selflift["inputs"]["transition_ratio"] == 0.6
+    assert selflift["inputs"]["lowres_scale"] == 0.6
+    assert "upscale_by" not in selflift["inputs"]
+    assert selflift["inputs"]["upscaler_model"] == "None"
+    assert artifact["inputs"]["sampling_pass"] == "single"
+    assert artifact["inputs"]["tracks_info"]["width"] == 1344
+    assert artifact["inputs"]["tracks_info"]["height"] == 768
+
+
+def test_multitrack_h3_selflift_reads_nested_upscale_model(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+
+    result = module.EasyMultiTrackProject.execute(
+        **_h3_project_inputs(
+            sampling_mode=_h3_sampling_mode(
+                "selflift",
+                upscale_by=[2.5],
+                upscale_model=["h3_upscale.safetensors"],
+            ),
+        )
+    )
+
+    selflift = next(
+        node
+        for node in result.expand.values()
+        if node["class_type"] == "easy minimaxH3SelfLiftSampler"
+    )
+    assert selflift["inputs"]["lowres_scale"] == 0.6
+    assert "upscale_by" not in selflift["inputs"]
+    assert selflift["inputs"]["upscaler_model"] == "h3_upscale.safetensors"
+
+
+def test_selflift_sampler_schema_forces_euler_by_not_exposing_a_sampler(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+
+    schema = module.EasyMiniMaxH3SelfLiftSampler.define_schema()
+    inputs = {port.name: port for port in schema.inputs}
+
+    assert schema.node_id == "easy minimaxH3SelfLiftSampler"
+    assert schema.is_dev_only is True
+    assert "sampler" not in inputs
+    assert inputs["transition_ratio"].kwargs["default"] == 0.6
+    assert inputs["lowres_scale"].kwargs["default"] == 0.6
+    assert "upscale_by" not in inputs
+
+
+def test_selflift_sampler_uses_lowres_scale(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    captured = {}
+    sampled = {"samples": object()}
+    sampling_module = types.ModuleType("easy_media.modules.selflift.sampling")
+
+    def progressive_sample_h3(**kwargs):
+        captured.update(kwargs)
+        return sampled
+
+    sampling_module.progressive_sample_h3 = progressive_sample_h3
+    monkeypatch.setitem(
+        sys.modules,
+        "easy_media.modules.selflift.sampling",
+        sampling_module,
+    )
+
+    result = module.EasyMiniMaxH3SelfLiftSampler.execute(
+        model=object(),
+        positive=[],
+        vae=object(),
+        latent_image={"samples": torch.zeros(1, 24, 1, 60, 104)},
+        sigmas=torch.tensor([1.0, 0.0]),
+        seed=42,
+        transition_ratio=0.6,
+        lowres_scale=0.6,
+    )
+
+    assert captured["lowres_scale"] == pytest.approx(0.6)
+    assert result.values == (sampled,)
 
 
 @pytest.mark.parametrize("upscale_model", ["None", "h3_upscale.safetensors"])
