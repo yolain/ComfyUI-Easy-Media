@@ -23,10 +23,6 @@ from comfy.ldm.minimax.vae import LATENTS_MEAN, LATENTS_STD
 
 from .diagnostics import log_memory
 
-_FOLDER = "latent_upscale_models"
-
-if _FOLDER not in folder_paths.folder_names_and_paths:
-    folder_paths.add_model_folder_path(_FOLDER, os.path.join(folder_paths.models_dir, _FOLDER))
 
 
 def _normalization(channels):
@@ -239,20 +235,6 @@ class LatentResizer3D(nn.Module):
 _model_cache = {}
 
 
-def list_upscaler_models():
-    try:
-        paths = folder_paths.get_folder_paths(_FOLDER)
-    except KeyError:
-        return []
-    names = []
-    for p in paths:
-        for root, _, files in os.walk(p):
-            for f in files:
-                if os.path.splitext(f)[1].lower() in (".pth", ".safetensors"):
-                    names.append(os.path.relpath(os.path.join(root, f), p))
-    return sorted(names)
-
-
 def _detect_arch(sd):
     import re
     cfg = {"in_channels": 24, "in_blocks": 12, "out_blocks": 12, "channels": 512,
@@ -310,14 +292,10 @@ def _load_model(model_name, device):
     if key in _model_cache:
         return _model_cache[key]
 
-    path = None
-    for p in folder_paths.get_folder_paths(_FOLDER):
-        candidate = os.path.join(p, model_name)
-        if os.path.isfile(candidate):
-            path = candidate
-            break
-    if path is None:
-        raise FileNotFoundError(f"latent upscaler model not found: {model_name} (place it under ComfyUI/models/{_FOLDER}/)")
+    try:
+        path = folder_paths.get_full_path('latent_upscale_models', model_name)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"latent upscaler model not found: {model_name} (place it under ComfyUI/models/latent_upscale_models/)")
 
     import comfy.utils
     sd = comfy.utils.load_torch_file(path)
@@ -343,15 +321,23 @@ def _load_model(model_name, device):
     return patcher
 
 
-def _inference_memory_required(model, z0_low, out_hw):
+def _inference_memory_required(model, z0_low, out_hw, enable_temporal_chunking=True):
     H, W = out_hw
     T = z0_low.shape[2]
-    temporal_window = model.temporal_window_budget(T)
+    temporal_window = model.temporal_window_budget(T) if enable_temporal_chunking else T
     feature_elements = z0_low.shape[0] * model.conv_in.out_channels * temporal_window * H * W
     return feature_elements * model.conv_in.weight.element_size() * 8
 
 
-def learned_latent_lift(z0_low, out_hw, model_name, device=None):
+def learned_latent_lift(
+    z0_low,
+    out_hw,
+    model_name,
+    device=None,
+    *,
+    enable_temporal_chunking=True,
+    force_unload=False,
+):
     """2D/3D learned upsample of the low-res clean endpoint to the target latent size.
 
     z0_low: [B, 24, T, h, w] H3 video latent in VAE space. Returns [B, 24, T, H, W].
@@ -365,14 +351,19 @@ def learned_latent_lift(z0_low, out_hw, model_name, device=None):
     log_memory("upscaler before_load", device)
     patcher = _load_model(model_name, device)
     model = patcher.model
-    memory_required = _inference_memory_required(model, z0_low, (H, W))
+    memory_required = _inference_memory_required(
+        model,
+        z0_low,
+        (H, W),
+        enable_temporal_chunking=enable_temporal_chunking,
+    )
     length = z0_low.shape[2]
     chunk, overlap = model.temporal_chunk_settings()
     identity = (H, W) == (h, w)
-    chunked = not identity and length > chunk
+    chunked = enable_temporal_chunking and not identity and length > chunk
     windows = list(_temporal_windows(length, chunk, overlap)) if chunked else []
     actual_window = max(end - start + 2 * overlap for _, _, start, end in windows) if chunked else length
-    budget_window = model.temporal_window_budget(length)
+    budget_window = model.temporal_window_budget(length) if enable_temporal_chunking else length
     logging.info("[SelfLift upscaler] model=%s dtype=%s input=%s target_hw=%s "
                  "spatial_lift=(%.4f, %.4f) scale_embedding=%.4f mode=%s "
                  "chunk=%d overlap=%d windows=%d max_input_window=%d budget_window=%d "
@@ -381,16 +372,31 @@ def learned_latent_lift(z0_low, out_hw, model_name, device=None):
                  H / h, W / w, scale - 1.0, "identity" if identity else "chunked" if chunked else "full",
                  chunk, overlap if chunked else 0, len(windows) if chunked else int(not identity),
                  actual_window if not identity else 0, budget_window, memory_required / 2**20)
-    comfy.model_management.load_models_gpu([patcher], memory_required=memory_required)
-    log_memory("upscaler after_load", device)
-    dtype = model.conv_in.weight.dtype
-    mean = torch.tensor(LATENTS_MEAN, dtype=dtype, device=device).view(1, -1, 1, 1, 1)
-    std = torch.tensor(LATENTS_STD, dtype=dtype, device=device).view(1, -1, 1, 1, 1)
+    try:
+        comfy.model_management.load_models_gpu([patcher], memory_required=memory_required)
+        log_memory("upscaler after_load", device)
+        dtype = model.conv_in.weight.dtype
+        mean = torch.tensor(LATENTS_MEAN, dtype=dtype, device=device).view(1, -1, 1, 1, 1)
+        std = torch.tensor(LATENTS_STD, dtype=dtype, device=device).view(1, -1, 1, 1, 1)
 
-    x = z0_low.to(device=device, dtype=dtype)
-    with torch.no_grad():
-        x = (x - mean) / std
-        out = model(x, scale=scale, target_size=(z0_low.shape[2], H, W))
-        out = (out * std + mean).float().to(comfy.model_management.intermediate_device())
-    log_memory("upscaler end", device)
-    return out
+        x = z0_low.to(device=device, dtype=dtype)
+        with torch.no_grad():
+            x = (x - mean) / std
+            out = model(
+                x,
+                scale=scale,
+                target_size=(z0_low.shape[2], H, W),
+                enable_chunking=enable_temporal_chunking,
+            )
+            out = (out * std + mean).float().to(
+                comfy.model_management.intermediate_device()
+            )
+        log_memory("upscaler end", device)
+        return out
+    finally:
+        if force_unload:
+            comfy.model_management.unload_model_and_clones(
+                patcher,
+                unload_additional_models=False,
+            )
+            comfy.model_management.soft_empty_cache()

@@ -99,6 +99,7 @@ class EasyMediaExtension(ComfyExtension):
             EasyH3MotionContextLatentTrim,
             EasyH3ProjectContextLatentLoad,
             EasyH3SegmentSamplingStart,
+            EasyMiniMaxH3LatentUpscaler,
             EasyMiniMaxH3SelfLiftSampler,
             EasyH3SegmentSaveEnd,
             EasyH3ContextMediaTrim,

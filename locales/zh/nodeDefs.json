@@ -1218,9 +1218,41 @@
       "1": { "name": "裁剪帧数" }
     }
   },
+  "easy minimaxH3LatentUpscaler": {
+    "display_name": "MiniMax H3 潜空间放大",
+    "description": "使用 Easy Media 内置的 3D 推理实现放大 MiniMax H3 视频潜空间；嵌套 AV 输入会保留音频流。",
+    "inputs": {
+      "latent": { "name": "潜空间" },
+      "model_name": { "name": "放大模型" },
+      "mode": {
+        "name": "尺寸模式",
+        "options": {
+          "scale by multiplier": "按倍率放大",
+          "target dimensions": "指定目标尺寸",
+          "megapixels": "指定百万像素"
+        }
+      },
+      "scale": { "name": "放大倍率" },
+      "width": { "name": "目标宽度" },
+      "height": { "name": "目标高度" },
+      "megapixels": { "name": "目标百万像素" },
+      "align": { "name": "像素对齐" },
+      "enable_temporal_chunking": {
+        "name": "启用时序分块",
+        "tooltip": "以带重叠的时序分块处理长视频潜空间，降低峰值显存占用。"
+      },
+      "force_unload": {
+        "name": "强制卸载",
+        "tooltip": "节点执行结束后从显存卸载潜空间放大模型。"
+      }
+    },
+    "outputs": {
+      "0": { "name": "潜空间" }
+    }
+  },
   "easy minimaxH3SelfLiftSampler": {
     "display_name": "MiniMax H3 SelfLift 渐进采样器",
-    "description": "先在低分辨率执行前段去噪评估，再提升干净端点，并在目标分辨率继续同一条 Euler 调度；总去噪评估次数不增加。",
+    "description": "先在低分辨率执行前段去噪评估，再提升干净端点，并在目标分辨率继续同一条 Euler 调度；带视频上下文 mask 时自动使用全分辨率 Euler 保持边界。",
     "inputs": {
       "model": { "name": "模型" },
       "positive": { "name": "正向条件" },
@@ -1239,6 +1271,10 @@
       "upscaler_model": {
         "name": "潜空间提升模型",
         "tooltip": "可选 MiniMax H3 潜空间放大模型；None 使用最近邻潜空间提升，不经过像素/VAE 往返。"
+      },
+      "highres_tiling": {
+        "name": "高分辨率分块",
+        "tooltip": "实验性功能：在 SelfLift 高分辨率阶段或带视频 mask 的全分辨率回退中自动进行空间分块，以降低峰值显存。"
       },
       "project_name": { "name": "项目名称" },
       "segment_index": { "name": "片段索引" }
@@ -1288,7 +1324,19 @@
       },
       "sampling_mode": {
         "name": "采样模式",
-        "tooltip": "dual 使用原有两次独立采样；selflift 是一条强制 Euler 的单次渐进分辨率调度。"
+        "tooltip": "single 单次采样效果最好；dual 使用原有两次独立采样；selflift 适合低显存设备，对纯生成和仅锁音频片段使用渐进分辨率调度，带视频上下文 mask 时自动改用全分辨率 Euler。"
+      },
+      "transition_ratio": {
+        "name": "低分辨率采样比例",
+        "tooltip": "SelfLift 在低分辨率执行的去噪评估比例。"
+      },
+      "lowres_scale": {
+        "name": "低分辨率比例",
+        "tooltip": "SelfLift 前段低分辨率相对于目标潜空间的缩放比例。"
+      },
+      "highres_tiling": {
+        "name": "高分辨率分块",
+        "tooltip": "实验性功能：在 SelfLift 高分辨率阶段或带视频 mask 的全分辨率回退中自动进行空间分块。"
       },
       "model_loader_2nd": {
         "name": "模型加载器(二采)",

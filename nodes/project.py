@@ -144,23 +144,15 @@ def _h3_latent_upscale_inputs(
     width: int,
     height: int,
 ) -> dict[str, Any]:
-    node_id = "MinimaxH3LatentUpscaler3D"
-    if _h3_node_mapping(node_id) is None:
-        raise RuntimeError(f"{node_id} is not installed")
     return {
-        # Include required options added by newer upscalers without sending them
-        # to older versions; explicit project settings below take precedence.
-        **_h3_required_node_defaults(node_id),
         "latent": latent,
         "model_name": model_name,
         "mode": "target dimensions",
         "mode.width": width,
         "mode.height": height,
         "align": 32,
-        "keep_proportion": False,
-        "enable_chunking": True,
-        "device": "cuda",
-        "precision": "fp16",
+        "enable_temporal_chunking": True,
+        "force_unload": True,
     }
 
 
@@ -479,9 +471,51 @@ class EasyMultiTrackProject(io.ComfyNode):
                     options=cls._sampling_plan_options(),
                     default="light",
                 ),
-                io.Combo.Input(
+                io.DynamicCombo.Input(
                     "sampling_mode",
-                    options=["single", "dual", "selflift"],
+                    options=[
+                        io.DynamicCombo.Option("single", []),
+                        io.DynamicCombo.Option("dual", []),
+                        io.DynamicCombo.Option(
+                            "selflift",
+                            [
+                                io.Float.Input(
+                                    "transition_ratio",
+                                    default=0.6,
+                                    min=0.05,
+                                    max=0.95,
+                                    step=0.05,
+                                    tooltip=(
+                                        "Fraction of denoiser evaluations performed "
+                                        "at low resolution."
+                                    ),
+                                ),
+                                io.Float.Input(
+                                    "lowres_scale",
+                                    default=0.6,
+                                    min=0.25,
+                                    max=1.0,
+                                    step=0.001,
+                                    round=0.001,
+                                    extra_dict={"precision": 3},
+                                    tooltip=(
+                                        "Scale of the low-resolution prefix relative "
+                                        "to the target latent."
+                                    ),
+                                ),
+                                io.Boolean.Input(
+                                    "highres_tiling",
+                                    default=False,
+                                    tooltip=(
+                                        "Experimental: spatially tile MiniMax H3 "
+                                        "model evaluation during SelfLift's "
+                                        "high-resolution stage or a masked-video "
+                                        "full-resolution fallback."
+                                    ),
+                                ),
+                            ],
+                        ),
+                    ],
                 ),
                 io.Boolean.Input(
                     "1st_pass_only",
@@ -565,6 +599,19 @@ class EasyMultiTrackProject(io.ComfyNode):
         )
         is_selflift = sampling_mode == "selflift"
         has_second_pass = sampling_mode == "dual"
+        transition_ratio = 0.6
+        lowres_scale = 0.6
+        highres_tiling = False
+        if is_selflift:
+            transition_ratio = float(
+                _first_input(sampling_config.get("transition_ratio"), 0.6)
+            )
+            lowres_scale = float(
+                _first_input(sampling_config.get("lowres_scale"), 0.6)
+            )
+            highres_tiling = bool(
+                _first_input(sampling_config.get("highres_tiling"), False)
+            )
         first_pass_only = bool(
             _first_input(
                 sampling_config.get("1st_pass_only"),
@@ -781,17 +828,6 @@ class EasyMultiTrackProject(io.ComfyNode):
                 )
         report_step(31)
 
-        if (
-            run_second_pass
-            and not audio_only
-            and upscale_by > 1
-            and selected_upscale_model != "None"
-            and _h3_node_mapping("MinimaxH3LatentUpscaler3D") is None
-        ):
-            raise RuntimeError(
-                "MinimaxH3LatentUpscaler3D is required when an H3 upscale_model "
-                "is selected. Install Comfyui_Minimax_h3_latent_Upscaler."
-            )
         report_step(33)
 
         previous_hires_context_latent: Any | None = None
@@ -975,18 +1011,6 @@ class EasyMultiTrackProject(io.ComfyNode):
                 uses_context
                 and first_pass_context_latent is not None
             )
-            if is_selflift and has_context_continuity:
-                raise ValueError(
-                    "selflift currently supports continuity_mode='shot' only. "
-                    "The existing context modes create encoded/noise-masked input "
-                    "latents, while the original SelfLift flow requires an all-zero "
-                    "target latent."
-                )
-            if is_selflift and has_task_locked_audio:
-                raise ValueError(
-                    "selflift does not yet support locked task audio because "
-                    "audio locking creates a noise-masked input latent"
-                )
             # Lock task audio after the context source is known so its timeline
             # can be shifted behind the copied source prefix. The extra 12
             # generated frames required by H3's temporal grid are removed from
@@ -1058,9 +1082,10 @@ class EasyMultiTrackProject(io.ComfyNode):
                     latent_image=initial_latent,
                     sigmas=first_pass_sigmas,
                     seed=first_pass_seed,
-                    transition_ratio=0.75,
-                    lowres_scale=0.6,
+                    transition_ratio=transition_ratio,
+                    lowres_scale=lowres_scale,
                     upscaler_model=selected_upscale_model,
+                    highres_tiling=highres_tiling,
                     project_name=safe_project_name,
                     segment_index=task_index,
                 )
@@ -1139,7 +1164,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     if selected_upscale_model != "None":
                         report_segment_step(0.50)
                         upscaled_video = graph.node(
-                            "MinimaxH3LatentUpscaler3D",
+                            "easy minimaxH3LatentUpscaler",
                             id=f"latent_upscale_{task_index}",
                             **_h3_latent_upscale_inputs(
                                 separated.out(0),

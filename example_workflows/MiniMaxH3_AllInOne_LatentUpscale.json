@@ -3197,7 +3197,7 @@
     },
     {
       "id": 243,
-      "type": "MinimaxH3LatentUpscaler3D",
+      "type": "easy minimaxH3LatentUpscaler",
       "pos": [
         5570.283397767433,
         1062.0308264041514
@@ -3212,7 +3212,7 @@
       "inputs": [
         {
           "name": "latent",
-          "type": "*",
+          "type": "LATENT",
           "link": 651
         },
         {
@@ -3235,36 +3235,33 @@
       "outputs": [
         {
           "name": "latent",
-          "type": "*",
+          "type": "LATENT",
           "links": [
             652
           ]
         }
       ],
       "properties": {
-        "aux_id": "LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler",
-        "ver": "64fc9d4c7e2c03e8c61d6886182e3309365a1962",
-        "Node name for S&R": "MinimaxH3LatentUpscaler3D"
+        "cnr_id": "comfyui-easy-media",
+        "Node name for S&R": "easy minimaxH3LatentUpscaler"
       },
       "widgets_values": [
         "minimax_h3_latent_upscaler_3d_fp16.safetensors",
         "target dimensions",
         160,
         704,
-        2,
-        false,
-        "cuda",
-        "fp16"
+        32,
+        true,
+        true
       ],
       "widgets_values_named": {
         "model_name": "minimax_h3_latent_upscaler_3d_fp16.safetensors",
         "mode": "target dimensions",
         "mode.width": 160,
         "mode.height": 704,
-        "align": 2,
-        "keep_proportion": false,
-        "device": "cuda",
-        "precision": "fp16"
+        "align": 32,
+        "enable_temporal_chunking": true,
+        "force_unload": true
       }
     },
     {
@@ -3315,10 +3312,10 @@
         "widget_ue_connectable": {}
       },
       "widgets_values": [
-        "# 【Custom nodes in this workflow】\n\n## [ComfyUI-Easy-Media](https://github.com/yolain/ComfyUI-Easy-Media) \n\n## [ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use)\n\n## [ComfyUI-llama-cpp_vlm](https://github.com/lihaoyun6/ComfyUI-llama-cpp_vlm)\n\n## [ComfyUI_MinimaxH3HybridLoader](https://github.com/scottmudge/ComfyUI_MinimaxH3HybridLoader)\n\n## [Comfyui_Minimax_h3_latent_Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler)\n\n## [ComfyUI-Kjnodes](https://github.com/kijai/ComfyUI-Kjnodes)"
+        "# 【Custom nodes in this workflow】\n\n## [ComfyUI-Easy-Media](https://github.com/yolain/ComfyUI-Easy-Media) \n\n## [ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use)\n\n## [ComfyUI-llama-cpp_vlm](https://github.com/lihaoyun6/ComfyUI-llama-cpp_vlm)\n\n## [ComfyUI_MinimaxH3HybridLoader](https://github.com/scottmudge/ComfyUI_MinimaxH3HybridLoader)\n\n## [ComfyUI-Kjnodes](https://github.com/kijai/ComfyUI-Kjnodes)"
       ],
       "widgets_values_named": {
-        "text": "# 【Custom nodes in this workflow】\n\n## [ComfyUI-Easy-Media](https://github.com/yolain/ComfyUI-Easy-Media) \n\n## [ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use)\n\n## [ComfyUI-llama-cpp_vlm](https://github.com/lihaoyun6/ComfyUI-llama-cpp_vlm)\n\n## [ComfyUI_MinimaxH3HybridLoader](https://github.com/scottmudge/ComfyUI_MinimaxH3HybridLoader)\n\n## [Comfyui_Minimax_h3_latent_Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler)\n\n## [ComfyUI-Kjnodes](https://github.com/kijai/ComfyUI-Kjnodes)"
+        "text": "# 【Custom nodes in this workflow】\n\n## [ComfyUI-Easy-Media](https://github.com/yolain/ComfyUI-Easy-Media) \n\n## [ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use)\n\n## [ComfyUI-llama-cpp_vlm](https://github.com/lihaoyun6/ComfyUI-llama-cpp_vlm)\n\n## [ComfyUI_MinimaxH3HybridLoader](https://github.com/scottmudge/ComfyUI_MinimaxH3HybridLoader)\n\n## [ComfyUI-Kjnodes](https://github.com/kijai/ComfyUI-Kjnodes)"
       },
       "color": "#c09430",
       "bgcolor": "rgba(24,24,27,.9)"
