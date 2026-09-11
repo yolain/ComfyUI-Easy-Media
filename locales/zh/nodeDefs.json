@@ -1218,6 +1218,83 @@
       "1": { "name": "裁剪帧数" }
     }
   },
+  "easy minimaxH3LatentUpscaler": {
+    "display_name": "MiniMax H3 潜空间放大",
+    "description": "使用 Easy Media 内置的 3D 推理实现放大 MiniMax H3 视频潜空间；嵌套 AV 输入会保留音频流。",
+    "inputs": {
+      "latent": { "name": "潜空间" },
+      "model_name": { "name": "放大模型" },
+      "mode": {
+        "name": "尺寸模式",
+        "options": {
+          "scale by multiplier": "按倍率放大",
+          "target dimensions": "指定目标尺寸",
+          "megapixels": "指定百万像素"
+        }
+      },
+      "scale": { "name": "放大倍率" },
+      "width": { "name": "目标宽度" },
+      "height": { "name": "目标高度" },
+      "megapixels": { "name": "目标百万像素" },
+      "align": { "name": "像素对齐" },
+      "enable_temporal_chunking": {
+        "name": "启用时序分块",
+        "tooltip": "以带重叠的时序分块处理长视频潜空间，降低峰值显存占用。"
+      },
+      "force_unload": {
+        "name": "强制卸载",
+        "tooltip": "节点执行结束后从显存卸载潜空间放大模型。"
+      }
+    },
+    "outputs": {
+      "0": { "name": "潜空间" }
+    }
+  },
+  "easy minimaxH3SelfLiftSampler": {
+    "display_name": "MiniMax H3 SelfLift 渐进采样器",
+    "description": "先在低分辨率执行前段去噪评估，再提升干净端点，并在目标分辨率继续同一条 Euler 调度；可复用上一段保存的低分辨率上下文。",
+    "inputs": {
+      "model": { "name": "模型" },
+      "positive": { "name": "正向条件" },
+      "vae": { "name": "VAE" },
+      "latent_image": { "name": "目标潜空间" },
+      "sigmas": { "name": "Sigma 序列" },
+      "seed": { "name": "种子" },
+      "transition_ratio": {
+        "name": "步数过渡比例",
+        "tooltip": "在低分辨率执行的去噪评估比例；这是步数比例，不是 sigma 数值阈值。"
+      },
+      "lowres_scale": {
+        "name": "低分缩放比例",
+        "tooltip": "前段低分辨率相对于目标潜空间的缩放比例。"
+      },
+      "rho": {
+        "name": "rho（修正强度）",
+        "tooltip": "像素/VAE 伪影修正的强度。"
+      },
+      "w_max": {
+        "name": "w_max（最大一致性权重）",
+        "tooltip": "伪影修正使用的最大一致性权重。"
+      },
+      "w_min": {
+        "name": "w_min（最小一致性权重）",
+        "tooltip": "伪影修正使用的最小一致性权重，不能大于最大一致性权重。"
+      },
+      "upscaler_model": {
+        "name": "潜空间提升模型",
+        "tooltip": "可选 MiniMax H3 潜空间放大模型；None 使用最近邻潜空间提升，不经过像素/VAE 往返。"
+      },
+      "highres_tiling": {
+        "name": "高分辨率分块",
+        "tooltip": "实验性功能：在 SelfLift 高分辨率阶段自动进行空间分块，以降低峰值显存。"
+      },
+      "low_context_latent": { "name": "低分上下文潜空间" }
+    },
+    "outputs": {
+      "0": { "name": "潜空间" },
+      "1": { "name": "低分上下文潜空间" }
+    }
+  },
   "easy multitrackProject": {
     "display_name": "多轨项目",
     "description": "执行多轨 MiniMax H3 项目的一采与可选二采，并保存片段产物。",
@@ -1259,7 +1336,19 @@
       },
       "sampling_mode": {
         "name": "采样模式",
-        "tooltip": "选择 dual 后显示二采专用的模型、采样与噪声设置。"
+        "tooltip": "single 单次采样效果最好；dual 使用原有两次独立采样；selflift 使用单条渐进分辨率调度，并分别维护低、高分辨率上下文。"
+      },
+      "transition_ratio": {
+        "name": "步数过渡比例",
+        "tooltip": "SelfLift 在低分辨率执行的去噪评估比例。"
+      },
+      "lowres_scale": {
+        "name": "低分缩放比例",
+        "tooltip": "SelfLift 前段低分辨率相对于目标潜空间的缩放比例。"
+      },
+      "highres_tiling": {
+        "name": "高分辨率分块",
+        "tooltip": "实验性功能：在 SelfLift 高分辨率阶段自动进行空间分块，适用于低显存用户。"
       },
       "model_loader_2nd": {
         "name": "模型加载器(二采)",
@@ -1279,7 +1368,10 @@
         "name": "禁用二采噪声",
         "tooltip": "在二采中禁用噪声。"
       },
-      "upscale_by": { "name": "放大倍数" },
+      "upscale_by": {
+        "name": "二采放大倍率",
+        "tooltip": "dual 模式下用于计算二采目标分辨率。"
+      },
       "upscale_model": { "name": "放大模型" },
       "segment_start_number": { "name": "片段开始编号" },
       "segment_count": {

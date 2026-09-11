@@ -187,6 +187,7 @@ If an older workflow connects directly to the editor's media outputs, insert `Mu
 | `model_loader` | First-pass H3 model and shared CLIP, video VAE, and audio VAE; video projects also require the audio VAE |
 | `model_loader_2nd` | Optional second-pass H3 model; defaults to the first-pass model. Even when connected, encoding and VAEs still come from the first-pass loader |
 | `sampling_plan` | Built-in presets such as `ultra_light`, `light`, `medium`, and `high` select samplers and sigmas for Turbo / non-Turbo models; use `custom` for manual settings |
+| `sampling_mode` | `single`, `dual`, or `selflift`; SelfLift expands `transition_ratio`, `lowres_scale`, and the optional `highres_tiling` switch. Pixel/VAE correction is disabled for ordinary segments and uses an internal conservative preset for context continuation. SelfLift also saves separate low- and high-resolution context lineages |
 | `sampler` / `sigmas` | Connect both to override first-pass sampling. Second-pass overrides use `sampler_2nd` / `sigmas_2nd`, also as a pair. `custom` requires both inputs for every sampling pass that runs |
 | `upscale_by` | Second-pass scale relative to the editor dimensions; default `1.250`, three decimal places, step `0.001` |
 | `disable_2nd_noise` | Disables added second-pass noise; it does not skip the second pass |
@@ -200,10 +201,12 @@ To customize presets, copy [h3_sample.json.example](./presets/h3_sample.json.exa
 
 | `upscale_model` | Upscaling Path | Dependencies |
 |-----------------|----------------|--------------|
-| An H3 latent upscaler model | Calls `MinimaxH3LatentUpscaler3D` to upscale the video latent directly to the scaled, aligned second-pass dimensions | Install [Comfyui_Minimax_h3_latent_Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler) and place the [H3 upscaler weights](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler) in `ComfyUI/models/latent_upscale_models/` |
+| An H3 latent upscaler model | Calls the bundled `easy minimaxH3LatentUpscaler` node to upscale the video latent directly to the scaled, aligned second-pass dimensions | Place the [H3 upscaler weights](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler) in `ComfyUI/models/latent_upscale_models/`; the external custom-node package is not required |
 | `None` | Decode the first-pass video with the VAE → Resize images → Re-encode with the VAE → Second pass | Requires `ImageResizeKJv2` from [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) |
 
-`upscale_model` selects **H3 latent upscaler weights**, which serve a different purpose from the H3 generation model in `model_loader_2nd`. Direct latent upscaling avoids the intermediate video VAE decode/encode round trip, but the second pass still runs at the target resolution; its VRAM requirements do not decrease proportionally. Selecting an upscaler model without installing the required node raises an error rather than silently switching paths.
+`upscale_model` selects **H3 latent upscaler weights**, which serve a different purpose from the H3 generation model in `model_loader_2nd`. Direct latent upscaling avoids the intermediate video VAE decode/encode round trip, but the second pass still runs at the target resolution; its VRAM requirements do not decrease proportionally. Easy Media includes the inference node and runtime; only the checkpoint is downloaded separately.
+
+The standalone `easy minimaxH3LatentUpscaler` node exposes `enable_temporal_chunking` and `force_unload`. Both default to enabled; MultiTrack's internal latent-upscale path also enables both explicitly. Temporal chunking lowers peak memory for long latents, while forced unload releases the upscaler from VRAM after inference.
 
 For example, download `minimax_h3_latent_upscaler_3d_fp16.safetensors` from the model repository above, place it in the specified directory, restart ComfyUI, and select it under `upscale_model`. Its documentation specifies a 1–4× scaling range. Follow the selected model's supported range even if the project parameter accepts larger values.
 
@@ -491,6 +494,8 @@ bun run build:release
 - [H3 Motion Context](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context)
 - [Drift Control for h3 motion context](https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop)
 - [MiniMax H3 Latent Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler)
+- [SelfLift for H3 Sampling](https://github.com/facok/comfyui-SelfLift)
+
 
 ## Source of Inspiration
 

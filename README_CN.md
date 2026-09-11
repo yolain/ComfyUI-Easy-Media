@@ -192,6 +192,7 @@ v1.3.0 新增多轨项目流水线，将时间线编排、逐段生成、上下�
 | `model_loader` | 一采 H3 模型与共用的 CLIP、视频 VAE、音频 VAE；视频项目也需要音频 VAE |
 | `model_loader_2nd` | 可选的二采 H3 模型；不接时复用一采模型，接入后也仍使用一采加载器的编码器和 VAE |
 | `sampling_plan` | 内置 `ultra_light`、`light`、`medium`、`high` 等预设，根据 Turbo / 非 Turbo 模型选择采样器和 sigmas；也可用 `custom` 自定义 |
+| `sampling_mode` | 可选 `single`、`dual` 或 `selflift`；SelfLift 会展开 `transition_ratio`、`lowres_scale` 和 `highres_tiling`。普通片段关闭像素/VAE 修正，上下文续接自动使用内部保守预设；同时分别保存低、高分辨率上下文 |
 | `sampler` / `sigmas` | 成对接入以覆盖一采采样设置；二采对应 `sampler_2nd` / `sigmas_2nd`，也需成对接入。`custom` 需要为实际运行的每个采样阶段提供这两个输入 |
 | `upscale_by` | 相对于编辑器尺寸的二采放大倍率；默认 `1.250`，三位小数，步长 `0.001` |
 | `disable_2nd_noise` | 控制是否禁用二采新增噪声，不代表跳过二采 |
@@ -205,10 +206,12 @@ v1.3.0 新增多轨项目流水线，将时间线编排、逐段生成、上下�
 
 | `upscale_model` | 放大路径 | 依赖 |
 |-----------------|----------|------|
-| 选择 H3 潜空间放大模型 | 调用 `MinimaxH3LatentUpscaler3D`，直接把视频潜空间放大到乘倍率并对齐后的二采尺寸 | 安装 [Comfyui_Minimax_h3_latent_Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler)，将 [H3 放大模型权重](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler) 放入 `ComfyUI/models/latent_upscale_models/` |
+| 选择 H3 潜空间放大模型 | 调用内置的 `easy minimaxH3LatentUpscaler`，直接把视频潜空间放大到乘倍率并对齐后的二采尺寸 | 只需将 [H3 放大模型权重](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler) 放入 `ComfyUI/models/latent_upscale_models/`，不再需要安装外部自定义节点包 |
 | `None` | 一采视频 VAE 解码 → 图像缩放 → VAE 重新编码 → 二采 | 需要 [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) 的 `ImageResizeKJv2` 节点 |
 
-这里的 `upscale_model` 是 **H3 潜空间放大权重**，与 `model_loader_2nd` 中负责二采的 H3 生成模型用途不同。直接放大潜空间可以省去中间的视频 VAE 解码 / 编码步骤，但二采仍在目标分辨率运行，不意味着高分辨率采样的显存开销也会同比下降。选择了模型但未安装对应节点时会报错，不会静默切换放大方式。
+这里的 `upscale_model` 是 **H3 潜空间放大权重**，与 `model_loader_2nd` 中负责二采的 H3 生成模型用途不同。直接放大潜空间可以省去中间的视频 VAE 解码 / 编码步骤，但二采仍在目标分辨率运行，不意味着高分辨率采样的显存开销也会同比下降。Easy Media 已内置推理节点和运行时代码，只需另外下载模型权重。
+
+独立的 `easy minimaxH3LatentUpscaler` 节点提供 `enable_temporal_chunking` 和 `force_unload`，两项默认开启；多轨内部的潜空间放大路径也会显式开启两项。时序分块可降低长视频潜空间的峰值显存，强制卸载会在推理结束后释放放大模型占用的显存。
 
 例如可从上述模型仓库下载 `minimax_h3_latent_upscaler_3d_fp16.safetensors`，放入指定目录后重启 ComfyUI，再在 `upscale_model` 中选择。该模型文档给出的放大范围为 1–4 倍；即使项目参数允许更大数值，也应遵循所选放大模型的支持范围。
 
@@ -496,8 +499,9 @@ bun run build:release
 - [VoxCPM2](https://github.com/OpenBMB/VoxCPM)
 - [Bernini S2V](https://huggingface.co/rzgar/Bernini-R-S2V)
 - [H3 Motion Context](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context)
-- [Drift Control for h3 motion context](https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop)
+- [Drift Control for H3 motion context](https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop)
 - [MiniMax H3 Latent Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler)
+- [SelfLift for H3 Sampling](https://github.com/facok/comfyui-SelfLift)
 
 ## Source of Inspiration
 

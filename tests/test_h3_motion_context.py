@@ -10,6 +10,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from modules.motion_context import core
+from modules.motion_context import drift_control_av
 
 
 class _NestedTensor:
@@ -178,6 +179,30 @@ def test_context_swap_noise_is_disposable_deterministic_and_video_only(
     assert torch.equal(first_video, second_video)
     assert torch.equal(first_audio, original_audio)
     assert torch.equal(second_audio, original_audio)
+
+
+def test_context_swap_dynamic_mask_tracks_selflift_stage_resolution():
+    state = drift_control_av._DriftControlMaskState(
+        (1, 24, 7, 8, 10),
+        torch.tensor([1.0, 0.5, 0.0]),
+        prefix_steps=2,
+    )
+    active_shapes = [(1, 24, 7, 4, 6), (1, 32, 2, 20)]
+    active_model = types.SimpleNamespace(
+        inner_model=types.SimpleNamespace(latent_shapes=active_shapes)
+    )
+    packed_size = 24 * 7 * 4 * 6 + 32 * 2 * 20
+    packed_mask = torch.ones(1, 1, packed_size)
+
+    output = state.denoise_mask_function(
+        torch.tensor(1.0),
+        packed_mask,
+        {"model": active_model},
+    )
+
+    assert output.shape == packed_mask.shape
+    assert state.current_video_mask is not None
+    assert state.current_video_mask.shape == (1, 1, 7, 4, 6)
 
 def test_h3_hard_context_requires_native_video_and_audio_keyframes(monkeypatch):
     monkeypatch.setattr(

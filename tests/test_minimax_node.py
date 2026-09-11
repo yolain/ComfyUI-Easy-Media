@@ -178,6 +178,7 @@ def _load_minimax_node(monkeypatch):
         Image=_PortType,
         Int=_PortType,
         Latent=_PortType,
+        Model=_PortType,
         NodeOutput=_NodeOutput,
         Noise=_PortType,
         Sampler=_PortType,
@@ -393,6 +394,16 @@ def _load_minimax_node(monkeypatch):
     assert motion_context_spec is not None and motion_context_spec.loader is not None
     motion_context_module = importlib.util.module_from_spec(motion_context_spec)
     motion_context_spec.loader.exec_module(motion_context_module)
+    drift_control_module = types.ModuleType(
+        "easy_media.modules.motion_context.drift_control_av"
+    )
+    drift_control_module.apply_context_swap_drift_control = (
+        lambda model, target_latent, context_latent, **kwargs: (
+            model,
+            target_latent,
+            int(kwargs.get("context_length", 22)),
+        )
+    )
 
     modules = {
         "comfy_api": comfy_api,
@@ -412,6 +423,7 @@ def _load_minimax_node(monkeypatch):
         "easy_media.modules": project_modules_package,
         "easy_media.modules.motion_context": motion_context_package,
         "easy_media.modules.motion_context.core": motion_context_module,
+        "easy_media.modules.motion_context.drift_control_av": drift_control_module,
         "easy_media.utils": utils_package,
         "easy_media.utils.multitrack": multitrack_module,
         "easy_media.utils.h3_presets": h3_presets_module,
@@ -671,7 +683,22 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
     assert json.loads(json.dumps(sampling_plan_options)) == sampling_plan_options
     assert inputs["sampling_plan"].kwargs["default"] == "light"
     sampling_mode_options = inputs["sampling_mode"].kwargs["options"]
-    assert sampling_mode_options == ["single", "dual"]
+    assert [name for name, _ in sampling_mode_options] == [
+        "single",
+        "dual",
+        "selflift",
+    ]
+    assert sampling_mode_options[0][1] == []
+    assert sampling_mode_options[1][1] == []
+    selflift_inputs = {port.name: port for port in sampling_mode_options[2][1]}
+    assert list(selflift_inputs) == [
+        "transition_ratio",
+        "lowres_scale",
+        "highres_tiling",
+    ]
+    assert selflift_inputs["transition_ratio"].kwargs["default"] == 0.6
+    assert selflift_inputs["lowres_scale"].kwargs["default"] == 0.6
+    assert selflift_inputs["highres_tiling"].kwargs["default"] is False
     for name in ("sampler_2nd", "sigmas_2nd", "model_loader_2nd"):
         assert inputs[name].kwargs["optional"] is True
     assert inputs["1st_pass_only"].kwargs["default"] is False
@@ -706,7 +733,15 @@ def test_multitrack_h3_project_loads_segment_media_from_tracks_info(monkeypatch)
     }
 
 
-@pytest.mark.parametrize("sampling_mode,first_only", [("single", False), ("dual", False), ("dual", True)])
+@pytest.mark.parametrize(
+    "sampling_mode,first_only",
+    [
+        ("single", False),
+        ("dual", False),
+        ("dual", True),
+        ("selflift", False),
+    ],
+)
 def test_project_memory_boundaries_follow_artifact_saves(monkeypatch, sampling_mode, first_only):
     module = _load_minimax_node(monkeypatch)
     installed = []
@@ -1272,6 +1307,9 @@ def test_multitrack_h3_project_has_matching_chinese_localization():
         "project_save",
         "sampling_plan",
         "sampling_mode",
+        "transition_ratio",
+        "lowres_scale",
+        "highres_tiling",
         "model_loader_2nd",
         "1st_pass_only",
         "disable_2nd_noise",
@@ -1511,6 +1549,462 @@ def test_multitrack_h3_fast_dual_non_turbo_uses_preset_sigmas_and_pixel_upscale(
     assert any(node["class_type"] == "DisableNoise" for node in nodes)
 
 
+def test_multitrack_h3_selflift_uses_target_size_and_one_progressive_sample(
+    monkeypatch,
+):
+    module = _load_minimax_node(monkeypatch)
+
+    result = module.EasyMultiTrackProject.execute(
+        **_h3_project_inputs(
+            sampling_mode=_h3_sampling_mode("selflift"),
+            sampling_plan=["medium"],
+            upscale_by=[1.25],
+            upscale_model=["None"],
+        )
+    )
+
+    nodes = list(result.expand.values())
+    selflift = next(
+        node
+        for node in nodes
+        if node["class_type"] == "easy minimaxH3SelfLiftSampler"
+    )
+    artifact = next(
+        node
+        for node in nodes
+        if node["class_type"] == "easy h3ProjectArtifact"
+    )
+    conditioning = next(
+        node for node in nodes if node["class_type"] == "easy minimaxH3ToVideo"
+    )
+    sigma_nodes = [node for node in nodes if node["class_type"] == "ManualSigmas"]
+
+    assert len(sigma_nodes) == 1
+    assert sigma_nodes[0]["inputs"]["sigmas"].startswith("1.0000, 0.9956")
+    assert not any(node["class_type"] == "KSamplerSelect" for node in nodes)
+    assert not any(node["class_type"] == "SamplerCustomAdvanced" for node in nodes)
+    assert not any(node["class_type"] == "VAEEncode" for node in nodes)
+    assert not any(node["class_type"] == "ImageResizeKJv2" for node in nodes)
+    assert (conditioning["inputs"]["width"], conditioning["inputs"]["height"]) == (
+        1344,
+        768,
+    )
+    assert selflift["inputs"]["transition_ratio"] == 0.6
+    assert selflift["inputs"]["lowres_scale"] == 0.6
+    assert selflift["inputs"]["rho"] == 0.0
+    assert selflift["inputs"]["w_min"] == 0.25
+    assert selflift["inputs"]["w_max"] == 0.7
+    assert selflift["inputs"]["highres_tiling"] is False
+    assert "project_name" not in selflift["inputs"]
+    assert "segment_index" not in selflift["inputs"]
+    assert "upscale_by" not in selflift["inputs"]
+    assert selflift["inputs"]["upscaler_model"] == "None"
+    assert artifact["inputs"]["sampling_pass"] == "single"
+    assert artifact["inputs"]["tracks_info"]["width"] == 1344
+    assert artifact["inputs"]["tracks_info"]["height"] == 768
+
+
+def test_multitrack_h3_selflift_reads_nested_upscale_model(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+
+    result = module.EasyMultiTrackProject.execute(
+        **_h3_project_inputs(
+            sampling_mode=_h3_sampling_mode(
+                "selflift",
+                upscale_by=[2.5],
+                upscale_model=["h3_upscale.safetensors"],
+            ),
+        )
+    )
+
+    selflift = next(
+        node
+        for node in result.expand.values()
+        if node["class_type"] == "easy minimaxH3SelfLiftSampler"
+    )
+    assert selflift["inputs"]["lowres_scale"] == 0.6
+    assert "upscale_by" not in selflift["inputs"]
+    assert selflift["inputs"]["upscaler_model"] == "h3_upscale.safetensors"
+
+
+def test_multitrack_h3_selflift_passes_dynamic_sampling_values(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+
+    result = module.EasyMultiTrackProject.execute(
+        **_h3_project_inputs(
+            sampling_mode=_h3_sampling_mode(
+                "selflift",
+                transition_ratio=[0.75],
+                lowres_scale=[0.5],
+                highres_tiling=[True],
+            ),
+        )
+    )
+
+    selflift = next(
+        node
+        for node in result.expand.values()
+        if node["class_type"] == "easy minimaxH3SelfLiftSampler"
+    )
+    assert selflift["inputs"]["transition_ratio"] == 0.75
+    assert selflift["inputs"]["lowres_scale"] == 0.5
+    assert selflift["inputs"]["highres_tiling"] is True
+
+
+@pytest.mark.parametrize("continuity_mode", ["context", "context_swap"])
+def test_multitrack_h3_selflift_supports_context_and_locked_audio(
+    monkeypatch,
+    continuity_mode,
+):
+    module = _load_minimax_node(monkeypatch)
+    inputs = _h3_project_inputs(sampling_mode=_h3_sampling_mode("selflift"))
+    info = inputs["tracks_info"][0]
+    info["tracks"][0]["segments"].append(
+        {
+            "start_frame": 120,
+            "end_frame": 240,
+            "content": {
+                "task_mode": "default",
+                "continuity_mode": continuity_mode,
+                "images": [],
+                "user_prompt": "continue seamlessly",
+            },
+        }
+    )
+    info["tracks"].append(
+        {
+            "id": "locked-audio-track",
+            "type": "audio",
+            "audio_locked": True,
+            "segments": [
+                {
+                    "id": "locked-audio",
+                    "start_frame": 0,
+                    "end_frame": 240,
+                    "content": {"media_type": "audio"},
+                }
+            ],
+        }
+    )
+
+    result = module.EasyMultiTrackProject.execute(**inputs)
+
+    selflift_nodes = [
+        (node_id, node)
+        for node_id, node in result.expand.items()
+        if node["class_type"] == "easy minimaxH3SelfLiftSampler"
+    ]
+    assert len(selflift_nodes) == 2
+    context_selflift = selflift_nodes[1][1]
+    audio_lock_id = next(
+        node_id
+        for node_id, node in result.expand.items()
+        if node["class_type"] == "easy minimaxH3AudioLock"
+        and node["inputs"]["prepend_frames"] == 22
+    )
+    context_type = (
+        "easy MiniMaxH3MotionContextHard"
+        if continuity_mode == "context"
+        else "easy MiniMaxH3ContextSwap"
+    )
+    context_id, context_node = next(
+        (node_id, node)
+        for node_id, node in result.expand.items()
+        if node["class_type"] == context_type
+    )
+    assert context_node["inputs"]["latent"] == [audio_lock_id, 0]
+    latent_output = 2 if continuity_mode == "context" else 1
+    assert context_selflift["inputs"]["latent_image"] == [context_id, latent_output]
+    low_context_link = context_selflift["inputs"]["low_context_latent"]
+    low_context_node = result.expand[low_context_link[0]]
+    assert low_context_node["class_type"] == "easy h3MotionContextLatentTrim"
+    first_selflift_id = selflift_nodes[0][0]
+    assert low_context_node["inputs"]["latent"] == [first_selflift_id, 1]
+    if continuity_mode == "context_swap":
+        assert context_selflift["inputs"]["model"] == [context_id, 0]
+
+
+def test_selflift_sampler_schema_forces_euler_by_not_exposing_a_sampler(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+
+    schema = module.EasyMiniMaxH3SelfLiftSampler.define_schema()
+    inputs = {port.name: port for port in schema.inputs}
+
+    assert schema.node_id == "easy minimaxH3SelfLiftSampler"
+    assert schema.is_dev_only is True
+    assert "sampler" not in inputs
+    assert inputs["transition_ratio"].kwargs["default"] == 0.6
+    assert inputs["lowres_scale"].kwargs["default"] == 0.6
+    assert inputs["rho"].kwargs["default"] == pytest.approx(0.1)
+    assert inputs["w_max"].kwargs["default"] == pytest.approx(0.7)
+    assert inputs["w_min"].kwargs["default"] == pytest.approx(0.25)
+    assert inputs["highres_tiling"].kwargs["default"] is False
+    assert inputs["highres_tiling"].kwargs["optional"] is True
+    assert inputs["low_context_latent"].kwargs["optional"] is True
+    assert "project_name" not in inputs
+    assert "segment_index" not in inputs
+    assert len(schema.outputs) == 2
+    assert "upscale_by" not in inputs
+
+
+def test_bundled_h3_latent_upscaler_schema_exposes_three_resize_modes(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+
+    schema = module.EasyMiniMaxH3LatentUpscaler.define_schema()
+    inputs = {port.name: port for port in schema.inputs}
+    modes = inputs["mode"].kwargs["options"]
+
+    assert schema.node_id == "easy minimaxH3LatentUpscaler"
+    assert list(inputs) == [
+        "latent",
+        "model_name",
+        "mode",
+        "align",
+        "enable_temporal_chunking",
+        "force_unload",
+    ]
+    assert [name for name, _ in modes] == [
+        "scale by multiplier",
+        "target dimensions",
+        "megapixels",
+    ]
+    assert inputs["align"].kwargs["default"] == 32
+    assert inputs["enable_temporal_chunking"].kwargs["default"] is True
+    assert inputs["force_unload"].kwargs["default"] is True
+    node_defs = json.loads(
+        (Path(__file__).parents[1] / "locales" / "zh" / "nodeDefs.json").read_text()
+    )
+    assert set(node_defs["easy minimaxH3LatentUpscaler"]["inputs"]) == {
+        "latent",
+        "model_name",
+        "mode",
+        "scale",
+        "width",
+        "height",
+        "megapixels",
+        "align",
+        "enable_temporal_chunking",
+        "force_unload",
+    }
+
+
+def test_bundled_h3_latent_upscaler_preserves_audio_and_resizes_mask(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    calls = []
+    upscaler_module = types.ModuleType(
+        "easy_media.modules.selflift.h3_latent_upscale"
+    )
+
+    def learned_latent_lift(video, target_size, model_name, **kwargs):
+        calls.append((tuple(video.shape), target_size, model_name, kwargs))
+        return torch.full(
+            (*video.shape[:-2], *target_size),
+            7.0,
+            dtype=video.dtype,
+        )
+
+    upscaler_module.learned_latent_lift = learned_latent_lift
+    monkeypatch.setitem(
+        sys.modules,
+        "easy_media.modules.selflift.h3_latent_upscale",
+        upscaler_module,
+    )
+    video = torch.zeros(1, 24, 3, 4, 6)
+    audio = torch.randn(1, 32, 2, 9)
+    video_mask = torch.ones(1, 1, 3, 4, 6)
+    audio_mask = torch.zeros(1, 1, 2, 9)
+    latent = {
+        "samples": _NestedTensor((video, audio)),
+        "noise_mask": _NestedTensor((video_mask, audio_mask)),
+        "batch_index": [0],
+    }
+
+    output = module.EasyMiniMaxH3LatentUpscaler.execute(
+        latent=latent,
+        model_name="h3_upscale.safetensors",
+        mode={"mode": "target dimensions", "width": 192, "height": 128},
+        align=32,
+        enable_temporal_chunking=False,
+        force_unload=False,
+    ).values[0]
+
+    upscaled_video, output_audio = output["samples"].unbind()
+    upscaled_mask, output_audio_mask = output["noise_mask"].unbind()
+    assert calls == [
+        (
+            (1, 24, 3, 4, 6),
+            (8, 12),
+            "h3_upscale.safetensors",
+            {"enable_temporal_chunking": False, "force_unload": False},
+        )
+    ]
+    assert upscaled_video.shape == (1, 24, 3, 8, 12)
+    assert torch.equal(output_audio, audio)
+    assert upscaled_mask.shape == (1, 1, 3, 8, 12)
+    assert torch.equal(output_audio_mask, audio_mask)
+    assert output["batch_index"] == [0]
+
+
+def test_selflift_sampler_uses_lowres_scale(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    captured = {}
+    sampled = {"samples": object()}
+    low_context = {"samples": object()}
+    sampling_module = types.ModuleType("easy_media.modules.selflift.sampling")
+
+    def progressive_sample_h3(**kwargs):
+        captured.update(kwargs)
+        return sampled, low_context
+
+    sampling_module.progressive_sample_h3 = progressive_sample_h3
+    monkeypatch.setitem(
+        sys.modules,
+        "easy_media.modules.selflift.sampling",
+        sampling_module,
+    )
+
+    result = module.EasyMiniMaxH3SelfLiftSampler.execute(
+        model=object(),
+        positive=[],
+        vae=object(),
+        latent_image={"samples": torch.zeros(1, 24, 1, 60, 104)},
+        sigmas=torch.tensor([1.0, 0.0]),
+        seed=42,
+        transition_ratio=0.6,
+        lowres_scale=0.6,
+    )
+
+    assert captured["lowres_scale"] == pytest.approx(0.6)
+    assert captured["rho"] == pytest.approx(0.1)
+    assert captured["w_min"] == 0.25
+    assert captured["w_max"] == 0.7
+    assert captured["highres_tiling"] is False
+    assert captured["low_context_latent"] is None
+    assert result.values == (sampled, low_context)
+
+
+def test_selflift_sampler_forwards_artifact_correction_controls(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    captured = {}
+    sampling_module = types.ModuleType("easy_media.modules.selflift.sampling")
+
+    def progressive_sample_h3(**kwargs):
+        captured.update(kwargs)
+        return {"samples": object()}, {"samples": object()}
+
+    sampling_module.progressive_sample_h3 = progressive_sample_h3
+    monkeypatch.setitem(
+        sys.modules,
+        "easy_media.modules.selflift.sampling",
+        sampling_module,
+    )
+
+    module.EasyMiniMaxH3SelfLiftSampler.execute(
+        model=object(),
+        positive=[],
+        vae=object(),
+        latent_image={"samples": torch.zeros(1, 24, 1, 60, 104)},
+        sigmas=torch.tensor([1.0, 0.0]),
+        seed=42,
+        rho=0.2,
+        w_max=0.8,
+        w_min=0.3,
+    )
+
+    assert captured["rho"] == pytest.approx(0.2)
+    assert captured["w_max"] == pytest.approx(0.8)
+    assert captured["w_min"] == pytest.approx(0.3)
+
+
+def test_selflift_sampler_uses_saved_low_context_for_masked_video(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    captured = {}
+    sampled = {"samples": object()}
+    low_result = {"samples": object()}
+    sampling_module = types.ModuleType("easy_media.modules.selflift.sampling")
+
+    def progressive_sample_h3(**kwargs):
+        captured.update(kwargs)
+        return sampled, low_result
+
+    sampling_module.progressive_sample_h3 = progressive_sample_h3
+    monkeypatch.setitem(
+        sys.modules,
+        "easy_media.modules.selflift.sampling",
+        sampling_module,
+    )
+    video = torch.zeros(1, 24, 7, 4, 6)
+    audio = torch.zeros(1, 32, 2, 20)
+    video_mask = torch.ones(1, 1, 7, 4, 6)
+    video_mask[:, :, :2] = 0.0
+    audio_mask = torch.ones(1, 1, 2, 20)
+    saved_low_context = {
+        "samples": _NestedTensor(
+            (torch.ones(1, 24, 2, 3, 4), torch.ones_like(audio))
+        )
+    }
+
+    result = module.EasyMiniMaxH3SelfLiftSampler.execute(
+        model=object(),
+        positive=[],
+        vae=object(),
+        latent_image={
+            "samples": _NestedTensor((video, audio)),
+            "noise_mask": _NestedTensor((video_mask, audio_mask)),
+        },
+        sigmas=torch.tensor([1.0, 0.5, 0.0]),
+        seed=42,
+        highres_tiling=True,
+        low_context_latent=saved_low_context,
+    )
+
+    assert captured["highres_tiling"] is True
+    assert captured["low_context_latent"] is saved_low_context
+    assert captured["rho"] == 0.1
+    assert captured["w_min"] == 0.25
+    assert captured["w_max"] == 0.7
+    assert result.values == (sampled, low_result)
+
+
+def test_selflift_sampler_keeps_audio_only_mask_on_selflift(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    captured = {}
+    sampled = {"samples": object()}
+    low_context = {"samples": object()}
+    sampling_module = types.ModuleType("easy_media.modules.selflift.sampling")
+
+    def progressive_sample_h3(**kwargs):
+        captured.update(kwargs)
+        return sampled, low_context
+
+    sampling_module.progressive_sample_h3 = progressive_sample_h3
+    monkeypatch.setitem(
+        sys.modules,
+        "easy_media.modules.selflift.sampling",
+        sampling_module,
+    )
+    video = torch.zeros(1, 24, 7, 4, 6)
+    audio = torch.zeros(1, 32, 2, 20)
+    video_mask = torch.ones(1, 1, 7, 4, 6)
+    audio_mask = torch.zeros(1, 1, 2, 20)
+
+    result = module.EasyMiniMaxH3SelfLiftSampler.execute(
+        model=object(),
+        positive=[],
+        vae=object(),
+        latent_image={
+            "samples": _NestedTensor((video, audio)),
+            "noise_mask": _NestedTensor((video_mask, audio_mask)),
+        },
+        sigmas=torch.tensor([1.0, 0.5, 0.0]),
+        seed=42,
+    )
+
+    assert captured["rho"] == pytest.approx(0.1)
+    assert captured["lowres_scale"] == pytest.approx(0.6)
+    assert result.values == (sampled, low_context)
+
+
 @pytest.mark.parametrize("upscale_model", ["None", "h3_upscale.safetensors"])
 @pytest.mark.parametrize(
     ("upscale_by", "expected_size"),
@@ -1521,7 +2015,6 @@ def test_multitrack_project_uses_flat_upscale_by(
 ):
     module = _load_minimax_node(monkeypatch)
     module.comfy_nodes.NODE_CLASS_MAPPINGS["ImageResizeKJv2"] = _ImageResizeKJWithNvidia
-    module.comfy_nodes.NODE_CLASS_MAPPINGS["MinimaxH3LatentUpscaler3D"] = _MiniMaxLatentUpscaler
     monkeypatch.setattr(module.folder_paths, "get_output_directory", lambda: str(tmp_path))
     inputs = _h3_project_inputs(sampling_mode=["dual"], upscale_model=[upscale_model])
     if upscale_by is not None:
@@ -1536,7 +2029,7 @@ def test_multitrack_project_uses_flat_upscale_by(
     manifest = json.loads((tmp_path / "easy_media/projects/default/project.json").read_text())
     assert (manifest["width"], manifest["height"]) == expected_size
     assert (inputs["tracks_info"][0]["width"], inputs["tracks_info"][0]["height"]) == (1344, 768)
-    upscale_type = "ImageResizeKJv2" if upscale_model == "None" else "MinimaxH3LatentUpscaler3D"
+    upscale_type = "ImageResizeKJv2" if upscale_model == "None" else "easy minimaxH3LatentUpscaler"
     if expected_size == (1344, 768):
         assert not any(node["class_type"] == upscale_type for node in result.expand.values())
     else:
@@ -1611,38 +2104,11 @@ def test_multitrack_project_rejects_zero_start_number(monkeypatch):
         )
 
 
-@pytest.mark.parametrize(
-    "upscaler_defaults",
-    [
-        {},
-        {"enable_temporal_chunking": True, "force_unload": False},
-        {"enable_temporal_chunking": False, "force_unload": True},
-    ],
-)
 def test_multitrack_h3_medium_dual_uses_selected_latent_upscale_model(
-    monkeypatch, upscaler_defaults
+    monkeypatch,
 ):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
-
-    class VersionedLatentUpscaler(_MiniMaxLatentUpscaler):
-        @classmethod
-        def INPUT_TYPES(cls):
-            return {
-                "required": {
-                    "latent": ("LATENT",),
-                    "model_name": (["default.safetensors"],),
-                    "align": ("INT", {"default": 2}),
-                    **{
-                        name: ("BOOLEAN", {"default": value})
-                        for name, value in upscaler_defaults.items()
-                    },
-                }
-            }
-
-    module.comfy_nodes.NODE_CLASS_MAPPINGS["MinimaxH3LatentUpscaler3D"] = (
-        VersionedLatentUpscaler
-    )
 
     result = module.EasyMultiTrackProject.execute(
         **_h3_project_inputs(
@@ -1660,7 +2126,7 @@ def test_multitrack_h3_medium_dual_uses_selected_latent_upscale_model(
     upscale = next(
         node
         for node in nodes
-        if node["class_type"] == "MinimaxH3LatentUpscaler3D"
+        if node["class_type"] == "easy minimaxH3LatentUpscaler"
     )
     separate = next(
         node for node in nodes if node["class_type"] == "LTXVSeparateAVLatent"
@@ -1674,14 +2140,8 @@ def test_multitrack_h3_medium_dual_uses_selected_latent_upscale_model(
     assert upscale["inputs"]["model_name"] == "h3_upscale.safetensors"
     assert upscale["inputs"]["mode"] == "target dimensions"
     assert upscale["inputs"]["align"] == 32
-    assert upscale["inputs"]["enable_chunking"] is True
-    for name in ("enable_temporal_chunking", "force_unload"):
-        if name in upscaler_defaults:
-            assert upscale["inputs"][name] is upscaler_defaults[name]
-        else:
-            assert name not in upscale["inputs"]
-    assert upscale["inputs"]["device"] == "cuda"
-    assert upscale["inputs"]["precision"] == "fp16"
+    assert upscale["inputs"]["enable_temporal_chunking"] is True
+    assert upscale["inputs"]["force_unload"] is True
     assert (
         upscale["inputs"]["mode.width"],
         upscale["inputs"]["mode.height"],
@@ -1704,17 +2164,18 @@ def test_multitrack_h3_medium_dual_uses_selected_latent_upscale_model(
     assert not any(node["class_type"] == "ImageResizeKJv2" for node in nodes)
 
 
-def test_multitrack_h3_selected_upscale_model_requires_external_node(monkeypatch):
+def test_multitrack_h3_selected_upscale_model_uses_bundled_node(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
 
-    with pytest.raises(RuntimeError, match="MinimaxH3LatentUpscaler3D is required"):
-        module.EasyMultiTrackProject.execute(
-            **_h3_project_inputs(
-                sampling_mode=_h3_sampling_mode("dual"),
-                upscale_model=["h3_upscale.safetensors"],
-            )
+    result = module.EasyMultiTrackProject.execute(
+        **_h3_project_inputs(
+            sampling_mode=_h3_sampling_mode("dual"),
+            upscale_model=["h3_upscale.safetensors"],
         )
+    )
+
+    assert _graph_node(result, "easy minimaxH3LatentUpscaler")
 
 
 def test_multitrack_h3_second_pass_at_one_x_reuses_first_pass_latent(monkeypatch):
@@ -1735,7 +2196,7 @@ def test_multitrack_h3_second_pass_at_one_x_reuses_first_pass_latent(monkeypatch
     assert sum(node["class_type"] == "easy h3SegmentSaveEnd" for node in nodes) == 1
     assert not any(node["class_type"] == "ImageResizeKJv2" for node in nodes)
     assert not any(
-        node["class_type"] == "MinimaxH3LatentUpscaler3D" for node in nodes
+        node["class_type"] == "easy minimaxH3LatentUpscaler" for node in nodes
     )
 
 
@@ -2569,6 +3030,10 @@ def test_multitrack_h3_consecutive_context_uses_previous_trimmed_latent(monkeypa
 def test_multitrack_h3_loop_start_loads_previous_project_context(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
+    project_module = sys.modules["easy_media.nodes.project"]
+    monkeypatch.setattr(
+        project_module, "has_h3_context_latent", lambda *args, **kwargs: True
+    )
     module.comfy_nodes.NODE_CLASS_MAPPINGS.update(
         {
             "MiniMaxH3MotionContextTrim": _MiniMaxMotionContextTrim,
@@ -2607,6 +3072,73 @@ def test_multitrack_h3_loop_start_loads_previous_project_context(monkeypatch):
     assert any(
         node["class_type"] == "easy MiniMaxH3MotionContextHard" for node in nodes
     )
+
+
+def test_multitrack_h3_context_start_rejects_missing_previous_latent(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    project_module = sys.modules["easy_media.nodes.project"]
+    monkeypatch.setattr(
+        project_module, "has_h3_context_latent", lambda *args, **kwargs: False
+    )
+    info = _h3_project_inputs()["tracks_info"][0]
+    info["tracks"][0]["segments"].append(
+        {
+            "start_frame": 120,
+            "end_frame": 240,
+            "content": {
+                "task_mode": "l2v",
+                "continuity_mode": "context",
+                "images": [{"media_index": 0}],
+            },
+        }
+    )
+
+    with pytest.raises(ValueError, match="segment 1 has no active context latent"):
+        module.EasyMultiTrackProject.execute(
+            **_h3_project_inputs(
+                tracks_info=[info],
+                segment_start_number=[2],
+                segment_count=[1],
+            )
+        )
+
+
+def test_multitrack_h3_selflift_context_start_requires_exact_low_latent(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    project_module = sys.modules["easy_media.nodes.project"]
+    checked_resolutions = []
+
+    def has_context(*args, **kwargs):
+        checked_resolutions.append(
+            (kwargs.get("resolution"), kwargs.get("allow_low_fallback", True))
+        )
+        return kwargs.get("resolution") == "high"
+
+    monkeypatch.setattr(project_module, "has_h3_context_latent", has_context)
+    info = _h3_project_inputs()["tracks_info"][0]
+    info["tracks"][0]["segments"].append(
+        {
+            "start_frame": 120,
+            "end_frame": 240,
+            "content": {
+                "task_mode": "l2v",
+                "continuity_mode": "context_swap",
+                "images": [{"media_index": 0}],
+            },
+        }
+    )
+
+    with pytest.raises(ValueError, match="no active low-resolution context latent"):
+        module.EasyMultiTrackProject.execute(
+            **_h3_project_inputs(
+                tracks_info=[info],
+                sampling_mode=_h3_sampling_mode("selflift"),
+                segment_start_number=[2],
+                segment_count=[1],
+            )
+        )
+
+    assert checked_resolutions == [("high", True), ("low", False)]
 
 
 def test_multitrack_h3_project_uses_prompt_graph_as_last_turbo_fallback(
@@ -3498,7 +4030,7 @@ def test_audio_only_project_never_decodes_or_saves_video(monkeypatch, mode, firs
     types_in_graph = {node["class_type"] for node in result.expand.values()}
     assert "VAEDecodeAudio" in types_in_graph
     assert not types_in_graph.intersection({
-        "VAEDecode", "VAEEncode", "ImageResizeKJv2", "MinimaxH3LatentUpscaler3D",
+        "VAEDecode", "VAEEncode", "ImageResizeKJv2", "easy minimaxH3LatentUpscaler",
         "easy saveVideo", "easy h3SegmentEncodingStart", "easy h3SegmentSaveEnd",
         "easy h3LockedAudioDurationAlign",
     })

@@ -1171,6 +1171,425 @@ class EasyH3SegmentSamplingStart(io.ComfyNode):
         return io.NodeOutput(noise, guider, sampler, sigmas, latent_image)
 
 
+def _h3_upscale_target_size(
+    video: torch.Tensor,
+    mode: dict[str, Any],
+    align: int,
+) -> tuple[int, int]:
+    """Resolve a pixel-space resize request to H3 latent height and width."""
+    if video.ndim not in (4, 5) or video.shape[1] != 24:
+        raise ValueError(
+            "MiniMax H3 latent upscale expects a 24-channel 4D/5D video latent"
+        )
+    source_height, source_width = video.shape[-2:]
+    source_pixel_height = source_height * 16
+    source_pixel_width = source_width * 16
+    selected_mode = str(mode.get("mode", "scale by multiplier"))
+    if selected_mode == "scale by multiplier":
+        scale = float(mode.get("scale", 2.0))
+        if not math.isfinite(scale) or not 1.0 <= scale <= 4.0:
+            raise ValueError("MiniMax H3 upscale scale must be between 1 and 4")
+        target_pixel_width = source_pixel_width * scale
+        target_pixel_height = source_pixel_height * scale
+    elif selected_mode == "target dimensions":
+        target_pixel_width = float(mode.get("width", source_pixel_width))
+        target_pixel_height = float(mode.get("height", source_pixel_height))
+    elif selected_mode == "megapixels":
+        megapixels = float(mode.get("megapixels", 1.0))
+        if not math.isfinite(megapixels) or megapixels <= 0:
+            raise ValueError("MiniMax H3 upscale megapixels must be positive")
+        target_pixels = megapixels * 1_048_576
+        aspect_ratio = source_pixel_width / source_pixel_height
+        target_pixel_height = math.sqrt(target_pixels / aspect_ratio)
+        target_pixel_width = target_pixel_height * aspect_ratio
+    else:
+        raise ValueError(f"Unsupported MiniMax H3 upscale mode: {selected_mode}")
+    if (
+        not math.isfinite(target_pixel_width)
+        or not math.isfinite(target_pixel_height)
+        or target_pixel_width <= 0
+        or target_pixel_height <= 0
+    ):
+        raise ValueError("MiniMax H3 upscale target dimensions must be positive and finite")
+
+    alignment = max(16, int(align))
+    target_pixel_width = round(target_pixel_width / alignment) * alignment
+    target_pixel_height = round(target_pixel_height / alignment) * alignment
+    target_width = max(1, round(target_pixel_width / 16))
+    target_height = max(1, round(target_pixel_height / 16))
+    scale_height = target_height / source_height
+    scale_width = target_width / source_width
+    if scale_height < 1.0 or scale_width < 1.0:
+        raise ValueError("MiniMax H3 latent upscale only supports upscaling")
+    if scale_height > 4.0 or scale_width > 4.0:
+        raise ValueError("MiniMax H3 latent upscale supports at most 4x per axis")
+    return target_height, target_width
+
+
+def _h3_latent_streams(samples: Any) -> tuple[list[torch.Tensor], bool]:
+    if getattr(samples, "is_nested", False):
+        streams = list(samples.unbind())
+        if len(streams) != 2:
+            raise ValueError("MiniMax H3 nested latent must contain video and audio")
+        return streams, True
+    if not isinstance(samples, torch.Tensor):
+        raise TypeError("MiniMax H3 latent samples must be a tensor or nested AV latent")
+    return [samples], False
+
+
+def _pack_h3_latent_streams(streams: list[torch.Tensor], nested: bool) -> Any:
+    if not nested:
+        return streams[0]
+    import comfy.nested_tensor
+
+    return comfy.nested_tensor.NestedTensor(streams)
+
+
+class EasyMiniMaxH3LatentUpscaler(io.ComfyNode):
+    """Upscale MiniMax H3 video latents with the bundled learned 3D model."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        models = folder_paths.get_filename_list("latent_upscale_models")
+        return io.Schema(
+            node_id="easy minimaxH3LatentUpscaler",
+            display_name="MiniMax H3 Latent Upscaler",
+            category=CATEGORY_MINIMAX,
+            description=(
+                "Upscale a MiniMax H3 video latent with Easy Media's bundled "
+                "3D latent-upscaler runtime. Nested AV inputs retain their audio stream."
+            ),
+            inputs=[
+                io.Latent.Input("latent"),
+                io.Combo.Input(
+                    "model_name",
+                    options=models or ["None"],
+                    default=models[0] if models else "None",
+                    tooltip=(
+                        "Checkpoint under ComfyUI/models/latent_upscale_models."
+                    ),
+                ),
+                io.DynamicCombo.Input(
+                    "mode",
+                    options=[
+                        io.DynamicCombo.Option(
+                            "scale by multiplier",
+                            [
+                                io.Float.Input(
+                                    "scale", default=2.0, min=1.0, max=4.0, step=0.05
+                                )
+                            ],
+                        ),
+                        io.DynamicCombo.Option(
+                            "target dimensions",
+                            [
+                                io.Int.Input(
+                                    "width", default=1280, min=64, max=8192, step=8
+                                ),
+                                io.Int.Input(
+                                    "height", default=704, min=64, max=8192, step=8
+                                ),
+                            ],
+                        ),
+                        io.DynamicCombo.Option(
+                            "megapixels",
+                            [
+                                io.Float.Input(
+                                    "megapixels",
+                                    default=1.0,
+                                    min=0.1,
+                                    max=16.0,
+                                    step=0.1,
+                                )
+                            ],
+                        ),
+                    ],
+                ),
+                io.Int.Input(
+                    "align",
+                    default=32,
+                    min=16,
+                    max=512,
+                    step=16,
+                    tooltip="Pixel-space alignment; 32 is recommended for MiniMax H3.",
+                ),
+                io.Boolean.Input(
+                    "enable_temporal_chunking",
+                    default=True,
+                    tooltip=(
+                        "Process long video latents in overlapping temporal chunks "
+                        "to reduce peak memory usage."
+                    ),
+                ),
+                io.Boolean.Input(
+                    "force_unload",
+                    default=True,
+                    tooltip="Unload the latent upscaler from VRAM after execution.",
+                ),
+            ],
+            outputs=[io.Latent.Output("latent")],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        latent: dict[str, Any],
+        model_name: str,
+        mode: dict[str, Any],
+        align: int = 32,
+        enable_temporal_chunking: bool = True,
+        force_unload: bool = True,
+    ) -> io.NodeOutput:
+        if model_name == "None":
+            raise ValueError(
+                "Place a MiniMax H3 upscaler checkpoint under "
+                "ComfyUI/models/latent_upscale_models"
+            )
+        if not isinstance(latent, dict) or "samples" not in latent:
+            raise TypeError("MiniMax H3 latent upscale requires a LATENT dictionary")
+        streams, nested = _h3_latent_streams(latent["samples"])
+        video = streams[0]
+        target_height, target_width = _h3_upscale_target_size(video, mode, align)
+        if video.shape[-2:] == (target_height, target_width):
+            return io.NodeOutput(latent)
+
+        from ..modules.selflift.h3_latent_upscale import learned_latent_lift
+
+        was_4d = video.ndim == 4
+        upscaler_input = video.unsqueeze(2) if was_4d else video
+        try:
+            upscaled_video = learned_latent_lift(
+                upscaler_input,
+                (target_height, target_width),
+                str(model_name),
+                enable_temporal_chunking=bool(enable_temporal_chunking),
+                force_unload=bool(force_unload),
+            )
+        except (FileNotFoundError, RuntimeError, TypeError, ValueError) as error:
+            raise RuntimeError(f"MiniMax H3 latent upscale failed: {error}") from error
+        if was_4d:
+            upscaled_video = upscaled_video.squeeze(2)
+
+        result = latent.copy()
+        result["samples"] = _pack_h3_latent_streams(
+            [upscaled_video, *streams[1:]],
+            nested,
+        )
+        noise_mask = latent.get("noise_mask")
+        if noise_mask is not None:
+            mask_streams, mask_nested = _h3_latent_streams(noise_mask)
+            video_mask = mask_streams[0]
+            temporal = video_mask.shape[-3] if video_mask.ndim == 5 else None
+            size = (
+                (temporal, target_height, target_width)
+                if temporal is not None
+                else (target_height, target_width)
+            )
+            resized_mask = F.interpolate(video_mask.float(), size=size, mode="nearest").to(
+                video_mask
+            )
+            result["noise_mask"] = _pack_h3_latent_streams(
+                [resized_mask, *mask_streams[1:]],
+                mask_nested,
+            )
+        return io.NodeOutput(result)
+
+
+class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
+    """Run an NFE-preserving low-to-high-resolution MiniMax H3 sample."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy minimaxH3SelfLiftSampler",
+            display_name="MiniMax H3 SelfLift Sampler",
+            category=CATEGORY_MINIMAX,
+            description=(
+                "Sample the early denoiser evaluations at low resolution, lift "
+                "the clean endpoint, and finish the same Euler schedule at the "
+                "target resolution. A saved low-resolution context can continue "
+                "the low stage while the regular latent preserves the high-resolution "
+                "boundary. The sampler is always standard Euler."
+            ),
+            inputs=[
+                io.Model.Input("model"),
+                io.Conditioning.Input("positive"),
+                io.Vae.Input("vae"),
+                io.Latent.Input("latent_image"),
+                io.Sigmas.Input("sigmas"),
+                io.Int.Input(
+                    "seed",
+                    default=0,
+                    min=0,
+                    max=0xFFFFFFFFFFFFFFFF,
+                    control_after_generate=io.ControlAfterGenerate.fixed,
+                ),
+                io.Float.Input(
+                    "transition_ratio",
+                    default=0.6,
+                    min=0.05,
+                    max=0.95,
+                    step=0.05,
+                    tooltip=(
+                        "Fraction of denoiser evaluations performed at low "
+                        "resolution. This is an NFE ratio, not a sigma-value cutoff."
+                    ),
+                ),
+                io.Float.Input(
+                    "lowres_scale",
+                    default=0.6,
+                    min=0.25,
+                    max=1.0,
+                    step=0.001,
+                    round=0.001,
+                    extra_dict={"precision": 3},
+                    tooltip=(
+                        "Scale of the low-resolution prefix relative to the "
+                        "target latent."
+                    ),
+                ),
+                io.Float.Input(
+                    "rho",
+                    default=0.1,
+                    min=0.0,
+                    max=1.0,
+                    step=0.01,
+                    tooltip="Strength of the pixel/VAE artifact correction.",
+                ),
+                io.Float.Input(
+                    "w_max",
+                    default=0.7,
+                    min=0.0,
+                    max=1.0,
+                    step=0.01,
+                    tooltip="Maximum consistency weight used by artifact correction.",
+                ),
+                io.Float.Input(
+                    "w_min",
+                    default=0.25,
+                    min=0.0,
+                    max=1.0,
+                    step=0.01,
+                    tooltip="Minimum consistency weight used by artifact correction.",
+                ),
+                io.Combo.Input(
+                    "upscaler_model",
+                    options=["None"]
+                    + folder_paths.get_filename_list("latent_upscale_models"),
+                    default="None",
+                    tooltip=(
+                        "Optional MiniMax H3 latent upscaler. None uses nearest "
+                        "latent lifting without a pixel/VAE round trip."
+                    ),
+                ),
+                io.Boolean.Input(
+                    "highres_tiling",
+                    default=False,
+                    optional=True,
+                    tooltip=(
+                        "Experimental: automatically split MiniMax H3 model "
+                        "evaluation into spatial tiles during the high-resolution "
+                        "SelfLift stage to reduce peak VRAM."
+                    ),
+                ),
+                io.Latent.Input("low_context_latent", optional=True),
+            ],
+            outputs=[
+                io.Latent.Output("latent"),
+                io.Latent.Output("low_context_latent"),
+            ],
+            is_dev_only=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        model: Any,
+        positive: Any,
+        vae: Any,
+        latent_image: dict[str, Any],
+        sigmas: torch.Tensor,
+        seed: int,
+        transition_ratio: float = 0.6,
+        lowres_scale: float = 0.6,
+        rho: float = 0.1,
+        w_max: float = 0.7,
+        w_min: float = 0.25,
+        upscaler_model: str = "None",
+        highres_tiling: bool = False,
+        low_context_latent: dict[str, Any] | None = None,
+    ) -> io.NodeOutput:
+        from ..modules.selflift.sampling import progressive_sample_h3
+
+        lowres_factor = float(lowres_scale)
+        if not math.isfinite(lowres_factor) or not 0.25 <= lowres_factor <= 1.0:
+            raise ValueError(
+                "MiniMax H3 SelfLift lowres_scale must be between 0.25 and 1"
+            )
+        correction_rho = float(rho)
+        correction_min = float(w_min)
+        correction_max = float(w_max)
+        if not all(
+            math.isfinite(value)
+            for value in (correction_rho, correction_min, correction_max)
+        ) or not (
+            0.0 <= correction_rho <= 1.0
+            and 0.0 <= correction_min <= correction_max <= 1.0
+        ):
+            raise ValueError(
+                "MiniMax H3 SelfLift correction parameters must satisfy "
+                "0 <= rho <= 1 and 0 <= w_min <= w_max <= 1"
+            )
+
+        selected_upscaler = str(upscaler_model)
+        latent_lifter = None
+        if selected_upscaler != "None":
+            from ..modules.selflift.h3_latent_upscale import learned_latent_lift
+
+            def latent_lifter(
+                latent: torch.Tensor,
+                target_size: tuple[int, int],
+            ) -> torch.Tensor:
+                return learned_latent_lift(
+                    latent,
+                    target_size,
+                    selected_upscaler,
+                )
+
+        log_node_info(
+            "MiniMax H3 SelfLift Sampler",
+            "Sampling with forced Euler, "
+            f"transition_ratio={float(transition_ratio):.3f}, "
+            f"lowres_scale={lowres_factor:.3f}, "
+            f"rho={correction_rho:.3f}, "
+            f"weights={correction_min:.3f}..{correction_max:.3f}, "
+            f"upscaler_model={selected_upscaler}, "
+            f"highres_tiling={bool(highres_tiling)}, "
+            f"low_context={'saved' if low_context_latent is not None else 'derived'}, "
+            "sampling_route=selflift",
+        )
+        try:
+            sampled, low_context = progressive_sample_h3(
+                model=model,
+                positive=positive,
+                vae=vae,
+                latent_image=latent_image,
+                sigmas=sigmas,
+                seed=int(seed),
+                transition_ratio=float(transition_ratio),
+                lowres_scale=lowres_factor,
+                latent_lifter=latent_lifter,
+                low_context_latent=low_context_latent,
+                rho=correction_rho,
+                w_min=correction_min,
+                w_max=correction_max,
+                highres_tiling=bool(highres_tiling),
+            )
+        except (RuntimeError, TypeError, ValueError) as error:
+            raise RuntimeError(f"MiniMax H3 SelfLift sampling failed: {error}") from error
+        return io.NodeOutput(sampled, low_context)
+
+
 class EasyH3SegmentSaveEnd(io.ComfyNode):
     """Forward a staged project segment video path."""
 

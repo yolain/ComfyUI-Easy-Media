@@ -18,8 +18,6 @@ from typing import Any, Iterable
 import torch
 
 from .core import (
-    AUDIO_HZ,
-    FPS,
     _audio_tail_from_latent,
     _merge_noise_mask,
     _noise_mask_streams,
@@ -245,7 +243,6 @@ def prepare_context_swap_latent(
     output_audio = target_audio.clone()
     audio_mask = torch.ones_like(output_audio[:, :1], dtype=torch.float32)
     audio_steps = 0
-    release_values: list[float] = []
 
     if continue_audio:
         copied_audio, audio_steps, _overhang = _audio_tail_from_latent(
@@ -264,7 +261,7 @@ def prepare_context_swap_latent(
             device=output_audio.device,
             dtype=output_audio.dtype,
         )
-        release_values = _soft_audio_release(
+        _soft_audio_release(
             audio_mask,
             audio_steps,
             audio_release_steps,
@@ -311,9 +308,19 @@ class _DriftControlMaskState:
         schedule = self.sigmas or _schedule_values(
             (extra_options or {}).get("sigmas", ())
         )
+        active_video_shape = self.video_shape
+        active_model = (extra_options or {}).get("model")
+        active_inner_model = getattr(active_model, "inner_model", None)
+        active_shapes = getattr(active_inner_model, "latent_shapes", None)
+        if (
+            isinstance(active_shapes, (tuple, list))
+            and active_shapes
+            and len(active_shapes[0]) == 5
+        ):
+            active_video_shape = tuple(int(value) for value in active_shapes[0])
         output, video_mask = apply_dynamic_prefix_mask(
             denoise_mask,
-            self.video_shape,
+            active_video_shape,
             matched_noise_ratio(current, schedule),
             prefix_steps=self.prefix_steps,
             taper_steps=min(DRIFT_CONTROL_TAPER_STEPS, self.prefix_steps),

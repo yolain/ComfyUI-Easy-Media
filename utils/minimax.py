@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,16 @@ H3_VAE_FRAME_CHUNK = 17
 H3_VAE_TOKENS_PER_CHUNK = 5
 H3_VAE_FINAL_TOKEN_DROP = 3
 H3_FRAMES_PER_TOKEN = (1, 4, 4, 4, 4)
+
+
+def selflift_transition_step(step_count: int, ratio: float) -> int:
+    """Round a low-resolution NFE ratio to a valid SelfLift boundary."""
+    if step_count < 2:
+        raise ValueError("SelfLift requires at least two denoiser evaluations")
+    if not math.isfinite(ratio) or not 0.0 < ratio < 1.0:
+        raise ValueError("SelfLift transition_ratio must be between 0 and 1")
+    nearest = int(math.floor(step_count * ratio + 0.5))
+    return max(1, min(step_count - 1, nearest))
 
 
 def h3_phase_aligned_context_start(
