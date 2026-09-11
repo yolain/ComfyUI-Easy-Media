@@ -5,7 +5,46 @@ import { Check, ChevronDown, ChevronUp } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { CUSTOM_NODE_CLASS } from "@/lib/constants"
 
-const Select = SelectPrimitive.Root
+interface SelectOverlayContextValue {
+  open: boolean
+  close: () => void
+}
+
+const SelectOverlayContext = React.createContext<SelectOverlayContextValue>({
+  open: false,
+  close: () => {},
+})
+
+const Select = ({
+  open: controlledOpen,
+  defaultOpen = false,
+  onOpenChange,
+  ...props
+}: React.ComponentProps<typeof SelectPrimitive.Root>) => {
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen)
+  const open = controlledOpen ?? uncontrolledOpen
+
+  const handleOpenChange = React.useCallback((nextOpen: boolean) => {
+    if (controlledOpen === undefined) setUncontrolledOpen(nextOpen)
+    onOpenChange?.(nextOpen)
+  }, [controlledOpen, onOpenChange])
+
+  const overlayContext = React.useMemo<SelectOverlayContextValue>(() => ({
+    open,
+    close: () => handleOpenChange(false),
+  }), [handleOpenChange, open])
+
+  return (
+    <SelectOverlayContext.Provider value={overlayContext}>
+      <SelectPrimitive.Root
+        {...props}
+        open={open}
+        onOpenChange={handleOpenChange}
+      />
+    </SelectOverlayContext.Provider>
+  )
+}
+Select.displayName = SelectPrimitive.Root.displayName
 
 const SelectGroup = SelectPrimitive.Group
 
@@ -69,35 +108,47 @@ SelectScrollDownButton.displayName =
 const SelectContent = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
->(({ className, children, position = "popper", ...props }, ref) => (
-  <SelectPrimitive.Portal>
-    <div className={`${CUSTOM_NODE_CLASS}`}>
-      <SelectPrimitive.Content
-        ref={ref}
-        className={cn(
-          "relative z-50 max-h-[--radix-select-content-available-height] min-w-[8rem] overflow-y-auto overflow-x-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 origin-[--radix-select-content-transform-origin]",
-          position === "popper" &&
-            "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
-          className
-        )}
-        position={position}
-        {...props}
-      >
-        <SelectScrollUpButton />
-        <SelectPrimitive.Viewport
+>(({ className, children, position = "popper", ...props }, ref) => {
+  const overlayContext = React.useContext(SelectOverlayContext)
+
+  return (
+    <SelectPrimitive.Portal>
+      <div className={`${CUSTOM_NODE_CLASS}`}>
+        {overlayContext.open ? (
+          <div
+            aria-hidden="true"
+            data-easy-media-select-backdrop=""
+            className="fixed inset-0 z-[9997]"
+            onPointerDown={overlayContext.close}
+          />
+        ) : null}
+        <SelectPrimitive.Content
+          ref={ref}
           className={cn(
-            "p-1",
+            "relative z-[9999] max-h-[--radix-select-content-available-height] min-w-[8rem] overflow-y-auto overflow-x-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 origin-[--radix-select-content-transform-origin]",
             position === "popper" &&
-              "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]"
+              "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
+            className
           )}
+          position={position}
+          {...props}
         >
-          {children}
-        </SelectPrimitive.Viewport>
-        <SelectScrollDownButton />
-      </SelectPrimitive.Content>
-    </div>
-  </SelectPrimitive.Portal>
-))
+          <SelectScrollUpButton />
+          <SelectPrimitive.Viewport
+            className={cn(
+              "p-1",
+              position === "popper" &&
+                "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]"
+            )}
+          >
+            {children}
+          </SelectPrimitive.Viewport>
+          <SelectScrollDownButton />
+        </SelectPrimitive.Content>
+      </div>
+    </SelectPrimitive.Portal>
+  )
+})
 SelectContent.displayName = SelectPrimitive.Content.displayName
 
 const SelectLabel = React.forwardRef<

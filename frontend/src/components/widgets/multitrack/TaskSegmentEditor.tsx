@@ -1,9 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { CloudUpload, Eye, Pencil, Plus, RotateCcw, Share2, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+  type ResizablePanelGroupHandle,
+} from '@/components/ui/resizable'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
@@ -57,6 +63,20 @@ import { PromptContentEditor, type PromptReferenceResource } from './PromptConte
 
 type PromptTab = 'user' | 'system'
 type EditMode = 'individual' | 'combined'
+
+const TASK_IMAGE_PANEL_MIN_SIZE = 180
+const TASK_IMAGE_PANEL_MAX_SIZE = '55%'
+const TASK_PROMPT_PANEL_MIN_SIZE = 280
+const TASK_EDITOR_PANEL_GAP = 16
+const TASK_IMAGES_PANEL_ID = 'task-images-resizable-panel'
+const TASK_PROMPT_PANEL_ID = 'task-prompt-resizable-panel'
+
+interface TaskEditorPanelDrag {
+  pointerId: number
+  startClientX: number
+  startImageSize: number
+  groupWidth: number
+}
 
 interface TrackSegmentContentUpdate {
   segmentId: string
@@ -554,7 +574,34 @@ export function TaskSegmentEditor({
   const imageGridColumns = images.length > 0 && images.length < 4 ? 'grid-cols-2' : 'grid-cols-3'
   const imagePickerSurfaceClass = isImageDragOver ? 'border-primary bg-accent/20' : 'border-border bg-muted/20'
   const containerRef = useRef<HTMLDivElement>(null)
+  const editorContentRef = useRef<HTMLDivElement>(null)
+  const panelGroupRef = useRef<ResizablePanelGroupHandle>(null)
+  const panelDragRef = useRef<TaskEditorPanelDrag | null>(null)
   const [showEditModeToggle, setShowEditModeToggle] = useState(true)
+  const [imagePanelDefaultSize, setImagePanelDefaultSize] = useState<string | number>('40%')
+
+  useLayoutEffect(() => {
+    const content = editorContentRef.current
+    if (!content) return
+
+    const styles = globalThis.getComputedStyle(content)
+    const innerWidth = content.clientWidth
+      - Number.parseFloat(styles.paddingLeft)
+      - Number.parseFloat(styles.paddingRight)
+    const innerHeight = content.clientHeight
+      - Number.parseFloat(styles.paddingTop)
+      - Number.parseFloat(styles.paddingBottom)
+    if (innerWidth <= 0 || innerHeight <= 0) return
+
+    const maximumImageWidth = Math.min(
+      innerWidth * 0.55,
+      innerWidth - TASK_PROMPT_PANEL_MIN_SIZE - TASK_EDITOR_PANEL_GAP,
+    )
+    setImagePanelDefaultSize(Math.max(
+      TASK_IMAGE_PANEL_MIN_SIZE,
+      Math.min(innerHeight, maximumImageWidth),
+    ))
+  }, [])
 
   useEffect(() => {
     const container = containerRef.current
@@ -572,26 +619,81 @@ export function TaskSegmentEditor({
     return () => observer.disconnect()
   }, [])
 
+  function handlePanelResizePointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.stopPropagation()
+
+    const layout = panelGroupRef.current?.getLayout()
+    const groupWidth = event.currentTarget.parentElement?.getBoundingClientRect().width ?? 0
+    const startImageSize = layout?.[TASK_IMAGES_PANEL_ID]
+    if (groupWidth <= 0 || startImageSize === undefined) return
+
+    panelDragRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startImageSize,
+      groupWidth,
+    }
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+  }
+
+  function handlePanelResizePointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    const drag = panelDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    event.preventDefault()
+    event.stopPropagation()
+
+    const imageSize = drag.startImageSize
+      + ((event.clientX - drag.startClientX) / drag.groupWidth) * 100
+    panelGroupRef.current?.setLayout({
+      [TASK_IMAGES_PANEL_ID]: imageSize,
+      [TASK_PROMPT_PANEL_ID]: 100 - imageSize,
+    })
+  }
+
+  function finishPanelResize(event: React.PointerEvent<HTMLDivElement>) {
+    if (panelDragRef.current?.pointerId !== event.pointerId) return
+    event.preventDefault()
+    event.stopPropagation()
+    panelDragRef.current = null
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId)
+    }
+  }
+
   return (
     <div
       ref={containerRef}
       data-capture-wheel="true"
       className="task-segment-editor flex h-full min-h-24 w-full flex-col overflow-hidden rounded-sm bg-background text-foreground"
     >
-      <div className="flex min-h-0 flex-1 gap-4 p-4">
+      <div ref={editorContentRef} className="flex min-h-0 flex-1 p-4">
+        <ResizablePanelGroup
+          key={editMode}
+          groupRef={panelGroupRef}
+          orientation="horizontal"
+          className="min-h-0 min-w-0"
+        >
         {editMode === 'individual' && (
-          <div
-            data-testid="task-image-drop-zone"
-            aria-label={t('multitrack.taskImageDropZone')}
-            className={cn(
-              'task-image-drop-zone flex aspect-square h-full min-h-0 shrink-0 items-center justify-center rounded-md border border-dashed transition-colors',
-              isImageDragOver ? 'border-primary bg-accent/20' : 'border-border bg-muted/30',
-            )}
-            onDragEnter={handleImageDragEnter}
-            onDragOver={handleImageDragOver}
-            onDragLeave={handleImageDragLeave}
-            onDrop={handleDrop}
+          <ResizablePanel
+            id={TASK_IMAGES_PANEL_ID}
+            defaultSize={imagePanelDefaultSize}
+            minSize={TASK_IMAGE_PANEL_MIN_SIZE}
+            maxSize={TASK_IMAGE_PANEL_MAX_SIZE}
           >
+            <div
+              data-testid="task-image-drop-zone"
+              aria-label={t('multitrack.taskImageDropZone')}
+              className={cn(
+                'task-image-drop-zone flex h-full min-h-0 w-full items-center justify-center rounded-md border border-dashed transition-colors',
+                isImageDragOver ? 'border-primary bg-accent/20' : 'border-border bg-muted/30',
+              )}
+              onDragEnter={handleImageDragEnter}
+              onDragOver={handleImageDragOver}
+              onDragLeave={handleImageDragLeave}
+              onDrop={handleDrop}
+            >
             <Popover
               open={mediaSelectorOpen}
               onOpenChange={(open) => {
@@ -648,7 +750,7 @@ export function TaskSegmentEditor({
                         key={image.id}
                         draggable
                         data-testid={`task-image-${image.id}`}
-                        className={`task-image-grid-item group relative flex aspect-square w-full self-start cursor-pointer items-center justify-center overflow-hidden rounded-md border bg-black ${
+                        className={`task-image-grid-item group/task-image relative flex aspect-square w-full self-start cursor-pointer items-center justify-center overflow-hidden rounded-md border bg-black ${
                           image.shared_reference ? 'border-highlight' : 'border-border'
                         }`}
                         role="button"
@@ -700,7 +802,7 @@ export function TaskSegmentEditor({
                         )}
                         <div
                           data-testid={`task-image-actions-${image.id}`}
-                          className="absolute right-1 top-1 z-10 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                          className="absolute right-1 top-1 z-10 flex gap-1 opacity-0 transition-opacity group-hover/task-image:opacity-100 group-focus-within/task-image:opacity-100"
                         >
                           <TooltipProvider>
                             <Tooltip>
@@ -798,13 +900,33 @@ export function TaskSegmentEditor({
                 />
               </PopoverContent>
             </Popover>
-          </div>
+            </div>
+          </ResizablePanel>
         )}
 
-        <div
-          data-testid="task-prompt-panel"
-          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-md border border-border bg-muted/30 shadow-sm"
+        {editMode === 'individual' ? (
+          <ResizableHandle
+            withHandle
+            aria-label={t('multitrack.resizeTaskEditorPanels')}
+            className="mx-2 bg-transparent"
+            onPointerDown={handlePanelResizePointerDown}
+            onPointerMove={handlePanelResizePointerMove}
+            onPointerUp={finishPanelResize}
+            onPointerCancel={finishPanelResize}
+            onLostPointerCapture={() => {
+              panelDragRef.current = null
+            }}
+          />
+        ) : null}
+
+        <ResizablePanel
+          id={TASK_PROMPT_PANEL_ID}
+          minSize={editMode === 'individual' ? TASK_PROMPT_PANEL_MIN_SIZE : '100%'}
         >
+          <div
+            data-testid="task-prompt-panel"
+            className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-md border border-border bg-muted/30 shadow-sm"
+          >
           {editMode === 'individual' && (
             <div className="flex h-11 shrink-0 items-center px-2 justify-between">
               <div className="flex h-7 items-center rounded-md bg-card p-1">
@@ -921,7 +1043,9 @@ export function TaskSegmentEditor({
               </div>
             </div>
           )}
-        </div>
+          </div>
+        </ResizablePanel>
+        </ResizablePanelGroup>
       </div>
 
       <div className="relative flex shrink-0 items-center justify-between border-t border-dashed border-border p-2">

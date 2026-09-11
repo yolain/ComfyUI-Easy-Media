@@ -62,19 +62,52 @@ const H3_LANGUAGE_LABELS = new Set([
   'turkish',
   'vietnamese',
 ])
-const TOKEN_PATTERN = /<[^<>\n]*>|@(?:图片|音频|视频|Picture|Image|Audio|Video)\s*\d+|\{[^{}\n]*\}|\[[^\[\]\n]*\]|\(S\d+(?:\s*,\s*S?\d+)*\)|[|｜]/gi
-const REFERENCE_CHIP_CLASS = 'prompt-reference-chip inline-flex h-[1.6em] max-w-full items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5 mx-1 align-middle font-semibold leading-none shadow-sm'
+const TOKEN_PATTERN = /<[^<>\n]*>|@(?:图片|音频|视频|Picture|Image|Audio|Video)\s*\d+|\{[^{}\n]*\}|\[[^\[\]\n]*\]|\(S\d+(?:\s*,\s*S?\d+)*\)|(?:subject_definitions|summary|retention_analysis|detailed_description|overall_soundscape|non_diegetic_music)\s*:\s*|(?:主体定义|留存分析|详细描述|整体声景|非叙事性音乐)\s*[:：]\s*|[|｜]/gi
+const PROMPT_CHIP_CLASS = 'prompt-reference-chip inline-flex h-[1.6em] max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 mx-1 align-middle font-semibold leading-none shadow-sm'
+const EMPHASIS_CLASS = 'font-semibold text-muted-foreground'
 
 function isH3PromptSemantic(token: string): boolean {
   if (/^<Subject\s+\d+>$/i.test(token)) return true
   if (/^<\/?d>$/i.test(token) || /^<(?:scenetrans|cutoff)>$/i.test(token)) return true
   if (/^\[Shot\s+\d+\]$/i.test(token) || /^\(S\d+(?:\s*,\s*S?\d+)*\)$/i.test(token)) return true
+  return isH3LanguageSemantic(token)
+}
+
+function isH3LanguageSemantic(token: string): boolean {
   const language = token.match(/^\[([A-Za-z]+)\]$/)?.[1].toLowerCase()
   return language !== undefined && H3_LANGUAGE_LABELS.has(language)
 }
 
 function isH3ThemeSemantic(token: string): boolean {
   return /^\[Shot\s+\d+\]$/i.test(token)
+}
+
+function isH3SectionHeading(token: string): boolean {
+  return /^(?:(?:subject_definitions|summary|retention_analysis|detailed_description|overall_soundscape|non_diegetic_music)\s*:|(?:主体定义|留存分析|详细描述|整体声景|非叙事性音乐)\s*[:：])\s*$/i.test(token)
+}
+
+function referenceColor(reference: { type: PromptReferenceType }, resource?: PromptReferenceResource): string {
+  if (resource?.color) return resource.color
+  if (reference.type === 'audio') return 'var(--multitrack-audio-waveform)'
+  if (reference.type === 'video') return 'var(--multitrack-video-waveform)'
+  return 'var(--multitrack-task-bg)'
+}
+
+function applyChipColor(chip: HTMLElement, color: string) {
+  chip.style.color = color
+  chip.style.borderColor = color
+  chip.style.backgroundColor = `color-mix(in srgb, ${color} 10%, transparent)`
+}
+
+function replacementReferenceToken(currentToken: string, resource: PromptReferenceResource): string {
+  const type = resource.type === 'image' ? 'Picture' : resource.type === 'audio' ? 'Audio' : 'Video'
+  if (/^<(?:Picture|Image|Audio|Video)\s+\d+>$/i.test(currentToken)) {
+    return `<${type} ${resource.index}>`
+  }
+  if (/^@(?:Picture|Image|Audio|Video)\s*\d+$/i.test(currentToken)) {
+    return `@${type} ${resource.index}`
+  }
+  return resource.token
 }
 
 function normalizedReference(token: string): { type: PromptReferenceType; index: number } | null {
@@ -101,8 +134,11 @@ function serializePromptContent(container: ParentNode): string {
       return
     }
     if (!(node instanceof HTMLElement)) return
-    if (node.dataset.promptReferenceToken !== undefined) {
-      append(node.dataset.promptReferenceToken)
+    const decoratedToken = node.dataset.promptReferenceToken
+      ?? node.dataset.promptSemanticToken
+      ?? node.dataset.promptEmphasisText
+    if (decoratedToken !== undefined) {
+      append(decoratedToken)
       return
     }
     if (node.tagName === 'BR') {
@@ -151,6 +187,8 @@ function valueDecorationKey(
       decorations.push(`reference:${reference.type}:${reference.index}`)
     } else if (highlightPromptSemantics && isH3PromptSemantic(token)) {
       decorations.push(`semantic:${token.toLowerCase()}`)
+    } else if (highlightPromptSemantics && isH3SectionHeading(token)) {
+      decorations.push(`emphasis:${token.toLowerCase()}`)
     } else if (highlightSystemVariables && (token.startsWith('{') || token.startsWith('<'))) {
       decorations.push('system')
     } else if (highlightPipes && (token === '|' || token === '｜')) {
@@ -162,7 +200,7 @@ function valueDecorationKey(
 
 function editorDecorationKey(editor: HTMLElement): string {
   return Array.from(editor.querySelectorAll<HTMLElement>(
-    '[data-prompt-reference-token], [data-prompt-semantic-token], [data-system-prompt-variable], [data-pipe]',
+    '[data-prompt-reference-token], [data-prompt-semantic-token], [data-prompt-emphasis-text], [data-system-prompt-variable], [data-pipe]',
   )).map((element) => {
     const token = element.dataset.promptReferenceToken
     if (token !== undefined) {
@@ -172,6 +210,9 @@ function editorDecorationKey(editor: HTMLElement): string {
     if (element.dataset.systemPromptVariable !== undefined) return 'system'
     if (element.dataset.promptSemanticToken !== undefined) {
       return `semantic:${element.dataset.promptSemanticToken.toLowerCase()}`
+    }
+    if (element.dataset.promptEmphasisText !== undefined) {
+      return `emphasis:${element.dataset.promptEmphasisText.toLowerCase()}`
     }
     return 'pipe'
   }).join('|')
@@ -183,15 +224,17 @@ function setCaretOffset(editor: HTMLElement, targetOffset: number) {
   let offset = Math.max(0, targetOffset)
   for (const node of editor.childNodes) {
     const element = node instanceof HTMLElement ? node : null
-    const referenceToken = element?.dataset.promptReferenceToken
-    const length = referenceToken !== undefined
-      ? referenceToken.length
+    const decoratedToken = element?.dataset.promptReferenceToken
+      ?? element?.dataset.promptSemanticToken
+      ?? element?.dataset.promptEmphasisText
+    const length = decoratedToken !== undefined
+      ? decoratedToken.length
       : element?.tagName === 'BR'
         ? 1
         : node.textContent?.replaceAll('\u200B', '').length ?? 0
     if (offset <= length) {
       const range = document.createRange()
-      if (referenceToken !== undefined) {
+      if (decoratedToken !== undefined) {
         offset === 0 ? range.setStartBefore(node) : range.setStartAfter(node)
       } else if (element?.tagName === 'BR') {
         offset === 0 ? range.setStartBefore(node) : range.setStartAfter(node)
@@ -245,7 +288,7 @@ function appendDialogueText(container: HTMLElement, text: string) {
     if (!part) return
     const dialogue = document.createElement('span')
     dialogue.dataset.promptDialogueContent = 'true'
-    dialogue.className = 'text-highlight'
+    dialogue.className = EMPHASIS_CLASS
     dialogue.textContent = part
     container.append(dialogue)
   })
@@ -288,8 +331,8 @@ function appendReferenceChip(
   chip.contentEditable = 'false'
   chip.dataset.promptReferenceToken = token
   chip.dataset.promptReferenceType = parsed?.type ?? ''
-  chip.className = REFERENCE_CHIP_CLASS
-  chip.style.color = resource?.color || 'var(--muted-foreground)'
+  chip.className = `${PROMPT_CHIP_CLASS} cursor-pointer`
+  applyChipColor(chip, parsed ? referenceColor(parsed, resource) : 'var(--muted-foreground)')
 
   if (resource?.type === 'image' && resource.thumbnailUrl) {
     const image = document.createElement('img')
@@ -334,6 +377,66 @@ function appendReferenceChip(
   container.append(chip)
 }
 
+function appendSemanticIcon(chip: HTMLElement, type: 'subject' | 'dialogue') {
+  const icon = document.createElement('span')
+  icon.className = 'inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center'
+  icon.dataset.semanticIcon = type
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('fill', 'none')
+  svg.setAttribute('stroke', 'currentColor')
+  svg.setAttribute('stroke-width', '2')
+  svg.setAttribute('stroke-linecap', 'round')
+  svg.setAttribute('stroke-linejoin', 'round')
+  svg.setAttribute('aria-hidden', 'true')
+  svg.classList.add('lucide', 'h-3.5', 'w-3.5')
+  const paths = type === 'subject'
+    ? ['M18 21a8 8 0 0 0-16 0', 'M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8', 'M19 8v6', 'M22 11h-6']
+    : ['M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z']
+  paths.forEach((pathData) => {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    path.setAttribute('d', pathData)
+    svg.append(path)
+  })
+  icon.append(svg)
+  chip.append(icon)
+}
+
+function appendSemanticChip(container: HTMLElement, token: string) {
+  const chip = document.createElement('span')
+  chip.contentEditable = 'false'
+  chip.dataset.promptSemanticToken = token
+  chip.className = PROMPT_CHIP_CLASS
+  const subject = /^<Subject\s+\d+>$/i.test(token)
+  const dialogue = /^<\/?d>$/i.test(token)
+  const usesDefaultChipSurface = isH3ThemeSemantic(token) || isH3LanguageSemantic(token)
+  const color = subject || isH3ThemeSemantic(token)
+    ? 'var(--highlight)'
+    : dialogue
+      ? 'var(--prompt-dialogue)'
+      : 'var(--prompt-semantic)'
+  if (usesDefaultChipSurface) {
+    chip.classList.add('border-border', 'bg-background', 'text-foreground')
+  } else {
+    applyChipColor(chip, color)
+  }
+  if (subject) appendSemanticIcon(chip, 'subject')
+  if (dialogue) appendSemanticIcon(chip, 'dialogue')
+  const label = document.createElement('span')
+  label.className = 'inline-flex h-full items-center leading-none'
+  label.textContent = token
+  chip.append(label)
+  container.append(chip)
+}
+
+function appendEmphasisText(container: HTMLElement, token: string) {
+  const emphasis = document.createElement('span')
+  emphasis.dataset.promptEmphasisText = token
+  emphasis.className = EMPHASIS_CLASS
+  emphasis.textContent = token
+  container.append(emphasis)
+}
+
 function renderValue(
   editor: HTMLElement,
   value: string,
@@ -360,11 +463,9 @@ function renderValue(
       const resource = resources.find((item) => item.type === reference.type && item.index === reference.index)
       appendReferenceChip(editor, token, resource)
     } else if (highlightPromptSemantics && isH3PromptSemantic(token)) {
-      const semantic = document.createElement('span')
-      semantic.dataset.promptSemanticToken = token
-      semantic.className = isH3ThemeSemantic(token) ? 'text-highlight' : 'text-prompt-semantic'
-      semantic.textContent = token
-      editor.append(semantic)
+      appendSemanticChip(editor, token)
+    } else if (highlightPromptSemantics && isH3SectionHeading(token)) {
+      appendEmphasisText(editor, token)
     } else if (highlightSystemVariables && (token.startsWith('{') || token.startsWith('<'))) {
       const variable = document.createElement('span')
       variable.dataset.systemPromptVariable = 'true'
@@ -499,6 +600,22 @@ export function PromptContentEditor({
     setMention({ start: 0, end: 0, query: '', left, top, activeIndex: 0 })
   }
 
+  function openReferenceMention(chip: HTMLElement) {
+    const editor = editorRef.current
+    const token = chip.dataset.promptReferenceToken
+    if (!mentionsEnabled || !editor || token === undefined) return
+    const beforeChip = document.createRange()
+    beforeChip.selectNodeContents(editor)
+    beforeChip.setEndBefore(chip)
+    const start = serializePromptContent(beforeChip.cloneContents()).length
+    const rect = chip.getBoundingClientRect()
+    const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - 264))
+    const top = rect.bottom + 214 <= window.innerHeight
+      ? rect.bottom + 6
+      : Math.max(8, rect.top - 214)
+    setMention({ start, end: start + token.length, query: '', left, top, activeIndex: 0 })
+  }
+
   function commitEditorChange() {
     const editor = editorRef.current
     if (!editor) return
@@ -542,10 +659,12 @@ export function PromptContentEditor({
     const editor = editorRef.current
     if (!editor || !mention) return
     const currentValue = serializeEditor(editor)
-    const nextValue = `${currentValue.slice(0, mention.start)}${resource.token}${currentValue.slice(mention.end)}`
+    const currentToken = currentValue.slice(mention.start, mention.end)
+    const replacementToken = replacementReferenceToken(currentToken, resource)
+    const nextValue = `${currentValue.slice(0, mention.start)}${replacementToken}${currentValue.slice(mention.end)}`
     renderValue(editor, nextValue, resources, highlightSystemVariables, highlightPromptSemantics, highlightPipes)
     setEditorEmpty(false)
-    setCaretOffset(editor, mention.start + resource.token.length)
+    setCaretOffset(editor, mention.start + replacementToken.length)
     lastRenderKeyRef.current = ''
     onChange(nextValue)
     setMention(null)
@@ -639,8 +758,14 @@ export function PromptContentEditor({
             event.stopPropagation()
           }
         }}
-        onClick={() => {
-          setMention(null)
+        onClick={(event) => {
+          const target = event.target instanceof Element ? event.target : null
+          const referenceChip = target?.closest<HTMLElement>('[data-prompt-reference-token]')
+          if (referenceChip && editorRef.current?.contains(referenceChip)) {
+            openReferenceMention(referenceChip)
+          } else {
+            setMention(null)
+          }
         }}
         onBlur={(event) => {
           if (wrapperRef.current?.contains(event.relatedTarget as Node | null)) return
@@ -660,7 +785,7 @@ export function PromptContentEditor({
                 type="button"
                 variant="ghost"
                 aria-label={t('multitrack.openReferenceResources')}
-                className={cn(REFERENCE_CHIP_CLASS, 'pointer-events-auto min-w-0 text-highlight text-[10px]')}
+                className={cn(PROMPT_CHIP_CLASS, 'pointer-events-auto min-w-0 border-border bg-background text-highlight text-[10px]')}
                 onPointerDown={(event) => event.preventDefault()}
                 onClick={(event) => openPlaceholderMention(event.currentTarget)}
               >

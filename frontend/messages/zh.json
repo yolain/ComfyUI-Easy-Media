@@ -139,6 +139,7 @@
     "referenceAudioItem": "音频{n}",
     "referenceVideoItem": "视频{n}",
     "taskImageDropZone": "任务图片拖放区域",
+    "resizeTaskEditorPanels": "调整图片与提示词区域宽度",
     "selectImage": "选择图片",
     "addImage": "添加图片",
     "imageDropHint": "点击从文件选择，或将文件拖到这里。",

@@ -701,7 +701,7 @@ export function PreviewArea({
       <div
         key={image.id}
         data-testid={`task-preview-image-${image.id}`}
-        className={`group relative shrink-0 cursor-pointer overflow-hidden rounded-sm border bg-black ${borderClass} ${className}`}
+        className={`group/task-image relative shrink-0 cursor-pointer overflow-hidden rounded-sm border bg-black ${borderClass} ${className}`}
         draggable
         onDragStart={() => {
           draggedTaskImageIdRef.current = image.id
@@ -917,11 +917,11 @@ export function PreviewArea({
     const wrapperClassName = layout === 'corner'
       ? 'absolute right-2 top-2 flex gap-1'
       : layout === 'flow'
-        ? 'absolute right-1 top-1 flex gap-0.5'
-      : `absolute left-0 top-0 ${image.panorama_view ? '' : ' opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100'}`
+        ? 'absolute right-1 top-1 flex gap-0.5 opacity-0 transition-opacity group-hover/task-image:opacity-100 group-focus-within/task-image:opacity-100'
+      : `absolute left-0 top-0 ${image.panorama_view ? '' : ' opacity-0 transition-opacity group-hover/task-image:opacity-100 group-focus-within/task-image:opacity-100'}`
     const deleteWrapperClassName = layout === 'corner'
       ? ''
-      : 'absolute right-0 top-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100'
+      : 'absolute right-0 top-0 opacity-0 transition-opacity group-hover/task-image:opacity-100 group-focus-within/task-image:opacity-100'
     const controlClassName = layout === 'corner' ? 'h-7 w-7' : 'h-5 w-5'
     const iconClassName = layout === 'corner' ? '[&_svg]:!size-4' : '[&_svg]:!size-3'
     const sharedImageSegments = taskSegments && taskSegments.length > 0
@@ -1028,7 +1028,7 @@ export function PreviewArea({
     return (
       <div
         data-testid="task-prompt-overlay"
-        className={`flex w-full editing ${ editing ? 'items-end' : 'items-center'} bg-black/70 px-2 text-primary-foreground`}
+        className={`flex w-full editing ${ editing ? 'items-end' : 'items-center'} bg-background/70 px-2 text-primary-foreground`}
       >
         { !usesTaskImageOnlyPreview ? (<TooltipProvider>
           <Tooltip>
@@ -1369,7 +1369,7 @@ export function PreviewArea({
   return (
     <div
       data-multitrack-preview-area
-      className="relative flex min-h-24 w-full min-w-0 max-w-full flex-1 items-center justify-center overflow-hidden rounded-sm bg-black text-xs text-muted-foreground"
+      className="relative flex min-h-24 w-full min-w-0 max-w-full flex-1 items-center justify-center overflow-hidden rounded-sm text-xs text-muted-foreground bg-background"
       onClick={(event) => event.stopPropagation()}
     >
       {expandedTaskImage && expandedTaskImageTarget?.source === 'active'
@@ -1397,7 +1397,7 @@ export function PreviewArea({
               <div
                 data-testid="task-preview-images"
                 data-layout="flow"
-                className="flex h-full min-h-0 w-full flex-wrap content-center items-center justify-center gap-2 overflow-y-auto bg-black p-2"
+                className="flex h-full min-h-0 w-full flex-wrap content-center items-center justify-center gap-2 overflow-y-auto p-2"
               >
                 {activeTaskImages.images.map(({ image, url }, imageIndex) => (
                   renderActiveTaskImageThumbnail(

@@ -538,6 +538,7 @@ describe('PreviewArea', () => {
     expect(screen.getAllByRole('img').map((image) => image.getAttribute('src'))).toContain('https://example.com/second.png')
     expect(screen.getByRole('img', { name: 'second.png' }).className).toContain('w-auto')
     expect(screen.getByTestId('task-preview-image-first').className).toContain('h-40')
+    expect(screen.getByTestId('task-preview-image-first').className).toContain('group/task-image')
     expect(screen.getByTestId('task-preview-image-second').className).toContain('h-40')
     expect(screen.getByTestId('panorama-image-preview-first').className).toContain('aspect-video')
     expect(screen.queryByLabelText('720° panorama preview')).toBeNull()
@@ -650,7 +651,7 @@ describe('PreviewArea', () => {
     )
 
     const overlay = screen.getByTestId('task-prompt-overlay')
-    expect(overlay.className).toContain('bg-black/')
+    expect(overlay.className).toContain('bg-background/70')
     expect(screen.getByTestId('task-prompt-text').className).toContain('truncate')
     expect(screen.getByTestId('task-prompt-text').textContent).toBe(
       'A long active task prompt that should stay on one preview line and truncate when needed',
@@ -1006,6 +1007,7 @@ describe('PreviewArea', () => {
     expect(firstImage.className).toContain('cursor-pointer')
     const deleteButton = screen.getByRole('button', { name: 'Delete image first.png' })
     expect(firstImage.contains(deleteButton)).toBe(true)
+    expect(deleteButton.parentElement?.className).toContain('group-hover/task-image:opacity-100')
     expect(deleteButton.parentElement?.className).toContain('right-1')
     expect(deleteButton.className).toContain('h-5')
     expect(deleteButton.className).toContain('text-destructive')

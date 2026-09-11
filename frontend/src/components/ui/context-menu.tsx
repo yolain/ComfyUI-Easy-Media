@@ -59,6 +59,11 @@ const ContextMenuContent = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <ContextMenuPrimitive.Portal>
     <div className={`${CUSTOM_NODE_CLASS}`}>
+      <div
+        aria-hidden="true"
+        data-easy-media-context-menu-backdrop=""
+        className="fixed inset-0 z-[9997]"
+      />
       <ContextMenuPrimitive.Content
         ref={ref}
         className={cn(
