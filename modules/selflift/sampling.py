@@ -169,6 +169,7 @@ def _low_resolution_inputs(
     height: int,
     width: int,
     device: Any,
+    low_context_samples: Any | None = None,
 ) -> tuple[Any, Any | None]:
     """Build matching low-resolution H3 latent and denoise-mask streams."""
     streams, nested = _streams(samples)
@@ -182,6 +183,35 @@ def _low_resolution_inputs(
             _resize_video_spatial(masks[0], height, width, mode="nearest").to(device)
         ] + [mask.to(device) for mask in masks[1:]]
         low_mask = _pack(low_masks, nested or len(low_masks) > 1)
+        if low_context_samples is not None:
+            context_streams, _ = _streams(low_context_samples)
+            if not context_streams or context_streams[0].ndim != 5:
+                raise ValueError("SelfLift: low context has no H3 video stream")
+            context_video = _resize_video_spatial(
+                context_streams[0], height, width, mode="trilinear"
+            ).to(device=device, dtype=low_streams[0].dtype)
+            target_video = low_streams[0]
+            if context_video.shape[:2] != target_video.shape[:2]:
+                raise ValueError(
+                    "SelfLift: low context video batch/channels do not match the target"
+                )
+            temporal_mask = (low_masks[0] < 1.0 - 1e-6).any(
+                dim=(0, 1, 3, 4)
+            )
+            masked_steps = torch.nonzero(
+                temporal_mask, as_tuple=False
+            ).flatten()
+            if masked_steps.numel() > 0:
+                prefix_steps = min(
+                    int(masked_steps[-1].item()) + 1,
+                    int(context_video.shape[2]),
+                    int(target_video.shape[2]),
+                )
+                target_video = target_video.clone()
+                low_streams[0] = target_video
+                target_video[:, :, :prefix_steps] = context_video[
+                    :, :, -prefix_steps:
+                ]
     return _pack(low_streams, nested), low_mask
 
 
@@ -251,83 +281,6 @@ def _validate_euler_sampler(sampler: Any) -> None:
         raise ValueError("SelfLift requires standard Euler with s_churn=0")
 
 
-def sample_fullres_h3(
-    model: Any,
-    positive: Any,
-    latent_image: dict[str, Any],
-    sigmas: torch.Tensor,
-    seed: int,
-    *,
-    highres_tiling: bool = False,
-) -> dict[str, Any]:
-    """Sample a masked H3 latent entirely at target resolution.
-
-    A copied video context cannot safely pass through SelfLift's low-resolution
-    prefix: even when the preserved region is restored before the second stage,
-    the newly generated boundary was predicted from a spatially reduced context.
-    Use ComfyUI's native masked Euler path for those segments instead.
-    """
-    import comfy.model_management
-    import comfy.sample
-    import comfy.samplers
-    import comfy.utils
-    import latent_preview
-
-    _validate_latent_input(latent_image)
-    if sigmas.ndim != 1 or not sigmas.is_floating_point() or sigmas.numel() < 2:
-        raise ValueError("SelfLift fallback: sigmas must contain an active schedule")
-    if not torch.isfinite(sigmas).all() or (sigmas < 0).any():
-        raise ValueError("SelfLift fallback: sigmas must be finite and nonnegative")
-    if (sigmas[1:] > sigmas[:-1]).any():
-        raise ValueError("SelfLift fallback: sigmas must be non-increasing")
-
-    sampler = comfy.samplers.sampler_object("euler")
-    _validate_euler_sampler(sampler)
-    fixed_samples = comfy.sample.fix_empty_latent_channels(
-        model,
-        latent_image["samples"],
-        latent_image.get("downscale_ratio_spacial"),
-        latent_image.get("downscale_ratio_temporal"),
-    )
-    streams, _ = _streams(fixed_samples)
-    sampling_model = _highres_sampling_model(model, streams, highres_tiling)
-    noise = comfy.sample.prepare_noise(
-        fixed_samples,
-        seed,
-        latent_image.get("batch_index"),
-    )
-    callback = latent_preview.prepare_callback(model, int(sigmas.numel()) - 1)
-    logging.info(
-        "[SelfLift plan] masked video context uses native full-resolution Euler; "
-        "target_latent=%s nfe=%d highres_tiling=%s",
-        tuple(streams[0].shape),
-        int(sigmas.numel()) - 1,
-        highres_tiling,
-    )
-    sampled = comfy.samplers.sample(
-        sampling_model,
-        noise,
-        positive,
-        [],
-        1.0,
-        sampling_model.load_device,
-        sampler,
-        sigmas,
-        sampling_model.model_options,
-        latent_image=fixed_samples,
-        denoise_mask=latent_image.get("noise_mask"),
-        callback=callback,
-        disable_pbar=not comfy.utils.PROGRESS_BAR_ENABLED,
-        seed=seed,
-    )
-    result = latent_image.copy()
-    result["samples"] = sampled.to(
-        device=comfy.model_management.intermediate_device(),
-        dtype=comfy.model_management.intermediate_dtype(),
-    )
-    return result
-
-
 def _euler_step(
     state: torch.Tensor,
     denoised: torch.Tensor,
@@ -375,11 +328,12 @@ def progressive_sample_h3(
     lowres_scale: float,
     *,
     latent_lifter: Callable[[torch.Tensor, tuple[int, int]], torch.Tensor] | None = None,
+    low_context_latent: dict[str, Any] | None = None,
     rho: float = 0.0,
     w_min: float = 0.5,
     w_max: float = 1.0,
     highres_tiling: bool = False,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Run the original NFE-preserving H3 SelfLift transition and resume flow."""
     import comfy.model_management
     import comfy.model_sampling
@@ -437,6 +391,11 @@ def progressive_sample_h3(
         low_height,
         low_width,
         device,
+        (
+            low_context_latent.get("samples")
+            if isinstance(low_context_latent, dict)
+            else None
+        ),
     )
     noise_low = comfy.sample.prepare_noise(
         low_latent, seed, latent_image.get("batch_index")
@@ -494,6 +453,16 @@ def progressive_sample_h3(
     transition_timer = _StageTimer("transition", model.load_device)
     low_streams, nested = _streams(transition.pop("state"))
     x0_streams, _ = _streams(transition.pop("x0"))
+    low_clean = model.model.process_latent_out(_pack(x0_streams, nested))
+    low_result = latent_image.copy()
+    low_result["samples"] = low_clean.to(
+        device=comfy.model_management.intermediate_device(),
+        dtype=comfy.model_management.intermediate_dtype(),
+    )
+    if low_noise_mask is not None:
+        low_result["noise_mask"] = low_noise_mask
+    else:
+        low_result.pop("noise_mask", None)
     sigma_prediction = sigmas[transition_step - 1]
     sigma_resume = sigmas[transition_step]
     auxiliary_next = [
@@ -626,4 +595,4 @@ def progressive_sample_h3(
     )
     high_timer.finish()
     log_memory("high_resolution end", high_model.load_device)
-    return result
+    return result, low_result

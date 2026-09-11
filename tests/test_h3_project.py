@@ -19,6 +19,7 @@ from utils.h3_project import (  # noqa: E402
     h3_locked_audio_track,
     h3_locked_video_track,
     h3_second_pass_dimensions,
+    has_h3_context_latent,
     has_h3_first_pass_checkpoint,
     h3_project_filename_prefix,
     h3_task_entries,
@@ -293,6 +294,42 @@ def test_first_pass_checkpoint_requires_marker_and_existing_context_latent(tmp_p
     assert has_h3_first_pass_checkpoint("demo", 0, tmp_path) is True
     context_latent.unlink()
     assert has_h3_first_pass_checkpoint("demo", 0, tmp_path) is False
+
+
+def test_context_latent_availability_checks_active_high_and_exact_low(tmp_path):
+    project_dir = initialize_h3_project("demo", _tracks_info(), tmp_path)
+    high = project_dir / "context_latent_0_1.safetensors"
+    low = project_dir / "context_latent_low_0_1.safetensors"
+    high.write_bytes(b"high")
+    manifest_path = project_dir / "project.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["segments"] = {
+        "0": {
+            "active_generation": 1,
+            "generations": {"1": {"context_latent": high.name}},
+        }
+    }
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    assert has_h3_context_latent("demo", 0, output_directory=tmp_path)
+    assert has_h3_context_latent(
+        "demo", 0, resolution="low", output_directory=tmp_path
+    )
+    assert not has_h3_context_latent(
+        "demo", 0, resolution="low", output_directory=tmp_path,
+        allow_low_fallback=False,
+    )
+
+    low.write_bytes(b"low")
+    manifest["segments"]["0"]["generations"]["1"]["context_latent_low"] = low.name
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert has_h3_context_latent(
+        "demo", 0, resolution="low", output_directory=tmp_path,
+        allow_low_fallback=False,
+    )
+
+    high.unlink()
+    assert not has_h3_context_latent("demo", 0, output_directory=tmp_path)
 
 
 def test_delete_project_removes_the_entire_named_project_directory(tmp_path):

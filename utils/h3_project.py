@@ -672,6 +672,53 @@ def has_h3_first_pass_checkpoint(
     return checkpoint_path.is_file()
 
 
+def has_h3_context_latent(
+    project_name: Any,
+    segment_index: int,
+    *,
+    resolution: str = "high",
+    output_directory: str | Path | None = None,
+    allow_low_fallback: bool = True,
+) -> bool:
+    """Return whether the active generation has the requested saved context."""
+    if resolution not in {"high", "low"}:
+        raise ValueError("resolution must be 'high' or 'low'")
+    safe_name = safe_h3_project_name(project_name)
+    project_dir = (
+        Path(output_directory).resolve() / "easy_media" / "projects" / safe_name
+        if output_directory is not None
+        else h3_project_directory(safe_name)
+    )
+    manifest_path = project_dir / "project.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        segment = manifest["segments"][str(int(segment_index))]
+        generation = str(int(segment["active_generation"]))
+        generation_data = segment["generations"][generation]
+        if resolution == "low":
+            filename = generation_data.get("context_latent_low")
+            if not filename and allow_low_fallback:
+                filename = generation_data["context_latent"]
+        else:
+            filename = generation_data["context_latent"]
+    except (
+        KeyError,
+        OSError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ):
+        return False
+    if not filename:
+        return False
+    latent_path = (project_dir / str(filename)).resolve()
+    try:
+        latent_path.relative_to(project_dir.resolve())
+    except ValueError:
+        return False
+    return latent_path.is_file()
+
+
 def clear_h3_project_segments_from(
     project_name: Any,
     start_index: int,

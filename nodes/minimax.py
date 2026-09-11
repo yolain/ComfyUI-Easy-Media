@@ -1407,9 +1407,9 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
             description=(
                 "Sample the early denoiser evaluations at low resolution, lift "
                 "the clean endpoint, and finish the same Euler schedule at the "
-                "target resolution. Segments with masked video context use "
-                "full-resolution Euler to preserve the boundary. The sampler is "
-                "always standard Euler."
+                "target resolution. A saved low-resolution context can continue "
+                "the low stage while the regular latent preserves the high-resolution "
+                "boundary. The sampler is always standard Euler."
             ),
             inputs=[
                 io.Model.Input("model"),
@@ -1448,6 +1448,30 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
                         "target latent."
                     ),
                 ),
+                io.Float.Input(
+                    "rho",
+                    default=0.1,
+                    min=0.0,
+                    max=1.0,
+                    step=0.01,
+                    tooltip="Strength of the pixel/VAE artifact correction.",
+                ),
+                io.Float.Input(
+                    "w_max",
+                    default=0.7,
+                    min=0.0,
+                    max=1.0,
+                    step=0.01,
+                    tooltip="Maximum consistency weight used by artifact correction.",
+                ),
+                io.Float.Input(
+                    "w_min",
+                    default=0.25,
+                    min=0.0,
+                    max=1.0,
+                    step=0.01,
+                    tooltip="Minimum consistency weight used by artifact correction.",
+                ),
                 io.Combo.Input(
                     "upscaler_model",
                     options=["None"]
@@ -1465,14 +1489,15 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
                     tooltip=(
                         "Experimental: automatically split MiniMax H3 model "
                         "evaluation into spatial tiles during the high-resolution "
-                        "SelfLift stage, or throughout a masked-video fallback, "
-                        "to reduce peak VRAM."
+                        "SelfLift stage to reduce peak VRAM."
                     ),
                 ),
-                io.String.Input("project_name", default="", optional=True),
-                io.Int.Input("segment_index", default=0, min=0, optional=True),
+                io.Latent.Input("low_context_latent", optional=True),
             ],
-            outputs=[io.Latent.Output("latent")],
+            outputs=[
+                io.Latent.Output("latent"),
+                io.Latent.Output("low_context_latent"),
+            ],
             is_dev_only=True,
         )
 
@@ -1487,34 +1512,36 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
         seed: int,
         transition_ratio: float = 0.6,
         lowres_scale: float = 0.6,
+        rho: float = 0.1,
+        w_max: float = 0.7,
+        w_min: float = 0.25,
         upscaler_model: str = "None",
         highres_tiling: bool = False,
-        project_name: str = "",
-        segment_index: int = 0,
+        low_context_latent: dict[str, Any] | None = None,
     ) -> io.NodeOutput:
-        from ..modules.selflift.sampling import progressive_sample_h3, sample_fullres_h3
+        from ..modules.selflift.sampling import progressive_sample_h3
 
         lowres_factor = float(lowres_scale)
         if not math.isfinite(lowres_factor) or not 0.25 <= lowres_factor <= 1.0:
             raise ValueError(
                 "MiniMax H3 SelfLift lowres_scale must be between 0.25 and 1"
             )
+        correction_rho = float(rho)
+        correction_min = float(w_min)
+        correction_max = float(w_max)
+        if not all(
+            math.isfinite(value)
+            for value in (correction_rho, correction_min, correction_max)
+        ) or not (
+            0.0 <= correction_rho <= 1.0
+            and 0.0 <= correction_min <= correction_max <= 1.0
+        ):
+            raise ValueError(
+                "MiniMax H3 SelfLift correction parameters must satisfy "
+                "0 <= rho <= 1 and 0 <= w_min <= w_max <= 1"
+            )
 
         selected_upscaler = str(upscaler_model)
-        noise_mask = latent_image.get("noise_mask")
-        if isinstance(noise_mask, torch.Tensor):
-            video_mask = noise_mask
-        elif noise_mask is not None and hasattr(noise_mask, "unbind"):
-            mask_streams = list(noise_mask.unbind())
-            video_mask = mask_streams[0] if mask_streams else None
-        elif isinstance(noise_mask, (tuple, list)):
-            video_mask = noise_mask[0] if noise_mask else None
-        else:
-            video_mask = None
-        has_masked_video = (
-            isinstance(video_mask, torch.Tensor)
-            and bool((video_mask < 1.0 - 1e-6).any().item())
-        )
         latent_lifter = None
         if selected_upscaler != "None":
             from ..modules.selflift.h3_latent_upscale import learned_latent_lift
@@ -1529,51 +1556,38 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
                     selected_upscaler,
                 )
 
-        if project_name:
-            _notify_multitrack_project_refresh(
-                project_name,
-                "before",
-                int(segment_index),
-                "single",
-            )
         log_node_info(
             "MiniMax H3 SelfLift Sampler",
-            f"Sampling segment {int(segment_index)} with forced Euler, "
+            "Sampling with forced Euler, "
             f"transition_ratio={float(transition_ratio):.3f}, "
             f"lowres_scale={lowres_factor:.3f}, "
+            f"rho={correction_rho:.3f}, "
+            f"weights={correction_min:.3f}..{correction_max:.3f}, "
             f"upscaler_model={selected_upscaler}, "
             f"highres_tiling={bool(highres_tiling)}, "
-            f"sampling_route={'fullres_masked_video' if has_masked_video else 'selflift'}",
+            f"low_context={'saved' if low_context_latent is not None else 'derived'}, "
+            "sampling_route=selflift",
         )
         try:
-            if has_masked_video:
-                sampled = sample_fullres_h3(
-                    model=model,
-                    positive=positive,
-                    latent_image=latent_image,
-                    sigmas=sigmas,
-                    seed=int(seed),
-                    highres_tiling=bool(highres_tiling),
-                )
-            else:
-                sampled = progressive_sample_h3(
-                    model=model,
-                    positive=positive,
-                    vae=vae,
-                    latent_image=latent_image,
-                    sigmas=sigmas,
-                    seed=int(seed),
-                    transition_ratio=float(transition_ratio),
-                    lowres_scale=lowres_factor,
-                    latent_lifter=latent_lifter,
-                    rho=0.0,
-                    w_min=0.5,
-                    w_max=1.0,
-                    highres_tiling=bool(highres_tiling),
-                )
+            sampled, low_context = progressive_sample_h3(
+                model=model,
+                positive=positive,
+                vae=vae,
+                latent_image=latent_image,
+                sigmas=sigmas,
+                seed=int(seed),
+                transition_ratio=float(transition_ratio),
+                lowres_scale=lowres_factor,
+                latent_lifter=latent_lifter,
+                low_context_latent=low_context_latent,
+                rho=correction_rho,
+                w_min=correction_min,
+                w_max=correction_max,
+                highres_tiling=bool(highres_tiling),
+            )
         except (RuntimeError, TypeError, ValueError) as error:
             raise RuntimeError(f"MiniMax H3 SelfLift sampling failed: {error}") from error
-        return io.NodeOutput(sampled)
+        return io.NodeOutput(sampled, low_context)
 
 
 class EasyH3SegmentSaveEnd(io.ComfyNode):

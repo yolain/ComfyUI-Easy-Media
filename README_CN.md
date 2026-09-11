@@ -192,7 +192,7 @@ v1.3.0 新增多轨项目流水线，将时间线编排、逐段生成、上下�
 | `model_loader` | 一采 H3 模型与共用的 CLIP、视频 VAE、音频 VAE；视频项目也需要音频 VAE |
 | `model_loader_2nd` | 可选的二采 H3 模型；不接时复用一采模型，接入后也仍使用一采加载器的编码器和 VAE |
 | `sampling_plan` | 内置 `ultra_light`、`light`、`medium`、`high` 等预设，根据 Turbo / 非 Turbo 模型选择采样器和 sigmas；也可用 `custom` 自定义 |
-| `sampling_mode` | 可选 `single`、`dual` 或 `selflift`；纯生成和仅锁音频的片段使用渐进 SelfLift。带视频上下文 mask 的片段会自动改用全分辨率 Euler，避免复制边界经过低分辨率提升，因此这类片段不享受 SelfLift 加速；`highres_tiling` 对两种路径均可用 |
+| `sampling_mode` | 可选 `single`、`dual` 或 `selflift`；SelfLift 会展开 `transition_ratio`、`lowres_scale` 和 `highres_tiling`。普通片段关闭像素/VAE 修正，上下文续接自动使用内部保守预设；同时分别保存低、高分辨率上下文 |
 | `sampler` / `sigmas` | 成对接入以覆盖一采采样设置；二采对应 `sampler_2nd` / `sigmas_2nd`，也需成对接入。`custom` 需要为实际运行的每个采样阶段提供这两个输入 |
 | `upscale_by` | 相对于编辑器尺寸的二采放大倍率；默认 `1.250`，三位小数，步长 `0.001` |
 | `disable_2nd_noise` | 控制是否禁用二采新增噪声，不代表跳过二采 |

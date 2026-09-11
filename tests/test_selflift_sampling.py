@@ -93,6 +93,33 @@ def test_low_resolution_inputs_resize_nonzero_video_and_matching_mask(monkeypatc
     assert torch.equal(low_audio_mask, audio_mask)
 
 
+def test_low_resolution_inputs_use_saved_low_context_for_masked_prefix(monkeypatch):
+    _install_nested_tensor(monkeypatch)
+    video = torch.zeros(1, 24, 5, 8, 10)
+    audio = torch.zeros(1, 32, 2, 9)
+    video_mask = torch.ones(1, 1, 5, 8, 10)
+    video_mask[:, :, :2] = 0.0
+    audio_mask = torch.ones(1, 1, 2, 9)
+    saved_low_video = torch.stack(
+        [torch.full((1, 24, 4, 6), float(index)) for index in range(3)],
+        dim=2,
+    )
+
+    latent, _ = sampling._low_resolution_inputs(
+        _NestedTensor((video, audio)),
+        _NestedTensor((video_mask, audio_mask)),
+        4,
+        6,
+        "cpu",
+        _NestedTensor((saved_low_video, audio)),
+    )
+
+    low_video, _ = latent.unbind()
+    assert torch.all(low_video[:, :, 0] == 1.0)
+    assert torch.all(low_video[:, :, 1] == 2.0)
+    assert torch.all(low_video[:, :, 2:] == 0.0)
+
+
 def test_resume_noise_recreates_lifted_state_while_retaining_clean_anchor():
     model_sampling = types.SimpleNamespace(noise_scale=1.25)
     sigma = torch.tensor(0.4)

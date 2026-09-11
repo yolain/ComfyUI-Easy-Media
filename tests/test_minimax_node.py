@@ -1591,7 +1591,12 @@ def test_multitrack_h3_selflift_uses_target_size_and_one_progressive_sample(
     )
     assert selflift["inputs"]["transition_ratio"] == 0.6
     assert selflift["inputs"]["lowres_scale"] == 0.6
+    assert selflift["inputs"]["rho"] == 0.0
+    assert selflift["inputs"]["w_min"] == 0.25
+    assert selflift["inputs"]["w_max"] == 0.7
     assert selflift["inputs"]["highres_tiling"] is False
+    assert "project_name" not in selflift["inputs"]
+    assert "segment_index" not in selflift["inputs"]
     assert "upscale_by" not in selflift["inputs"]
     assert selflift["inputs"]["upscaler_model"] == "None"
     assert artifact["inputs"]["sampling_pass"] == "single"
@@ -1710,6 +1715,11 @@ def test_multitrack_h3_selflift_supports_context_and_locked_audio(
     assert context_node["inputs"]["latent"] == [audio_lock_id, 0]
     latent_output = 2 if continuity_mode == "context" else 1
     assert context_selflift["inputs"]["latent_image"] == [context_id, latent_output]
+    low_context_link = context_selflift["inputs"]["low_context_latent"]
+    low_context_node = result.expand[low_context_link[0]]
+    assert low_context_node["class_type"] == "easy h3MotionContextLatentTrim"
+    first_selflift_id = selflift_nodes[0][0]
+    assert low_context_node["inputs"]["latent"] == [first_selflift_id, 1]
     if continuity_mode == "context_swap":
         assert context_selflift["inputs"]["model"] == [context_id, 0]
 
@@ -1725,8 +1735,15 @@ def test_selflift_sampler_schema_forces_euler_by_not_exposing_a_sampler(monkeypa
     assert "sampler" not in inputs
     assert inputs["transition_ratio"].kwargs["default"] == 0.6
     assert inputs["lowres_scale"].kwargs["default"] == 0.6
+    assert inputs["rho"].kwargs["default"] == pytest.approx(0.1)
+    assert inputs["w_max"].kwargs["default"] == pytest.approx(0.7)
+    assert inputs["w_min"].kwargs["default"] == pytest.approx(0.25)
     assert inputs["highres_tiling"].kwargs["default"] is False
     assert inputs["highres_tiling"].kwargs["optional"] is True
+    assert inputs["low_context_latent"].kwargs["optional"] is True
+    assert "project_name" not in inputs
+    assert "segment_index" not in inputs
+    assert len(schema.outputs) == 2
     assert "upscale_by" not in inputs
 
 
@@ -1832,16 +1849,14 @@ def test_selflift_sampler_uses_lowres_scale(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     captured = {}
     sampled = {"samples": object()}
+    low_context = {"samples": object()}
     sampling_module = types.ModuleType("easy_media.modules.selflift.sampling")
 
     def progressive_sample_h3(**kwargs):
         captured.update(kwargs)
-        return sampled
+        return sampled, low_context
 
     sampling_module.progressive_sample_h3 = progressive_sample_h3
-    sampling_module.sample_fullres_h3 = lambda **kwargs: pytest.fail(
-        "unmasked video must remain on SelfLift"
-    )
     monkeypatch.setitem(
         sys.modules,
         "easy_media.modules.selflift.sampling",
@@ -1860,25 +1875,59 @@ def test_selflift_sampler_uses_lowres_scale(monkeypatch):
     )
 
     assert captured["lowres_scale"] == pytest.approx(0.6)
-    assert captured["rho"] == 0.0
+    assert captured["rho"] == pytest.approx(0.1)
+    assert captured["w_min"] == 0.25
+    assert captured["w_max"] == 0.7
     assert captured["highres_tiling"] is False
-    assert result.values == (sampled,)
+    assert captured["low_context_latent"] is None
+    assert result.values == (sampled, low_context)
 
 
-def test_selflift_sampler_uses_fullres_euler_for_masked_video(monkeypatch):
+def test_selflift_sampler_forwards_artifact_correction_controls(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    captured = {}
+    sampling_module = types.ModuleType("easy_media.modules.selflift.sampling")
+
+    def progressive_sample_h3(**kwargs):
+        captured.update(kwargs)
+        return {"samples": object()}, {"samples": object()}
+
+    sampling_module.progressive_sample_h3 = progressive_sample_h3
+    monkeypatch.setitem(
+        sys.modules,
+        "easy_media.modules.selflift.sampling",
+        sampling_module,
+    )
+
+    module.EasyMiniMaxH3SelfLiftSampler.execute(
+        model=object(),
+        positive=[],
+        vae=object(),
+        latent_image={"samples": torch.zeros(1, 24, 1, 60, 104)},
+        sigmas=torch.tensor([1.0, 0.0]),
+        seed=42,
+        rho=0.2,
+        w_max=0.8,
+        w_min=0.3,
+    )
+
+    assert captured["rho"] == pytest.approx(0.2)
+    assert captured["w_max"] == pytest.approx(0.8)
+    assert captured["w_min"] == pytest.approx(0.3)
+
+
+def test_selflift_sampler_uses_saved_low_context_for_masked_video(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     captured = {}
     sampled = {"samples": object()}
+    low_result = {"samples": object()}
     sampling_module = types.ModuleType("easy_media.modules.selflift.sampling")
 
-    def sample_fullres_h3(**kwargs):
+    def progressive_sample_h3(**kwargs):
         captured.update(kwargs)
-        return sampled
+        return sampled, low_result
 
-    sampling_module.progressive_sample_h3 = lambda **kwargs: pytest.fail(
-        "masked video must not enter the low-resolution SelfLift stage"
-    )
-    sampling_module.sample_fullres_h3 = sample_fullres_h3
+    sampling_module.progressive_sample_h3 = progressive_sample_h3
     monkeypatch.setitem(
         sys.modules,
         "easy_media.modules.selflift.sampling",
@@ -1889,6 +1938,11 @@ def test_selflift_sampler_uses_fullres_euler_for_masked_video(monkeypatch):
     video_mask = torch.ones(1, 1, 7, 4, 6)
     video_mask[:, :, :2] = 0.0
     audio_mask = torch.ones(1, 1, 2, 20)
+    saved_low_context = {
+        "samples": _NestedTensor(
+            (torch.ones(1, 24, 2, 3, 4), torch.ones_like(audio))
+        )
+    }
 
     result = module.EasyMiniMaxH3SelfLiftSampler.execute(
         model=object(),
@@ -1901,28 +1955,29 @@ def test_selflift_sampler_uses_fullres_euler_for_masked_video(monkeypatch):
         sigmas=torch.tensor([1.0, 0.5, 0.0]),
         seed=42,
         highres_tiling=True,
+        low_context_latent=saved_low_context,
     )
 
     assert captured["highres_tiling"] is True
-    assert "vae" not in captured
-    assert "lowres_scale" not in captured
-    assert result.values == (sampled,)
+    assert captured["low_context_latent"] is saved_low_context
+    assert captured["rho"] == 0.1
+    assert captured["w_min"] == 0.25
+    assert captured["w_max"] == 0.7
+    assert result.values == (sampled, low_result)
 
 
 def test_selflift_sampler_keeps_audio_only_mask_on_selflift(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     captured = {}
     sampled = {"samples": object()}
+    low_context = {"samples": object()}
     sampling_module = types.ModuleType("easy_media.modules.selflift.sampling")
 
     def progressive_sample_h3(**kwargs):
         captured.update(kwargs)
-        return sampled
+        return sampled, low_context
 
     sampling_module.progressive_sample_h3 = progressive_sample_h3
-    sampling_module.sample_fullres_h3 = lambda **kwargs: pytest.fail(
-        "an audio-only lock must not disable SelfLift"
-    )
     monkeypatch.setitem(
         sys.modules,
         "easy_media.modules.selflift.sampling",
@@ -1945,9 +2000,9 @@ def test_selflift_sampler_keeps_audio_only_mask_on_selflift(monkeypatch):
         seed=42,
     )
 
-    assert captured["rho"] == 0.0
+    assert captured["rho"] == pytest.approx(0.1)
     assert captured["lowres_scale"] == pytest.approx(0.6)
-    assert result.values == (sampled,)
+    assert result.values == (sampled, low_context)
 
 
 @pytest.mark.parametrize("upscale_model", ["None", "h3_upscale.safetensors"])
@@ -2975,6 +3030,10 @@ def test_multitrack_h3_consecutive_context_uses_previous_trimmed_latent(monkeypa
 def test_multitrack_h3_loop_start_loads_previous_project_context(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
+    project_module = sys.modules["easy_media.nodes.project"]
+    monkeypatch.setattr(
+        project_module, "has_h3_context_latent", lambda *args, **kwargs: True
+    )
     module.comfy_nodes.NODE_CLASS_MAPPINGS.update(
         {
             "MiniMaxH3MotionContextTrim": _MiniMaxMotionContextTrim,
@@ -3013,6 +3072,73 @@ def test_multitrack_h3_loop_start_loads_previous_project_context(monkeypatch):
     assert any(
         node["class_type"] == "easy MiniMaxH3MotionContextHard" for node in nodes
     )
+
+
+def test_multitrack_h3_context_start_rejects_missing_previous_latent(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    project_module = sys.modules["easy_media.nodes.project"]
+    monkeypatch.setattr(
+        project_module, "has_h3_context_latent", lambda *args, **kwargs: False
+    )
+    info = _h3_project_inputs()["tracks_info"][0]
+    info["tracks"][0]["segments"].append(
+        {
+            "start_frame": 120,
+            "end_frame": 240,
+            "content": {
+                "task_mode": "l2v",
+                "continuity_mode": "context",
+                "images": [{"media_index": 0}],
+            },
+        }
+    )
+
+    with pytest.raises(ValueError, match="segment 1 has no active context latent"):
+        module.EasyMultiTrackProject.execute(
+            **_h3_project_inputs(
+                tracks_info=[info],
+                segment_start_number=[2],
+                segment_count=[1],
+            )
+        )
+
+
+def test_multitrack_h3_selflift_context_start_requires_exact_low_latent(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    project_module = sys.modules["easy_media.nodes.project"]
+    checked_resolutions = []
+
+    def has_context(*args, **kwargs):
+        checked_resolutions.append(
+            (kwargs.get("resolution"), kwargs.get("allow_low_fallback", True))
+        )
+        return kwargs.get("resolution") == "high"
+
+    monkeypatch.setattr(project_module, "has_h3_context_latent", has_context)
+    info = _h3_project_inputs()["tracks_info"][0]
+    info["tracks"][0]["segments"].append(
+        {
+            "start_frame": 120,
+            "end_frame": 240,
+            "content": {
+                "task_mode": "l2v",
+                "continuity_mode": "context_swap",
+                "images": [{"media_index": 0}],
+            },
+        }
+    )
+
+    with pytest.raises(ValueError, match="no active low-resolution context latent"):
+        module.EasyMultiTrackProject.execute(
+            **_h3_project_inputs(
+                tracks_info=[info],
+                sampling_mode=_h3_sampling_mode("selflift"),
+                segment_start_number=[2],
+                segment_count=[1],
+            )
+        )
+
+    assert checked_resolutions == [("high", True), ("low", False)]
 
 
 def test_multitrack_h3_project_uses_prompt_graph_as_last_turbo_fallback(

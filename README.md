@@ -187,7 +187,7 @@ If an older workflow connects directly to the editor's media outputs, insert `Mu
 | `model_loader` | First-pass H3 model and shared CLIP, video VAE, and audio VAE; video projects also require the audio VAE |
 | `model_loader_2nd` | Optional second-pass H3 model; defaults to the first-pass model. Even when connected, encoding and VAEs still come from the first-pass loader |
 | `sampling_plan` | Built-in presets such as `ultra_light`, `light`, `medium`, and `high` select samplers and sigmas for Turbo / non-Turbo models; use `custom` for manual settings |
-| `sampling_mode` | `single`, `dual`, or `selflift`; SelfLift expands `transition_ratio`, `lowres_scale`, and the optional `highres_tiling` switch. Pure generation and audio-only locks use progressive SelfLift. Segments with masked video context automatically use full-resolution Euler so the copied boundary never passes through the low-resolution lift; those segments do not receive the SelfLift speedup |
+| `sampling_mode` | `single`, `dual`, or `selflift`; SelfLift expands `transition_ratio`, `lowres_scale`, and the optional `highres_tiling` switch. Pixel/VAE correction is disabled for ordinary segments and uses an internal conservative preset for context continuation. SelfLift also saves separate low- and high-resolution context lineages |
 | `sampler` / `sigmas` | Connect both to override first-pass sampling. Second-pass overrides use `sampler_2nd` / `sigmas_2nd`, also as a pair. `custom` requires both inputs for every sampling pass that runs |
 | `upscale_by` | Second-pass scale relative to the editor dimensions; default `1.250`, three decimal places, step `0.001` |
 | `disable_2nd_noise` | Disables added second-pass noise; it does not skip the second pass |
