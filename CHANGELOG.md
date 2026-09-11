@@ -2,6 +2,18 @@
 
 ---
 
+## [1.3.2] - preRelease
+
+### ⚡ Improvements
+
+- **MultiTrack Editor**: Added the ability to freely drag and adjust the width ratio between the image item area and the prompt area within segments. Optimized the UI display of user prompt highlight tags.
+- **MultiTrack Project**: Added `selflift` option to `sampling_mode`, adapted from [comfyui-SelfLift](https://github.com/facok/comfyui-SelfLift)
+- **Character Swap Context**: Switched to `drive_control` approach instead of the previous noise-based method. Testing shows `drive_control` is more stable and preserves more motion details. Although it may appear slightly less sharp visually than the noise approach, it is better suited for preserving source motion during character replacement and motion transfer.
+
+### 🐛 Bug Fixes
+
+- **MultiTrack Editor**: Fixed some UI interaction compatibility issues with Node2.0, improving the overall operational experience.
+
 ## [1.3.1] - 2026-09-07
 
 ### ✨ New Features

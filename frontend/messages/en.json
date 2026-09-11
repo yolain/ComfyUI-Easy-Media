@@ -139,6 +139,7 @@
     "referenceAudioItem": "Audio {n}",
     "referenceVideoItem": "Video {n}",
     "taskImageDropZone": "Task image drop zone",
+    "resizeTaskEditorPanels": "Resize image and prompt panels",
     "selectImage": "Select image",
     "addImage": "Add image",
     "imageDropHint": "Click to choose, or drag files here.",

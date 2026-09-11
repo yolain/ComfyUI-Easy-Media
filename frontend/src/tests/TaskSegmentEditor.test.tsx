@@ -249,8 +249,11 @@ describe('TaskSegmentEditor', () => {
     )
 
     const tooltipText = 'New: The user prompt output follows your A/B selection (select A to output A, select B to output B). Use A/B to compare prompts, or to preserve both the original and reverse-engineered prompts.'
-    fireEvent.pointerMove(screen.getByLabelText(tooltipText), { pointerType: 'mouse' })
+    const tooltipTrigger = screen.getByLabelText(tooltipText)
+    fireEvent.pointerMove(tooltipTrigger, { pointerType: 'mouse' })
     expect((await screen.findByRole('tooltip')).textContent).toBe(tooltipText)
+    fireEvent.pointerLeave(tooltipTrigger, { pointerType: 'mouse' })
+    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull())
 
     activateTab('B')
     expect(onContentChange).toHaveBeenCalledWith({ user_prompt_variant: 'b' })
@@ -435,6 +438,7 @@ describe('TaskSegmentEditor', () => {
     )
 
     expect(screen.getByTestId('task-image-a').className).toContain('bg-black')
+    expect(screen.getByTestId('task-image-a').className).toContain('group/task-image')
     const firstImage = screen.getByAltText('a.png')
     expect(firstImage.className).toContain('absolute')
     expect(firstImage.className).toContain('inset-0')
@@ -442,6 +446,7 @@ describe('TaskSegmentEditor', () => {
     expect(firstImage.className).toContain('w-full')
     expect(firstImage.className).toContain('object-contain')
     expect(screen.getByTestId('task-image-actions-a').className).toContain('opacity-0')
+    expect(screen.getByTestId('task-image-actions-a').className).toContain('group-hover/task-image:opacity-100')
     expect(screen.getByTestId('task-image-actions-a').className).toContain('right-1')
     expect(screen.getByTestId('task-image-actions-a').className).toContain('top-1')
     expect(screen.getByTestId('task-image-index-a').textContent).toBe('0')
@@ -565,19 +570,67 @@ describe('TaskSegmentEditor', () => {
     expect(screen.getByTestId('task-image-index-b').textContent).toBe('2')
   })
 
-  it('preserves the default image grid while exposing a container for narrow layouts', () => {
+  it('keeps the image grid responsive inside resizable image and prompt panels', () => {
+    const nodePointerDown = vi.fn()
+    document.body.addEventListener('pointerdown', nodePointerDown)
     render(<TaskSegmentEditor segment={taskSegment()} onContentChange={vi.fn()} />)
 
     const dropZone = screen.getByTestId('task-image-drop-zone')
     const grid = screen.getByTestId('task-image-grid')
     expect(dropZone.closest('.task-segment-editor')).not.toBeNull()
-    expect(dropZone.className).toContain('aspect-square')
+    expect(dropZone.className).toContain('w-full')
     expect(grid.className).toContain('grid-cols-2')
     expect(screen.getByTestId('task-image-a').className).toContain('w-full')
     expect(screen.getByTestId('task-image-a').className).toContain('self-start')
     expect(screen.getByRole('button', { name: 'Select image' }).className).toContain('w-full')
     expect(screen.getByRole('button', { name: 'Select image' }).className).toContain('self-start')
     expect(screen.getByTestId('task-prompt-panel').className).toContain('min-w-0')
+    const separator = screen.getByRole('separator', { name: 'Resize image and prompt panels' })
+    fireEvent.pointerDown(separator, { button: 0, clientX: 320 })
+    expect(nodePointerDown).not.toHaveBeenCalled()
+    document.body.removeEventListener('pointerdown', nodePointerDown)
+    expect(screen.getByTestId('task-images-resizable-panel')).not.toBeNull()
+    expect(screen.getByTestId('task-prompt-resizable-panel')).not.toBeNull()
+  })
+
+  it('resizes panels through the local pointer-capture path used by Nodes 2.0', async () => {
+    const offsetWidth = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(400)
+    render(<TaskSegmentEditor segment={taskSegment()} onContentChange={vi.fn()} />)
+
+    const separator = screen.getByRole('separator', { name: 'Resize image and prompt panels' })
+    const group = separator.parentElement
+    if (!group) throw new Error('Expected resizable panel group')
+    vi.spyOn(group, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 800,
+      bottom: 400,
+      left: 0,
+      width: 800,
+      height: 400,
+      toJSON: () => ({}),
+    })
+
+    const dispatchPointer = (type: string, clientX: number, buttons: number) => {
+      const event = new Event(type, { bubbles: true, cancelable: true })
+      Object.defineProperties(event, {
+        button: { value: 0 },
+        buttons: { value: buttons },
+        clientX: { value: clientX },
+        pointerId: { value: 7 },
+      })
+      fireEvent(separator, event)
+    }
+    const initialSize = separator.getAttribute('aria-valuenow')
+    dispatchPointer('pointerdown', 320, 1)
+    dispatchPointer('pointermove', 400, 1)
+
+    await waitFor(() => {
+      expect(separator.getAttribute('aria-valuenow')).not.toBe(initialSize)
+    })
+    dispatchPointer('pointerup', 400, 0)
+    offsetWidth.mockRestore()
   })
 
   it('renders saved panorama framing without showing a panorama action icon', () => {
@@ -804,17 +857,21 @@ describe('TaskSegmentEditor', () => {
     expect((chips[0] as HTMLElement).className).toContain('items-center')
     expect((chips[0] as HTMLElement).className).toContain('leading-none')
     expect((chips[0] as HTMLElement).className).toContain('rounded-md')
-    expect((chips[0] as HTMLElement).className).toContain('bg-background')
-    expect((chips[0] as HTMLElement).className).toContain('border-border')
+    expect((chips[0] as HTMLElement).className).toContain('cursor-pointer')
     expect(chips[0].querySelector('span:last-child')?.className).toContain('items-center')
+    expect((chips[0] as HTMLElement).style.borderColor).toBe('var(--multitrack-task-bg)')
+    expect((chips[0] as HTMLElement).style.backgroundColor).toContain('color-mix')
     expect((chips[1] as HTMLElement).style.color).toBe('var(--multitrack-video-waveform)')
+    expect((chips[1] as HTMLElement).style.borderColor).toBe('var(--multitrack-video-waveform)')
     expect((chips[2] as HTMLElement).style.color).toBe('var(--multitrack-audio-waveform)')
+    expect((chips[2] as HTMLElement).style.borderColor).toBe('var(--multitrack-audio-waveform)')
     expect((chips[3] as HTMLElement).style.color).toBe('var(--multitrack-video-waveform)')
+    expect((chips[3] as HTMLElement).style.borderColor).toBe('var(--multitrack-video-waveform)')
   })
 
-  it('uses orange for H3 language and speaker tags and theme color for dialogue text', () => {
+  it('renders H3 tags as typed chips and emphasizes dialogue text and section headings', () => {
     const segment = taskSegment()
-    segment.content.user_prompt = '<Subject 12> (S1,S2) says <d>[Chinese] 你好</d> [English] [Shot 3] <scenetrans> <cutoff> [reference generation]'
+    segment.content.user_prompt = '<Subject 12> (S1,S2) says <d>[Chinese] 你好</d> [English] [Shot 3] <scenetrans> <cutoff> subject_definitions: subject summary: overview retention_analysis: retention detailed_description: detail overall_soundscape: sound non_diegetic_music: music 主体定义：主体 留存分析:结果 详细描述：细节 整体声景:声音 非叙事性音乐：安静 [reference generation]'
     render(<TaskSegmentEditor segment={segment} onContentChange={vi.fn()} />)
 
     const prompt = screen.getByRole('textbox', { name: 'Prompt' })
@@ -830,18 +887,76 @@ describe('TaskSegmentEditor', () => {
       '<scenetrans>',
       '<cutoff>',
     ])
-    expect(semantics[0].className).toContain('text-prompt-semantic')
-    expect(semantics[1].className).toContain('text-prompt-semantic')
-    expect(semantics[2].className).toContain('text-prompt-semantic')
-    expect(semantics[3].className).toContain('text-prompt-semantic')
-    expect(semantics[4].className).toContain('text-prompt-semantic')
-    expect(semantics[6].className).toContain('text-highlight')
-    expect(Array.from(semantics).filter((_, index) => index !== 6)
-      .every((item) => item.className.includes('text-prompt-semantic'))).toBe(true)
+    expect(Array.from(semantics).every((item) => item.className.includes('prompt-reference-chip'))).toBe(true)
+    expect((semantics[0] as HTMLElement).style.color).toBe('var(--highlight)')
+    expect(semantics[0].querySelector('[data-semantic-icon="subject"] svg.lucide')).not.toBeNull()
+    expect((semantics[1] as HTMLElement).style.color).toBe('var(--prompt-semantic)')
+    expect((semantics[2] as HTMLElement).style.color).toBe('var(--prompt-dialogue)')
+    expect(semantics[2].querySelector('[data-semantic-icon="dialogue"] svg.lucide')).not.toBeNull()
+    expect((semantics[3] as HTMLElement).style.color).toBe('')
+    expect(semantics[3].className).toContain('border-border')
+    expect(semantics[3].className).toContain('bg-background')
+    expect(semantics[3].className).toContain('text-foreground')
+    expect((semantics[3] as HTMLElement).style.borderColor).toBe('')
+    expect((semantics[5] as HTMLElement).style.color).toBe('')
+    expect(semantics[5].className).toContain('border-border')
+    expect(semantics[5].className).toContain('bg-background')
+    expect((semantics[4] as HTMLElement).style.color).toBe('var(--prompt-dialogue)')
+    expect((semantics[6] as HTMLElement).style.color).toBe('')
+    expect(semantics[6].className).toContain('border-border')
+    expect(semantics[6].className).toContain('bg-background')
+    expect(semantics[6].className).toContain('text-foreground')
+    expect((semantics[6] as HTMLElement).style.borderColor).toBe('')
     const dialogue = prompt.querySelector('[data-prompt-dialogue-content]')
-    expect(dialogue?.className).toContain('text-highlight')
+    expect(dialogue?.className).toContain('font-semibold')
+    expect(dialogue?.className).toContain('text-muted-foreground')
     expect(dialogue?.textContent).toBe(' 你好')
+    const emphasis = prompt.querySelectorAll('[data-prompt-emphasis-text]')
+    expect(Array.from(emphasis, (item) => item.textContent)).toEqual([
+      'subject_definitions: ',
+      'summary: ',
+      'retention_analysis: ',
+      'detailed_description: ',
+      'overall_soundscape: ',
+      'non_diegetic_music: ',
+      '主体定义：',
+      '留存分析:',
+      '详细描述：',
+      '整体声景:',
+      '非叙事性音乐：',
+    ])
+    expect(Array.from(emphasis).every((item) => (
+      item.className.includes('font-semibold') && item.className.includes('text-muted-foreground')
+    ))).toBe(true)
     expect(prompt.textContent).toContain('[reference generation]')
+  })
+
+  it('opens the reference picker from media chips and preserves their token syntax when replacing them', () => {
+    const onContentChange = vi.fn()
+    const segment = taskSegment()
+    segment.content.user_prompt = '@Picture 1 then <Picture 2>'
+    const audio = videoSegment(0, 3)
+    audio.id = 'audio-segment'
+    audio.content = { media_type: 'audio', file_path: 'voice.wav' }
+    render(
+      <TaskSegmentEditor
+        segment={segment}
+        mediaTracks={[
+          mediaTrack('audio', [audio]),
+          mediaTrack('video', [videoSegment(0, 3)]),
+        ]}
+        onContentChange={onContentChange}
+      />,
+    )
+
+    const prompt = screen.getByRole('textbox', { name: 'Prompt' })
+    fireEvent.click(prompt.querySelector('[data-prompt-reference-token="@Picture 1"]') as HTMLElement)
+    fireEvent.click(screen.getByRole('option', { name: /Video 1 Source video track/ }))
+    expect(onContentChange).toHaveBeenLastCalledWith({ user_prompt: '@Video 1 then <Picture 2>' })
+
+    fireEvent.click(prompt.querySelector('[data-prompt-reference-token="<Picture 2>"]') as HTMLElement)
+    fireEvent.click(screen.getByRole('option', { name: /Audio 2 Voice track/ }))
+    expect(onContentChange).toHaveBeenLastCalledWith({ user_prompt: '@Video 1 then <Audio 2>' })
   })
 
   it('keeps reference tokens stable when typing adjacent text', () => {
@@ -1268,7 +1383,7 @@ describe('TaskSegmentEditor', () => {
     }
     render(<TaskSegmentEditor segment={emptyImageSegment} onContentChange={vi.fn()} />)
 
-    expect(screen.getByTestId('task-image-drop-zone').className).toContain('aspect-square')
+    expect(screen.getByTestId('task-image-drop-zone').className).toContain('w-full')
     expect(screen.getByRole('button', { name: 'Task image drop zone' }).tagName).not.toBe('BUTTON')
     expect(screen.getByRole('textbox', { name: 'Prompt' }).className).toContain('text-[10px]')
   })

@@ -4,7 +4,16 @@ import * as TooltipPrimitive from "@radix-ui/react-tooltip"
 import { cn } from "@/lib/utils"
 import { CUSTOM_NODE_CLASS } from "@/lib/constants"
 
-const TooltipProvider = TooltipPrimitive.Provider
+const TooltipProvider = ({
+  disableHoverableContent = true,
+  ...props
+}: React.ComponentProps<typeof TooltipPrimitive.Provider>) => (
+  <TooltipPrimitive.Provider
+    disableHoverableContent={disableHoverableContent}
+    {...props}
+  />
+)
+TooltipProvider.displayName = TooltipPrimitive.Provider.displayName
 
 const Tooltip = TooltipPrimitive.Root
 
