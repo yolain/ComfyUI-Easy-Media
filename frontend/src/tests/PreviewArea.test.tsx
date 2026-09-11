@@ -651,7 +651,7 @@ describe('PreviewArea', () => {
     )
 
     const overlay = screen.getByTestId('task-prompt-overlay')
-    expect(overlay.className).toContain('bg-black/')
+    expect(overlay.className).toContain('bg-background/70')
     expect(screen.getByTestId('task-prompt-text').className).toContain('truncate')
     expect(screen.getByTestId('task-prompt-text').textContent).toBe(
       'A long active task prompt that should stay on one preview line and truncate when needed',
