@@ -301,7 +301,8 @@
       "model": { "name": "模型" },
       "clip": { "name": "CLIP" },
       "vae": { "name": "VAE" },
-      "audio_vae": { "name": "音频 VAE" }
+      "audio_vae": { "name": "音频 VAE" },
+      "preview_vae": { "name": "预览 VAE" }
     },
     "outputs": {
       "0": { "name": "模型加载器" }
@@ -1284,10 +1285,15 @@
         "name": "潜空间提升模型",
         "tooltip": "可选 MiniMax H3 潜空间放大模型；None 使用最近邻潜空间提升，不经过像素/VAE 往返。"
       },
-      "highres_tiling": {
-        "name": "高分辨率分块",
-        "tooltip": "实验性功能：在 SelfLift 高分辨率阶段自动进行空间分块，以降低峰值显存。"
+      "enabled_tiling": {
+        "name": "启用分块",
+        "tooltip": "在 SelfLift 高分辨率阶段进行空间分块，以降低峰值显存。"
       },
+      "highres_tiling": {
+        "name": "高分辨率分块（兼容）",
+        "tooltip": "enabled_tiling 的旧版兼容选项。"
+      },
+      "tile_count": { "name": "分块数量" },
       "low_context_latent": { "name": "低分上下文潜空间" }
     },
     "outputs": {
@@ -1346,10 +1352,11 @@
         "name": "低分缩放比例",
         "tooltip": "SelfLift 前段低分辨率相对于目标潜空间的缩放比例。"
       },
-      "highres_tiling": {
-        "name": "高分辨率分块",
-        "tooltip": "实验性功能：在 SelfLift 高分辨率阶段自动进行空间分块，适用于低显存用户。"
+      "enabled_tiling": {
+        "name": "启用分块",
+        "tooltip": "为 Dual 二采或 SelfLift 高分辨率阶段启用空间分块。"
       },
+      "tile_count": { "name": "分块数量" },
       "model_loader_2nd": {
         "name": "模型加载器(二采)",
         "tooltip": "可选；仅替换二采模型，编码与 VAE 保持一采配置以确保 latent 兼容。"

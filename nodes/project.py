@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import math
 from typing import Any
@@ -234,6 +235,7 @@ def _timed_h3_project_graph(
     expanded = graph.finalize()
     timed_types = {
         "SamplerCustomAdvanced",
+        "easy h3SamplingPreviewSampler",
         "VAEEncode",
         "VAEEncodeAudio",
         "VAEDecode",
@@ -348,6 +350,24 @@ def _h3_sampling_mode_config(value: Any) -> tuple[str, dict[str, Any]]:
     return sampling_mode, config
 
 
+def _h3_tiling_config(value: Any) -> tuple[bool, int]:
+    config = _first_input(value)
+    if config is None:
+        return False, 0
+    if isinstance(config, str):
+        enabled = config.lower() == "true"
+        return enabled, 2 if enabled else 0
+    if not isinstance(config, dict):
+        raise TypeError("enabled_tiling must be a DynamicCombo configuration dictionary")
+    enabled = str(_first_input(config.get("enabled_tiling"), "false")).lower() == "true"
+    if not enabled:
+        return False, 0
+    tile_count = int(_first_input(config.get("tile_count"), 2))
+    if not 2 <= tile_count <= 8:
+        raise ValueError("tile_count must be between 2 and 8")
+    return True, tile_count
+
+
 def _h3_resolve_selflift_sigmas(
     graph: GraphBuilder,
     *,
@@ -392,6 +412,162 @@ def _h3_second_pass_model(
     if second_model is None:
         raise ValueError("model_loader_2nd is missing required component: model")
     return second_model
+
+
+class EasyH3SamplingPreviewSampler(io.ComfyNode):
+    """SamplerCustomAdvanced with an optional preview-VAE event callback."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy h3SamplingPreviewSampler",
+            display_name="H3 Sampling Preview Sampler",
+            category="EasyUse/H3/dev",
+            inputs=[
+                io.Noise.Input("noise"),
+                io.Guider.Input("guider"),
+                io.Sampler.Input("sampler"),
+                io.Sigmas.Input("sigmas"),
+                io.Latent.Input("latent_image"),
+                io.Boolean.Input("enabled_tiling", default=False, optional=True),
+                io.Int.Input(
+                    "tile_count",
+                    default=2,
+                    min=2,
+                    max=8,
+                    step=1,
+                    optional=True,
+                ),
+                io.Vae.Input("preview_vae", optional=True),
+                io.String.Input("preview_node_id", default="", optional=True),
+                io.Int.Input(
+                    "generated_frame_count", default=1, min=1, optional=True
+                ),
+                io.Float.Input("preview_fps", default=24.0, min=0.01, optional=True),
+                io.Int.Input("segment_index", default=0, min=0, optional=True),
+                io.String.Input("sampling_pass", default="sampling", optional=True),
+            ],
+            outputs=[
+                io.Latent.Output(display_name="output"),
+                io.Latent.Output(display_name="denoised_output"),
+            ],
+            is_dev_only=True,
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        noise: Any,
+        guider: Any,
+        sampler: Any,
+        sigmas: Any,
+        latent_image: dict[str, Any],
+        enabled_tiling: bool = False,
+        tile_count: int = 2,
+        preview_vae: Any | None = None,
+        preview_node_id: str = "",
+        generated_frame_count: int = 1,
+        preview_fps: float = 24.0,
+        segment_index: int = 0,
+        sampling_pass: str = "sampling",
+    ) -> io.NodeOutput:
+        import comfy.model_management
+        import comfy.nested_tensor
+        import comfy.sample
+        import comfy.utils
+        import latent_preview
+
+        from ..utils.sampling_preview import (
+            create_preview_callback,
+            preview_frame_count,
+            preview_playback_fps,
+        )
+
+        latent = latent_image.copy()
+        samples = comfy.sample.fix_empty_latent_channels(
+            guider.model_patcher,
+            latent["samples"],
+            latent.get("downscale_ratio_spacial"),
+            latent.get("downscale_ratio_temporal"),
+        )
+        latent["samples"] = samples
+        sampling_guider = guider
+        if enabled_tiling:
+            streams = (
+                list(samples.unbind())
+                if getattr(samples, "is_nested", False)
+                else [samples]
+            )
+            from ..modules.selflift.h3_tiling import tiled_model
+
+            patched_model = tiled_model(
+                guider.model_patcher,
+                [tuple(stream.shape) for stream in streams],
+                tile_count=int(tile_count),
+            )
+            sampling_guider = copy.copy(guider)
+            sampling_guider.model_patcher = patched_model
+            sampling_guider.model_options = patched_model.model_options
+
+        noise_mask = latent.get("noise_mask")
+        x0_output: dict[str, Any] = {}
+        if preview_vae is not None and preview_node_id:
+            preview_callback = create_preview_callback(
+                sampling_guider.model_patcher,
+                preview_vae,
+                node_id=preview_node_id,
+                requested_frames=preview_frame_count(generated_frame_count),
+                fps=preview_playback_fps(generated_frame_count, preview_fps),
+                segment_index=int(segment_index),
+                sampling_pass=sampling_pass,
+            )
+            progress = comfy.utils.ProgressBar(int(sigmas.shape[-1]) - 1)
+
+            def callback(step: int, x0: Any, state: Any, total: int) -> None:
+                x0_output["x0"] = x0
+                preview_callback(step, x0, state, total)
+                progress.update_absolute(step + 1, total)
+        else:
+            callback = latent_preview.prepare_callback(
+                sampling_guider.model_patcher,
+                int(sigmas.shape[-1]) - 1,
+                x0_output,
+            )
+
+        disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
+        sampled = sampling_guider.sample(
+            noise.generate_noise(latent),
+            samples,
+            sampler,
+            sigmas,
+            denoise_mask=noise_mask,
+            callback=callback,
+            disable_pbar=disable_pbar,
+            seed=noise.seed,
+        ).to(comfy.model_management.intermediate_device())
+
+        output = latent.copy()
+        output.pop("downscale_ratio_spacial", None)
+        output.pop("downscale_ratio_temporal", None)
+        output["samples"] = sampled
+        if "x0" not in x0_output:
+            return io.NodeOutput(output, output)
+
+        denoised = x0_output["x0"]
+        if getattr(sampled, "is_nested", False) and not getattr(
+            denoised, "is_nested", False
+        ):
+            latent_shapes = [tensor.shape for tensor in sampled.unbind()]
+            denoised = comfy.nested_tensor.NestedTensor(
+                comfy.utils.unpack_latents(denoised, latent_shapes)
+            )
+        denoised = sampling_guider.model_patcher.model.process_latent_out(
+            denoised.cpu()
+        )
+        denoised_output = latent.copy()
+        denoised_output["samples"] = denoised
+        return io.NodeOutput(output, denoised_output)
+
 
 
 class EasyMultiTrackProject(io.ComfyNode):
@@ -504,15 +680,6 @@ class EasyMultiTrackProject(io.ComfyNode):
                                         "to the target latent."
                                     ),
                                 ),
-                                io.Boolean.Input(
-                                    "highres_tiling",
-                                    default=False,
-                                    tooltip=(
-                                        "Experimental: spatially tile MiniMax H3 "
-                                        "model evaluation during SelfLift's "
-                                        "high-resolution stage."
-                                    ),
-                                ),
                             ],
                         ),
                     ],
@@ -541,6 +708,26 @@ class EasyMultiTrackProject(io.ComfyNode):
                     options=["None"]
                     + folder_paths.get_filename_list("latent_upscale_models"),
                     default="None",
+                ),
+                io.DynamicCombo.Input(
+                    "enabled_tiling",
+                    options=[
+                        io.DynamicCombo.Option("false", []),
+                        io.DynamicCombo.Option(
+                            "true",
+                            [
+                                io.Int.Input(
+                                    "tile_count",
+                                    default=2,
+                                    min=2,
+                                    max=8,
+                                    step=1,
+                                    tooltip="Spatial tile count shared by Dual and SelfLift high-res sampling.",
+                                ),
+                            ],
+                        ),
+                    ],
+                    tooltip="Enable shared high-resolution H3 spatial tiling.",
                 ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.unique_id],
@@ -574,6 +761,14 @@ class EasyMultiTrackProject(io.ComfyNode):
         clip = selected_model_loader.get("clip")
         vae = selected_model_loader.get("vae")
         audio_vae = selected_model_loader.get("audio_vae")
+        preview_vae = selected_model_loader.get("preview_vae")
+        preview_node_id = str(
+            _first_input(
+                getattr(getattr(cls, "hidden", None), "unique_id", None),
+                "",
+            )
+        )
+        has_sampling_preview = preview_vae is not None and bool(preview_node_id)
         missing_components = [
             name
             for name, value in (("model", model), ("clip", clip), ("vae", vae))
@@ -601,7 +796,7 @@ class EasyMultiTrackProject(io.ComfyNode):
         has_second_pass = sampling_mode == "dual"
         transition_ratio = 0.6
         lowres_scale = 0.6
-        highres_tiling = False
+        tiling_enabled, tile_count = _h3_tiling_config(kwargs.get("enabled_tiling"))
         if is_selflift:
             transition_ratio = float(
                 _first_input(sampling_config.get("transition_ratio"), 0.6)
@@ -609,9 +804,12 @@ class EasyMultiTrackProject(io.ComfyNode):
             lowres_scale = float(
                 _first_input(sampling_config.get("lowres_scale"), 0.6)
             )
-            highres_tiling = bool(
+            legacy_highres_tiling = bool(
                 _first_input(sampling_config.get("highres_tiling"), False)
             )
+            if legacy_highres_tiling and not tiling_enabled:
+                tiling_enabled = True
+                tile_count = 0
         first_pass_only = bool(
             _first_input(
                 sampling_config.get("1st_pass_only"),
@@ -1130,8 +1328,18 @@ class EasyMultiTrackProject(io.ComfyNode):
                     "w_max": 0.7,
                     "w_min": 0.25,
                     "upscaler_model": selected_upscale_model,
-                    "highres_tiling": highres_tiling,
+                    "enabled_tiling": tiling_enabled,
+                    "tile_count": tile_count,
                 }
+                if has_sampling_preview:
+                    selflift_inputs.update({
+                        "preview_vae": preview_vae,
+                        "preview_node_id": preview_node_id,
+                        "generated_frame_count": task_length,
+                        "preview_fps": fps,
+                        "segment_index": task_index,
+                        "sampling_pass": "selflift",
+                    })
                 if has_context_continuity and previous_low_context_latent is not None:
                     selflift_inputs["low_context_latent"] = previous_low_context_latent
                 selflift_sample = graph.node(
@@ -1181,14 +1389,29 @@ class EasyMultiTrackProject(io.ComfyNode):
                         sampling_pass="first",
                         **sampling_inputs,
                     )
+                    preview_inputs = (
+                        {
+                            "preview_vae": preview_vae,
+                            "preview_node_id": preview_node_id,
+                            "generated_frame_count": task_length,
+                            "preview_fps": fps,
+                            "segment_index": task_index,
+                            "sampling_pass": "first",
+                        }
+                        if has_sampling_preview
+                        else {}
+                    )
                     first_pass_sample = graph.node(
-                        "SamplerCustomAdvanced",
+                        "easy h3SamplingPreviewSampler"
+                        if has_sampling_preview
+                        else "SamplerCustomAdvanced",
                         id=f"first_pass_sample_{task_index}",
                         noise=sampling_start.out(0),
                         guider=sampling_start.out(1),
                         sampler=sampling_start.out(2),
                         sigmas=sampling_start.out(3),
                         latent_image=sampling_start.out(4),
+                        **preview_inputs,
                     )
                     first_pass_latent = first_pass_sample.out(1)
             final_latent = first_pass_latent
@@ -1305,14 +1528,34 @@ class EasyMultiTrackProject(io.ComfyNode):
                     segment_index=task_index,
                     sampling_pass="second",
                 )
+                second_preview_inputs = (
+                    {
+                        "preview_vae": preview_vae,
+                        "preview_node_id": preview_node_id,
+                        "generated_frame_count": task_length,
+                        "preview_fps": fps,
+                        "segment_index": task_index,
+                        "sampling_pass": "second",
+                    }
+                    if has_sampling_preview
+                    else {}
+                )
+                if tiling_enabled:
+                    second_preview_inputs.update({
+                        "enabled_tiling": True,
+                        "tile_count": tile_count,
+                    })
                 second_pass_sample = graph.node(
-                    "SamplerCustomAdvanced",
+                    "easy h3SamplingPreviewSampler"
+                    if has_sampling_preview or tiling_enabled
+                    else "SamplerCustomAdvanced",
                     id=f"second_pass_sample_{task_index}",
                     noise=second_sampling_start.out(0),
                     guider=second_sampling_start.out(1),
                     sampler=second_sampling_start.out(2),
                     sigmas=second_sampling_start.out(3),
                     latent_image=second_sampling_start.out(4),
+                    **second_preview_inputs,
                 )
                 final_latent = second_pass_sample.out(1)
             else:
