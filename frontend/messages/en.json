@@ -77,6 +77,18 @@
     "combineQueuedDetail": "The {project} project and its downstream nodes were added to the queue.",
     "queueBusy": "Wait until the current ComfyUI queue is empty before combining manually."
   },
+  "samplingPreview": {
+    "title": "Sampling preview",
+    "meta": "Segment {segment} · {pass} · {step}/{total}",
+    "playbackProgress": "Sampling preview playback progress",
+    "hidePreview": "Hide sampling preview",
+    "showPreview": "Show sampling preview",
+    "pausePreview": "Pause sampling preview",
+    "resumePreview": "Resume sampling preview",
+    "first": "First pass",
+    "second": "Second pass",
+    "selflift": "SelfLift"
+  },
   "toolbar": {
     "frames": "Frames",
     "seconds": "Seconds",

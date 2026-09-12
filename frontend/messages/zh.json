@@ -77,6 +77,18 @@
     "combineQueuedDetail": "项目 {project} 及其下游节点已加入队列。",
     "queueBusy": "当前 ComfyUI 队列仍有任务，请等待队列清空后再手动合并。"
   },
+  "samplingPreview": {
+    "title": "采样预览",
+    "meta": "片段 {segment} · {pass} · {step}/{total}",
+    "playbackProgress": "采样预览播放进度",
+    "hidePreview": "隐藏采样预览",
+    "showPreview": "显示采样预览",
+    "pausePreview": "暂停采样预览",
+    "resumePreview": "继续采样预览",
+    "first": "一采",
+    "second": "二采",
+    "selflift": "SelfLift"
+  },
   "toolbar": {
     "frames": "帧",
     "seconds": "秒",
