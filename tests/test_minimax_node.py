@@ -663,6 +663,7 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
         "disable_2nd_noise",
         "upscale_by",
         "upscale_model",
+        "enabled_tiling",
     ]
     for name in (
         "sampler",
@@ -694,11 +695,9 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
     assert list(selflift_inputs) == [
         "transition_ratio",
         "lowres_scale",
-        "highres_tiling",
     ]
     assert selflift_inputs["transition_ratio"].kwargs["default"] == 0.6
     assert selflift_inputs["lowres_scale"].kwargs["default"] == 0.6
-    assert selflift_inputs["highres_tiling"].kwargs["default"] is False
     for name in ("sampler_2nd", "sigmas_2nd", "model_loader_2nd"):
         assert inputs[name].kwargs["optional"] is True
     assert inputs["1st_pass_only"].kwargs["default"] is False
@@ -1309,7 +1308,8 @@ def test_multitrack_h3_project_has_matching_chinese_localization():
         "sampling_mode",
         "transition_ratio",
         "lowres_scale",
-        "highres_tiling",
+        "enabled_tiling",
+        "tile_count",
         "model_loader_2nd",
         "1st_pass_only",
         "disable_2nd_noise",
@@ -1394,6 +1394,85 @@ def test_multitrack_h3_project_expands_single_task_sampling_pipeline(monkeypatch
     assert log_messages == [
         ("MultiTrack Project", "Found 1 segments; processing 1"),
     ]
+
+
+def test_multitrack_project_patches_sampler_when_loader_has_preview_vae(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    module.comfy_nodes.NODE_CLASS_MAPPINGS["ImageResizeKJv2"] = _ImageResizeKJWithNvidia
+    module.EasyMultiTrackProject.hidden = types.SimpleNamespace(unique_id="42")
+    inputs = _h3_project_inputs(sampling_mode=_h3_sampling_mode("dual"))
+    preview_vae = object()
+    inputs["model_loader"][0]["preview_vae"] = preview_vae
+
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    preview_samplers = [
+        node
+        for node in result.expand.values()
+        if node["class_type"] == "easy h3SamplingPreviewSampler"
+    ]
+
+    assert len(preview_samplers) == 2
+    assert not any(
+        node["class_type"] == "SamplerCustomAdvanced"
+        for node in result.expand.values()
+    )
+    assert {node["inputs"]["sampling_pass"] for node in preview_samplers} == {
+        "first",
+        "second",
+    }
+    assert all(node["inputs"]["preview_vae"] is preview_vae for node in preview_samplers)
+    assert all(node["inputs"]["preview_node_id"] == "42" for node in preview_samplers)
+    assert all(node["inputs"]["preview_fps"] == 24.0 for node in preview_samplers)
+
+
+def test_h3_sampling_preview_sampler_exposes_optional_tiling(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+
+    schema = module._project_module.EasyH3SamplingPreviewSampler.define_schema()
+    inputs = {port.name: port for port in schema.inputs}
+
+    assert inputs["enabled_tiling"].kwargs["default"] is False
+    assert inputs["enabled_tiling"].kwargs["optional"] is True
+    assert inputs["tile_count"].kwargs["default"] == 2
+    assert inputs["tile_count"].kwargs["min"] == 2
+    assert inputs["tile_count"].kwargs["max"] == 8
+    assert inputs["preview_vae"].kwargs["optional"] is True
+
+
+def test_multitrack_project_tiles_inside_second_pass_sampler(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    module.comfy_nodes.NODE_CLASS_MAPPINGS["ImageResizeKJv2"] = _ImageResizeKJWithNvidia
+    inputs = _h3_project_inputs(
+        sampling_mode=_h3_sampling_mode("dual"),
+        enabled_tiling=[{"enabled_tiling": ["true"], "tile_count": [4]}],
+    )
+
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    nodes = list(result.expand.values())
+    tiled_sampler = next(
+        node
+        for node in nodes
+        if node["class_type"] == "easy h3SamplingPreviewSampler"
+    )
+
+    assert tiled_sampler["inputs"]["enabled_tiling"] is True
+    assert tiled_sampler["inputs"]["tile_count"] == 4
+    assert not any(node["class_type"] == "easy h3TiledModel" for node in nodes)
+
+
+def test_multitrack_project_adds_preview_inputs_to_selflift_sampler(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    module.EasyMultiTrackProject.hidden = types.SimpleNamespace(unique_id="84")
+    inputs = _h3_project_inputs(sampling_mode=_h3_sampling_mode("selflift"))
+    preview_vae = object()
+    inputs["model_loader"][0]["preview_vae"] = preview_vae
+
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    sampler = _graph_node(result, "easy minimaxH3SelfLiftSampler")
+
+    assert sampler["inputs"]["preview_vae"] is preview_vae
+    assert sampler["inputs"]["preview_node_id"] == "84"
+    assert sampler["inputs"]["sampling_pass"] == "selflift"
 
 
 def test_multitrack_h3_project_reads_ref_image_size_from_each_segment(monkeypatch):
@@ -1594,7 +1673,7 @@ def test_multitrack_h3_selflift_uses_target_size_and_one_progressive_sample(
     assert selflift["inputs"]["rho"] == 0.0
     assert selflift["inputs"]["w_min"] == 0.25
     assert selflift["inputs"]["w_max"] == 0.7
-    assert selflift["inputs"]["highres_tiling"] is False
+    assert selflift["inputs"]["enabled_tiling"] is False
     assert "project_name" not in selflift["inputs"]
     assert "segment_index" not in selflift["inputs"]
     assert "upscale_by" not in selflift["inputs"]
@@ -1636,8 +1715,10 @@ def test_multitrack_h3_selflift_passes_dynamic_sampling_values(monkeypatch):
                 "selflift",
                 transition_ratio=[0.75],
                 lowres_scale=[0.5],
-                highres_tiling=[True],
             ),
+            enabled_tiling=[
+                {"enabled_tiling": ["true"], "tile_count": [4]}
+            ],
         )
     )
 
@@ -1648,7 +1729,8 @@ def test_multitrack_h3_selflift_passes_dynamic_sampling_values(monkeypatch):
     )
     assert selflift["inputs"]["transition_ratio"] == 0.75
     assert selflift["inputs"]["lowres_scale"] == 0.5
-    assert selflift["inputs"]["highres_tiling"] is True
+    assert selflift["inputs"]["enabled_tiling"] is True
+    assert selflift["inputs"]["tile_count"] == 4
 
 
 @pytest.mark.parametrize("continuity_mode", ["context", "context_swap"])
@@ -1738,11 +1820,14 @@ def test_selflift_sampler_schema_forces_euler_by_not_exposing_a_sampler(monkeypa
     assert inputs["rho"].kwargs["default"] == pytest.approx(0.1)
     assert inputs["w_max"].kwargs["default"] == pytest.approx(0.7)
     assert inputs["w_min"].kwargs["default"] == pytest.approx(0.25)
+    assert inputs["enabled_tiling"].kwargs["default"] is False
+    assert inputs["enabled_tiling"].kwargs["optional"] is True
     assert inputs["highres_tiling"].kwargs["default"] is False
     assert inputs["highres_tiling"].kwargs["optional"] is True
+    assert inputs["highres_tiling"].kwargs["advanced"] is True
     assert inputs["low_context_latent"].kwargs["optional"] is True
     assert "project_name" not in inputs
-    assert "segment_index" not in inputs
+    assert inputs["segment_index"].kwargs["optional"] is True
     assert len(schema.outputs) == 2
     assert "upscale_by" not in inputs
 
@@ -1954,11 +2039,13 @@ def test_selflift_sampler_uses_saved_low_context_for_masked_video(monkeypatch):
         },
         sigmas=torch.tensor([1.0, 0.5, 0.0]),
         seed=42,
-        highres_tiling=True,
+        enabled_tiling=True,
+        tile_count=4,
         low_context_latent=saved_low_context,
     )
 
     assert captured["highres_tiling"] is True
+    assert captured["tile_count"] == 4
     assert captured["low_context_latent"] is saved_low_context
     assert captured["rho"] == 0.1
     assert captured["w_min"] == 0.25
