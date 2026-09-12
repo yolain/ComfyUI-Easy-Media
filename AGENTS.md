@@ -52,6 +52,12 @@ bun run build:release     # production build → dist/release
 - **Color exceptions** — `bg-white` and `bg-black` are allowed for canvas/node editor backgrounds when explicit backgrounds are intentional
 - **Adding colors** — Add new colors as CSS custom property tokens in `src/styles/index.css` under `@theme inline`, then consume them through Tailwind utilities
 
+### Sampling Preview Regression Guards
+
+- Tiny VAE preview decoders may return either normalized float pixels (`0..1`) or `uint8` pixels (`0..255`). When interpolating `uint8` preview frames, preserve that scale and cast the result back to `uint8` before generic float conversion. Passing interpolated `0..255` floats through a `0..1` clamp saturates the preview to white.
+- Keep `tests/test_sampling_preview.py::test_decode_preview_frames_resamples_uint8_without_clipping_to_white` as a regression test for the white-preview failure.
+- The sampling preview belongs to the `easy multitrackProject` node itself. It is not part of `TRACK_DATA` or `MultiTrackWidget`. Keep its DOM widget inside the node layout with bounded min/max height and bounded pointer hit-testing.
+
 ---
 
 ## Git Workflow
