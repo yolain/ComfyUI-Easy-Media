@@ -1483,16 +1483,40 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
                     ),
                 ),
                 io.Boolean.Input(
-                    "highres_tiling",
+                    "enabled_tiling",
                     default=False,
                     optional=True,
                     tooltip=(
-                        "Experimental: automatically split MiniMax H3 model "
-                        "evaluation into spatial tiles during the high-resolution "
-                        "SelfLift stage to reduce peak VRAM."
+                        "Split MiniMax H3 model evaluation into spatial tiles "
+                        "during the high-resolution SelfLift stage."
                     ),
                 ),
+                io.Boolean.Input(
+                    "highres_tiling",
+                    default=False,
+                    optional=True,
+                    advanced=True,
+                    tooltip=(
+                        "Legacy alias for enabled_tiling. Kept for saved workflow "
+                        "compatibility."
+                    ),
+                ),
+                io.Int.Input(
+                    "tile_count",
+                    default=0,
+                    min=0,
+                    max=8,
+                    step=1,
+                    optional=True,
+                    tooltip="Internal shared H3 tiling count; 0 keeps legacy auto planning.",
+                ),
                 io.Latent.Input("low_context_latent", optional=True),
+                io.Vae.Input("preview_vae", optional=True),
+                io.String.Input("preview_node_id", default="", optional=True),
+                io.Int.Input("generated_frame_count", default=1, min=1, optional=True),
+                io.Float.Input("preview_fps", default=24.0, min=0.01, optional=True),
+                io.Int.Input("segment_index", default=0, min=0, optional=True),
+                io.String.Input("sampling_pass", default="selflift", optional=True),
             ],
             outputs=[
                 io.Latent.Output("latent"),
@@ -1516,10 +1540,37 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
         w_max: float = 0.7,
         w_min: float = 0.25,
         upscaler_model: str = "None",
+        enabled_tiling: bool = False,
         highres_tiling: bool = False,
+        tile_count: int = 0,
         low_context_latent: dict[str, Any] | None = None,
+        preview_vae: Any | None = None,
+        preview_node_id: str = "",
+        generated_frame_count: int = 1,
+        preview_fps: float = 24.0,
+        segment_index: int = 0,
+        sampling_pass: str = "selflift",
     ) -> io.NodeOutput:
         from ..modules.selflift.sampling import progressive_sample_h3
+
+        tiling_enabled = bool(enabled_tiling or highres_tiling)
+        preview_callback = None
+        if preview_vae is not None and preview_node_id:
+            from ..utils.sampling_preview import (
+                create_preview_callback,
+                preview_frame_count,
+                preview_playback_fps,
+            )
+
+            preview_callback = create_preview_callback(
+                model,
+                preview_vae,
+                node_id=preview_node_id,
+                requested_frames=preview_frame_count(generated_frame_count),
+                fps=preview_playback_fps(generated_frame_count, preview_fps),
+                segment_index=int(segment_index),
+                sampling_pass=sampling_pass,
+            )
 
         lowres_factor = float(lowres_scale)
         if not math.isfinite(lowres_factor) or not 0.25 <= lowres_factor <= 1.0:
@@ -1564,7 +1615,7 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
             f"rho={correction_rho:.3f}, "
             f"weights={correction_min:.3f}..{correction_max:.3f}, "
             f"upscaler_model={selected_upscaler}, "
-            f"highres_tiling={bool(highres_tiling)}, "
+            f"enabled_tiling={tiling_enabled}, "
             f"low_context={'saved' if low_context_latent is not None else 'derived'}, "
             "sampling_route=selflift",
         )
@@ -1583,7 +1634,9 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
                 rho=correction_rho,
                 w_min=correction_min,
                 w_max=correction_max,
-                highres_tiling=bool(highres_tiling),
+                highres_tiling=tiling_enabled,
+                tile_count=int(tile_count or 0),
+                preview_callback=preview_callback,
             )
         except (RuntimeError, TypeError, ValueError) as error:
             raise RuntimeError(f"MiniMax H3 SelfLift sampling failed: {error}") from error

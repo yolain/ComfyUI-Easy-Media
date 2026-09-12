@@ -64,6 +64,35 @@ def _install_nested_tensor(monkeypatch):
     monkeypatch.setattr(comfy, "nested_tensor", nested, raising=False)
 
 
+def test_custom_preview_disables_native_latent_preview_but_keeps_progress(monkeypatch):
+    prepared = []
+    updates = []
+    class ProgressBar:
+        def __init__(self, total):
+            assert total == 4
+
+        def update_absolute(self, current, total):
+            updates.append((current, total))
+
+    comfy = sys.modules.get("comfy", types.ModuleType("comfy"))
+    comfy_utils = types.ModuleType("comfy.utils")
+    comfy_utils.ProgressBar = ProgressBar
+    latent_preview = types.ModuleType("latent_preview")
+    latent_preview.prepare_callback = lambda model, total: prepared.append(
+        (model, total)
+    )
+    monkeypatch.setitem(sys.modules, "comfy", comfy)
+    monkeypatch.setitem(sys.modules, "comfy.utils", comfy_utils)
+    monkeypatch.setattr(comfy, "utils", comfy_utils, raising=False)
+    monkeypatch.setitem(sys.modules, "latent_preview", latent_preview)
+
+    callback = sampling._prepare_sampling_callback(object(), 4, lambda *args: None)
+    callback(1, object(), object(), 4)
+
+    assert prepared == []
+    assert updates == [(2, 4)]
+
+
 def test_low_resolution_inputs_resize_nonzero_video_and_matching_mask(monkeypatch):
     _install_nested_tensor(monkeypatch)
     video = torch.arange(1 * 24 * 3 * 8 * 10, dtype=torch.float32).reshape(

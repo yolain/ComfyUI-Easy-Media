@@ -72,8 +72,10 @@ def test_model_loader_pack_schema_uses_fastuse_compatible_type(monkeypatch):
         "clip",
         "vae",
         "audio_vae",
+        "preview_vae",
     ]
     assert inputs["audio_vae"].kwargs["optional"] is True
+    assert inputs["preview_vae"].kwargs["optional"] is True
     assert schema.outputs[0].name == "model_loader"
 
 
@@ -110,6 +112,17 @@ def test_model_loader_pack_omits_unconnected_optional_values(monkeypatch):
     assert set(model_loader) == {"model", "clip", "vae"}
 
 
+def test_model_loader_pack_includes_preview_vae_when_connected(monkeypatch):
+    module = _load_common_module(monkeypatch)
+    preview_vae = object()
+
+    model_loader = module.EasyModelLoaderPack.execute(
+        object(), object(), object(), preview_vae=preview_vae
+    ).values[0]
+
+    assert model_loader["preview_vae"] is preview_vae
+
+
 def test_model_loader_pack_has_matching_chinese_localization():
     node_defs = json.loads(
         (Path(__file__).parents[1] / "locales" / "zh" / "nodeDefs.json").read_text()
@@ -122,5 +135,6 @@ def test_model_loader_pack_has_matching_chinese_localization():
         "clip",
         "vae",
         "audio_vae",
+        "preview_vae",
     }
     assert translation["outputs"] == {"0": {"name": "模型加载器"}}
