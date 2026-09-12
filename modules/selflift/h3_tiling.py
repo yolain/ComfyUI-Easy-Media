@@ -2,6 +2,7 @@
 
 from functools import partial
 import inspect
+import itertools
 import logging
 import math
 
@@ -12,6 +13,54 @@ from comfy.ldm.minimax.model import PackedLayout
 import comfy.model_base
 import comfy.patcher_extension
 import comfy.sampler_helpers
+
+
+_H3_TILING_EVAL_COUNTER = itertools.count(1)
+
+
+def _cuda_memory_snapshot(device):
+    try:
+        device = torch.device(device)
+    except (TypeError, RuntimeError):
+        return None
+    if device.type != "cuda" or not torch.cuda.is_available():
+        return None
+    mib = 1024 ** 2
+    return {
+        "allocated": torch.cuda.memory_allocated(device) / mib,
+        "peak": torch.cuda.max_memory_allocated(device) / mib,
+        "reserved": torch.cuda.memory_reserved(device) / mib,
+        "peak_reserved": torch.cuda.max_memory_reserved(device) / mib,
+    }
+
+
+def _reset_cuda_peak(device):
+    try:
+        device = torch.device(device)
+    except (TypeError, RuntimeError):
+        return
+    if device.type == "cuda" and torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats(device)
+
+
+def _log_cuda_memory(prefix, eval_id, device, tile_index=None, tile_total=None):
+    stats = _cuda_memory_snapshot(device)
+    if stats is None:
+        return
+    tile_suffix = ""
+    if tile_index is not None:
+        tile_suffix = f" tile={tile_index}/{tile_total}"
+    logging.info(
+        "%s eval=%d%s allocated=%.2f MiB peak=%.2f MiB "
+        "reserved=%.2f MiB peak_reserved=%.2f MiB",
+        prefix,
+        eval_id,
+        tile_suffix,
+        stats["allocated"],
+        stats["peak"],
+        stats["reserved"],
+        stats["peak_reserved"],
+    )
 
 
 def _regions(length, tile_count=2):
@@ -119,8 +168,33 @@ def _tiled_forward(executor, streams, timestep, context, transformer_options, mi
     axis = 3 if (video.shape[3] + 1) // 2 >= (video.shape[4] + 1) // 2 else 4
     length = video.shape[axis]
     regions = _regions(length, plan['tiles'] if plan is not None else n_tiles)
+    eval_id = next(_H3_TILING_EVAL_COUNTER)
+    axis_name = "H" if axis == 3 else "W"
+    _reset_cuda_peak(video.device)
+    logging.info(
+        "[H3 tiled forward] eval=%d axis=%s tiles=%d full_video=%s audio=%s",
+        eval_id,
+        axis_name,
+        len(regions),
+        tuple(video.shape),
+        tuple(audio.shape),
+    )
+    _log_cuda_memory("[H3 tiled forward memory/start]", eval_id, video.device)
     if len(regions) == 1:
-        return executor(streams, timestep, context, transformer_options, minimax_payload=minimax_payload, **kwargs)
+        logging.info(
+            "[H3 tiled forward] eval=%d bypassed effective_tiles=1",
+            eval_id,
+        )
+        result = executor(
+            streams,
+            timestep,
+            context,
+            transformer_options,
+            minimax_payload=minimax_payload,
+            **kwargs,
+        )
+        _log_cuda_memory("[H3 tiled forward memory/bypass]", eval_id, video.device)
+        return result
     if kwargs.get("control") is not None:
         raise ValueError("SelfLift: high-resolution H3 tiling does not support ControlNet")
     # Keep the stitched accumulator on CPU so previous tiles do not remain on
@@ -131,6 +205,17 @@ def _tiled_forward(executor, streams, timestep, context, transformer_options, mi
     weights = torch.zeros(length, dtype=torch.float32, device="cpu")
     for index, (start, end) in enumerate(regions):
         tile = video.narrow(axis, start, end - start).contiguous()
+        logging.info(
+            "[H3 tile] eval=%d tile=%d/%d axis=%s range=%d:%d tile_video=%s full_audio=%s",
+            eval_id,
+            index + 1,
+            len(regions),
+            axis_name,
+            start,
+            end,
+            tuple(tile.shape),
+            tuple(audio.shape),
+        )
         payload = _tile_payload(minimax_payload or {}, context, video, audio, axis, start, end)
         tile_kwargs = kwargs.copy()
         tile_kwargs["denoise_mask"] = _tile_denoise_mask(
@@ -147,6 +232,13 @@ def _tiled_forward(executor, streams, timestep, context, transformer_options, mi
             transformer_options.copy(),
             minimax_payload=payload,
             **tile_kwargs,
+        )
+        _log_cuda_memory(
+            "[H3 tile memory/after-forward]",
+            eval_id,
+            video.device,
+            tile_index=index + 1,
+            tile_total=len(regions),
         )
         window = torch.ones(end - start, device=video.device, dtype=torch.float32)
         if index > 0:
@@ -165,9 +257,23 @@ def _tiled_forward(executor, streams, timestep, context, transformer_options, mi
         window_shape[axis] = end - start
         video_output.narrow(axis, start, end - start).addcmul_(predicted_video.float(), window.view(window_shape))
         del tile, payload, predicted_video, predicted_audio, window
+        _log_cuda_memory(
+            "[H3 tile memory/after-release]",
+            eval_id,
+            video.device,
+            tile_index=index + 1,
+            tile_total=len(regions),
+        )
     window_shape[axis] = length
     video_output.div_(weights.view(window_shape))
     audio_output.div_(audio_weight_total)
+    logging.info(
+        "[H3 tiled forward done] eval=%d axis=%s tiles=%d",
+        eval_id,
+        axis_name,
+        len(regions),
+    )
+    _log_cuda_memory("[H3 tiled forward memory/done]", eval_id, video.device)
     return [
         video_output.to(device=video.device, dtype=video.dtype),
         audio_output.to(device=audio.device, dtype=audio.dtype),
@@ -217,7 +323,18 @@ def _prepare_tiled_sampling(executor, model, noise_shape, conds, model_options=N
     if tuple(noise_shape) != (video_shape[0], 1, full_elements):
         raise ValueError("SelfLift: tiled memory planning received a different latent shape than the sampling input")
     count = 2
-    if plan is not None:
+    requested = int(plan.get("tiles", 0) or 0) if plan is not None else 0
+    if requested > 0:
+        count = max(2, min(8, requested))
+        regions = _regions(video_shape[axis], count)
+        count = len(regions)
+        plan["tiles"] = count
+        logging.info(
+            "[H3 tiling plan] axis=%s tiles=%d mode=manual",
+            "H" if axis == 3 else "W",
+            count,
+        )
+    elif plan is not None:
         available = _available_workspace(model)
         for count in range(1, 9):
             regions = _regions(video_shape[axis], count)
@@ -265,12 +382,17 @@ def _available_workspace(model):
     return available
 
 
-def tiled_model(model, latent_shapes):
+def tiled_model(model, latent_shapes, tile_count: int = 0):
     if not isinstance(model.model, comfy.model_base.MiniMaxH3):
         raise ValueError("SelfLift: high-resolution tiling requires a MiniMax H3 model")
     if len(latent_shapes) != 2 or len(latent_shapes[0]) != 5 or len(latent_shapes[1]) != 4:
         raise ValueError("SelfLift: high-resolution tiling requires H3 video and audio latent streams")
-    plan = {}
+    requested_tiles = int(tile_count or 0)
+    if requested_tiles not in (0, 1) and not 2 <= requested_tiles <= 8:
+        raise ValueError(
+            "H3 high-resolution tile_count must be 0/auto or between 2 and 8"
+        )
+    plan = {} if requested_tiles <= 1 else {"tiles": requested_tiles}
     patched = model.clone()
     patched.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL,
                                  "selflift_high_resolution_tiling", partial(_tiled_forward, plan=plan))

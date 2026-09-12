@@ -14,10 +14,6 @@ class EasyModelLoaderPack(io.ComfyNode):
             node_id="easy modelLoaderPack",
             display_name="Model Loader Pack",
             category=CATEGORY_LOADERS,
-            description=(
-                "Pack model components into a FAST_MODEL_LOADER compatible with "
-                "FastUse nodes."
-            ),
             inputs=[
                 io.Model.Input("model"),
                 io.Clip.Input("clip"),
