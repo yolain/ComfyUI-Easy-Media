@@ -77,17 +77,41 @@ def _pack(streams: list[torch.Tensor], nested: bool) -> Any:
     return comfy.nested_tensor.NestedTensor(streams)
 
 
+def _prepare_sampling_callback(
+    model: Any,
+    step_count: int,
+    preview_callback: Callable[[int, Any, Any, int], None] | None,
+) -> Callable[[int, Any, Any, int], Any]:
+    """Use native preview normally, or progress-only when custom preview is active."""
+    import comfy.utils
+    import latent_preview
+
+    if preview_callback is None:
+        return latent_preview.prepare_callback(model, step_count)
+
+    progress = comfy.utils.ProgressBar(step_count)
+
+    def callback(step: int, _x0: Any, _state: Any, total: int) -> None:
+        progress.update_absolute(step + 1, total)
+
+    return callback
+
+
 def _highres_sampling_model(
     model: Any,
     streams: list[torch.Tensor],
     highres_tiling: bool,
+    tile_count: int = 0,
 ) -> Any:
     """Patch only the high-resolution H3 stage when tiling is requested."""
     if not highres_tiling:
         return model
     from .h3_tiling import tiled_model
 
-    return tiled_model(model, [tuple(stream.shape) for stream in streams])
+    shapes = [tuple(stream.shape) for stream in streams]
+    if tile_count > 0:
+        return tiled_model(model, shapes, tile_count=tile_count)
+    return tiled_model(model, shapes)
 
 
 def _validate_schedule(sigmas: torch.Tensor, transition_step: int) -> None:
@@ -333,6 +357,8 @@ def progressive_sample_h3(
     w_min: float = 0.5,
     w_max: float = 1.0,
     highres_tiling: bool = False,
+    tile_count: int = 0,
+    preview_callback: Callable[[int, Any, Any, int], None] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Run the original NFE-preserving H3 SelfLift transition and resume flow."""
     import comfy.model_management
@@ -340,7 +366,6 @@ def progressive_sample_h3(
     import comfy.sample
     import comfy.samplers
     import comfy.utils
-    import latent_preview
 
     if not 0.25 <= lowres_scale <= 1.0:
         raise ValueError("SelfLift: lowres_scale must be between 0.25 and 1")
@@ -364,7 +389,12 @@ def progressive_sample_h3(
         latent_image.get("downscale_ratio_temporal"),
     )
     streams, nested = _streams(fixed_samples)
-    high_model = _highres_sampling_model(model, streams, highres_tiling)
+    high_model = _highres_sampling_model(
+        model,
+        streams,
+        highres_tiling,
+        tile_count=tile_count,
+    )
     batch, channels, frames, target_height, target_width = streams[0].shape
     low_height = max(2, round(target_height * lowres_scale / 2) * 2)
     low_width = max(2, round(target_width * lowres_scale / 2) * 2)
@@ -400,7 +430,7 @@ def progressive_sample_h3(
     noise_low = comfy.sample.prepare_noise(
         low_latent, seed, latent_image.get("batch_index")
     )
-    callback = latent_preview.prepare_callback(model, step_count)
+    callback = _prepare_sampling_callback(model, step_count, preview_callback)
     disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
     positive_low = _resize_keyframes(positive, low_height, low_width)
 
@@ -418,6 +448,8 @@ def progressive_sample_h3(
             transition["state"] = state
             transition["x0"] = x0
         result = callback(current, x0, state, step_count)
+        if preview_callback is not None:
+            preview_callback(current, x0, state, step_count)
         low_timer.mark(
             f"step {current + 1}/{transition_step}"
             + (" (includes setup)" if current == 0 else "")
@@ -553,6 +585,8 @@ def progressive_sample_h3(
         if high_evaluations > step_count - transition_step:
             raise RuntimeError("SelfLift: too many high-resolution Euler callbacks")
         result = callback(current + transition_step, x0, state, step_count)
+        if preview_callback is not None:
+            preview_callback(current + transition_step, x0, state, step_count)
         high_timer.mark(
             f"step {current + 1}/{step_count - transition_step}"
             + (" (includes setup)" if current == 0 else "")

@@ -23,6 +23,7 @@ class EasyModelLoaderPack(io.ComfyNode):
                 io.Clip.Input("clip"),
                 io.Vae.Input("vae"),
                 io.Vae.Input("audio_vae", optional=True),
+                io.Vae.Input("preview_vae", optional=True),
             ],
             outputs=[TYPE_FAST_MODEL_LOADER.Output("model_loader")],
         )
@@ -34,10 +35,13 @@ class EasyModelLoaderPack(io.ComfyNode):
         clip: object,
         vae: object,
         audio_vae: object | None = None,
+        preview_vae: object | None = None,
     ) -> io.NodeOutput:
         result = {"model": model, "clip": clip, "vae": vae}
         if audio_vae is not None:
             result["audio_vae"] = audio_vae
+        if preview_vae is not None:
+            result["preview_vae"] = preview_vae
         return io.NodeOutput(result)
 
 
