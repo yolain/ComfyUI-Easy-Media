@@ -12,6 +12,7 @@
 
 ### 🐛 Bug Fixes
 
+- **Video Reference**: Fixed video reference frame alignment. Previous version had frame loss in motion transfer scenarios when timeline was locked, causing reference to fall back to image.
 - **MultiTrack Editor**: Fixed some UI interaction compatibility issues with Node2.0, improving the overall operational experience.
 
 ## [1.3.1] - 2026-09-07
