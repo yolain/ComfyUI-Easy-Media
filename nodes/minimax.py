@@ -305,6 +305,33 @@ def _adapt_canvas(width: int, height: int) -> tuple[int, int]:
     )
 
 
+def _prepare_reference_video_frames(
+    frames: torch.Tensor,
+    frame_count: int,
+) -> torch.Tensor:
+    """Resize once, then preserve the clip tail while aligning to H3's grid."""
+    video_height, video_width = frames.shape[1], frames.shape[2]
+    canvas_width, canvas_height = _adapt_canvas(video_width, video_height)
+    if video_width * video_height < canvas_width * canvas_height:
+        canvas_width = max(
+            CANVAS_MULTIPLE,
+            round(video_width / CANVAS_MULTIPLE) * CANVAS_MULTIPLE,
+        )
+        canvas_height = max(
+            CANVAS_MULTIPLE,
+            round(video_height / CANVAS_MULTIPLE) * CANVAS_MULTIPLE,
+        )
+    frames = _resize(frames[:frame_count], canvas_width, canvas_height, "disabled")
+    available_frames = frames.shape[0]
+    if available_frames < 5:
+        return frames
+    aligned_frames = min(frame_count, _align_frame_count(available_frames))
+    if aligned_frames == available_frames:
+        return frames
+    padding = frames[-1:].expand(aligned_frames - available_frames, *frames.shape[1:])
+    return torch.cat((frames, padding), dim=0)
+
+
 def _set_conditioning_values(
     conditioning: Any,
     values: dict[str, Any],
@@ -586,27 +613,13 @@ class MiniMaxH3ReferenceToVideoFallback(io.ComfyNode):
             if frames is None:
                 continue
             soundtrack = video_audios.get("ref_video_audio_" + name.rsplit("_", 1)[-1])
-            video_height, video_width = frames.shape[1], frames.shape[2]
-            canvas_width, canvas_height = _adapt_canvas(video_width, video_height)
-            if video_width * video_height < canvas_width * canvas_height:
-                canvas_width = max(
-                    CANVAS_MULTIPLE,
-                    round(video_width / CANVAS_MULTIPLE) * CANVAS_MULTIPLE,
-                )
-                canvas_height = max(
-                    CANVAS_MULTIPLE,
-                    round(video_height / CANVAS_MULTIPLE) * CANVAS_MULTIPLE,
-                )
-            frames = _resize(frames, canvas_width, canvas_height, "disabled")
-            frames = frames[:frame_count]
+            frames = _prepare_reference_video_frames(frames, frame_count)
             aligned_count = frames.shape[0]
+            canvas_height, canvas_width = frames.shape[1], frames.shape[2]
             if aligned_count < 5:
                 raise ValueError(
                     "MiniMax H3 reference videos need at least 5 frames (~0.2s at 24 fps)"
                 )
-            while aligned_count % 17 != 5:
-                aligned_count -= 1
-            frames = frames[:aligned_count]
             video_latent = vae.encode(frames)
             audio_latent = None
             reference_audio_length = 0
@@ -759,6 +772,12 @@ class EasyMiniMaxH3ReferenceToVideoBridge(io.ComfyNode):
             if destination is None:
                 raise TypeError(f"Unexpected MiniMax H3 reference input: {name}")
             grouped_inputs[destination][name] = value
+
+        target_frame_count = _align_frame_count(max(5, int(length)))
+        grouped_inputs["ref_videos"] = {
+            name: _prepare_reference_video_frames(frames, target_frame_count)
+            for name, frames in grouped_inputs["ref_videos"].items()
+        }
 
         target = getattr(comfy_nodes, "NODE_CLASS_MAPPINGS", {}).get(
             "MiniMaxH3ReferenceToVideo",

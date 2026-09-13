@@ -3897,6 +3897,60 @@ def test_reference_bridge_groups_fixed_inputs_before_direct_execute(monkeypatch)
     assert list(calls[0]["ref_audios"]) == ["ref_audio_0"]
 
 
+def test_reference_bridge_pads_video_tail_up_to_h3_grid(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+    calls = []
+
+    class _NativeReferenceNode:
+        @classmethod
+        def execute(cls, **kwargs):
+            calls.append(kwargs)
+            return _NodeOutput("conditioning", "latent")
+
+    module.comfy_nodes.NODE_CLASS_MAPPINGS[
+        "MiniMaxH3ReferenceToVideo"
+    ] = _NativeReferenceNode
+    frames = _image_values(*range(120))
+
+    module.EasyMiniMaxH3ReferenceToVideoBridge.execute(
+        clip=_Clip(),
+        vae=_Vae(),
+        prompt="prompt",
+        width=32,
+        height=32,
+        length=120,
+        ref_video_0=frames,
+    )
+
+    aligned = calls[0]["ref_videos"]["ref_video_0"]
+    assert aligned.shape[0] == 124
+    assert aligned[:120, 0, 0, 0].tolist() == list(map(float, range(120)))
+    assert aligned[120:, 0, 0, 0].tolist() == [119.0] * 4
+
+
+def test_reference_fallback_pads_video_tail_instead_of_dropping_frames(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    assert module is not None
+    vae = _Vae()
+    frames = _image_values(*range(120))
+
+    module.MiniMaxH3ReferenceToVideoFallback.execute(
+        clip=_Clip(),
+        vae=vae,
+        audio_vae=None,
+        prompt="prompt",
+        width=32,
+        height=32,
+        length=120,
+        ref_videos={"ref_video_0": frames},
+    )
+
+    encoded = vae.encoded[-1]
+    assert encoded.shape[0] == 124
+    assert encoded[119:, 0, 0, 0].tolist() == [119.0] * 5
+
+
 def test_reference_bridge_directly_executes_fallback_when_native_is_missing(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
