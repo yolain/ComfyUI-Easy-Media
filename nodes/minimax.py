@@ -1723,7 +1723,7 @@ class EasyH3AudioContextLatent(io.ComfyNode):
 
 
 class EasyH3ContextMediaTrim(io.ComfyNode):
-    """Remove an H3 context head and its temporal-grid tail together."""
+    """Remove H3 context frames and fit locked video timing when requested."""
 
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -1741,6 +1741,7 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
                 io.Int.Input("output_frames", min=1),
                 io.Boolean.Input("pad_audio", default=True),
                 io.Boolean.Input("phase_align_video_encode", default=False),
+                io.Boolean.Input("fit_video_duration", default=False),
                 io.Float.Input(
                     "fps",
                     default=24.0,
@@ -1765,6 +1766,7 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
         output_frames: int = 1,
         pad_audio: bool = True,
         phase_align_video_encode: bool = False,
+        fit_video_duration: bool = False,
         fps: float = 24.0,
     ) -> io.NodeOutput:
         prefix = max(0, int(trim_frames))
@@ -1809,8 +1811,28 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
                 (0, wanted_samples - int(output_waveform.shape[-1])),
             )
 
+        output_images = None
+        if images is not None:
+            available_images = images[prefix:]
+            if bool(fit_video_duration) and len(available_images) > wanted_frames:
+                if wanted_frames == 1:
+                    output_images = available_images[:1]
+                else:
+                    positions = torch.linspace(
+                        0,
+                        len(available_images) - 1,
+                        wanted_frames,
+                        device=images.device,
+                    )
+                    output_images = available_images.index_select(
+                        0,
+                        positions.round().to(dtype=torch.long),
+                    )
+            else:
+                output_images = available_images[:wanted_frames]
+
         return io.NodeOutput(
-            images[prefix : prefix + wanted_frames] if images is not None else None,
+            output_images.contiguous() if output_images is not None else None,
             {"waveform": output_waveform, "sample_rate": sample_rate},
         )
 

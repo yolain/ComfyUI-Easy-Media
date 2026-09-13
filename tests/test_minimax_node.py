@@ -2663,6 +2663,7 @@ def test_multitrack_h3_context_chain_uses_previous_segment_latent(monkeypatch):
     assert trim["inputs"]["trim_frames"] == [motion_id, 1]
     assert trim["inputs"]["output_frames"] == [task_length_link[0], 3]
     assert trim["inputs"]["pad_audio"] is False
+    assert "fit_video_duration" not in trim["inputs"]
     trim_id = next(
         node_id for node_id, node in result.expand.items() if node is trim
     )
@@ -4399,6 +4400,7 @@ def test_audio_lock_preserves_source_span_in_both_passes(
     ]
     assert len(trims) == (4 if sampling == "dual" else 2)
     assert all(n["inputs"]["output_frames"] == duration for n in trims)
+    assert all(n["inputs"]["fit_video_duration"] is True for n in trims)
     saves = [n for n in graph.values() if n["class_type"] == "easy saveVideo"]
     assert len(saves) == 2
     for node in saves:
@@ -4474,15 +4476,27 @@ def test_source_timing_policy_leaves_other_tasks_unchanged(
 
 @pytest.mark.parametrize("duration", [120, 125, 124])
 @pytest.mark.parametrize("prefix", [0, 22])
-def test_video_locked_trim_retains_all_source_frames_and_audio(monkeypatch, duration, prefix):
+def test_video_locked_trim_fits_full_generated_span_without_dropping_tail(
+    monkeypatch, duration, prefix,
+):
     module = _load_minimax_node(monkeypatch)
     generated = module._align_frame_count(duration) + (34 if prefix else 0)
     images = torch.arange(generated, dtype=torch.float32).reshape(-1, 1, 1, 1)
     audio = {"waveform": torch.arange(generated * 2).reshape(1, 1, -1), "sample_rate": 48}
     result = module.EasyH3ContextMediaTrim.execute(
-        images, audio, trim_frames=prefix, output_frames=duration, pad_audio=False, fps=24,
+        images,
+        audio,
+        trim_frames=prefix,
+        output_frames=duration,
+        pad_audio=False,
+        fit_video_duration=True,
+        fps=24,
     )
-    assert torch.equal(result.values[0], images[prefix:prefix + duration])
+    available = images[prefix:]
+    expected_indexes = torch.linspace(0, len(available) - 1, duration).round().long()
+    assert torch.equal(result.values[0], available.index_select(0, expected_indexes))
+    assert result.values[0][0].item() == images[prefix].item()
+    assert result.values[0][-1].item() == images[-1].item()
     assert torch.equal(result.values[1]["waveform"], audio["waveform"][..., prefix * 2:(prefix + duration) * 2])
 
 

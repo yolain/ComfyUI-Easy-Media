@@ -1630,6 +1630,11 @@ class EasyMultiTrackProject(io.ComfyNode):
                         ),
                         output_frames=base_task_length,
                         pad_audio=not has_task_locked_audio,
+                        **(
+                            {"fit_video_duration": True}
+                            if preserve_video_timing
+                            else {}
+                        ),
                         fps=fps,
                     )
                     output_images = trimmed.out(0)
@@ -1686,6 +1691,11 @@ class EasyMultiTrackProject(io.ComfyNode):
                                 else 0
                             ),
                             output_frames=base_task_length,
+                            **(
+                                {"fit_video_duration": True}
+                                if preserve_video_timing
+                                else {}
+                            ),
                             fps=fps,
                         )
                         project_low_context_latent = _h3_encode_context_media(
