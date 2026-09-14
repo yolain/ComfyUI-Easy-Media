@@ -25,6 +25,7 @@ from ..utils.h3_project import (
     choose_h3_generation,
     compact_h3_task_segments,
     load_h3_latent,
+    minimax_frame_count,
     parse_tracks_info,
     safe_h3_project_name,
     save_h3_latent,
@@ -1774,8 +1775,21 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
         if bool(phase_align_video_encode):
             if not isinstance(images, torch.Tensor) or images.ndim != 4:
                 raise ValueError("images must have IMAGE shape [B, H, W, C]")
+            frame_count = int(images.shape[0])
+            if frame_count < 1:
+                raise ValueError("images must contain at least one frame")
+            aligned_frame_count = minimax_frame_count(frame_count, round_up=True)
+            if aligned_frame_count > frame_count:
+                # H3 drops three tokens from its final temporal chunk. Extend an
+                # exact-duration delivery to the next 17k+5 boundary so those
+                # dropped tokens cannot exclude the clip's true final frames.
+                padding = images[-1:].expand(
+                    aligned_frame_count - frame_count,
+                    *images.shape[1:],
+                )
+                images = torch.cat((images, padding), dim=0)
             start = h3_phase_aligned_context_start(
-                int(images.shape[0]),
+                aligned_frame_count,
                 wanted_frames,
             )
             return io.NodeOutput(images[start:].contiguous(), audio)

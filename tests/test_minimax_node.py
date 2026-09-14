@@ -999,13 +999,21 @@ def test_h3_context_media_trim_can_leave_locked_audio_short_for_alignment(
 
 
 @pytest.mark.parametrize(
-    ("total_frames", "expected_start"),
-    [(22, 0), (120, 102), (124, 102), (240, 221)],
+    ("total_frames", "expected_start", "expected_padding"),
+    [
+        (22, 0, 0),
+        (120, 102, 4),
+        (124, 102, 0),
+        (153, 136, 5),
+        (168, 153, 7),
+        (240, 221, 3),
+    ],
 )
 def test_h3_context_media_trim_preserves_vae_chunk_phase_for_encoding(
     monkeypatch,
     total_frames,
     expected_start,
+    expected_padding,
 ):
     module = _load_minimax_node(monkeypatch)
     images = torch.arange(total_frames, dtype=torch.float32).reshape(
@@ -1025,10 +1033,25 @@ def test_h3_context_media_trim_preserves_vae_chunk_phase_for_encoding(
     )
 
     output_images, output_audio = result.values
-    assert output_images[:, 0, 0, 0].tolist() == list(
-        range(expected_start, total_frames)
-    )
+    expected = list(range(expected_start, total_frames))
+    expected.extend([total_frames - 1] * expected_padding)
+    assert output_images[:, 0, 0, 0].tolist() == expected
+    assert len(output_images) == 22
+    assert output_images[-1].item() == images[-1].item()
     assert output_audio is audio
+
+
+def test_h3_context_media_trim_rejects_empty_phase_aligned_video(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    audio = {"waveform": torch.zeros(1, 1, 2), "sample_rate": 48}
+
+    with pytest.raises(ValueError, match="at least one frame"):
+        module.EasyH3ContextMediaTrim.execute(
+            torch.empty(0, 1, 1, 1),
+            audio,
+            output_frames=22,
+            phase_align_video_encode=True,
+        )
 
 
 def test_h3_locked_audio_duration_align_matches_decoded_video_without_padding(
