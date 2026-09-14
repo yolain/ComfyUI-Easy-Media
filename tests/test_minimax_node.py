@@ -2654,7 +2654,7 @@ def test_multitrack_h3_context_chain_uses_previous_segment_latent(monkeypatch):
     assert trim["inputs"]["trim_frames"] == [motion_id, 1]
     assert trim["inputs"]["output_frames"] == 120
     assert trim["inputs"]["pad_audio"] is False
-    assert trim["inputs"]["fit_video_duration"] is True
+    assert "fit_video_duration" not in trim["inputs"]
     trim_id = next(
         node_id for node_id, node in result.expand.items() if node is trim
     )
@@ -2719,7 +2719,7 @@ def test_multitrack_h3_first_context_task_does_not_add_an_empty_prefix(monkeypat
         and not node["inputs"].get("phase_align_video_encode")
     )
     assert delivery_trim["inputs"]["output_frames"] == 120
-    assert delivery_trim["inputs"]["fit_video_duration"] is True
+    assert "fit_video_duration" not in delivery_trim["inputs"]
     assert not any(
         node["class_type"] in {
             "ComfyMathExpression",
@@ -4390,7 +4390,10 @@ def test_locked_media_preserves_source_span_in_both_passes(
     ]
     assert len(trims) == (4 if sampling == "dual" else 2)
     assert all(n["inputs"]["output_frames"] == duration for n in trims)
-    assert all(n["inputs"]["fit_video_duration"] is True for n in trims)
+    assert all(
+        n["inputs"].get("fit_video_duration", False) is (track_type == "video")
+        for n in trims
+    )
     saves = [n for n in graph.values() if n["class_type"] == "easy saveVideo"]
     assert len(saves) == 2
     for node in saves:
@@ -4442,7 +4445,7 @@ def test_audio_locked_context_mv_delivers_exact_timeline_spans(monkeypatch):
         key=lambda node: node["_meta"]["easy_media_segment"],
     )
     assert [node["inputs"]["output_frames"] for node in delivery_trims] == durations
-    assert all(node["inputs"]["fit_video_duration"] is True for node in delivery_trims)
+    assert all("fit_video_duration" not in node["inputs"] for node in delivery_trims)
     assert sum(node["inputs"]["output_frames"] for node in delivery_trims) == 2244
 
 
@@ -4480,16 +4483,17 @@ def test_audio_lock_priority_keeps_locked_video_timing(monkeypatch):
     assert audio_lock["inputs"]["audio"] == {"prepared_locked_audio": True}
 
 
-@pytest.mark.parametrize("track_type,locked,audio_only,preserves_timing", [
-    ("video", False, False, False),
-    ("audio", False, False, False),
-    ("audio", True, False, True),
-    ("video", True, True, False),
-    ("audio", True, True, False),
+@pytest.mark.parametrize("track_type,locked,audio_only,preserves_timing,fits_video", [
+    ("video", False, False, False, False),
+    ("audio", False, False, False, False),
+    ("audio", True, False, True, False),
+    ("video", True, False, True, True),
+    ("video", True, True, False, False),
+    ("audio", True, True, False, False),
 ])
 @pytest.mark.parametrize("duration", [120, 125, 131])
 def test_source_timing_policy_leaves_other_tasks_unchanged(
-    monkeypatch, track_type, locked, audio_only, preserves_timing, duration,
+    monkeypatch, track_type, locked, audio_only, preserves_timing, fits_video, duration,
 ):
     module = _load_minimax_node(monkeypatch)
     inputs = _h3_project_inputs(sampling_mode=_h3_sampling_mode("single"))
@@ -4513,7 +4517,7 @@ def test_source_timing_policy_leaves_other_tasks_unchanged(
         ]
         assert len(trims) == 1
         assert trims[0]["inputs"]["output_frames"] == duration
-        assert trims[0]["inputs"]["fit_video_duration"] is True
+        assert trims[0]["inputs"].get("fit_video_duration", False) is fits_video
     else:
         assert isinstance(length, list)
         assert length[1] == 3
@@ -4548,6 +4552,37 @@ def test_video_locked_trim_fits_full_generated_span_without_dropping_tail(
     assert result.values[0][0].item() == images[prefix].item()
     assert result.values[0][-1].item() == images[-1].item()
     assert torch.equal(result.values[1]["waveform"], audio["waveform"][..., prefix * 2:(prefix + duration) * 2])
+
+
+def test_audio_locked_trim_discards_generated_tail_without_time_compression(
+    monkeypatch,
+):
+    module = _load_minimax_node(monkeypatch)
+    duration = 187
+    prefix = 22
+    generated = module._align_frame_count(duration) + 34
+    images = torch.arange(generated, dtype=torch.float32).reshape(-1, 1, 1, 1)
+    audio = {
+        "waveform": torch.arange(generated * 2).reshape(1, 1, -1),
+        "sample_rate": 48,
+    }
+
+    result = module.EasyH3ContextMediaTrim.execute(
+        images,
+        audio,
+        trim_frames=prefix,
+        output_frames=duration,
+        pad_audio=False,
+        fps=24,
+    )
+
+    assert torch.equal(result.values[0], images[prefix:prefix + duration])
+    assert result.values[0][-1].item() == images[prefix + duration - 1].item()
+    assert result.values[0][-1].item() != images[-1].item()
+    assert torch.equal(
+        result.values[1]["waveform"],
+        audio["waveform"][..., prefix * 2:(prefix + duration) * 2],
+    )
 
 
 @pytest.mark.parametrize("track_type", ["video"])
