@@ -1177,7 +1177,7 @@
   },
   "easy MiniMaxH3MotionContextHard": {
     "display_name": "简易 MiniMax H3 硬上下文",
-    "description": "保留 Motion Context 0.4 原生视频与音频关键帧，同时将同一段上一片段音视频潜空间尾部复制到当前采样起点，并分别应用释放遮罩。",
+    "description": "保留 Motion Context 0.4 原生视频与音频关键帧，同时只硬锁定最后 5 帧视频；音频保持生成，使锁定语音能够驱动新的口型。",
     "inputs": {
       "conditioning": { "name": "条件" },
       "vae": { "name": "VAE" },
@@ -1185,7 +1185,8 @@
       "context_latent": { "name": "上一片段上下文潜空间" },
       "context_length": { "name": "视频上下文长度" },
       "video_transition_steps": { "name": "视频过渡步数" },
-      "audio_transition_steps": { "name": "音频过渡步数" }
+      "audio_transition_steps": { "name": "音频过渡步数" },
+      "video_anchor_only": { "name": "仅视频锚点" }
     },
     "outputs": {
       "0": { "name": "条件" },
@@ -1207,12 +1208,13 @@
   },
   "easy MiniMaxH3HiResContinuity": {
     "display_name": "简易 MiniMax H3 高分辨率连续性",
-    "description": "用于二采上下文衔接：将上一片段最终高分辨率视频潜空间尾部复制到当前放大后的潜空间，并冻结当前音频。",
+    "description": "用于二采上下文衔接：硬锁定上一片段最后 5 帧视频边界，并冻结当前音频。",
     "inputs": {
       "current_hires_latent": { "name": "当前高分辨率潜空间" },
       "previous_hires_latent": { "name": "上一片段高分辨率潜空间" },
       "context_length": { "name": "上下文长度" },
-      "video_transition_steps": { "name": "视频过渡步数" }
+      "video_transition_steps": { "name": "视频过渡步数" },
+      "video_anchor_only": { "name": "仅视频锚点" }
     },
     "outputs": {
       "0": { "name": "潜空间" },
@@ -1444,7 +1446,7 @@
       },
       "continuity_mode": {
         "name": "衔接模式",
-        "tooltip": "每个片段的衔接模式。支持 shot、context、context_swap；单个值会应用到所有片段，逗号分隔值如 shot,context,context 会按顺序设置，少于片段数时复用最后一个值。"
+        "tooltip": "每个片段的衔接模式。支持 shot、context、context_swap；context 使用 5 帧视频硬锚点且保持音频生成。单个值会应用到所有片段，逗号分隔值会按顺序设置，少于片段数时复用最后一个值。"
       },
       "system_prompt": {
         "name": "系统提示词",

@@ -169,7 +169,7 @@
     "taskMode": "Task mode",
     "taskModeTooltip": "Choose how this segment generates video.",
     "continuityMode": "Continuity mode",
-    "continuityModeTooltip": "Start a new shot, continue normally, or preserve motion while replacing the character appearance.",
+    "continuityModeTooltip": "Start a new shot, continue with a five-frame video anchor, or preserve motion while replacing the character appearance.",
     "refImageSize": "Reference image size",
     "refImageSizeTooltip": "Match scales reference images to the generation area; Max keeps a larger reference for stronger identity fidelity but can be much slower.",
     "lockAudio": "Lock audio",
