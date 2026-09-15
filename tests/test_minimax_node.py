@@ -3911,10 +3911,15 @@ def test_reference_bridge_groups_fixed_inputs_before_direct_execute(monkeypatch)
     assert list(calls[0]["ref_audios"]) == ["ref_audio_0"]
 
 
-def test_reference_bridge_pads_video_tail_up_to_h3_grid(monkeypatch):
+def test_reference_bridge_pads_video_tail_without_resizing(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
     calls = []
+
+    def unexpected_resize(*_args, **_kwargs):
+        raise AssertionError("reference bridge must leave spatial resizing to core")
+
+    monkeypatch.setattr(module, "_resize", unexpected_resize)
 
     class _NativeReferenceNode:
         @classmethod
@@ -3938,7 +3943,7 @@ def test_reference_bridge_pads_video_tail_up_to_h3_grid(monkeypatch):
     )
 
     aligned = calls[0]["ref_videos"]["ref_video_0"]
-    assert aligned.shape[0] == 124
+    assert aligned.shape == (124, 1, 1, 1)
     assert aligned[:120, 0, 0, 0].tolist() == list(map(float, range(120)))
     assert aligned[120:, 0, 0, 0].tolist() == [119.0] * 4
 

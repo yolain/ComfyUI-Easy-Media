@@ -27,6 +27,10 @@ bun run build             # one-shot dev build → dist/dev
 bun run build:release     # production build → dist/release
 ```
 
+## Skill Synchronization
+
+- **Keep Codex skills in sync** — When changing any skill in this project, overwrite the corresponding Codex skill with the updated project version so both copies remain identical
+
 ## Code Style
 
 ### Backend

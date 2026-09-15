@@ -306,6 +306,22 @@ def _adapt_canvas(width: int, height: int) -> tuple[int, int]:
     )
 
 
+def _align_reference_video_frames(
+    frames: torch.Tensor,
+    frame_count: int,
+) -> torch.Tensor:
+    """Preserve the clip tail while aligning its frame count to H3's grid."""
+    frames = frames[:frame_count]
+    available_frames = frames.shape[0]
+    if available_frames < 5:
+        return frames
+    aligned_frames = min(frame_count, _align_frame_count(available_frames))
+    if aligned_frames == available_frames:
+        return frames
+    padding = frames[-1:].expand(aligned_frames - available_frames, *frames.shape[1:])
+    return torch.cat((frames, padding), dim=0)
+
+
 def _prepare_reference_video_frames(
     frames: torch.Tensor,
     frame_count: int,
@@ -322,15 +338,10 @@ def _prepare_reference_video_frames(
             CANVAS_MULTIPLE,
             round(video_height / CANVAS_MULTIPLE) * CANVAS_MULTIPLE,
         )
-    frames = _resize(frames[:frame_count], canvas_width, canvas_height, "disabled")
-    available_frames = frames.shape[0]
-    if available_frames < 5:
-        return frames
-    aligned_frames = min(frame_count, _align_frame_count(available_frames))
-    if aligned_frames == available_frames:
-        return frames
-    padding = frames[-1:].expand(aligned_frames - available_frames, *frames.shape[1:])
-    return torch.cat((frames, padding), dim=0)
+    resized = _resize(
+        frames[:frame_count], canvas_width, canvas_height, "disabled"
+    )
+    return _align_reference_video_frames(resized, frame_count)
 
 
 def _set_conditioning_values(
@@ -776,7 +787,7 @@ class EasyMiniMaxH3ReferenceToVideoBridge(io.ComfyNode):
 
         target_frame_count = _align_frame_count(max(5, int(length)))
         grouped_inputs["ref_videos"] = {
-            name: _prepare_reference_video_frames(frames, target_frame_count)
+            name: _align_reference_video_frames(frames, target_frame_count)
             for name, frames in grouped_inputs["ref_videos"].items()
         }
 
