@@ -3725,76 +3725,6 @@ def _apply_multitrack_enhanced_prompts(info: dict, prompts: list[str]) -> dict:
     return output_info
 
 
-def _multitrack_task_has_video(info: dict, task: dict) -> bool:
-    start_frame = _multitrack_frame_value(task.get("start_frame"))
-    end_frame = _multitrack_frame_value(task.get("end_frame"), start_frame)
-    if end_frame <= start_frame:
-        return False
-    tracks = info.get("tracks", [])
-    if not isinstance(tracks, list):
-        return False
-    return any(
-        isinstance(track, dict)
-        and track.get("type") == "video"
-        and any(
-            isinstance(segment, dict)
-            and _multitrack_frame_value(segment.get("start_frame")) < end_frame
-            and _multitrack_frame_value(segment.get("end_frame"), -1) > start_frame
-            for segment in track.get("segments", [])
-        )
-        for track in tracks
-    )
-
-
-def _multitrack_project_prompt_request(
-    info: dict,
-    task: dict,
-) -> tuple[str, str, str, int]:
-    """Build a text-only enhancer request for one multitrack task segment."""
-    content = task.get("content", {})
-    if not isinstance(content, dict):
-        content = {}
-    task_images = content.get("images", [])
-    image_count = len(task_images) if isinstance(task_images, list) else 0
-    task_type = _multitrack_task_type(
-        task,
-        image_count,
-        _multitrack_task_has_video(info, task),
-    )
-    raw_prompt = _multitrack_prompt_value(content).replace("@", "")
-    system_prompt, api_prompt, _json_mode = build_prompt_request(
-        task_type,
-        raw_prompt,
-        images=[],
-        video=None,
-        custom_system_prompt=(
-            str(content.get("system_prompt")).replace("@", "")
-            if content.get("system_prompt")
-            else None
-        ),
-        video_format=info.get("format"),
-        task_mode=content.get("task_mode", "default"),
-    )
-    chat_system_prompt, chat_user_prompt = _build_chat_prompts(
-        system_prompt,
-        api_prompt,
-        raw_prompt,
-    )
-    start_frame = max(0, _multitrack_frame_value(task.get("start_frame")))
-    end_frame = max(
-        start_frame,
-        _multitrack_frame_value(task.get("end_frame"), start_frame),
-    )
-    duration_frames = end_frame - start_frame
-    frame_rate = float(info.get("frame_rate", 24))
-    length = (
-        _video_frame_count_from_duration(duration_frames, frame_rate, "MiniMax")
-        if info.get("format") == "MiniMax"
-        else duration_frames + 1
-    )
-    return chat_system_prompt, chat_user_prompt, task_type, max(1, length)
-
-
 # Deliberately do not subclass MultiTrackPromptEnhancer. ComfyUI V3 caches
 # RETURN_TYPES and related schema-derived attributes on the first class that
 # accesses them; a subclass would inherit the enhancer's STRING outputs instead
@@ -3807,7 +3737,7 @@ class MultiTrackPromptEnhanceToProject(io.ComfyNode):
             display_name="MultiTrack Prompt Enhance To Project",
             category=CATEGORY_MULTITRACK,
             description=(
-                "Enhance every task prompt in TRACKS_INFO using text-only inference, "
+                "Enhance every task prompt in TRACKS_INFO with its task-range media, "
                 "write each result back to its task segment, and return the updated "
                 "project data plus the ordered prompt list."
             ),
@@ -3927,13 +3857,26 @@ class MultiTrackPromptEnhanceToProject(io.ComfyNode):
         segment_progress = ProgressBar(len(tasks)) if len(tasks) > 1 else None
         if segment_progress is not None:
             segment_progress.update_absolute(0, len(tasks))
-        for task_index, task in enumerate(tasks):
-            (
-                system_prompt,
-                user_prompt,
-                task_type,
-                length,
-            ) = _multitrack_project_prompt_request(info, task)
+        task_media_info = info
+        if info.get("task_markers"):
+            # This node updates task segments rather than marker-defined task ranges.
+            # Ignore markers while reusing MultiTrackTaskOutput's media resolver so
+            # task_index remains aligned with the sorted segment list above.
+            task_media_info = dict(info)
+            task_media_info["task_markers"] = []
+        for task_index in range(len(tasks)):
+            task_output = MultiTrackTaskOutput.execute(
+                tracks_info=task_media_info,
+                task_index=task_index,
+                prompt_format="api",
+            )
+            system_prompt = task_output[0]
+            user_prompt = task_output[1]
+            task_type = task_output[2]
+            length = task_output[3]
+            selected_images = task_output[4]
+            selected_audio = task_output[5]
+            selected_video = task_output[6]
             segment_model_config = dict(synchronous_model_config)
             if selected_model == LLAMACPP_MODEL and len(tasks) > 1:
                 segment_model_config["force_offload"] = (
@@ -3944,6 +3887,9 @@ class MultiTrackPromptEnhanceToProject(io.ComfyNode):
                 user_prompt=[user_prompt],
                 type=[task_type],
                 length=[length],
+                images=selected_images,
+                audio=selected_audio,
+                video=selected_video,
                 llama_model=llama_model,
                 model=[segment_model_config],
                 seed=[selected_seed],

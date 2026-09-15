@@ -4253,6 +4253,10 @@ def test_multitrack_prompt_enhance_to_project_updates_each_task_in_time_order(
 ):
     module = _load_basic_module()
     calls = []
+    image = torch.zeros(1, 2, 2, 3)
+    video = _FakeVideo(
+        _VideoComponents(torch.zeros(240, 2, 2, 3), None, Fraction(24))
+    )
 
     class PublicNodeOutput:
         def __init__(self, *args, expand=None):
@@ -4274,6 +4278,9 @@ def test_multitrack_prompt_enhance_to_project_updates_each_task_in_time_order(
     tracks_info = {
         "frame_rate": 24,
         "format": "MiniMax",
+        "media_loading": "eager",
+        "eager_media_types": ["image", "video"],
+        "media": {"images": [image], "audio": [None], "video": [video]},
         "tracks": [
             {
                 "type": "task",
@@ -4310,10 +4317,11 @@ def test_multitrack_prompt_enhance_to_project_updates_each_task_in_time_order(
             },
             {
                 "type": "video",
+                "media_index": 0,
                 "segments": [{
                     "start_frame": 120,
                     "end_frame": 240,
-                    "content": {"media_type": "video"},
+                    "content": {"media_type": "video", "media_index": 0},
                 }],
             },
         ],
@@ -4345,10 +4353,11 @@ def test_multitrack_prompt_enhance_to_project_updates_each_task_in_time_order(
     prompt_builder_calls = sys.modules["easy_media.utils.prompt_builder"].calls
     assert [call[0] for call in prompt_builder_calls[-2:]] == ["i2v", "rv2v"]
     assert all(call["model"][0]["return_async"] is False for call in calls)
-    assert all(
-        set(call).isdisjoint({"images", "video", "audio", "files"})
-        for call in calls
-    )
+    assert calls[0]["images"] == [image]
+    assert calls[0]["video"] == [None]
+    assert calls[1]["images"] == []
+    assert calls[1]["video"] == [video]
+    assert all(call["audio"] == [None] for call in calls)
     segment_progress = _ProgressBar.instances[-1]
     assert segment_progress.total == 2
     assert segment_progress.updates == [0, 1, 2]
@@ -4472,6 +4481,8 @@ def test_multitrack_prompt_enhance_to_project_has_chinese_localization():
     node_defs = json.loads(locale_path.read_text(encoding="utf-8"))
 
     translation = node_defs["easy multitrackPromptEnhanceToProject"]
+    assert "媒体" in translation["description"]
+    assert "纯文本" not in json.dumps(translation, ensure_ascii=False)
     assert set(translation["inputs"]) == {
         "tracks_info",
         "llama_model",
@@ -4518,6 +4529,78 @@ def test_multitrack_prompt_enhancer_returns_user_prompt_unchanged_when_disabled(
 
     assert output.values == ("Keep this prompt unchanged", "", "")
     assert output.expand is None
+
+
+def test_multitrack_prompt_enhance_to_project_resolves_deferred_reference_video(
+    monkeypatch,
+):
+    module = _load_basic_module()
+    calls = []
+    source_video = _FakeVideo(
+        _VideoComponents(torch.zeros(4, 2, 2, 3), None, Fraction(2))
+    )
+
+    class PublicNodeOutput:
+        expand = None
+
+        def __getitem__(self, index):
+            return ("enhanced", "", "")[index]
+
+    monkeypatch.setattr(
+        module,
+        "_resolve_multitrack_video",
+        lambda content, video_input: source_video,
+    )
+
+    def fake_enhance(cls, **kwargs):
+        calls.append(kwargs)
+        return PublicNodeOutput()
+
+    monkeypatch.setattr(
+        module.MultiTrackPromptEnhancer,
+        "execute",
+        classmethod(fake_enhance),
+    )
+    tracks_info = {
+        "format": "MiniMax",
+        "media_loading": "deferred",
+        "frame_rate": 2,
+        "width": 2,
+        "height": 2,
+        "total_length": 4,
+        "tracks": [
+            {
+                "type": "task",
+                "segments": [{
+                    "start_frame": 0,
+                    "end_frame": 4,
+                    "content": {"task_mode": "ref", "user_prompt": "move"},
+                }],
+            },
+            {
+                "type": "video",
+                "segments": [{
+                    "start_frame": 0,
+                    "end_frame": 4,
+                    "content": {
+                        "media_type": "video",
+                        "source_type": "input",
+                        "file_path": "reference.mp4",
+                    },
+                }],
+            },
+        ],
+    }
+
+    output = module.MultiTrackPromptEnhanceToProject.execute(
+        tracks_info=tracks_info,
+        model={"model": module.MINIMAX_MODEL},
+    )
+
+    assert output.values[1] == ["enhanced"]
+    assert calls[0]["type"] == ["rv2v"]
+    assert len(calls[0]["video"]) == 1
+    assert calls[0]["video"][0] is not None
 
 
 def test_multitrack_prompt_enhancer_passes_connected_llama_model_link_to_expansion():
