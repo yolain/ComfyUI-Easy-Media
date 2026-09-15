@@ -6,6 +6,7 @@
 
 ### ⚡ Improvements
 
+- **MultiTrack Project**: Enhanced action continuity in context mode and optimized lip-sync when audio is locked.
 - **MultiTrack Editor**: Added the ability to freely drag and adjust the width ratio between the image item area and the prompt area within segments. Optimized the UI display of user prompt highlight tags.
 - **MultiTrack Project**: Added `selflift` option to `sampling_mode`, adapted from [comfyui-SelfLift](https://github.com/facok/comfyui-SelfLift)
 - **Character Swap Context**: Switched to `drive_control` approach instead of the previous noise-based method. Testing shows `drive_control` is more stable and preserves more motion details. Although it may appear slightly less sharp visually than the noise approach, it is better suited for preserving source motion during character replacement and motion transfer.
@@ -21,6 +22,7 @@
 
 ### ✨ New Features
 
+- **MultiTrack Prompt Enhance to Project**: Added `easy multiTrackPromptEnhanceToProject` node, which supports directly applying the MultiTrack Prompt Enhancer's output to the MultiTrack Project.
 - **Character Swap Context**: Added the `context_swap` continuity mode for MiniMax H3 task segments. It preserves motion continuity while weakening the previous character's appearance with disposable tapered latent noise.
 - **Dual-Pass Swap Continuity**: Apply swap noise independently to the low-resolution first-pass context and the high-resolution second-pass context. Audio remains untouched, and only clean trimmed/re-encoded context latents are saved for later segments.
 - **Video-Track Audio Lock**: Lock a video track segment as the timeline constraint for MiniMax H3 generation, ensuring the output duration matches the video; once locked, the audio is synchronized and locked as well. To replace the audio lock, you can lock another audio track as the new audio source while keeping the video track unchanged for the visual. (Mainly used for motion transfer and character replacement.)
