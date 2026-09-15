@@ -8,6 +8,7 @@ import torch
 
 
 H3_VAE_FRAME_CHUNK = 17
+H3_VAE_FRAME_REMAINDER = 5
 H3_VAE_TOKENS_PER_CHUNK = 5
 H3_VAE_FINAL_TOKEN_DROP = 3
 H3_FRAMES_PER_TOKEN = (1, 4, 4, 4, 4)
@@ -60,6 +61,34 @@ def h3_phase_aligned_context_start(
     ) // H3_VAE_FRAME_CHUNK
     first_chunk = max(0, available_chunks - required_chunks)
     return first_chunk * H3_VAE_FRAME_CHUNK
+
+
+def h3_phase_aligned_video_suffix(
+    images: torch.Tensor,
+    context_frames: int,
+) -> torch.Tensor:
+    """Pad to the H3 frame grid and return an encoder-phase-aligned suffix."""
+    if not isinstance(images, torch.Tensor) or images.ndim != 4:
+        raise ValueError("images must have IMAGE shape [B, H, W, C]")
+    frame_count = int(images.shape[0])
+    if frame_count < 1:
+        raise ValueError("images must contain at least one frame")
+
+    aligned_frame_count = H3_VAE_FRAME_CHUNK * max(
+        0,
+        math.ceil((frame_count - H3_VAE_FRAME_REMAINDER) / H3_VAE_FRAME_CHUNK),
+    ) + H3_VAE_FRAME_REMAINDER
+    if aligned_frame_count > frame_count:
+        padding = images[-1:].expand(
+            aligned_frame_count - frame_count,
+            *images.shape[1:],
+        )
+        images = torch.cat((images, padding), dim=0)
+    start = h3_phase_aligned_context_start(
+        aligned_frame_count,
+        int(context_frames),
+    )
+    return images[start:].contiguous()
 
 
 def remove_output_files_by_prefix(

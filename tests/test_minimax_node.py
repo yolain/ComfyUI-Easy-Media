@@ -79,6 +79,10 @@ def _h3_context_latent(value: int | float = 0, video_steps: int = 7):
     return {"samples": _NestedTensor((video, audio))}
 
 
+def _h3_video_anchor_latent(value: int | float = 0):
+    return {"samples": torch.full((1, 24, 2, 2, 2), float(value))}
+
+
 class _ProgressBar:
     instances = []
 
@@ -1054,6 +1058,31 @@ def test_h3_context_media_trim_rejects_empty_phase_aligned_video(monkeypatch):
         )
 
 
+def test_h3_context_trim_embeds_phase_aligned_five_frame_anchor(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    images = torch.arange(9 * 2 * 2 * 3, dtype=torch.float32).reshape(9, 2, 2, 3)
+    vae = _Vae()
+    trimmed = {"samples": "trimmed"}
+    monkeypatch.setattr(
+        module,
+        "trim_motion_context_latent",
+        lambda _latent, context_length: trimmed.copy(),
+    )
+
+    output = module.EasyH3MotionContextLatentTrim.execute(
+        {"samples": "full"},
+        "22",
+        anchor_images=images,
+        vae=vae,
+    ).values[0]
+
+    assert len(vae.encoded) == 1
+    expected = images[-1:].expand(5, *images.shape[1:])
+    assert torch.equal(vae.encoded[0], expected)
+    assert output["samples"] == "trimmed"
+    assert output["anchor_samples"].shape[2] == 2
+
+
 def test_h3_locked_audio_duration_align_matches_decoded_video_without_padding(
     monkeypatch,
 ):
@@ -1238,13 +1267,9 @@ def test_easy_h3_hard_and_hires_context_schemas_and_wrappers(monkeypatch):
     motion_context_calls = []
     monkeypatch.setattr(
         module,
-        "apply_motion_context",
-        lambda **kwargs: motion_context_calls.append(kwargs) or ("conditioned", 22),
-    )
-    monkeypatch.setattr(
-        module,
-        "build_hard_motion_context",
-        lambda **_kwargs: ("conditioned", 22, "hard-latent"),
+        "apply_reencoded_anchor_motion_context",
+        lambda **kwargs: motion_context_calls.append(kwargs)
+        or ("conditioned", 22, "hard-latent"),
     )
     hard_output = module.EasyMiniMaxH3MotionContextHard.execute(
         "conditioning",
@@ -1259,8 +1284,8 @@ def test_easy_h3_hard_and_hires_context_schemas_and_wrappers(monkeypatch):
             "vae": "vae",
             "latent": {"samples": "target"},
             "context_length": "22",
-            "audio_context_length": 0,
             "context_latent": {"samples": "context"},
+            "anchor_length": "5",
         }
     ]
 
@@ -1268,7 +1293,7 @@ def test_easy_h3_hard_and_hires_context_schemas_and_wrappers(monkeypatch):
     assert hires_schema.node_id == "easy MiniMaxH3HiResContinuity"
     monkeypatch.setattr(
         module,
-        "apply_hires_continuity",
+        "apply_hires_anchor_continuity",
         lambda **_kwargs: ("hires-latent", 22),
     )
     hires_output = module.EasyMiniMaxH3HiResContinuity.execute(
@@ -1309,8 +1334,11 @@ def test_easy_h3_hard_and_hires_context_have_chinese_localization():
         "context_length",
         "video_transition_steps",
         "audio_transition_steps",
+        "video_anchor_only",
     }
     assert "easy MiniMaxH3HiResContinuity" in node_defs
+    assert "easy MiniMaxH3MotionContextAnchor" not in node_defs
+    assert "easy MiniMaxH3HiResAnchorContinuity" not in node_defs
 
 
 def test_multitrack_h3_project_has_matching_chinese_localization():
@@ -1820,11 +1848,12 @@ def test_multitrack_h3_selflift_supports_context_and_locked_audio(
     assert context_node["inputs"]["latent"] == [audio_lock_id, 0]
     latent_output = 2 if continuity_mode == "context" else 1
     assert context_selflift["inputs"]["latent_image"] == [context_id, latent_output]
-    low_context_link = context_selflift["inputs"]["low_context_latent"]
-    low_context_node = result.expand[low_context_link[0]]
-    assert low_context_node["class_type"] == "easy h3MotionContextLatentTrim"
-    low_context_source = result.expand[low_context_node["inputs"]["latent"][0]]
-    assert low_context_source["class_type"] == "LTXVConcatAVLatent"
+    if continuity_mode == "context_swap":
+        low_context_link = context_selflift["inputs"]["low_context_latent"]
+        low_context_node = result.expand[low_context_link[0]]
+        assert low_context_node["class_type"] == "easy h3MotionContextLatentTrim"
+    else:
+        assert "low_context_latent" not in context_selflift["inputs"]
     if continuity_mode == "context_swap":
         assert context_selflift["inputs"]["model"] == [context_id, 0]
 
@@ -2706,6 +2735,99 @@ def test_multitrack_h3_context_chain_uses_previous_segment_latent(monkeypatch):
     assert artifacts[1][1]["inputs"]["previous"] == [artifacts[0][0], 0]
 
 
+def test_multitrack_h3_context_uses_embedded_five_frame_anchor(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    info = _h3_project_inputs()["tracks_info"][0]
+    info["tracks"][0]["segments"].append(
+        {
+            "start_frame": 120,
+            "end_frame": 240,
+            "content": {
+                "task_mode": "default",
+                "continuity_mode": "context",
+                "images": [],
+                "user_prompt": "test direct anchor",
+            },
+        }
+    )
+
+    result = module.EasyMultiTrackProject.execute(
+        **_h3_project_inputs(tracks_info=[info])
+    )
+
+    motion = next(
+        node
+        for node in result.expand.values()
+        if node["class_type"] == "easy MiniMaxH3MotionContextHard"
+    )
+    context_id, context_output = motion["inputs"]["context_latent"]
+    assert context_output == 0
+    context_trim = result.expand[context_id]
+    assert context_trim["class_type"] == "easy h3MotionContextLatentTrim"
+    assert set(context_trim["inputs"]) == {
+        "latent",
+        "context_length",
+        "anchor_images",
+        "vae",
+    }
+    first_artifact = next(
+        node
+        for node_id, node in result.expand.items()
+        if "artifact_0" in node_id and node["class_type"] == "easy h3ProjectArtifact"
+    )
+    assert first_artifact["inputs"]["context_latent"] == [context_id, 0]
+    assert "anchor_latent" not in first_artifact["inputs"]
+    assert not any(
+        node["class_type"] in {
+            "easy h3VideoAnchorEncode",
+            "easy MiniMaxH3MotionContextAnchor",
+        }
+        for node in result.expand.values()
+    )
+
+
+def test_multitrack_h3_partial_shot_run_embeds_anchor_in_context_latent(
+    monkeypatch,
+):
+    module = _load_minimax_node(monkeypatch)
+    info = _h3_project_inputs()["tracks_info"][0]
+    info["tracks"][0]["segments"].append(
+        {
+            "start_frame": 120,
+            "end_frame": 240,
+            "content": {
+                "task_mode": "default",
+                "continuity_mode": "context",
+                "images": [],
+                "user_prompt": "generate later",
+            },
+        }
+    )
+
+    result = module.EasyMultiTrackProject.execute(
+        **_h3_project_inputs(
+            tracks_info=[info],
+            segment_start_number=[1],
+            segment_count=[1],
+        )
+    )
+
+    context_id, context_trim = next(
+        (node_id, node)
+        for node_id, node in result.expand.items()
+        if node["class_type"] == "easy h3MotionContextLatentTrim"
+    )
+    artifact = next(
+        node
+        for node in result.expand.values()
+        if node["class_type"] == "easy h3ProjectArtifact"
+    )
+    assert artifact["inputs"]["context_latent"] == [context_id, 0]
+    assert "anchor_images" in context_trim["inputs"]
+    assert "vae" in context_trim["inputs"]
+    assert "anchor_latent" not in artifact["inputs"]
+
+
 def test_multitrack_h3_first_context_task_does_not_add_an_empty_prefix(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     inputs = _h3_project_inputs()
@@ -2911,9 +3033,14 @@ def test_multitrack_h3_dual_context_uses_separate_low_and_hires_latents(monkeypa
     assert result.expand[hires_trim["inputs"]["latent"][0]]["class_type"] == (
         "LTXVConcatAVLatent"
     )
-    assert result.expand[low_context_link[0]]["class_type"] == "LTXVConcatAVLatent"
+    low_context_trim = result.expand[low_context_link[0]]
+    assert low_context_trim["class_type"] == "easy h3MotionContextLatentTrim"
+    assert "anchor_images" not in low_context_trim["inputs"]
     assert hires_context_link != low_context_link
-    context_concat_links = [hires_trim["inputs"]["latent"], low_context_link]
+    context_concat_links = [
+        hires_trim["inputs"]["latent"],
+        low_context_trim["inputs"]["latent"],
+    ]
     for concat_link in context_concat_links:
         concat = result.expand[concat_link[0]]
         video_encode = result.expand[concat["inputs"]["video_latent"][0]]
@@ -2981,11 +3108,13 @@ def test_multitrack_h3_context_swap_uses_drift_control_only_in_first_pass(
         for node in result.expand.values()
         if node["class_type"] == "easy h3ProjectArtifact"
     ]
-    low_context = result.expand[first_noise["inputs"]["context_latent"][0]]
+    low_context_id = first_noise["inputs"]["context_latent"][0]
+    low_context = result.expand[low_context_id]
     assert low_context["class_type"] == "easy h3MotionContextLatentTrim"
-    assert low_context["inputs"]["latent"] == artifacts[0]["inputs"][
-        "context_latent_low"
-    ]
+    assert artifacts[0]["inputs"]["context_latent_low"] == [low_context_id, 0]
+    assert result.expand[low_context["inputs"]["latent"][0]]["class_type"] == (
+        "SamplerCustomAdvanced"
+    )
     assert hires["inputs"]["previous_hires_latent"] == artifacts[0]["inputs"][
         "context_latent"
     ]
@@ -3173,6 +3302,48 @@ def test_multitrack_h3_loop_start_loads_previous_project_context(monkeypatch):
     assert any(
         node["class_type"] == "easy MiniMaxH3MotionContextHard" for node in nodes
     )
+
+
+def test_multitrack_h3_context_loop_start_loads_single_saved_context(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    project_module = sys.modules["easy_media.nodes.project"]
+    monkeypatch.setattr(
+        project_module, "has_h3_context_latent", lambda *args, **kwargs: True
+    )
+    info = _h3_project_inputs()["tracks_info"][0]
+    info["tracks"][0]["segments"].append(
+        {
+            "start_frame": 120,
+            "end_frame": 240,
+            "content": {
+                "task_mode": "default",
+                "continuity_mode": "context",
+                "images": [],
+                "user_prompt": "resume direct anchor",
+            },
+        }
+    )
+
+    result = module.EasyMultiTrackProject.execute(
+        **_h3_project_inputs(
+            tracks_info=[info],
+            segment_start_number=[2],
+            segment_count=[1],
+        )
+    )
+
+    loads = {
+        node["inputs"]["resolution"]: (node_id, node)
+        for node_id, node in result.expand.items()
+        if node["class_type"] == "easy h3ProjectContextLatentLoad"
+    }
+    assert set(loads) == {"high"}
+    motion = next(
+        node
+        for node in result.expand.values()
+        if node["class_type"] == "easy MiniMaxH3MotionContextHard"
+    )
+    assert motion["inputs"]["context_latent"] == [loads["high"][0], 0]
 
 
 def test_multitrack_h3_context_start_rejects_missing_previous_latent(monkeypatch):
@@ -3375,12 +3546,16 @@ def test_h3_project_artifact_writes_manifest_and_rotates_ten_generations(
     for run in range(12):
         staged = project_dir / f".staged_{run}.mp4"
         staged.write_bytes(f"video-{run}".encode())
+        high_context = _h3_context_latent(run, video_steps=12)
+        high_context["anchor_samples"] = _h3_video_anchor_latent(run)["samples"]
+        low_context = _h3_context_latent(-run, video_steps=12)
+        low_context["anchor_samples"] = _h3_video_anchor_latent(-run)["samples"]
         output = module.EasyH3ProjectArtifact.execute(
             project_name="demo",
             project_save="new",
             segment_index=0,
-            context_latent=_h3_context_latent(run, video_steps=12),
-            context_latent_low=_h3_context_latent(-run, video_steps=12),
+            context_latent=high_context,
+            context_latent_low=low_context,
             video_path=f"output/{staged.relative_to(tmp_path)}",
             tracks_info=info,
             seed=0xFFFFFFFFFFFFFFFF,
@@ -3391,6 +3566,8 @@ def test_h3_project_artifact_writes_manifest_and_rotates_ten_generations(
     assert not list(project_dir.glob("latent_0_*"))
     assert len(list(project_dir.glob("context_latent_0_*.safetensors"))) == 10
     assert len(list(project_dir.glob("context_latent_low_0_*.safetensors"))) == 10
+    assert not list(project_dir.glob("anchor_latent_0_*.safetensors"))
+    assert not list(project_dir.glob("anchor_latent_low_0_*.safetensors"))
     manifest = json.loads((project_dir / "project.json").read_text())
     assert manifest["version"] == 2
     assert manifest["project_name"] == "demo"
@@ -3416,15 +3593,19 @@ def test_h3_project_artifact_writes_manifest_and_rotates_ten_generations(
     assert all(isinstance(stream, torch.Tensor) for stream in loaded_streams)
     assert loaded_streams[0].shape[2] == 7
     assert loaded_streams[1].shape[-1] == 37
+    assert loaded.values[0]["anchor_samples"].shape == (1, 24, 2, 2, 2)
     loaded_low = module.EasyH3ProjectContextLatentLoad.execute(
         "demo", 0, resolution="low"
     )
     loaded_low_streams = loaded_low.values[0]["samples"].unbind()
     assert loaded_low_streams[0].shape[2] == 12
     assert loaded_low_streams[1].shape[-1] == 65
+    assert loaded_low.values[0]["anchor_samples"].shape == (1, 24, 2, 2, 2)
     active_generation = str(manifest["segments"]["0"]["active_generation"])
     active_files = manifest["segments"]["0"]["generations"][active_generation]
     assert active_files["context_latent_low"].startswith("context_latent_low_0_")
+    assert "anchor_latent" not in active_files
+    assert "anchor_latent_low" not in active_files
     assert active_files["continuity_mode"] == "shot"
     assert active_files["seed"] == 0xFFFFFFFFFFFFFFFF
 

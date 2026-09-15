@@ -14,8 +14,11 @@ from comfy_api.latest import io
 from comfy_execution.graph_utils import GraphBuilder
 
 from ..modules.motion_context.core import (
+    REENCODED_ANCHOR_FRAMES,
+    apply_hires_anchor_continuity,
     apply_hires_continuity,
     apply_motion_context,
+    apply_reencoded_anchor_motion_context,
     build_hard_motion_context,
     trim_motion_context_latent,
 )
@@ -25,7 +28,6 @@ from ..utils.h3_project import (
     choose_h3_generation,
     compact_h3_task_segments,
     load_h3_latent,
-    minimax_frame_count,
     parse_tracks_info,
     safe_h3_project_name,
     save_h3_latent,
@@ -34,7 +36,7 @@ from ..utils.h3_project import (
 from ..utils.minimax import (
     expand_image_inputs,
     flatten_media_inputs,
-    h3_phase_aligned_context_start,
+    h3_phase_aligned_video_suffix,
     remove_output_files_by_prefix,
 )
 from ..utils.prompt_override import build_minimax_prompt_override_json
@@ -123,7 +125,8 @@ class EasyMinimaxPromptOverride(io.ComfyNode):
                     default="shot",
                     tooltip=(
                         "Continuity mode per clip. Supported values are shot, "
-                        "context, and context_swap; a single value applies to every "
+                        "context, and context_swap; a single value "
+                        "applies to every "
                         "clip, while comma-separated values like shot,context,context "
                         "assign modes in order and reuse the last value when fewer "
                         "are provided."
@@ -811,7 +814,7 @@ def get_minimax_h3_fallback_nodes() -> list[type[io.ComfyNode]]:
 # Conditioning logic is based on
 # https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context.
 class EasyMiniMaxH3MotionContextHard(io.ComfyNode):
-    """Apply H3 context conditioning and hard video/audio latent continuity."""
+    """Apply native H3 context with a short hard video boundary anchor."""
 
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -821,8 +824,8 @@ class EasyMiniMaxH3MotionContextHard(io.ComfyNode):
             category=CATEGORY_MINIMAX,
             description=(
                 "Keep Motion Context 0.4 native video/audio keyframes while "
-                "copying the same AV tail into the current sampling seed with "
-                "independent release masks."
+                "hard-pinning only the final five video frames. Audio remains "
+                "generative so locked speech can drive fresh lip motion."
             ),
             inputs=[
                 io.Conditioning.Input("conditioning"),
@@ -849,6 +852,14 @@ class EasyMiniMaxH3MotionContextHard(io.ComfyNode):
                     max=80,
                     tooltip="Audio denoise-release steps inside the copied prefix.",
                 ),
+                io.Boolean.Input(
+                    "video_anchor_only",
+                    default=True,
+                    tooltip=(
+                        "Use the five-frame video-only anchor. Disable only for "
+                        "internal audio-only project compatibility."
+                    ),
+                ),
             ],
             outputs=[
                 io.Conditioning.Output("conditioning"),
@@ -867,7 +878,20 @@ class EasyMiniMaxH3MotionContextHard(io.ComfyNode):
         context_length: str = "22",
         video_transition_steps: int = 4,
         audio_transition_steps: int = 4,
+        video_anchor_only: bool = True,
     ) -> io.NodeOutput:
+        if video_anchor_only:
+            output, trim_frames, hard_latent = (
+                apply_reencoded_anchor_motion_context(
+                    conditioning=conditioning,
+                    vae=vae,
+                    latent=latent,
+                    context_latent=context_latent,
+                    context_length=context_length,
+                    anchor_length=str(REENCODED_ANCHOR_FRAMES),
+                )
+            )
+            return io.NodeOutput(output, trim_frames, hard_latent)
         output, trim_frames = apply_motion_context(
             conditioning=conditioning,
             vae=vae,
@@ -987,8 +1011,8 @@ class EasyMiniMaxH3HiResContinuity(io.ComfyNode):
             display_name="Easy MiniMax H3 HiRes Continuity",
             category=CATEGORY_MINIMAX,
             description=(
-                "Copy the previous final high-resolution video tail into the "
-                "current upscaled latent and freeze current audio during pass two."
+                "Hard-pin the previous five-frame video boundary in the current "
+                "upscaled latent and freeze current audio during pass two."
             ),
             inputs=[
                 io.Latent.Input("current_hires_latent"),
@@ -1004,6 +1028,7 @@ class EasyMiniMaxH3HiResContinuity(io.ComfyNode):
                     min=0,
                     max=32,
                 ),
+                io.Boolean.Input("video_anchor_only", default=True),
             ],
             outputs=[
                 io.Latent.Output("latent"),
@@ -1018,7 +1043,16 @@ class EasyMiniMaxH3HiResContinuity(io.ComfyNode):
         previous_hires_latent: dict[str, Any],
         context_length: str = "22",
         video_transition_steps: int = 4,
+        video_anchor_only: bool = True,
     ) -> io.NodeOutput:
+        if video_anchor_only:
+            output, trim_frames = apply_hires_anchor_continuity(
+                current_hires_latent=current_hires_latent,
+                previous_hires_latent=previous_hires_latent,
+                context_length=context_length,
+                anchor_length=str(REENCODED_ANCHOR_FRAMES),
+            )
+            return io.NodeOutput(output, trim_frames)
         output, trim_frames = apply_hires_continuity(
             current_hires_latent=current_hires_latent,
             previous_hires_latent=previous_hires_latent,
@@ -1043,6 +1077,8 @@ class EasyH3MotionContextLatentTrim(io.ComfyNode):
             ),
             inputs=[
                 io.Latent.Input("latent"),
+                io.Image.Input("anchor_images", optional=True),
+                io.Vae.Input("vae", optional=True),
                 io.Combo.Input(
                     "context_length",
                     options=["5", "22", "39", "56"],
@@ -1058,10 +1094,33 @@ class EasyH3MotionContextLatentTrim(io.ComfyNode):
         cls,
         latent: dict[str, Any],
         context_length: str = "22",
+        anchor_images: torch.Tensor | None = None,
+        vae: Any | None = None,
     ) -> io.NodeOutput:
-        return io.NodeOutput(
-            trim_motion_context_latent(latent, context_length=context_length)
-        )
+        output = trim_motion_context_latent(latent, context_length=context_length)
+        if (anchor_images is None) != (vae is None):
+            raise ValueError("anchor_images and vae must be connected together")
+        if anchor_images is not None and vae is not None:
+            if not isinstance(anchor_images, torch.Tensor) or anchor_images.ndim != 4:
+                raise ValueError("anchor_images must have IMAGE shape [B,H,W,C]")
+            if int(anchor_images.shape[0]) < REENCODED_ANCHOR_FRAMES:
+                raise ValueError("H3 context anchor requires at least five frames")
+            try:
+                anchor_pixels = h3_phase_aligned_video_suffix(
+                    anchor_images,
+                    REENCODED_ANCHOR_FRAMES,
+                )
+                anchor_samples = vae.encode(
+                    anchor_pixels[:, :, :, :3]
+                )
+            except (RuntimeError, TypeError, ValueError) as error:
+                raise RuntimeError(f"Failed to encode H3 context anchor: {error}") from error
+            if not isinstance(anchor_samples, torch.Tensor) or anchor_samples.ndim != 5:
+                raise ValueError("H3 video VAE returned an invalid anchor latent")
+            if int(anchor_samples.shape[2]) != 2:
+                raise ValueError("H3 five-frame anchor must contain two temporal tokens")
+            output["anchor_samples"] = anchor_samples
+        return io.NodeOutput(output)
 
 
 class EasyH3ProjectContextLatentLoad(io.ComfyNode):
@@ -1773,26 +1832,10 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
         prefix = max(0, int(trim_frames))
         wanted_frames = max(1, int(output_frames))
         if bool(phase_align_video_encode):
-            if not isinstance(images, torch.Tensor) or images.ndim != 4:
-                raise ValueError("images must have IMAGE shape [B, H, W, C]")
-            frame_count = int(images.shape[0])
-            if frame_count < 1:
-                raise ValueError("images must contain at least one frame")
-            aligned_frame_count = minimax_frame_count(frame_count, round_up=True)
-            if aligned_frame_count > frame_count:
-                # H3 drops three tokens from its final temporal chunk. Extend an
-                # exact-duration delivery to the next 17k+5 boundary so those
-                # dropped tokens cannot exclude the clip's true final frames.
-                padding = images[-1:].expand(
-                    aligned_frame_count - frame_count,
-                    *images.shape[1:],
-                )
-                images = torch.cat((images, padding), dim=0)
-            start = h3_phase_aligned_context_start(
-                aligned_frame_count,
-                wanted_frames,
+            return io.NodeOutput(
+                h3_phase_aligned_video_suffix(images, wanted_frames),
+                audio,
             )
-            return io.NodeOutput(images[start:].contiguous(), audio)
 
         frame_rate = float(fps)
         if not math.isfinite(frame_rate) or frame_rate <= 0:

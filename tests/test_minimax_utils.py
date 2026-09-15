@@ -80,6 +80,34 @@ def test_h3_phase_aligned_suffix_matches_full_encode_tail(total_frames):
     assert suffix == full[-7:]
 
 
+def test_h3_phase_aligned_video_suffix_restores_five_frame_anchor_behavior():
+    module = _load_minimax_utils()
+    images = torch.arange(120, dtype=torch.float32).reshape(120, 1, 1, 1)
+
+    suffix = module.h3_phase_aligned_video_suffix(images, 5)
+
+    assert suffix[:, 0, 0, 0].tolist() == [119.0] * 5
+
+
+def test_h3_phase_aligned_video_suffix_keeps_grid_aligned_real_frames():
+    module = _load_minimax_utils()
+    images = torch.arange(124, dtype=torch.float32).reshape(124, 1, 1, 1)
+
+    suffix = module.h3_phase_aligned_video_suffix(images, 5)
+
+    assert suffix[:, 0, 0, 0].tolist() == [119.0, 120.0, 121.0, 122.0, 123.0]
+
+
+def test_five_frame_anchor_matches_last_chunk_of_22_frame_context():
+    module = _load_minimax_utils()
+    images = torch.arange(120, dtype=torch.float32).reshape(120, 1, 1, 1)
+
+    anchor = module.h3_phase_aligned_video_suffix(images, 5)
+    context = module.h3_phase_aligned_video_suffix(images, 22)
+
+    assert torch.equal(anchor, context[-5:])
+
+
 @pytest.mark.parametrize("context_frames", [0, 6, 121])
 def test_h3_phase_aligned_context_start_rejects_invalid_context(context_frames):
     module = _load_minimax_utils()
