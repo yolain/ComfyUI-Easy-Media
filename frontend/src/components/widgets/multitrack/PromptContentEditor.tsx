@@ -134,11 +134,14 @@ function serializePromptContent(container: ParentNode): string {
       return
     }
     if (!(node instanceof HTMLElement)) return
-    const decoratedToken = node.dataset.promptReferenceToken
+    const atomicToken = node.dataset.promptReferenceToken
       ?? node.dataset.promptSemanticToken
-      ?? node.dataset.promptEmphasisText
-    if (decoratedToken !== undefined) {
-      append(decoratedToken)
+    if (atomicToken !== undefined) {
+      append(atomicToken)
+      return
+    }
+    if (node.dataset.promptEmphasisText !== undefined) {
+      append(node.textContent ?? '')
       return
     }
     if (node.tagName === 'BR') {
@@ -752,7 +755,18 @@ export function PromptContentEditor({
             } else if (event.key === 'Enter' && filteredResources.length > 0) {
               event.preventDefault()
               chooseResource(filteredResources[Math.min(mention.activeIndex, filteredResources.length - 1)])
+              return
             }
+          }
+          if (
+            event.key === 'Enter'
+            && !composingRef.current
+            && !event.nativeEvent.isComposing
+          ) {
+            event.preventDefault()
+            const editor = editorRef.current
+            if (editor && insertPlainTextAtSelection(editor, '\n')) commitEditorChange()
+            return
           }
           if ((event.ctrlKey || event.metaKey) && ['a', 'c', 'v', 'x'].includes(event.key.toLowerCase())) {
             event.stopPropagation()

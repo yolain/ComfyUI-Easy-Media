@@ -931,6 +931,51 @@ describe('TaskSegmentEditor', () => {
     expect(prompt.textContent).toContain('[reference generation]')
   })
 
+  it('inserts a plain line break after an H3 section heading without duplicating it', () => {
+    const onContentChange = vi.fn()
+    const segment = taskSegment()
+    segment.content.user_prompt = 'non_diegetic_music:'
+    render(<TaskSegmentEditor segment={segment} onContentChange={onContentChange} />)
+
+    const prompt = screen.getByRole('textbox', { name: 'Prompt' })
+    const heading = prompt.querySelector('[data-prompt-emphasis-text]')
+    expect(heading?.textContent).toBe('non_diegetic_music:')
+
+    prompt.focus()
+    const selection = window.getSelection()
+    const range = document.createRange()
+    range.setStartAfter(heading as Node)
+    range.collapse(true)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    fireEvent.keyDown(prompt, { key: 'Enter' })
+
+    expect(onContentChange).toHaveBeenLastCalledWith({
+      user_prompt: 'non_diegetic_music:\n',
+    })
+    expect(prompt.querySelectorAll('[data-prompt-emphasis-text]')).toHaveLength(1)
+    expect(prompt.textContent?.match(/non_diegetic_music:/g)).toHaveLength(1)
+  })
+
+  it('does not restore a stale H3 heading after replacing the full prompt', () => {
+    const onContentChange = vi.fn()
+    const segment = taskSegment()
+    segment.content.user_prompt = 'subject_definitions: old subject'
+    render(<TaskSegmentEditor segment={segment} onContentChange={onContentChange} />)
+
+    const prompt = screen.getByRole('textbox', { name: 'Prompt' })
+    const staleHeading = prompt.querySelector('[data-prompt-emphasis-text]') as HTMLElement
+    staleHeading.textContent = ''
+    while (staleHeading.nextSibling) staleHeading.nextSibling.remove()
+    prompt.append(document.createTextNode('subject_definitions: new subject'))
+    fireEvent.input(prompt)
+
+    expect(onContentChange).toHaveBeenLastCalledWith({
+      user_prompt: 'subject_definitions: new subject',
+    })
+    expect(prompt.textContent?.match(/subject_definitions:/g)).toHaveLength(1)
+  })
+
   it('opens the reference picker from media chips and preserves their token syntax when replacing them', () => {
     const onContentChange = vi.fn()
     const segment = taskSegment()
