@@ -62,7 +62,7 @@ const H3_LANGUAGE_LABELS = new Set([
   'turkish',
   'vietnamese',
 ])
-const TOKEN_PATTERN = /<[^<>\n]*>|@(?:图片|音频|视频|Picture|Image|Audio|Video)\s*\d+|\{[^{}\n]*\}|\[[^\[\]\n]*\]|\(S\d+(?:\s*,\s*S?\d+)*\)|(?:subject_definitions|summary|retention_analysis|detailed_description|overall_soundscape|non_diegetic_music)\s*:\s*|(?:主体定义|留存分析|详细描述|整体声景|非叙事性音乐)\s*[:：]\s*|[|｜]/gi
+const TOKEN_PATTERN = /<[^<>\n]*>|@(?:图片|音频|视频|Picture|Image|Audio|Video)\s*\d+|\{[^{}\n]*\}|\[[^\[\]\n]*\]|\(S\d+(?:\s*,\s*S?\d+)*\)|(?:subject_definitions|summary|retention_analysis|detailed_description|overall_soundscape|non_diegetic_music)\s*:\s*|(?:主体定义|摘要|留存分析|详细描述|整体声景|非叙事性音乐)\s*[:：]\s*|[|｜]/gi
 const PROMPT_CHIP_CLASS = 'prompt-reference-chip inline-flex h-[1.6em] max-w-full items-center gap-1 rounded-md border px-1.5 py-0.5 mx-1 align-middle font-semibold leading-none shadow-sm'
 const EMPHASIS_CLASS = 'font-semibold text-muted-foreground'
 
@@ -83,7 +83,7 @@ function isH3ThemeSemantic(token: string): boolean {
 }
 
 function isH3SectionHeading(token: string): boolean {
-  return /^(?:(?:subject_definitions|summary|retention_analysis|detailed_description|overall_soundscape|non_diegetic_music)\s*:|(?:主体定义|留存分析|详细描述|整体声景|非叙事性音乐)\s*[:：])\s*$/i.test(token)
+  return /^(?:(?:subject_definitions|summary|retention_analysis|detailed_description|overall_soundscape|non_diegetic_music)\s*:|(?:主体定义|摘要|留存分析|详细描述|整体声景|非叙事性音乐)\s*[:：])\s*$/i.test(token)
 }
 
 function referenceColor(reference: { type: PromptReferenceType }, resource?: PromptReferenceResource): string {
