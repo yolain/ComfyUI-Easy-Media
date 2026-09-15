@@ -671,7 +671,8 @@ describe('ProjectVideoCombineWidget', () => {
         ],
       }],
     }
-    const { props } = widgetProps({ value: data })
+    const { props, api } = widgetProps({ value: data })
+    api.fetchApi.mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue(data) })
 
     const { container } = render(<ProjectVideoCombineWidget {...props} />)
     const fileSelect = screen.getByRole('button', { name: 'Select up to two videos for segment 1' })
@@ -722,7 +723,8 @@ describe('ProjectVideoCombineWidget', () => {
         video_files: [projectData.clips[0], alternate],
       }],
     }
-    const { props } = widgetProps({ value: initial })
+    const { props, api } = widgetProps({ value: initial })
+    api.fetchApi.mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue(initial) })
 
     function Widget() {
       const [value, setValue] = useState<ProjectData>(initial)
@@ -737,6 +739,44 @@ describe('ProjectVideoCombineWidget', () => {
     fireEvent.click(original)
 
     expect(screen.getByText('Swap Context')).not.toBeNull()
+  })
+
+  it('persists the primary video selection for the next segment context', async () => {
+    const alternate = {
+      file_path: 'easy_media/projects/demo/video_0_2.mp4',
+      file_name: 'video_0_2.mp4',
+      source_frame_count: 96,
+    }
+    const initial = {
+      ...projectData,
+      clips: [{
+        ...projectData.clips[0],
+        video_files: [projectData.clips[0], alternate],
+      }],
+    }
+    const { props, api } = widgetProps({ value: initial })
+    api.fetchApi.mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue(initial),
+    })
+
+    render(<ProjectVideoCombineWidget {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Select up to two videos for segment 1' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: alternate.file_name }))
+    fireEvent.click(screen.getByRole('checkbox', { name: projectData.clips[0].file_name }))
+
+    await waitFor(() => expect(api.fetchApi).toHaveBeenCalledWith(
+      '/easy-media/project/video',
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_name: 'demo',
+          segment_index: 0,
+          file_path: alternate.file_path,
+        }),
+      },
+    ))
   })
 
   it('cancels deletion without changing selection or bubbling the delete click', async () => {

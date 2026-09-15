@@ -26,6 +26,7 @@ from utils.h3_project import (  # noqa: E402
     h3_task_type,
     load_h3_latent,
     load_h3_project_data,
+    select_h3_project_video,
     minimax_frame_count,
     initialize_h3_project,
     parse_tracks_info,
@@ -514,6 +515,44 @@ def test_delete_video_saves_remaining_generation_and_preserves_other_segments(mo
     assert (project_dir / "video_0_2.mp4").read_bytes() == b"remaining"
     assert result["clips"][0]["file_name"] == "video_0_2.mp4"
     assert result == load_h3_project_data("demo")
+
+
+def test_select_video_makes_its_generation_supply_the_context_latent(
+    monkeypatch, tmp_path
+):
+    project_dir = _write_render_project(tmp_path)
+    monkeypatch.setattr(
+        "utils.h3_project.folder_paths.get_output_directory",
+        lambda: str(tmp_path),
+    )
+    monkeypatch.setattr("utils.video.ffprobe_info", lambda _path: {"frame_count": 120})
+    manifest_path = project_dir / "project.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["segments"]["0"]["generations"]["1"]["context_latent"] = (
+        "context_latent_0_1.safetensors"
+    )
+    manifest["segments"]["0"]["generations"]["2"] = {
+        "video": "video_0_2.mp4",
+        "context_latent": "context_latent_0_2.safetensors",
+        "continuity_mode": "context_swap",
+        "updated_at": 2000,
+    }
+    manifest["segments"]["0"]["active_generation"] = 2
+    manifest_path.write_text(json.dumps(manifest))
+    (project_dir / "video_0_2.mp4").write_bytes(b"newer")
+    (project_dir / "context_latent_0_1.safetensors").write_bytes(b"selected-latent")
+    (project_dir / "context_latent_0_2.safetensors").write_bytes(b"newest-latent")
+
+    result = select_h3_project_video(
+        "demo", 0, "easy_media/projects/demo/video_0_1.mp4"
+    )
+
+    saved = json.loads(manifest_path.read_text())
+    assert saved["segments"]["0"]["active_generation"] == 1
+    assert result["clips"][0]["file_name"] == "video_0_1.mp4"
+    assert saved["segments"]["0"]["generations"]["1"]["context_latent"] == (
+        "context_latent_0_1.safetensors"
+    )
 
 
 def test_delete_last_video_removes_segment_and_keeps_shared_artifacts(monkeypatch, tmp_path):

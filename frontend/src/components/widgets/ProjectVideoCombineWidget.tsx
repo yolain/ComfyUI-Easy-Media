@@ -284,6 +284,38 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
       ...data,
       clips: data.clips.map((item) => item.id === clip.id ? selectProjectVideoFile(item, file) : item),
     })
+    void persistSelectedClipFile(clip, file)
+  }
+
+  async function persistSelectedClipFile(clip: ProjectClip, file: ProjectVideoFile) {
+    const projectName = data.project_name || 'default'
+    try {
+      const response = await app.api.fetchApi('/easy-media/project/video', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_name: projectName,
+          segment_index: clip.index,
+          file_path: file.file_path,
+        }),
+      })
+      let payload: unknown
+      try {
+        payload = await response.json()
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error
+        throw new Error(t('projectVideoCombine.selectClipFileFailed'))
+      }
+      if (!response.ok) throw new Error(errorMessage(payload, t('projectVideoCombine.selectClipFileFailed')))
+    } catch (error) {
+      app.extensionManager.toast.add({
+        severity: 'error',
+        summary: t('projectVideoCombine.selectClipFileFailed'),
+        detail: error instanceof Error ? error.message : String(error),
+        life: 5000,
+      })
+      void refreshProject(projectName, false)
+    }
   }
 
   function toggleClipFile(clip: ProjectClip, filePath: string) {

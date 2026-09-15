@@ -65,6 +65,7 @@
     "selectClipFile": "选择片段{number}的视频文件",
     "selectClipFiles": "为片段{number}选择最多两个视频",
     "selectClipFilesHint": "选择一个视频用于项目，选择两个视频进行对比。",
+    "selectClipFileFailed": "视频版本选择保存失败",
     "continuityShot": "分镜",
     "continuityContext": "上下文",
     "continuityContextSwap": "上下文(替换)",

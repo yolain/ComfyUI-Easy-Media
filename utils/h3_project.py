@@ -868,7 +868,9 @@ def delete_h3_project_video(project_name: str, segment_index: int, file_path: st
     output_dir = Path(folder_paths.get_output_directory()).resolve()
     segments = manifest.get("segments", {})
     segment = segments.get(str(segment_index)) if isinstance(segments, dict) else None
-    if not isinstance(segment, dict) or not isinstance(segment.get("generations"), dict):
+    if not isinstance(segment, dict) or not isinstance(
+        segment.get("generations"), dict
+    ):
         raise ValueError("Project segment was not found")
     generations = segment["generations"]
     generation_keys = [
@@ -936,6 +938,61 @@ def delete_h3_project_video(project_name: str, segment_index: int, file_path: st
     except OSError:
         logging.exception("Project updated, but staged deleted artifacts could not be cleaned up: %s", staging)
     return project_data
+
+
+def select_h3_project_video(
+    project_name: str,
+    segment_index: int,
+    file_path: str,
+) -> dict[str, Any]:
+    """Select the generation whose video supplies this segment's context latent."""
+    project_dir = h3_project_directory(project_name)
+    manifest_path = project_dir / "project.json"
+    if project_dir.is_symlink() or manifest_path.is_symlink():
+        raise ValueError("Project paths must not be symbolic links")
+    project_dir, manifest = _load_h3_manifest(project_name)
+    output_dir = Path(folder_paths.get_output_directory()).resolve()
+    segments = manifest.get("segments", {})
+    segment = segments.get(str(segment_index)) if isinstance(segments, dict) else None
+    if not isinstance(segment, dict) or not isinstance(
+        segment.get("generations"), dict
+    ):
+        raise ValueError("Project segment was not found")
+
+    selected_generation: str | None = None
+    for key, generation in segment["generations"].items():
+        if not isinstance(generation, dict) or not generation.get("video"):
+            continue
+        try:
+            candidate = _project_child_path(project_dir, generation["video"])
+        except FileNotFoundError:
+            continue
+        if candidate.relative_to(output_dir).as_posix() == file_path:
+            selected_generation = str(key)
+            break
+    if selected_generation is None:
+        raise ValueError("Video does not belong to this project segment")
+    try:
+        active_generation = int(selected_generation)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Project generation must be numeric") from error
+
+    segment["active_generation"] = active_generation
+    generation = segment["generations"][selected_generation]
+    segment["continuity_mode"] = _h3_continuity_mode(
+        generation.get("continuity_mode", segment.get("continuity_mode", "shot"))
+    )
+    temporary = project_dir / ".project.json.tmp"
+    try:
+        temporary.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temporary.replace(manifest_path)
+    except (OSError, TypeError, ValueError) as error:
+        temporary.unlink(missing_ok=True)
+        raise RuntimeError(f"Failed to select project video: {error}") from error
+    return _h3_project_data(project_name, project_dir, manifest)
 
 
 def load_h3_project_data(project_name: Any) -> dict[str, Any]:

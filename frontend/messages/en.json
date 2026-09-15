@@ -65,6 +65,7 @@
     "selectClipFile": "Select a file for segment {number}",
     "selectClipFiles": "Select up to two videos for segment {number}",
     "selectClipFilesHint": "Select one video for the project, or two to compare.",
+    "selectClipFileFailed": "Video selection could not be saved",
     "continuityShot": "Shot",
     "continuityContext": "Context",
     "continuityContextSwap": "Swap Context",
