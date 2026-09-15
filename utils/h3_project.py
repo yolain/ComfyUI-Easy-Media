@@ -131,6 +131,11 @@ def save_h3_latent(latent: dict[str, Any], path: Path) -> None:
         raise TypeError(
             "H3 context latent must contain a tensor or NestedTensor samples value"
         )
+    anchor_samples = latent.get("anchor_samples")
+    if anchor_samples is not None:
+        if not isinstance(anchor_samples, torch.Tensor) or anchor_samples.ndim != 5:
+            raise TypeError("H3 context anchor_samples must be a video latent")
+        tensors["anchor_samples"] = anchor_samples
     temporary = path.with_name(f".{path.name}.tmp")
     try:
         from comfy.utils import save_torch_file
@@ -166,8 +171,16 @@ def load_h3_latent(path: Path) -> dict[str, torch.Tensor]:
     if not isinstance(latent, dict):
         raise ValueError(f"Invalid H3 context latent: {path}")
     samples = latent.get("samples")
+    anchor_samples = latent.get("anchor_samples")
+    if anchor_samples is not None and (
+        not isinstance(anchor_samples, torch.Tensor) or anchor_samples.ndim != 5
+    ):
+        raise ValueError(f"Invalid H3 context anchor latent: {path}")
     if isinstance(samples, torch.Tensor):
-        return {"samples": samples}
+        output = {"samples": samples}
+        if anchor_samples is not None:
+            output["anchor_samples"] = anchor_samples
+        return output
     stream_keys = sorted(
         (
             key
@@ -187,7 +200,10 @@ def load_h3_latent(path: Path) -> dict[str, torch.Tensor]:
         import comfy.nested_tensor
     except ImportError as error:
         raise RuntimeError("ComfyUI NestedTensor support is unavailable") from error
-    return {"samples": comfy.nested_tensor.NestedTensor(streams)}
+    output = {"samples": comfy.nested_tensor.NestedTensor(streams)}
+    if anchor_samples is not None:
+        output["anchor_samples"] = anchor_samples
+    return output
 
 
 def unwrap_list_value(value: Any, default: Any = None) -> Any:
@@ -238,6 +254,8 @@ def _frame_value(value: Any, default: int = 0) -> int:
 
 def _h3_continuity_mode(value: Any) -> str:
     normalized = str(value or "shot").lower()
+    if normalized == "context_test":
+        return "context"
     return normalized if normalized in {"context", "context_swap"} else "shot"
 
 
@@ -473,11 +491,8 @@ def compact_h3_task_segments(info: dict[str, Any]) -> list[dict[str, Any]]:
             content = {}
         compact.append({
             "index": index,
-            "continuity_mode": (
-                str(content.get("continuity_mode", "shot")).lower()
-                if str(content.get("continuity_mode", "shot")).lower()
-                in {"context", "context_swap"}
-                else "shot"
+            "continuity_mode": _h3_continuity_mode(
+                content.get("continuity_mode", "shot")
             ),
             "task_mode": str(content.get("task_mode", "default")),
             "audio_locked": h3_locked_audio_track(entry, info) is not None,
@@ -509,7 +524,7 @@ def safe_h3_project_name(value: Any) -> str:
 def choose_h3_generation(project_dir: Path, segment_index: int, override: bool) -> int:
     versions: dict[int, float] = {}
     pattern = re.compile(
-        rf"^(?:video|audio|locked_audio|context_latent(?:_low)?)_{int(segment_index)}_"
+        rf"^(?:video|audio|locked_audio|context_latent(?:_low)?|anchor_latent(?:_low)?)_{int(segment_index)}_"
         r"(\d+)(?:\.[^.]+)?$"
     )
     if project_dir.is_dir():
@@ -777,6 +792,8 @@ def clear_h3_project_segments_from(
                 "latent",
                 "context_latent",
                 "context_latent_low",
+                "anchor_latent",
+                "anchor_latent_low",
             ):
                 filename = generation.get(key)
                 if not filename:
@@ -804,7 +821,7 @@ def clear_h3_project_segments_from(
         raise RuntimeError(f"Failed to clear project segments: {error}") from error
 
     artifact_pattern = re.compile(
-        r"^\.?(?:video|audio|locked_audio|latent|context_latent|context_latent_low|staging_video)_"
+        r"^\.?(?:video|audio|locked_audio|latent|context_latent|context_latent_low|anchor_latent|anchor_latent_low|staging_video)_"
         r"(\d+)(?:_|\.)"
     )
     for path in project_dir.iterdir():

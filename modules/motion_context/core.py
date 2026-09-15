@@ -15,6 +15,7 @@ VIDEO_RUN_GRID = (124, 107, 90, 73, 56, 39, 22, 5, 1)
 CONTEXT_SWAP_NOISE_ALPHA = 0.45
 CONTEXT_SWAP_NOISE_ALPHA_END = 0.10
 CONTEXT_SWAP_NOISE_RAMP_STEPS = 2
+REENCODED_ANCHOR_FRAMES = 5
 
 
 def _pixel_frames(latent_steps: int) -> int:
@@ -106,7 +107,15 @@ def _merge_noise_mask(
 
 
 def _video_from_latent(latent: dict[str, Any]) -> torch.Tensor:
-    video = _streams_from_latent(latent)[0]
+    if not isinstance(latent, dict) or "samples" not in latent:
+        raise ValueError("easy h3 motion context: expected a video latent")
+    samples = latent["samples"]
+    # A directly VAE-encoded anchor is a normal ComfyUI video LATENT, while
+    # sampled H3 data stores video and audio in a nested tensor.
+    if isinstance(samples, torch.Tensor) and not getattr(samples, "is_nested", False):
+        video = samples
+    else:
+        video = _streams_from_latent(latent)[0]
     if video.ndim == 4:
         video = video.unsqueeze(0)
     if video.ndim != 5:
@@ -222,7 +231,17 @@ def trim_motion_context_latent(
         stream.detach().to(device="cpu", copy=True).contiguous()
         for stream in (video, audio)
     )
-    return {"samples": _official_nested_tensor(streams)}
+    output = {"samples": _official_nested_tensor(streams)}
+    anchor_samples = latent.get("anchor_samples")
+    if anchor_samples is not None:
+        if not isinstance(anchor_samples, torch.Tensor) or anchor_samples.ndim != 5:
+            raise ValueError(
+                "easy h3 motion context: anchor_samples must be a video latent"
+            )
+        output["anchor_samples"] = (
+            anchor_samples.detach().to(device="cpu", copy=True).contiguous()
+        )
+    return output
 
 
 def apply_context_swap_noise(
@@ -499,6 +518,135 @@ def _hard_av_latent(
     return output
 
 
+def _reencoded_anchor_av_latent(
+    latent: dict[str, Any],
+    anchor_latent: dict[str, Any],
+    context_frames: int,
+    anchor_frames: int = REENCODED_ANCHOR_FRAMES,
+) -> dict[str, Any]:
+    """Hard-pin a short re-encoded video anchor at the end of a soft prefix."""
+    context_steps = _steps_for_frames(int(context_frames))
+    anchor_video_steps = _steps_for_frames(int(anchor_frames))
+    if context_steps is None or anchor_video_steps is None:
+        raise ValueError(
+            "easy h3 anchor context: context and anchor lengths must align "
+            "to whole H3 latent steps"
+        )
+    anchor_start = context_steps - anchor_video_steps
+    if anchor_start < 0 or anchor_start % len(FRAME_PER_TOKEN) != 0:
+        raise ValueError(
+            "easy h3 anchor context: anchor must begin on an H3 temporal cycle"
+        )
+
+    existing_video_mask, existing_audio_mask = _noise_mask_streams(latent)
+    target_parts = _streams_from_latent(latent)
+    if len(target_parts) < 2:
+        raise ValueError("easy h3 anchor context: target latent has no audio stream")
+    target_video, target_audio = target_parts[:2]
+    if target_video.ndim == 4:
+        target_video = target_video.unsqueeze(0)
+    if target_audio.ndim == 3:
+        target_audio = target_audio.unsqueeze(0)
+    if target_video.ndim != 5 or target_audio.ndim != 4:
+        raise ValueError("easy h3 anchor context: invalid target AV latent dimensions")
+    if context_steps >= int(target_video.shape[2]):
+        raise ValueError(
+            "easy h3 anchor context: context prefix must be shorter than target"
+        )
+
+    blocks, _, covered = _video_tail_from_latent(anchor_latent, int(anchor_frames))
+    anchor_video = torch.cat(blocks, dim=2)
+    if covered != int(anchor_frames):
+        raise RuntimeError("easy h3 anchor context: video anchor span changed")
+    if (
+        anchor_video.shape[0] != target_video.shape[0]
+        or anchor_video.shape[1] != target_video.shape[1]
+        or anchor_video.shape[3:] != target_video.shape[3:]
+    ):
+        raise ValueError(
+            "easy h3 anchor context: anchor and target video latent shapes differ"
+        )
+    output_video = target_video.clone()
+    output_video[:, :, anchor_start:context_steps] = anchor_video.to(
+        device=output_video.device,
+        dtype=output_video.dtype,
+    )
+    video_mask = torch.ones_like(output_video[:, :1], dtype=torch.float32)
+    video_mask[:, :, anchor_start:context_steps] = 0.0
+
+    output_audio = target_audio
+    audio_mask = torch.ones_like(output_audio[:, :1], dtype=torch.float32)
+
+    output = latent.copy()
+    output["samples"] = _official_nested_tensor((output_video, output_audio))
+    output["noise_mask"] = _official_nested_tensor(
+        (
+            _merge_noise_mask(video_mask, existing_video_mask, "video"),
+            _merge_noise_mask(audio_mask, existing_audio_mask, "audio"),
+        )
+    )
+    LOGGER.info(
+        "Re-encoded video anchor: soft context=%d frames, hard anchor=%d frames "
+        "(video steps=%d:%d); audio remains generative",
+        context_frames,
+        anchor_frames,
+        anchor_start,
+        context_steps,
+    )
+    return output
+
+
+def _video_anchor_from_context_latent(
+    context_latent: dict[str, Any],
+    anchor_frames: int = REENCODED_ANCHOR_FRAMES,
+) -> dict[str, torch.Tensor]:
+    """Use an embedded pixel anchor or the matching context-video tail."""
+    anchor_samples = context_latent.get("anchor_samples")
+    if anchor_samples is not None:
+        if not isinstance(anchor_samples, torch.Tensor) or anchor_samples.ndim != 5:
+            raise ValueError(
+                "easy h3 anchor context: anchor_samples must be [B,C,T,H,W]"
+            )
+        return {"samples": anchor_samples}
+    blocks, _, covered = _video_tail_from_latent(context_latent, int(anchor_frames))
+    if covered != int(anchor_frames):
+        raise RuntimeError("easy h3 anchor context: video anchor span changed")
+    return {"samples": torch.cat(blocks, dim=2)}
+
+
+def apply_reencoded_anchor_motion_context(
+    conditioning: Any,
+    vae: Any,
+    latent: dict[str, Any],
+    context_latent: dict[str, Any],
+    context_length: int | str = "22",
+    anchor_length: int | str = str(REENCODED_ANCHOR_FRAMES),
+) -> tuple[Any, int, dict[str, Any]]:
+    """Use long native Motion Context with a short immutable video anchor."""
+    output, trim_frames = apply_motion_context(
+        conditioning=conditioning,
+        vae=vae,
+        latent=latent,
+        context_length=context_length,
+        audio_context_length=0,
+        context_latent=context_latent,
+    )
+    video_keyframes, audio_keyframes = _native_keyframe_stats(output)
+    if video_keyframes < 1 or audio_keyframes < 1:
+        raise RuntimeError(
+            "easy h3 anchor context requires Motion Context 0.4.0+ native "
+            "video/audio keyframes and ComfyUI 0.34.0+; got "
+            f"video_keyframes={video_keyframes}, audio_keyframes={audio_keyframes}"
+        )
+    anchored = _reencoded_anchor_av_latent(
+        latent,
+        _video_anchor_from_context_latent(context_latent, int(anchor_length)),
+        context_frames=int(trim_frames),
+        anchor_frames=int(anchor_length),
+    )
+    return output, trim_frames, anchored
+
+
 def apply_hard_motion_context(
     conditioning: Any,
     vae: Any,
@@ -627,6 +775,32 @@ def apply_hires_continuity(
         ramp_values or "off",
     )
     return output, int(covered)
+
+
+def apply_hires_anchor_continuity(
+    current_hires_latent: dict[str, Any],
+    previous_hires_latent: dict[str, Any],
+    context_length: int | str = "22",
+    anchor_length: int | str = str(REENCODED_ANCHOR_FRAMES),
+) -> tuple[dict[str, Any], int]:
+    """Hard-pin a re-encoded boundary anchor during ordinary hi-res refine."""
+    output = _reencoded_anchor_av_latent(
+        current_hires_latent,
+        _video_anchor_from_context_latent(
+            previous_hires_latent,
+            int(anchor_length),
+        ),
+        context_frames=int(context_length),
+        anchor_frames=int(anchor_length),
+    )
+    masks = _streams_from_latent({"samples": output["noise_mask"]})
+    samples = _streams_from_latent(output)
+    if len(masks) < 2 or len(samples) < 2:
+        raise ValueError("easy h3 hires anchor: missing H3 AV streams")
+    masks[1] = torch.zeros_like(samples[1][:, :1], dtype=torch.float32)
+    output["noise_mask"] = _official_nested_tensor(tuple(masks))
+    LOGGER.info("HiRes anchor continuity: second-pass audio is frozen")
+    return output, int(context_length)
 
 
 def apply_motion_context(

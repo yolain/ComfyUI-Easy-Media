@@ -174,6 +174,15 @@ def test_compact_project_tasks_preserve_context_swap_mode():
     assert compact_h3_task_segments(info)[1]["continuity_mode"] == "context_swap"
 
 
+def test_compact_project_tasks_migrate_context_test_to_context():
+    info = _tracks_info()
+    info["tracks"][0]["segments"][1]["content"]["continuity_mode"] = (
+        "context_test"
+    )
+
+    assert compact_h3_task_segments(info)[1]["continuity_mode"] == "context"
+
+
 def test_locked_audio_track_applies_when_it_overlaps_the_task_range():
     info = _tracks_info()
     info["tracks"].append({

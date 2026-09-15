@@ -47,6 +47,7 @@ TYPE_FAST_MODEL_LOADER = io.Custom(io_type="FAST_MODEL_LOADER")
 TYPE_TRACKS_INFO = io.Custom(io_type="TRACKS_INFO")
 TYPE_PROJECT_DATA = io.Custom(io_type="PROJECT_DATA")
 H3_CONTEXT_CONTINUITY_MODES = {"context", "context_swap"}
+H3_CONTEXT_SOURCE_FRAMES = 22
 
 
 def _first_input(value: Any, default: Any = None) -> Any:
@@ -914,6 +915,8 @@ class EasyMultiTrackProject(io.ComfyNode):
             if isinstance(first_selected_content, dict)
             else "shot"
         )
+        if first_selected_continuity == "context_test":
+            first_selected_continuity = "context"
         if (
             first_selected_index > 0
             and first_selected_continuity in H3_CONTEXT_CONTINUITY_MODES
@@ -944,7 +947,6 @@ class EasyMultiTrackProject(io.ComfyNode):
                     f"{previous_index + 1} has no active low-resolution context "
                     "latent. Regenerate the previous segment with SelfLift first."
                 )
-
         resume_task_index: int | None = None
         if run_second_pass and selected_entries:
             first_selected_index = selected_entries[0][0]
@@ -1098,6 +1100,8 @@ class EasyMultiTrackProject(io.ComfyNode):
                 if isinstance(content, dict)
                 else "shot"
             )
+            if continuity_mode == "context_test":
+                continuity_mode = "context"
             uses_context = continuity_mode in H3_CONTEXT_CONTINUITY_MODES
             uses_swap = continuity_mode == "context_swap"
             locked_audio_track = h3_locked_audio_track(entry, info)
@@ -1163,7 +1167,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                 uses_context
                 and (previous_hires_context_latent is not None or task_index > 0)
             )
-            context_source_frames = 22
+            context_source_frames = H3_CONTEXT_SOURCE_FRAMES
             context_generation_frames = 34
             if will_have_context_continuity:
                 task_length = graph.node(
@@ -1304,6 +1308,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                         context_length=str(context_source_frames),
                         video_transition_steps=4,
                         audio_transition_steps=4,
+                        video_anchor_only=not audio_only,
                     )
                     positive = motion_context.out(0)
                     first_pass_context_trim_frames = motion_context.out(1)
@@ -1341,7 +1346,11 @@ class EasyMultiTrackProject(io.ComfyNode):
                         "segment_index": task_index,
                         "sampling_pass": "selflift",
                     })
-                if has_context_continuity and previous_low_context_latent is not None:
+                if (
+                    has_context_continuity
+                    and uses_swap
+                    and previous_low_context_latent is not None
+                ):
                     selflift_inputs["low_context_latent"] = previous_low_context_latent
                 selflift_sample = graph.node(
                     "easy minimaxH3SelfLiftSampler",
@@ -1497,8 +1506,9 @@ class EasyMultiTrackProject(io.ComfyNode):
                         id=f"hires_continuity_{task_index}",
                         current_hires_latent=upscaled_latent,
                         previous_hires_latent=previous_hires_context_latent,
-                        context_length="22",
+                        context_length=str(H3_CONTEXT_SOURCE_FRAMES),
                         video_transition_steps=4,
+                        video_anchor_only=not audio_only,
                     )
                     upscaled_latent = hires_continuity.out(0)
                     context_trim_frames = hires_continuity.out(1)
@@ -1569,6 +1579,8 @@ class EasyMultiTrackProject(io.ComfyNode):
                 if has_second_pass
                 else final_latent
             )
+            hires_context_reencoded = False
+            low_context_reencoded = False
             if audio_only:
                 output_audio = graph.node(
                     "VAEDecodeAudio",
@@ -1598,6 +1610,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                         )
                     else:
                         project_low_context_latent = project_hires_context_latent
+
                 report_segment_step(0.89)
                 saved_media_inputs = {
                     "audio": task_locked_audio if has_task_locked_audio else output_audio,
@@ -1655,6 +1668,7 @@ class EasyMultiTrackProject(io.ComfyNode):
 
                 project_hires_context_latent = final_latent
                 project_low_context_latent = low_stage_context_latent
+                low_delivered_images: Any | None = None
                 if context_trim_frames is not None or preserve_source_timing:
                     # Rebuild continuity from the delivered span after removing
                     # the optional context head and temporal-grid tail.
@@ -1666,6 +1680,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                         audio_vae,
                         f"hires_context_{task_index}",
                     )
+                    hires_context_reencoded = True
                     if (has_second_pass and run_second_pass) or (
                         is_selflift and selflift_low_latent is not None
                     ):
@@ -1699,6 +1714,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                             ),
                             fps=fps,
                         )
+                        low_delivered_images = low_context_media.out(0)
                         project_low_context_latent = _h3_encode_context_media(
                             graph,
                             low_context_media.out(0),
@@ -1707,8 +1723,10 @@ class EasyMultiTrackProject(io.ComfyNode):
                             audio_vae,
                             f"low_context_{task_index}",
                         )
+                        low_context_reencoded = True
                     else:
                         project_low_context_latent = project_hires_context_latent
+                        low_context_reencoded = hires_context_reencoded
                 report_segment_step(0.89)
                 # Keep decoded audio for latent continuity, but deliver the original
                 # task audio in the video so the project needs no separate WAV.
@@ -1738,18 +1756,43 @@ class EasyMultiTrackProject(io.ComfyNode):
 
             saved_hires_context_latent = project_hires_context_latent
             saved_low_context_latent = project_low_context_latent
+            hires_trim_inputs: dict[str, Any] = {
+                "latent": saved_hires_context_latent,
+                "context_length": str(context_source_frames),
+            }
+            if not audio_only and not hires_context_reencoded:
+                hires_trim_inputs.update({"anchor_images": output_images, "vae": vae})
             runtime_hires_context_latent = graph.node(
                 "easy h3MotionContextLatentTrim",
                 id=f"trim_hires_context_latent_{task_index}",
-                latent=saved_hires_context_latent,
-                context_length=str(context_source_frames),
+                **hires_trim_inputs,
             ).out(0)
             if has_second_pass or is_selflift:
+                low_trim_inputs: dict[str, Any] = {
+                    "latent": saved_low_context_latent,
+                    "context_length": str(context_source_frames),
+                }
+                if not audio_only and not low_context_reencoded:
+                    low_anchor_images = low_delivered_images
+                    if low_anchor_images is None:
+                        if (has_second_pass and run_second_pass) or (
+                            is_selflift and selflift_low_latent is not None
+                        ):
+                            low_anchor_images = graph.node(
+                                "VAEDecode",
+                                id=f"low_anchor_decode_video_{task_index}",
+                                samples=low_stage_context_latent,
+                                vae=vae,
+                            ).out(0)
+                        else:
+                            low_anchor_images = output_images
+                    low_trim_inputs.update(
+                        {"anchor_images": low_anchor_images, "vae": vae}
+                    )
                 runtime_low_context_latent = graph.node(
                     "easy h3MotionContextLatentTrim",
                     id=f"trim_low_context_latent_{task_index}",
-                    latent=saved_low_context_latent,
-                    context_length=str(context_source_frames),
+                    **low_trim_inputs,
                 ).out(0)
             else:
                 runtime_low_context_latent = runtime_hires_context_latent
@@ -1781,7 +1824,11 @@ class EasyMultiTrackProject(io.ComfyNode):
                 "sampling_pass": completed_sampling_pass,
             }
             if has_second_pass or is_selflift:
-                artifact_inputs["context_latent_low"] = saved_low_context_latent
+                artifact_inputs["context_latent_low"] = (
+                    saved_low_context_latent
+                    if completed_sampling_pass == "first"
+                    else runtime_low_context_latent
+                )
             if previous_artifact is not None:
                 artifact_inputs["previous"] = previous_artifact
             report_segment_step(0.95)

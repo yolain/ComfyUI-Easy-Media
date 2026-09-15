@@ -51,6 +51,19 @@ def _av_latent(
     return {"samples": [video, audio]}
 
 
+def _video_latent(
+    *,
+    video_steps: int = 2,
+    height: int = 2,
+    width: int = 2,
+) -> dict:
+    video = torch.arange(
+        24 * video_steps * height * width,
+        dtype=torch.float32,
+    ).reshape(1, 24, video_steps, height, width)
+    return {"samples": video}
+
+
 def test_h3_motion_context_latent_path_uses_native_keyframes_and_keeps_refs():
     target = _av_latent()
     context = _av_latent()
@@ -157,6 +170,77 @@ def test_h3_hard_context_merges_existing_masks_into_official_nested_tensor(
         torch.full_like(audio_mask[..., 6], 1 / 3),
     )
     assert torch.all(audio_mask[..., 7:] == 0.4)
+
+
+def test_h3_reencoded_anchor_only_locks_last_five_frames_of_soft_context(
+    nested_tensor_module,
+):
+    target = _av_latent(video_steps=12)
+    target_video, target_audio = target["samples"]
+    anchor = _video_latent(video_steps=2)
+    anchor["samples"] = anchor["samples"] + 10_000
+
+    output = core._reencoded_anchor_av_latent(
+        target,
+        anchor,
+        context_frames=22,
+        anchor_frames=5,
+    )
+
+    output_video, output_audio = output["samples"].tensors
+    video_mask, audio_mask = output["noise_mask"].tensors
+    assert torch.equal(output_video[:, :, :5], target_video[:, :, :5])
+    assert torch.equal(output_video[:, :, 5:7], anchor["samples"])
+    assert torch.equal(output_video[:, :, 7:], target_video[:, :, 7:])
+    assert torch.all(video_mask[:, :, :5] == 1)
+    assert torch.all(video_mask[:, :, 5:7] == 0)
+    assert torch.all(video_mask[:, :, 7:] == 1)
+    assert torch.equal(output_audio, target_audio)
+    assert torch.all(audio_mask == 1)
+
+
+def test_h3_reencoded_anchor_keeps_long_native_motion_context(
+    nested_tensor_module,
+):
+    context = _av_latent(video_steps=7)
+    context["anchor_samples"] = _video_latent(video_steps=2)["samples"]
+    conditioning, trim_frames, latent = core.apply_reencoded_anchor_motion_context(
+        conditioning=[[torch.tensor([1.0]), {}]],
+        vae=object(),
+        latent=_av_latent(video_steps=12),
+        context_latent=context,
+    )
+
+    assert trim_frames == 22
+    assert len(conditioning[0][1]["minimax_keyframes"]) == 8
+    video_mask, _ = latent["noise_mask"].tensors
+    assert torch.all(video_mask[:, :, :5] == 1)
+    assert torch.all(video_mask[:, :, 5:7] == 0)
+
+
+def test_h3_hires_reencoded_anchor_freezes_audio_and_only_video_boundary(
+    nested_tensor_module,
+):
+    context = _av_latent(video_steps=7)
+    context["anchor_samples"] = _video_latent(video_steps=2)["samples"]
+    output, trim_frames = core.apply_hires_anchor_continuity(
+        current_hires_latent=_av_latent(video_steps=12),
+        previous_hires_latent=context,
+    )
+
+    video_mask, audio_mask = output["noise_mask"].tensors
+    assert trim_frames == 22
+    assert torch.all(video_mask[:, :, :5] == 1)
+    assert torch.all(video_mask[:, :, 5:7] == 0)
+    assert torch.all(video_mask[:, :, 7:] == 1)
+    assert torch.all(audio_mask == 0)
+
+
+def test_h3_anchor_falls_back_to_last_two_context_video_tokens():
+    context = _av_latent(video_steps=7)
+    anchor = core._video_anchor_from_context_latent(context)
+
+    assert torch.equal(anchor["samples"], context["samples"][0][:, :, -2:])
 
 
 def test_context_swap_noise_is_disposable_deterministic_and_video_only(
@@ -281,6 +365,8 @@ def test_trim_motion_context_latent_keeps_only_detached_cpu_av_tail(
 ):
     latent = _av_latent(video_steps=12)
     source_video, source_audio = latent["samples"]
+    anchor_samples = _video_latent()["samples"]
+    latent["anchor_samples"] = anchor_samples
 
     output = core.trim_motion_context_latent(latent, context_length="22")
 
@@ -291,5 +377,9 @@ def test_trim_motion_context_latent_keeps_only_detached_cpu_av_tail(
     assert torch.equal(audio, source_audio[..., -37:])
     assert video.device.type == "cpu"
     assert audio.device.type == "cpu"
+    assert torch.equal(output["anchor_samples"], anchor_samples)
+    assert output["anchor_samples"].untyped_storage().data_ptr() != (
+        anchor_samples.untyped_storage().data_ptr()
+    )
     assert video.untyped_storage().data_ptr() != source_video.untyped_storage().data_ptr()
     assert audio.untyped_storage().data_ptr() != source_audio.untyped_storage().data_ptr()
