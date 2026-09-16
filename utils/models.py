@@ -466,10 +466,13 @@ def _upstream_nodes(
                 queue.append(linked_node_id)
 
 
+TURBO_KEYWORDS = ("turbo", "acc", "8step", "4step")
+
 def _has_turbo_name(value: Any) -> bool:
     if not isinstance(value, (str, Path)):
         return False
-    return "turbo" in str(value).lower() or "Acc" in value
+    val_lower = str(value).lower()
+    return any(kw in val_lower for kw in TURBO_KEYWORDS)
 
 
 def _is_enabled(value: Any) -> bool:
@@ -571,12 +574,12 @@ def detect_turbo_lora_from_prompt(
                     )
             continue
 
-        # fast h3Loader — check main_model and parent_model for turbo
+        # fast h3Loader — check 主模型 and 副模型 for turbo
         if class_type == "fast h3Loader":
             inputs = node.get("inputs")
             if not isinstance(inputs, Mapping):
                 continue
-            for model_key in ("main_model", "parent_model"):
+            for model_key in ("主模型", "副模型"):
                 model_value = inputs.get(model_key)
                 if _has_turbo_name(model_value):
                     return TurboModelDetection(

@@ -2682,6 +2682,10 @@ def test_multitrack_task_output_restores_project_runtime_media_cache():
         "frame_rate": 24,
         "format": "MiniMax",
         "_easy_media_runtime_cache": {},
+        "_easy_media_cache_status": {
+            "project_media": "命中恢复缓存",
+            "segment_media": "命中恢复缓存",
+        },
         "_preloaded_media": {
             "images": [shared_image],
             "audio": [],
@@ -2709,6 +2713,7 @@ def test_multitrack_task_output_restores_project_runtime_media_cache():
     )
 
     assert second is first
+    assert tracks_info["_easy_media_cache_status"]["task_output"] == "命中恢复缓存"
 
 
 def test_multitrack_task_output_uses_selected_user_prompt_variant():

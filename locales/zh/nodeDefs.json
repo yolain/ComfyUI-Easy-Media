@@ -301,8 +301,7 @@
       "model": { "name": "模型" },
       "clip": { "name": "CLIP" },
       "vae": { "name": "VAE" },
-      "audio_vae": { "name": "音频 VAE" },
-      "preview_vae": { "name": "预览 VAE" }
+      "audio_vae": { "name": "音频 VAE" }
     },
     "outputs": {
       "0": { "name": "模型加载器" }

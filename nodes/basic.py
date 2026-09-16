@@ -2778,6 +2778,8 @@ class MultiTrackTaskOutput(io.ComfyNode):
         )
         if isinstance(cached_task_output, io.NodeOutput):
             cache_status = info.get("_easy_media_cache_status", {})
+            if isinstance(cache_status, dict):
+                cache_status["task_output"] = "命中恢复缓存"
             log_node_info(
                 "MultiTrack Cache",
                 f"segment={requested_index} | "
@@ -2788,12 +2790,14 @@ class MultiTrackTaskOutput(io.ComfyNode):
             return cached_task_output
         if "_preloaded_media" in info:
             cache_status = info.get("_easy_media_cache_status", {})
+            if isinstance(cache_status, dict):
+                cache_status["task_output"] = "首次加载"
             log_node_info(
                 "MultiTrack Cache",
                 f"segment={requested_index} | "
                 f"项目媒体={cache_status.get('project_media', '未知')} | "
                 f"分段媒体={cache_status.get('segment_media', '未知')} | "
-                "TaskOutput=重新加载",
+                "TaskOutput=首次加载",
             )
 
         tracks = info.get("tracks", [])

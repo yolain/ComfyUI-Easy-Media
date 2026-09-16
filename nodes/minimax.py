@@ -33,6 +33,18 @@ from ..utils.h3_project import (
     save_h3_latent,
     save_h3_audio,
 )
+from ..utils.h3_conditioning_cache import (
+    format_h3_conditioning_cache_stats,
+    get_staged_h3_conditioning_cache,
+    h3_conditioning_cache_matches,
+    h3_conditioning_cache_path,
+    h3_encoder_signature,
+    load_h3_conditioning_cache,
+    prepare_h3_conditioning_cache_pool,
+    save_h3_conditioning_cache,
+    stage_h3_conditioning_cache,
+    touch_h3_conditioning_cache,
+)
 from ..utils.minimax import (
     expand_image_inputs,
     flatten_media_inputs,
@@ -1197,6 +1209,267 @@ class EasyH3ProjectContextLatentLoad(io.ComfyNode):
             raise FileNotFoundError(f"H3 context latent was not found: {latent_path}")
         return io.NodeOutput(load_h3_latent(latent_path))
 
+
+class EasyH3ConditioningCache(io.ComfyNode):
+    """Restore the first H3 conditioning pass when all media caches hit."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy h3ConditioningCache",
+            display_name="H3 Conditioning Cache",
+            category="EasyUse/H3/dev",
+            description=(
+                "Internal MiniMax H3 temp cache retaining five recent segments."
+            ),
+            is_dev_only=True,
+            inputs=[
+                io.String.Input("project_name"),
+                io.Int.Input("segment_index", min=0),
+                TYPE_TRACKS_INFO.Input("tracks_info"),
+                io.String.Input("task_output_ready", force_input=True),
+                io.Model.Input("model"),
+                io.Clip.Input("clip"),
+                io.Vae.Input("vae"),
+                io.Vae.Input("audio_vae", optional=True),
+                io.Conditioning.Input("conditioning", lazy=True),
+                io.Latent.Input("latent", lazy=True),
+            ],
+            outputs=[
+                io.Conditioning.Output("conditioning"),
+                io.Latent.Output("latent"),
+            ],
+        )
+
+    @classmethod
+    def check_lazy_status(
+        cls,
+        project_name: str,
+        segment_index: int,
+        tracks_info: Any,
+        task_output_ready: str,
+        model: Any,
+        clip: Any,
+        vae: Any,
+        audio_vae: Any | None = None,
+        conditioning: Any | None = None,
+        latent: dict[str, Any] | None = None,
+    ) -> list[str]:
+        del task_output_ready
+        cache_path = cls._cache_path(segment_index)
+        signature = h3_encoder_signature(clip, vae, audio_vae, model)
+        all_media_caches_hit = cls._all_media_caches_hit(tracks_info)
+        scope_token, execution_id = cls._prepare_cache_pool(
+            project_name,
+            tracks_info,
+            signature,
+            invalidate=not all_media_caches_hit,
+        )
+        staged_key = cls._staged_cache_key(
+            cache_path,
+            signature,
+            scope_token,
+            execution_id,
+        )
+        if (
+            conditioning is None
+            and latent is None
+            and all_media_caches_hit
+            and scope_token is not None
+        ):
+            if get_staged_h3_conditioning_cache(staged_key) is not None:
+                return []
+            if h3_conditioning_cache_matches(
+                cache_path,
+                signature,
+                scope_token,
+            ):
+                try:
+                    restored = load_h3_conditioning_cache(
+                        cache_path,
+                        signature,
+                        scope_token,
+                    )
+                except (OSError, RuntimeError, TypeError, ValueError) as error:
+                    cls._remove_cache_artifact(cache_path, error)
+                else:
+                    stage_h3_conditioning_cache(staged_key, restored)
+                    return []
+        required: list[str] = []
+        if conditioning is None:
+            required.append("conditioning")
+        if latent is None:
+            required.append("latent")
+        return required
+
+    @classmethod
+    def execute(
+        cls,
+        project_name: str,
+        segment_index: int,
+        tracks_info: Any,
+        task_output_ready: str,
+        model: Any,
+        clip: Any,
+        vae: Any,
+        audio_vae: Any | None = None,
+        conditioning: Any | None = None,
+        latent: dict[str, Any] | None = None,
+    ) -> io.NodeOutput:
+        del task_output_ready
+
+        cache_path = cls._cache_path(segment_index)
+        signature = h3_encoder_signature(clip, vae, audio_vae, model)
+        all_media_caches_hit = cls._all_media_caches_hit(tracks_info)
+        scope_token, execution_id = cls._prepare_cache_pool(
+            project_name,
+            tracks_info,
+            signature,
+            invalidate=not all_media_caches_hit,
+        )
+        staged_key = cls._staged_cache_key(
+            cache_path,
+            signature,
+            scope_token,
+            execution_id,
+        )
+        if conditioning is None and latent is None:
+            if not all_media_caches_hit or scope_token is None:
+                raise RuntimeError(
+                    "H3 conditioning cache inputs were skipped without full media cache hits"
+                )
+            restored = get_staged_h3_conditioning_cache(staged_key, remove=True)
+            if restored is None:
+                try:
+                    restored = load_h3_conditioning_cache(
+                        cache_path,
+                        signature,
+                        scope_token,
+                    )
+                except (OSError, RuntimeError, TypeError, ValueError) as error:
+                    cls._remove_cache_artifact(cache_path, error)
+                    raise RuntimeError(
+                        "Failed to restore H3 conditioning cache; rerun the project "
+                        "to rebuild it"
+                    ) from error
+            touch_h3_conditioning_cache(cache_path)
+            log_node_info(
+                "H3 Conditioning Cache",
+                f"segment={int(segment_index)} | Conditioning=命中恢复缓存",
+            )
+            return io.NodeOutput(*restored)
+
+        if conditioning is None or latent is None:
+            raise RuntimeError(
+                "H3 conditioning cache miss requires conditioning and latent inputs"
+            )
+        if scope_token is None:
+            log_node_info(
+                "H3 Conditioning Cache",
+                f"segment={int(segment_index)} | 缓存写入已跳过: temp缓存池不可用",
+            )
+            return io.NodeOutput(conditioning, latent)
+        try:
+            stats = save_h3_conditioning_cache(
+                conditioning,
+                latent,
+                cache_path,
+                signature,
+                scope_token,
+            )
+            log_node_info(
+                "H3 Conditioning Cache",
+                f"segment={int(segment_index)} | Conditioning=首次加载 | "
+                f"{format_h3_conditioning_cache_stats(stats)}",
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
+            log_node_info(
+                "H3 Conditioning Cache",
+                f"segment={int(segment_index)} | 缓存写入已跳过: {error}",
+            )
+        return io.NodeOutput(conditioning, latent)
+
+    @staticmethod
+    def _all_media_caches_hit(tracks_info: Any) -> bool:
+        info = _first_input(tracks_info, {})
+        if not isinstance(info, dict):
+            return False
+        status = info.get("_easy_media_cache_status")
+        return isinstance(status, dict) and all(
+            status.get(name) == "命中恢复缓存"
+            for name in ("project_media", "segment_media", "task_output")
+        )
+
+    @staticmethod
+    def _cache_path(segment_index: int) -> Path:
+        cache_dir = (
+            Path(folder_paths.get_temp_directory()).resolve()
+            / "easy_media"
+            / "h3_conditioning_cache"
+        )
+        return h3_conditioning_cache_path(cache_dir, int(segment_index))
+
+    @classmethod
+    def _prepare_cache_pool(
+        cls,
+        project_name: str,
+        tracks_info: Any,
+        signature: str,
+        *,
+        invalidate: bool,
+    ) -> tuple[str | None, str]:
+        execution_id = cls._execution_id(tracks_info)
+        scope_token = prepare_h3_conditioning_cache_pool(
+            cls._cache_path(0).parent,
+            safe_h3_project_name(project_name),
+            signature,
+            execution_id,
+            invalidate=invalidate,
+        )
+        return scope_token, execution_id
+
+    @staticmethod
+    def _staged_cache_key(
+        cache_path: Path,
+        signature: str,
+        scope_token: str | None,
+        execution_id: str,
+    ) -> str:
+        return ":".join(
+            (
+                str(cache_path),
+                str(signature),
+                str(scope_token),
+                str(execution_id),
+            )
+        )
+
+    @staticmethod
+    def _remove_cache_artifact(cache_path: Path, error: Exception) -> None:
+        try:
+            cache_path.unlink(missing_ok=True)
+        except OSError as unlink_error:
+            log_node_info(
+                "H3 Conditioning Cache",
+                f"损坏缓存无法删除: {unlink_error}",
+            )
+        log_node_info(
+            "H3 Conditioning Cache",
+            f"缓存读取失败，已回退条件编码: {error}",
+        )
+
+    @staticmethod
+    def _execution_id(tracks_info: Any) -> str:
+        try:
+            from comfy_execution.utils import get_executing_context
+
+            context = get_executing_context()
+        except (ImportError, RuntimeError):
+            context = None
+        prompt_id = getattr(context, "prompt_id", None)
+        if prompt_id:
+            return str(prompt_id)
+        return f"fallback:{id(_first_input(tracks_info, tracks_info))}"
 
 
 

@@ -79,6 +79,18 @@ def _h3_context_latent(value: int | float = 0, video_steps: int = 7):
     return {"samples": _NestedTensor((video, audio))}
 
 
+def _empty_h3_context_latent(video_steps: int = 7):
+    video = torch.zeros(1, 24, video_steps, 2, 2)
+    pixel_frames = sum((1, 4, 4, 4, 4)[index % 5] for index in range(video_steps))
+    audio_steps = round(pixel_frames * 5 / 3)
+    audio = torch.zeros(1, 32, 2, audio_steps)
+    return {"samples": _NestedTensor((video, audio))}
+
+
+def _h3_conditioning_cache_dir(tmp_path):
+    return tmp_path / "easy_media" / "h3_conditioning_cache"
+
+
 def _h3_video_anchor_latent(value: int | float = 0):
     return {"samples": torch.full((1, 24, 2, 2, 2), float(value))}
 
@@ -219,17 +231,32 @@ def _load_minimax_node(monkeypatch):
     )
     _ProgressBar.instances.clear()
     comfy_utils.ProgressBar = _ProgressBar
-    comfy_utils.save_torch_file = (
-        lambda state, path, metadata=None: torch.save(state, path)
-    )
-    # The fixture writes torch archives; avoid suffix-based safetensors detection.
-    comfy_utils.load_torch_file = (
-        lambda path, safe_load=False, device=None: torch.load(
+    def save_torch_file(state, path, metadata=None):
+        torch.save({"state": state, "metadata": metadata}, path)
+
+    def load_torch_file(
+        path,
+        safe_load=False,
+        device=None,
+        return_metadata=False,
+    ):
+        del safe_load
+        stored = torch.load(
             BytesIO(Path(path).read_bytes()),
             map_location=device or torch.device("cpu"),
             weights_only=True,
         )
-    )
+        if isinstance(stored, dict) and set(stored) == {"state", "metadata"}:
+            state = stored["state"]
+            metadata = stored["metadata"]
+        else:
+            state = stored
+            metadata = None
+        return (state, metadata) if return_metadata else state
+
+    comfy_utils.save_torch_file = save_torch_file
+    # The fixture writes torch archives; avoid suffix-based safetensors detection.
+    comfy_utils.load_torch_file = load_torch_file
     comfy.model_management = model_management
     comfy.nested_tensor = nested_tensor
     comfy.utils = comfy_utils
@@ -248,6 +275,7 @@ def _load_minimax_node(monkeypatch):
     folder_paths = types.ModuleType("folder_paths")
     folder_paths.get_filename_list = lambda category: []
     folder_paths.get_output_directory = lambda: "/tmp"
+    folder_paths.get_temp_directory = lambda: "/tmp"
     server = types.ModuleType("server")
     server.PromptServer = types.SimpleNamespace(
         instance=types.SimpleNamespace(send_sync=lambda _event, _payload: None)
@@ -541,6 +569,539 @@ def test_module_loads_without_native_minimax_nodes(monkeypatch):
     module = _load_minimax_node(monkeypatch)
 
     assert module is not None
+
+
+def test_h3_conditioning_cache_round_trips_and_skips_lazy_inputs(
+    monkeypatch,
+    tmp_path,
+):
+    module = _load_minimax_node(monkeypatch)
+    schema_inputs = {
+        item.name: item
+        for item in module.EasyH3ConditioningCache.define_schema().inputs
+    }
+    assert schema_inputs["conditioning"].kwargs["lazy"] is True
+    assert schema_inputs["latent"].kwargs["lazy"] is True
+    monkeypatch.setattr(
+        module.folder_paths,
+        "get_temp_directory",
+        lambda: str(tmp_path),
+    )
+    cache_logs = []
+    monkeypatch.setattr(
+        module,
+        "log_node_info",
+        lambda name, message: cache_logs.append((name, message)),
+    )
+    clip = _Clip()
+    vae = _Vae()
+    audio_vae = _AudioVae()
+    model = object()
+    conditioning = [(
+        torch.arange(6, dtype=torch.float32).reshape(1, 2, 3),
+        {
+            "pooled_output": torch.ones(1, 3),
+            "minimax_token_tags": torch.tensor([0, 1], dtype=torch.int64),
+            "minimax_refs": [{
+                "kind": "video_audio",
+                "latent_t": 2,
+                "latent": torch.full((1, 24, 2, 2, 2), 3.0),
+                "audio_latent": torch.full((1, 32, 2, 4), 4.0),
+            }],
+        },
+    )]
+    latent = _empty_h3_context_latent(video_steps=2)
+    first_status = {
+        "_easy_media_cache_status": {
+            "project_media": "首次加载",
+            "segment_media": "首次加载",
+            "task_output": "首次加载",
+        }
+    }
+    assert module.EasyH3ConditioningCache.check_lazy_status(
+        project_name="demo",
+        segment_index=0,
+        tracks_info=first_status,
+        task_output_ready="prompt",
+        model=model,
+        clip=clip,
+        vae=vae,
+        audio_vae=audio_vae,
+    ) == ["conditioning", "latent"]
+
+    first = module.EasyH3ConditioningCache.execute(
+        project_name="demo",
+        segment_index=0,
+        tracks_info=first_status,
+        task_output_ready="prompt",
+        model=model,
+        clip=clip,
+        vae=vae,
+        audio_vae=audio_vae,
+        conditioning=conditioning,
+        latent=latent,
+    )
+
+    cache_path = _h3_conditioning_cache_dir(tmp_path) / "conditioning_0.safetensors"
+    assert cache_path.is_file()
+    assert first.values == (conditioning, latent)
+    stored = torch.load(
+        BytesIO(cache_path.read_bytes()),
+        map_location=torch.device("cpu"),
+        weights_only=True,
+    )
+    assert not any(name.startswith("latent.") for name in stored["state"])
+    cache_metadata = json.loads(
+        stored["metadata"]["easy_media_h3_conditioning_cache"]
+    )
+    assert cache_metadata["schema_version"] == "3"
+    assert cache_metadata["scope_token"]
+    assert "文件(" in cache_logs[-1][1]
+    assert "=主条件(" in cache_logs[-1][1]
+    assert "+参考视频(" in cache_logs[-1][1]
+    assert "+参考音频(" in cache_logs[-1][1]
+    assert "initial latent" not in cache_logs[-1][1]
+
+    hit_status = {
+        "_easy_media_cache_status": {
+            "project_media": "命中恢复缓存",
+            "segment_media": "命中恢复缓存",
+            "task_output": "命中恢复缓存",
+        }
+    }
+    original_load = module.load_h3_conditioning_cache
+    load_calls = []
+
+    def tracked_load(*args, **kwargs):
+        load_calls.append(args)
+        return original_load(*args, **kwargs)
+
+    monkeypatch.setattr(module, "load_h3_conditioning_cache", tracked_load)
+    required = module.EasyH3ConditioningCache.check_lazy_status(
+        project_name="demo",
+        segment_index=0,
+        tracks_info=hit_status,
+        task_output_ready="prompt",
+        model=model,
+        clip=clip,
+        vae=vae,
+        audio_vae=audio_vae,
+    )
+    assert required == []
+
+    restored = module.EasyH3ConditioningCache.execute(
+        project_name="demo",
+        segment_index=0,
+        tracks_info=hit_status,
+        task_output_ready="prompt",
+        model=model,
+        clip=clip,
+        vae=vae,
+        audio_vae=audio_vae,
+    )
+    assert len(load_calls) == 1
+    restored_conditioning, restored_latent = restored.values
+    assert torch.equal(restored_conditioning[0][0], conditioning[0][0])
+    assert torch.equal(
+        restored_conditioning[0][1]["minimax_refs"][0]["audio_latent"],
+        conditioning[0][1]["minimax_refs"][0]["audio_latent"],
+    )
+    assert restored_latent["samples"].is_nested is True
+    assert all(
+        torch.equal(actual, expected)
+        for actual, expected in zip(
+            restored_latent["samples"].unbind(),
+            latent["samples"].unbind(),
+        )
+    )
+
+
+def test_h3_conditioning_cache_reencodes_when_model_changes(
+    monkeypatch,
+    tmp_path,
+):
+    module = _load_minimax_node(monkeypatch)
+    monkeypatch.setattr(
+        module.folder_paths,
+        "get_temp_directory",
+        lambda: str(tmp_path),
+    )
+    clip = _Clip()
+    vae = _Vae()
+    audio_vae = _AudioVae()
+    model = object()
+    hit_status = {
+        "_easy_media_cache_status": {
+            "project_media": "命中恢复缓存",
+            "segment_media": "命中恢复缓存",
+            "task_output": "命中恢复缓存",
+        }
+    }
+    module.EasyH3ConditioningCache.execute(
+        project_name="demo",
+        segment_index=1,
+        tracks_info=hit_status,
+        task_output_ready="prompt",
+        model=model,
+        clip=clip,
+        vae=vae,
+        audio_vae=audio_vae,
+        conditioning=[(torch.ones(1), {})],
+        latent=_empty_h3_context_latent(),
+    )
+
+    replacement_model = object()
+    required = module.EasyH3ConditioningCache.check_lazy_status(
+        project_name="demo",
+        segment_index=1,
+        tracks_info=hit_status,
+        task_output_ready="prompt",
+        model=replacement_model,
+        clip=clip,
+        vae=vae,
+        audio_vae=audio_vae,
+    )
+
+    assert required == ["conditioning", "latent"]
+    module.EasyH3ConditioningCache.execute(
+        project_name="demo",
+        segment_index=1,
+        tracks_info=hit_status,
+        task_output_ready="prompt",
+        model=replacement_model,
+        clip=clip,
+        vae=vae,
+        audio_vae=audio_vae,
+        conditioning=[(torch.full((1,), 2.0), {})],
+        latent=_empty_h3_context_latent(),
+    )
+    cache_dir = _h3_conditioning_cache_dir(tmp_path)
+    assert [path.name for path in cache_dir.glob("conditioning_1*.safetensors")] == [
+        "conditioning_1.safetensors"
+    ]
+    assert module.EasyH3ConditioningCache.check_lazy_status(
+        project_name="demo",
+        segment_index=1,
+        tracks_info=hit_status,
+        task_output_ready="prompt",
+        model=replacement_model,
+        clip=clip,
+        vae=vae,
+        audio_vae=audio_vae,
+    ) == []
+
+
+def test_h3_conditioning_cache_refuses_nonzero_initial_latent(
+    monkeypatch,
+    tmp_path,
+):
+    module = _load_minimax_node(monkeypatch)
+    cache_path = tmp_path / "conditioning_0.safetensors"
+
+    with pytest.raises(ValueError, match="must be zero-filled"):
+        module.save_h3_conditioning_cache(
+            [(torch.ones(1), {})],
+            _h3_context_latent(1),
+            cache_path,
+            "encoder",
+            "scope",
+        )
+
+    assert not cache_path.exists()
+
+
+def test_h3_conditioning_cache_invalidates_temp_pool_once_per_queue(
+    monkeypatch,
+    tmp_path,
+):
+    module = _load_minimax_node(monkeypatch)
+    monkeypatch.setattr(
+        module.folder_paths,
+        "get_temp_directory",
+        lambda: str(tmp_path),
+    )
+    clip = _Clip()
+    vae = _Vae()
+    audio_vae = _AudioVae()
+    model = object()
+    miss_status = {
+        "_easy_media_cache_status": {
+            "project_media": "首次加载",
+            "segment_media": "首次加载",
+            "task_output": "首次加载",
+        }
+    }
+
+    for segment_index in (0, 1):
+        module.EasyH3ConditioningCache.execute(
+            project_name="demo",
+            segment_index=segment_index,
+            tracks_info=miss_status,
+            task_output_ready="prompt",
+            model=model,
+            clip=clip,
+            vae=vae,
+            audio_vae=audio_vae,
+            conditioning=[(torch.tensor([segment_index]), {})],
+            latent=_empty_h3_context_latent(),
+        )
+
+    assert sorted(
+        path.name for path in _h3_conditioning_cache_dir(tmp_path).glob("*.safetensors")
+    ) == ["conditioning_0.safetensors", "conditioning_1.safetensors"]
+
+
+def test_h3_conditioning_cache_switching_project_resets_temp_pool(
+    monkeypatch,
+    tmp_path,
+):
+    module = _load_minimax_node(monkeypatch)
+    monkeypatch.setattr(
+        module.folder_paths,
+        "get_temp_directory",
+        lambda: str(tmp_path),
+    )
+    clip = _Clip()
+    vae = _Vae()
+    audio_vae = _AudioVae()
+    model = object()
+    hit_status = {
+        "_easy_media_cache_status": {
+            "project_media": "命中恢复缓存",
+            "segment_media": "命中恢复缓存",
+            "task_output": "命中恢复缓存",
+        }
+    }
+
+    for project_name, segment_index in (("first", 0), ("second", 1)):
+        module.EasyH3ConditioningCache.execute(
+            project_name=project_name,
+            segment_index=segment_index,
+            tracks_info=hit_status,
+            task_output_ready="prompt",
+            model=model,
+            clip=clip,
+            vae=vae,
+            audio_vae=audio_vae,
+            conditioning=[(torch.tensor([segment_index]), {})],
+            latent=_empty_h3_context_latent(),
+        )
+
+    assert [
+        path.name for path in _h3_conditioning_cache_dir(tmp_path).glob("*.safetensors")
+    ] == ["conditioning_1.safetensors"]
+
+
+def test_h3_conditioning_cache_keeps_only_five_recent_segments(
+    monkeypatch,
+    tmp_path,
+):
+    module = _load_minimax_node(monkeypatch)
+    monkeypatch.setattr(
+        module.folder_paths,
+        "get_temp_directory",
+        lambda: str(tmp_path),
+    )
+    clip = _Clip()
+    vae = _Vae()
+    audio_vae = _AudioVae()
+    model = object()
+    hit_status = {
+        "_easy_media_cache_status": {
+            "project_media": "命中恢复缓存",
+            "segment_media": "命中恢复缓存",
+            "task_output": "命中恢复缓存",
+        }
+    }
+
+    for segment_index in range(6):
+        module.EasyH3ConditioningCache.execute(
+            project_name="demo",
+            segment_index=segment_index,
+            tracks_info=hit_status,
+            task_output_ready="prompt",
+            model=model,
+            clip=clip,
+            vae=vae,
+            audio_vae=audio_vae,
+            conditioning=[(torch.tensor([segment_index]), {})],
+            latent=_empty_h3_context_latent(),
+        )
+
+    cache_files = sorted(
+        path.name for path in _h3_conditioning_cache_dir(tmp_path).glob("*.safetensors")
+    )
+    assert len(cache_files) == 5
+    assert "conditioning_0.safetensors" not in cache_files
+
+
+def test_h3_conditioning_cache_unavailable_pool_falls_back_to_encoding(
+    monkeypatch,
+    tmp_path,
+):
+    module = _load_minimax_node(monkeypatch)
+    monkeypatch.setattr(
+        module.folder_paths,
+        "get_temp_directory",
+        lambda: str(tmp_path),
+    )
+    monkeypatch.setattr(
+        module,
+        "prepare_h3_conditioning_cache_pool",
+        lambda *_args, **_kwargs: None,
+    )
+    clip = _Clip()
+    vae = _Vae()
+    audio_vae = _AudioVae()
+    model = object()
+    hit_status = {
+        "_easy_media_cache_status": {
+            "project_media": "命中恢复缓存",
+            "segment_media": "命中恢复缓存",
+            "task_output": "命中恢复缓存",
+        }
+    }
+
+    required = module.EasyH3ConditioningCache.check_lazy_status(
+        project_name="demo",
+        segment_index=0,
+        tracks_info=hit_status,
+        task_output_ready="prompt",
+        model=model,
+        clip=clip,
+        vae=vae,
+        audio_vae=audio_vae,
+    )
+
+    assert required == ["conditioning", "latent"]
+    conditioning = [(torch.ones(1), {})]
+    latent = _empty_h3_context_latent()
+    result = module.EasyH3ConditioningCache.execute(
+        project_name="demo",
+        segment_index=0,
+        tracks_info=hit_status,
+        task_output_ready="prompt",
+        model=model,
+        clip=clip,
+        vae=vae,
+        audio_vae=audio_vae,
+        conditioning=conditioning,
+        latent=latent,
+    )
+    assert result.values == (conditioning, latent)
+    assert not _h3_conditioning_cache_dir(tmp_path).exists()
+
+
+def test_h3_conditioning_cache_scope_rejects_stale_file_when_clear_fails(
+    monkeypatch,
+    tmp_path,
+):
+    module = _load_minimax_node(monkeypatch)
+    monkeypatch.setattr(
+        module.folder_paths,
+        "get_temp_directory",
+        lambda: str(tmp_path),
+    )
+    clip = _Clip()
+    vae = _Vae()
+    audio_vae = _AudioVae()
+    model = object()
+    hit_status = {
+        "_easy_media_cache_status": {
+            "project_media": "命中恢复缓存",
+            "segment_media": "命中恢复缓存",
+            "task_output": "命中恢复缓存",
+        }
+    }
+    module.EasyH3ConditioningCache.execute(
+        project_name="first",
+        segment_index=0,
+        tracks_info=hit_status,
+        task_output_ready="prompt",
+        model=model,
+        clip=clip,
+        vae=vae,
+        audio_vae=audio_vae,
+        conditioning=[(torch.ones(1), {})],
+        latent=_empty_h3_context_latent(),
+    )
+    cache_path = _h3_conditioning_cache_dir(tmp_path) / "conditioning_0.safetensors"
+    assert cache_path.is_file()
+    cache_module = sys.modules["easy_media.utils.h3_conditioning_cache"]
+    monkeypatch.setattr(
+        cache_module,
+        "_clear_h3_conditioning_cache_files",
+        lambda _cache_dir: None,
+    )
+
+    required = module.EasyH3ConditioningCache.check_lazy_status(
+        project_name="second",
+        segment_index=0,
+        tracks_info=hit_status,
+        task_output_ready="prompt",
+        model=model,
+        clip=clip,
+        vae=vae,
+        audio_vae=audio_vae,
+    )
+
+    assert cache_path.is_file()
+    assert required == ["conditioning", "latent"]
+
+
+def test_h3_conditioning_cache_corrupt_body_falls_back_in_same_queue(
+    monkeypatch,
+    tmp_path,
+):
+    module = _load_minimax_node(monkeypatch)
+    monkeypatch.setattr(
+        module.folder_paths,
+        "get_temp_directory",
+        lambda: str(tmp_path),
+    )
+    clip = _Clip()
+    vae = _Vae()
+    audio_vae = _AudioVae()
+    model = object()
+    hit_status = {
+        "_easy_media_cache_status": {
+            "project_media": "命中恢复缓存",
+            "segment_media": "命中恢复缓存",
+            "task_output": "命中恢复缓存",
+        }
+    }
+    module.EasyH3ConditioningCache.execute(
+        project_name="demo",
+        segment_index=0,
+        tracks_info=hit_status,
+        task_output_ready="prompt",
+        model=model,
+        clip=clip,
+        vae=vae,
+        audio_vae=audio_vae,
+        conditioning=[(torch.ones(1), {})],
+        latent=_empty_h3_context_latent(),
+    )
+    cache_path = _h3_conditioning_cache_dir(tmp_path) / "conditioning_0.safetensors"
+    monkeypatch.setattr(
+        module,
+        "load_h3_conditioning_cache",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("corrupt body")),
+    )
+
+    required = module.EasyH3ConditioningCache.check_lazy_status(
+        project_name="demo",
+        segment_index=0,
+        tracks_info=hit_status,
+        task_output_ready="prompt",
+        model=model,
+        clip=clip,
+        vae=vae,
+        audio_vae=audio_vae,
+    )
+
+    assert required == ["conditioning", "latent"]
+    assert not cache_path.exists()
 
 
 def test_fallback_conditioning_nodes_use_native_node_ids(monkeypatch):
@@ -1790,10 +2351,10 @@ def test_multitrack_h3_project_locks_task_audio_before_sampling(monkeypatch):
         for node_id, node in nodes.items()
         if node["class_type"] == "easy minimaxH3AudioLock"
     )
-    conditioning_id = next(
+    conditioning_cache_id = next(
         node_id
         for node_id, node in nodes.items()
-        if node["class_type"] == "easy minimaxH3ToVideo"
+        if node["class_type"] == "easy h3ConditioningCache"
     )
     sampling_start = next(
         node
@@ -1801,7 +2362,7 @@ def test_multitrack_h3_project_locks_task_audio_before_sampling(monkeypatch):
         if node["class_type"] == "easy h3SegmentSamplingStart"
     )
 
-    assert audio_lock["inputs"]["latent"] == [conditioning_id, 1]
+    assert audio_lock["inputs"]["latent"] == [conditioning_cache_id, 1]
     assert audio_lock["inputs"]["audio"] == {"prepared_locked_audio": True}
     assert audio_lock["inputs"]["remix_strength"] == 1.0
     assert audio_lock["inputs"]["prepend_frames"] == 0
@@ -3151,12 +3712,15 @@ def test_multitrack_h3_dual_context_uses_separate_low_and_hires_latents(monkeypa
     )
     low_context_conditioning_id = motion["inputs"]["conditioning"][0]
     low_context_conditioning = result.expand[low_context_conditioning_id]
+    encoded_low_conditioning = result.expand[
+        low_context_conditioning["inputs"]["conditioning"][0]
+    ]
     hires_context_conditioning_id = next(
         node_id
         for node_id, node in result.expand.items()
         if node["class_type"] == "easy minimaxH3ToVideo"
         and node["inputs"]["prompt"]
-        == low_context_conditioning["inputs"]["prompt"]
+        == encoded_low_conditioning["inputs"]["prompt"]
         and node["inputs"]["width"] == 1664
         and node["inputs"]["height"] == 960
     )

@@ -726,7 +726,7 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                 multitrack_runtime_cache(task_info, create=True)
                 task_info["_easy_media_cache_status"] = {
                     **project_static.get("_cache_status", {}),
-                    "segment_media": "重新加载",
+                    "segment_media": "首次加载",
                 }
                 if isinstance(segment_cache, dict):
                     segment_cache[segment_cache_key] = (
@@ -771,7 +771,7 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                         "full_locked_audio": locked,
                         "_segment_cache": {},
                         "_cache_status": {
-                            "project_media": "重新加载",
+                            "project_media": "首次加载",
                         },
                     }
                     if isinstance(runtime_cache, dict):
@@ -1484,10 +1484,24 @@ class EasyMultiTrackProject(io.ComfyNode):
                     "audios": task_output.out(5),
                     "videos": task_output.out(6),
                 })
-            conditioning = graph.node(
+            encoded_conditioning = graph.node(
                 "easy minimaxH3ToVideo",
                 id=f"conditioning_{task_index}",
                 **conditioning_inputs,
+            )
+            conditioning = graph.node(
+                "easy h3ConditioningCache",
+                id=f"conditioning_cache_{task_index}",
+                project_name=safe_project_name,
+                segment_index=task_index,
+                tracks_info=task_tracks_info,
+                task_output_ready=task_output.out(1),
+                model=model,
+                clip=clip,
+                vae=vae,
+                audio_vae=audio_vae,
+                conditioning=encoded_conditioning.out(0),
+                latent=encoded_conditioning.out(1),
             )
             base_positive = second_pass_positive = conditioning.out(0)
             if run_second_pass and (
