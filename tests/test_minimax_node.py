@@ -674,6 +674,10 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
         "sigmas",
     ):
         assert inputs[name].kwargs["optional"] is True
+        assert inputs[name].kwargs["raw_link"] is True
+        assert inputs[name].kwargs["lazy"] is True
+    assert inputs["model_loader"].kwargs["raw_link"] is True
+    assert inputs["model_loader"].kwargs["lazy"] is True
     assert inputs["project_name"].kwargs["default"] == ""
     assert inputs["project_save"].kwargs["options"] == ["new", "override"]
     assert inputs["project_save"].kwargs["default"] == "override"
@@ -704,6 +708,8 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
     assert selflift_inputs["lowres_scale"].kwargs["default"] == 0.6
     for name in ("sampler_2nd", "sigmas_2nd", "model_loader_2nd"):
         assert inputs[name].kwargs["optional"] is True
+        assert inputs[name].kwargs["raw_link"] is True
+        assert inputs[name].kwargs["lazy"] is True
     assert inputs["1st_pass_only"].kwargs["default"] is False
     assert inputs["disable_2nd_noise"].kwargs["default"] is False
     assert inputs["upscale_by"].kwargs["default"] == 1.250
@@ -717,6 +723,189 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
         "PROJECT_NAME",
         "LOCKED_AUDIO",
     ]
+
+
+def test_h3_project_static_prepare_exposes_media_cache_boundary(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    static_schema = module._project_module.EasyH3ProjectStaticPrepare.define_schema()
+
+    assert static_schema.node_id == "easy h3ProjectStaticPrepare"
+    assert static_schema.enable_expand is True
+
+
+def test_multitrack_h3_project_keeps_model_and_media_as_prepare_links(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    inputs = _h3_project_inputs(model_loader=[["loader", 0]])
+    module.EasyMultiTrackProject.hidden = types.SimpleNamespace(
+        prompt={
+            "project-node": {
+                "inputs": {
+                    "tracks_info": ["multitrack-info", 0],
+                    "model_loader": ["loader", 0],
+                },
+            },
+        },
+        unique_id="project-node",
+    )
+
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    media_id, media_node = next(
+        (node_id, node)
+        for node_id, node in result.expand.items()
+        if node["class_type"] == "easy h3ProjectStaticPrepare"
+        and node_id.endswith("project_media_prepare")
+    )
+    model_id, model_node = next(
+        (node_id, node)
+        for node_id, node in result.expand.items()
+        if node["class_type"] == "easy h3ProjectStaticPrepare"
+        and node_id.endswith("project_model_prepare")
+    )
+    segment_id, segment_node = next(
+        (node_id, node)
+        for node_id, node in result.expand.items()
+        if node["class_type"] == "easy h3ProjectStaticPrepare"
+        and node_id.endswith("segment_static_prepare_0")
+    )
+    task_id, task = next(
+        (node_id, node)
+        for node_id, node in result.expand.items()
+        if node["class_type"] == "easy multiTrackTaskOutput"
+    )
+    conditioning = _graph_node(result, "easy minimaxH3ToVideo")
+
+    assert model_node["inputs"]["model_loader"] == ["loader", 0]
+    assert "tracks_info" not in model_node["inputs"]
+    assert media_node["inputs"]["tracks_info"] == ["multitrack-info", 0]
+    assert "model_loader" not in media_node["inputs"]
+    assert segment_node["inputs"]["project_static"] == [media_id, 0]
+    assert task["inputs"]["tracks_info"] == [segment_id, 1]
+    assert conditioning["inputs"]["clip"] == [model_id, 4]
+    assert conditioning["inputs"]["images"] == [task_id, 4]
+    assert "seed" not in model_node["inputs"]
+    assert "seed" not in media_node["inputs"]
+    assert "seed" not in segment_node["inputs"]
+    assert "seed" not in task["inputs"]
+    assert "seed" not in conditioning["inputs"]
+
+
+def test_linked_selflift_keeps_segment_order_after_cached_media(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    inputs = _h3_project_inputs(
+        model_loader=[["loader", 0]],
+        sampling_mode=_h3_sampling_mode("selflift"),
+    )
+    first = inputs["tracks_info"][0]["tracks"][0]["segments"][0]
+    inputs["tracks_info"][0]["tracks"][0]["segments"].append({
+        **first,
+        "start_frame": 120,
+        "end_frame": 240,
+        "content": {**first["content"]},
+    })
+
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    artifact_id = next(
+        node_id
+        for node_id, node in result.expand.items()
+        if node["class_type"] == "easy h3ProjectArtifact"
+        and node["inputs"]["segment_index"] == 0
+    )
+    second_selflift = next(
+        node
+        for node_id, node in result.expand.items()
+        if node["class_type"] == "easy minimaxH3SelfLiftSampler"
+        and node_id.endswith("selflift_sample_1")
+    )
+    second_segment_prepare = next(
+        node
+        for node_id, node in result.expand.items()
+        if node["class_type"] == "easy h3ProjectStaticPrepare"
+        and node_id.endswith("segment_static_prepare_1")
+    )
+
+    assert second_selflift["inputs"]["previous"] == [artifact_id, 0]
+    assert second_segment_prepare["inputs"]["previous"] == [artifact_id, 0]
+
+
+def test_h3_project_static_prepare_materializes_once_then_crops(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    project_module = module._project_module
+    loader = {
+        "model": _MiniMaxH3Model(),
+        "clip": "clip",
+        "vae": "vae",
+        "audio_vae": "audio-vae",
+    }
+    prepared = []
+    shared_image = _image_values(1)
+    shared_audio = {"waveform": torch.ones(1, 1, 1), "sample_rate": 1}
+    shared_video = object()
+    locked_audio = {"waveform": torch.ones(1, 1, 1), "sample_rate": 1}
+
+    def prepare(info):
+        prepared.append(info)
+        return info, [shared_image], [shared_audio], [shared_video], locked_audio
+
+    monkeypatch.setattr(project_module, "prepare_multitrack_project_media", prepare)
+    monkeypatch.setattr(
+        project_module,
+        "crop_multitrack_project_media",
+        lambda audio, video, locked, *_args: (audio, video, locked),
+    )
+    tracks_info = _h3_project_inputs()["tracks_info"]
+    global_result = project_module.EasyH3ProjectStaticPrepare.execute(
+        model_loader=loader,
+        tracks_info=tracks_info,
+        sampling_plan="custom",
+        sampler="sampler",
+        sigmas="sigmas",
+    )
+    segment_result = project_module.EasyH3ProjectStaticPrepare.execute(
+        project_static=global_result.values[0],
+        task_start_frame=0,
+        task_duration_frames=120,
+        generation_mode="reference",
+    )
+    restored_global = project_module.EasyH3ProjectStaticPrepare.execute(
+        tracks_info=tracks_info,
+    )
+    restored_segment = project_module.EasyH3ProjectStaticPrepare.execute(
+        project_static=restored_global.values[0],
+        task_start_frame=0,
+        task_duration_frames=120,
+        generation_mode="reference",
+    )
+
+    def assert_no_container_cycle(value, ancestors=None):
+        if not isinstance(value, (dict, list, tuple)):
+            return
+        ancestors = set() if ancestors is None else ancestors
+        assert id(value) not in ancestors
+        nested_ancestors = ancestors | {id(value)}
+        children = value.values() if isinstance(value, dict) else value
+        for child in children:
+            assert_no_container_cycle(child, nested_ancestors)
+
+    assert len(prepared) == 1
+    assert global_result.values[2:7] == (
+        loader["model"],
+        loader["model"],
+        "clip",
+        "vae",
+        "audio-vae",
+    )
+    assert segment_result.values[1]["_preloaded_media"] == {
+        "images": [shared_image],
+        "audio": [shared_audio],
+        "video": [shared_video],
+    }
+    assert segment_result.values[8] is locked_audio
+    assert restored_global.values[0]["shared_images"] is global_result.values[0]["shared_images"]
+    assert restored_global.values[0]["shared_audio"] is global_result.values[0]["shared_audio"]
+    assert restored_global.values[0]["shared_video"] is global_result.values[0]["shared_video"]
+    assert restored_segment.values[1] is segment_result.values[1]
+    assert restored_segment.values[8] is locked_audio
+    assert_no_container_cycle(tracks_info)
 
 
 def test_multitrack_h3_project_loads_segment_media_from_tracks_info(monkeypatch):
@@ -765,8 +954,15 @@ def test_project_memory_boundaries_follow_artifact_saves(monkeypatch, sampling_m
     assert all(
         "easy_media_segment" not in node.get("_meta", {})
         for node in result.expand.values()
-        if node["class_type"] in {"KSamplerSelect", "ManualSigmas"}
+        if node["class_type"] in {
+            "KSamplerSelect",
+            "ManualSigmas",
+            "easy h3ProjectStaticPrepare",
+            "easy multiTrackTaskOutput",
+        }
     )
+    conditioning = _graph_node(result, "easy minimaxH3ToVideo")
+    assert conditioning["_meta"]["easy_media_segment"] == 0
 
 
 def test_multitrack_h3_project_prepends_shared_media_before_h3_conditioning(

@@ -2675,6 +2675,42 @@ def test_multitrack_task_output_prepends_project_preloaded_images():
     assert result.values[4] == [shared_image, local_image]
 
 
+def test_multitrack_task_output_restores_project_runtime_media_cache():
+    module = _load_basic_module()
+    shared_image = torch.zeros(1, 2, 2, 3)
+    tracks_info = {
+        "frame_rate": 24,
+        "format": "MiniMax",
+        "_easy_media_runtime_cache": {},
+        "_preloaded_media": {
+            "images": [shared_image],
+            "audio": [],
+            "video": [],
+        },
+        "tracks": [{
+            "type": "task",
+            "segments": [{
+                "start_frame": 0,
+                "end_frame": 120,
+                "content": {"task_mode": "ref", "images": []},
+            }],
+        }],
+    }
+
+    first = module.MultiTrackTaskOutput.execute(
+        tracks_info,
+        task_index=0,
+        prompt_format="default",
+    )
+    second = module.MultiTrackTaskOutput.execute(
+        tracks_info,
+        task_index=0,
+        prompt_format="default",
+    )
+
+    assert second is first
+
+
 def test_multitrack_task_output_uses_selected_user_prompt_variant():
     module = _load_basic_module()
     tracks_info = {

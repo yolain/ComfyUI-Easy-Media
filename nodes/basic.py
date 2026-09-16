@@ -80,6 +80,7 @@ from ..utils.multitrack import (
     _resize_multitrack_video,
     _trim_track_audio,
     _video_stream_source,
+    multitrack_runtime_cache,
 )
 
 
@@ -2740,6 +2741,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
     ) -> io.NodeOutput:
         del previous
         raw_info = _unwrap_list_scalar(tracks_info, {})
+        runtime_cache = multitrack_runtime_cache(raw_info)
         info = _parse_track_data(raw_info)
         preloaded_media = info.get("_preloaded_media", {})
         if not isinstance(preloaded_media, dict):
@@ -2757,6 +2759,42 @@ class MultiTrackTaskOutput(io.ComfyNode):
         output_full_timeline = requested_index == -1
         index = max(0, requested_index)
         selected_prompt_format = str(_unwrap_list_scalar(prompt_format, "default"))
+        task_cache_key = (
+            "multitrack_task_output",
+            requested_index,
+            selected_prompt_format,
+        )
+        can_restore_runtime = (
+            isinstance(runtime_cache, dict)
+            and "_preloaded_media" in info
+            and not image_items
+            and not audio_items
+            and not video_items
+        )
+        cached_task_output = (
+            runtime_cache.get(task_cache_key)
+            if can_restore_runtime
+            else None
+        )
+        if isinstance(cached_task_output, io.NodeOutput):
+            cache_status = info.get("_easy_media_cache_status", {})
+            log_node_info(
+                "MultiTrack Cache",
+                f"segment={requested_index} | "
+                f"项目媒体={cache_status.get('project_media', '未知')} | "
+                f"分段媒体={cache_status.get('segment_media', '未知')} | "
+                "TaskOutput=命中恢复缓存",
+            )
+            return cached_task_output
+        if "_preloaded_media" in info:
+            cache_status = info.get("_easy_media_cache_status", {})
+            log_node_info(
+                "MultiTrack Cache",
+                f"segment={requested_index} | "
+                f"项目媒体={cache_status.get('project_media', '未知')} | "
+                f"分段媒体={cache_status.get('segment_media', '未知')} | "
+                "TaskOutput=重新加载",
+            )
 
         tracks = info.get("tracks", [])
         task_entries = _multitrack_task_entries(info)
@@ -3211,7 +3249,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
         output_system_prompt = (
             "" if selected_prompt_format in {"default", "promptRelay"} else chat_system_prompt
         )
-        return io.NodeOutput(
+        output = io.NodeOutput(
             output_system_prompt,
             user_prompt,
             task_type,
@@ -3222,6 +3260,9 @@ class MultiTrackTaskOutput(io.ComfyNode):
             image_indexes,
             locked_audio,
         )
+        if can_restore_runtime:
+            runtime_cache[task_cache_key] = output
+        return output
 
 
 class MultiTrackPromptEnhancer(io.ComfyNode):

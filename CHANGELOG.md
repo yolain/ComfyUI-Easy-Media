@@ -6,6 +6,7 @@
 
 ### ⚡ Improvements
 
+- **MultiTrack Project**: Optimized project media, segment media, and TaskOutput caching mechanism to avoid media reloading when re-executing without parameter changes, especially for video reference segments where the previous version caused additional lengthy media reload time.
 - **MultiTrack Project**: Enhanced action continuity in context mode and optimized lip-sync when audio is locked.
 - **MultiTrack Editor**: Added the ability to freely drag and adjust the width ratio between the image item area and the prompt area within segments. Optimized the UI display of user prompt highlight tags.
 - **MultiTrack Project**: Added `selflift` option to `sampling_mode`, adapted from [comfyui-SelfLift](https://github.com/facok/comfyui-SelfLift)

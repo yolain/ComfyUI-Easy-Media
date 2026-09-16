@@ -1607,6 +1607,11 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
                 io.Float.Input("preview_fps", default=24.0, min=0.01, optional=True),
                 io.Int.Input("segment_index", default=0, min=0, optional=True),
                 io.String.Input("sampling_pass", default="selflift", optional=True),
+                io.AnyType.Input(
+                    "previous",
+                    optional=True,
+                    tooltip="Optional project-loop execution dependency.",
+                ),
             ],
             outputs=[
                 io.Latent.Output("latent"),
@@ -1640,7 +1645,9 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
         preview_fps: float = 24.0,
         segment_index: int = 0,
         sampling_pass: str = "selflift",
+        previous: Any | None = None,
     ) -> io.NodeOutput:
+        del previous
         from ..modules.selflift.sampling import progressive_sample_h3
 
         tiling_enabled = bool(enabled_tiling or highres_tiling)

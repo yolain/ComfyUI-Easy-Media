@@ -8,7 +8,7 @@ from typing import Any
 import folder_paths
 import nodes as comfy_nodes
 from comfy_api.latest import InputImpl, io
-from comfy_execution.graph_utils import ExecutionBlocker, GraphBuilder
+from comfy_execution.graph_utils import ExecutionBlocker, GraphBuilder, is_link
 from comfy.utils import ProgressBar
 
 from ..utils import instrument_node_timing, log_node_info
@@ -41,11 +41,16 @@ from ..utils.project_memory import (
     SEGMENT_META,
     install_project_memory_cleanup,
 )
+from ..utils.multitrack import (
+    MULTITRACK_RUNTIME_CACHE_KEY,
+    multitrack_runtime_cache,
+)
 
 
 TYPE_FAST_MODEL_LOADER = io.Custom(io_type="FAST_MODEL_LOADER")
 TYPE_TRACKS_INFO = io.Custom(io_type="TRACKS_INFO")
 TYPE_PROJECT_DATA = io.Custom(io_type="PROJECT_DATA")
+TYPE_H3_PROJECT_STATIC_DATA = io.Custom(io_type="H3_PROJECT_STATIC_DATA")
 H3_CONTEXT_CONTINUITY_MODES = {"context", "context_swap"}
 H3_CONTEXT_SOURCE_FRAMES = 22
 
@@ -54,6 +59,31 @@ def _first_input(value: Any, default: Any = None) -> Any:
     if isinstance(value, (list, tuple)):
         return value[0] if value else default
     return value if value is not None else default
+
+
+def _raw_project_input(value: Any) -> Any:
+    """Unwrap list inputs without splitting a raw graph link."""
+    if is_link(value):
+        return value
+    if isinstance(value, (list, tuple)) and len(value) == 1 and is_link(value[0]):
+        return value[0]
+    return _first_input(value)
+
+
+def _hidden_project_input_link(hidden_inputs: Any, name: str) -> Any | None:
+    """Recover the original prompt link after an input was materialized."""
+    prompt = _first_input(getattr(hidden_inputs, "prompt", None))
+    unique_id = str(_first_input(getattr(hidden_inputs, "unique_id", None), ""))
+    if not isinstance(prompt, dict) or not unique_id:
+        return None
+    node = prompt.get(unique_id)
+    if not isinstance(node, dict):
+        return None
+    inputs = node.get("inputs")
+    if not isinstance(inputs, dict):
+        return None
+    value = inputs.get(name)
+    return value if is_link(value) else None
 
 
 def _require_minimax_h3_model(model: Any) -> None:
@@ -242,8 +272,16 @@ def _timed_h3_project_graph(
         "VAEDecode",
         "VAEDecodeAudio",
     }
+    persistent_media_types = {
+        "easy h3ProjectStaticPrepare",
+        "easy multiTrackTaskOutput",
+    }
     for node_id, node in expanded.items():
-        if segment_nodes is not None and node_id in segment_nodes:
+        if (
+            segment_nodes is not None
+            and node_id in segment_nodes
+            and node["class_type"] not in persistent_media_types
+        ):
             node.setdefault("_meta", {})[SEGMENT_META] = segment_nodes[node_id]
             if node["class_type"] == "easy h3ProjectArtifact":
                 node["_meta"][BOUNDARY_META] = True
@@ -571,6 +609,237 @@ class EasyH3SamplingPreviewSampler(io.ComfyNode):
 
 
 
+class EasyH3ProjectStaticPrepare(io.ComfyNode):
+    """Resolve seed-independent model, media, and sampling resources."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy h3ProjectStaticPrepare",
+            display_name="H3 Project Static Prepare",
+            category="EasyUse/H3/dev",
+            is_dev_only=True,
+            enable_expand=True,
+            inputs=[
+                TYPE_FAST_MODEL_LOADER.Input("model_loader", optional=True),
+                TYPE_FAST_MODEL_LOADER.Input("model_loader_2nd", optional=True),
+                TYPE_TRACKS_INFO.Input("tracks_info", optional=True),
+                TYPE_H3_PROJECT_STATIC_DATA.Input("project_static", optional=True),
+                io.AnyType.Input(
+                    "previous",
+                    optional=True,
+                    tooltip="Optional dependency on the previous saved segment.",
+                ),
+                io.Int.Input("task_start_frame", default=0, min=0, optional=True),
+                io.Int.Input("task_duration_frames", default=1, min=1, optional=True),
+                io.Float.Input("fps", default=24.0, min=0.001, optional=True),
+                io.Combo.Input("generation_mode", options=["reference", "multi_frames", "last_frame"], default="multi_frames", optional=True),
+                io.String.Input("sampling_plan", default="light", optional=True),
+                io.Combo.Input("sampling_mode", options=["single", "dual", "selflift"], default="single", optional=True),
+                io.Sampler.Input("sampler", optional=True, raw_link=True),
+                io.Sigmas.Input("sigmas", optional=True, raw_link=True),
+                io.Sampler.Input("sampler_2nd", optional=True, raw_link=True),
+                io.Sigmas.Input("sigmas_2nd", optional=True, raw_link=True),
+                io.Boolean.Input("run_second_pass", default=False, optional=True),
+                io.Boolean.Input("has_context_second_pass", default=False, optional=True),
+                io.Boolean.Input("turbo_hint", default=False, optional=True),
+            ],
+            outputs=[
+                TYPE_H3_PROJECT_STATIC_DATA.Output("PROJECT_STATIC"),
+                TYPE_TRACKS_INFO.Output("TASK_TRACKS_INFO"),
+                io.Model.Output("MODEL"), io.Model.Output("MODEL_2ND"),
+                io.Clip.Output("CLIP"), io.Vae.Output("VAE"),
+                io.Vae.Output("AUDIO_VAE"), io.Vae.Output("PREVIEW_VAE"),
+                io.Audio.Output("LOCKED_AUDIO"),
+                io.Sampler.Output("SAMPLER"), io.Sigmas.Output("SIGMAS"),
+                io.Sampler.Output("SAMPLER_2ND"), io.Sigmas.Output("SIGMAS_2ND"),
+                io.Sigmas.Output("CONTEXT_SIGMAS_2ND"),
+            ],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        model_loader: Any | None = None,
+        model_loader_2nd: Any | None = None,
+        tracks_info: Any | None = None,
+        project_static: Any | None = None,
+        previous: Any | None = None,
+        task_start_frame: int = 0,
+        task_duration_frames: int = 1,
+        fps: float = 24.0,
+        generation_mode: str = "multi_frames",
+        sampling_plan: str = "light",
+        sampling_mode: str = "single",
+        sampler: Any | None = None,
+        sigmas: Any | None = None,
+        sampler_2nd: Any | None = None,
+        sigmas_2nd: Any | None = None,
+        run_second_pass: bool = False,
+        has_context_second_pass: bool = False,
+        turbo_hint: bool = False,
+    ) -> io.NodeOutput:
+        del previous
+        try:
+            if project_static is not None:
+                if not isinstance(project_static, dict):
+                    raise TypeError("project_static must contain H3 project static data")
+                segment_cache = project_static.get("_segment_cache")
+                segment_cache_key = (
+                    "h3_project_segment",
+                    int(task_start_frame),
+                    int(task_duration_frames),
+                    float(fps),
+                    str(generation_mode),
+                )
+                cached_segment = (
+                    segment_cache.get(segment_cache_key)
+                    if isinstance(segment_cache, dict)
+                    else None
+                )
+                if (
+                    isinstance(cached_segment, tuple)
+                    and len(cached_segment) == 2
+                ):
+                    cached_task_info = cached_segment[0]
+                    cached_task_info["_easy_media_cache_status"] = {
+                        **project_static.get("_cache_status", {}),
+                        "segment_media": "命中恢复缓存",
+                    }
+                    return io.NodeOutput(
+                        project_static,
+                        cached_task_info,
+                        None, None, None, None, None, None,
+                        cached_segment[1],
+                        None, None, None, None, None,
+                    )
+                task_audio, task_video, task_locked_audio = crop_multitrack_project_media(
+                    project_static["shared_audio"], project_static["shared_video"],
+                    project_static["full_locked_audio"], int(task_start_frame),
+                    int(task_duration_frames), float(fps),
+                )
+                task_info = prepare_multitrack_project_task_info(
+                    project_static["task_tracks_info_base"], project_static["shared_images"],
+                    task_audio if generation_mode == "reference" else [],
+                    task_video if generation_mode == "reference" else [],
+                )
+                multitrack_runtime_cache(task_info, create=True)
+                task_info["_easy_media_cache_status"] = {
+                    **project_static.get("_cache_status", {}),
+                    "segment_media": "重新加载",
+                }
+                if isinstance(segment_cache, dict):
+                    segment_cache[segment_cache_key] = (
+                        task_info,
+                        task_locked_audio,
+                    )
+                return io.NodeOutput(
+                    project_static, task_info, None, None, None, None, None,
+                    None, task_locked_audio,
+                    None, None, None, None, None,
+                )
+
+            media_data = None
+            locked = None
+            if tracks_info is not None:
+                runtime_cache = multitrack_runtime_cache(
+                    tracks_info,
+                    create=True,
+                )
+                cached_media = (
+                    runtime_cache.get("h3_project_media")
+                    if isinstance(runtime_cache, dict)
+                    else None
+                )
+                if isinstance(cached_media, dict):
+                    media_data = cached_media
+                    locked = cached_media.get("full_locked_audio")
+                    media_data["_cache_status"] = {
+                        "project_media": "命中恢复缓存",
+                    }
+                else:
+                    info = parse_tracks_info(tracks_info)
+                    task_base, images, audio, video, locked = (
+                        prepare_multitrack_project_media(info)
+                    )
+                    task_base.pop(MULTITRACK_RUNTIME_CACHE_KEY, None)
+                    media_data = {
+                        "task_tracks_info_base": task_base,
+                        "shared_images": images,
+                        "shared_audio": audio,
+                        "shared_video": video,
+                        "full_locked_audio": locked,
+                        "_segment_cache": {},
+                        "_cache_status": {
+                            "project_media": "重新加载",
+                        },
+                    }
+                    if isinstance(runtime_cache, dict):
+                        runtime_cache["h3_project_media"] = media_data
+                if model_loader is None:
+                    return io.NodeOutput(
+                        media_data, None, None, None, None, None, None, None,
+                        locked, None, None, None, None, None,
+                    )
+
+            loader = _first_input(model_loader)
+            if not isinstance(loader, dict):
+                raise TypeError("model_loader must contain a FAST_MODEL_LOADER dictionary")
+            model, clip, vae = loader.get("model"), loader.get("clip"), loader.get("vae")
+            audio_vae, preview_vae = loader.get("audio_vae"), loader.get("preview_vae")
+            missing = [name for name, value in (("model", model), ("clip", clip),
+                       ("vae", vae), ("audio_vae", audio_vae)) if value is None]
+            if missing:
+                raise ValueError("model_loader is missing required components: " + ", ".join(missing))
+            _require_minimax_h3_model(model)
+            second_model = _h3_second_pass_model(model_loader_2nd, model=model)
+            _require_minimax_h3_model(second_model)
+            static_data = {
+                "model": model, "second_model": second_model, "clip": clip,
+                "vae": vae, "audio_vae": audio_vae,
+                "preview_vae": preview_vae,
+            }
+            if media_data is not None:
+                static_data = {**media_data, **static_data}
+            first_is_turbo = detect_turbo_model(model).is_turbo or bool(turbo_hint)
+            second_is_turbo = first_is_turbo
+            if run_second_pass and second_model is not model:
+                second_is_turbo = detect_turbo_model(second_model).is_turbo
+            graph = GraphBuilder()
+            first_sampler = None
+            if sampling_mode == "selflift":
+                first_sigmas = _h3_resolve_selflift_sigmas(
+                    graph, sigmas=sigmas, preset_name=str(sampling_plan),
+                    is_turbo=first_is_turbo,
+                )
+            else:
+                first_sampler, first_sigmas = _h3_resolve_pass_sampling(
+                    graph, pass_name="first_pass", sampler=sampler, sigmas=sigmas,
+                    preset_name=str(sampling_plan), has_second_pass=sampling_mode == "dual",
+                    is_turbo=first_is_turbo,
+                )
+            second_sampler = second_sigmas = context_sigmas = None
+            if run_second_pass:
+                custom_second = sampler_2nd is not None or sigmas_2nd is not None
+                second_sampler, second_sigmas = _h3_resolve_pass_sampling(
+                    graph, pass_name="second_pass", sampler=sampler_2nd,
+                    sigmas=sigmas_2nd, preset_name=str(sampling_plan),
+                    has_second_pass=True, is_turbo=second_is_turbo,
+                )
+                if has_context_second_pass:
+                    context_sigmas = _h3_resolve_context_second_pass_sigmas(
+                        graph, preset_name=str(sampling_plan), is_turbo=second_is_turbo,
+                        has_custom_second_pass_sampling=custom_second,
+                    )
+            return io.NodeOutput(
+                static_data, None, model, second_model, clip, vae, audio_vae,
+                preview_vae, locked, first_sampler, first_sigmas, second_sampler,
+                second_sigmas, context_sigmas, expand=graph.finalize(),
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as error:
+            raise RuntimeError(f"Failed to prepare H3 project static inputs: {error}") from error
+
+
 class EasyMultiTrackProject(io.ComfyNode):
     @classmethod
     def _sampling_plan_options(cls) -> list[str]:
@@ -592,21 +861,29 @@ class EasyMultiTrackProject(io.ComfyNode):
             not_idempotent=True,
             inputs=[
                 TYPE_TRACKS_INFO.Input("tracks_info"),
-                TYPE_FAST_MODEL_LOADER.Input("model_loader"),
+                TYPE_FAST_MODEL_LOADER.Input(
+                    "model_loader", raw_link=True, lazy=True,
+                ),
                 TYPE_FAST_MODEL_LOADER.Input(
                     "model_loader_2nd",
                     optional=True,
+                    raw_link=True,
+                    lazy=True,
                     tooltip=(
                         "Optional second-pass model. Encoding and VAE "
                         "components remain from the first-pass loader."
                     ),
                 ),
-                io.Sampler.Input("sampler", optional=True),
-                io.Sampler.Input("sampler_2nd", optional=True, tooltip=(
+                io.Sampler.Input(
+                    "sampler", optional=True, raw_link=True, lazy=True,
+                ),
+                io.Sampler.Input("sampler_2nd", optional=True, raw_link=True, lazy=True, tooltip=(
                     "Optional second-pass sampler. "
                 )),
-                io.Sigmas.Input("sigmas", optional=True),
-                io.Sigmas.Input("sigmas_2nd", optional=True, tooltip=(
+                io.Sigmas.Input(
+                    "sigmas", optional=True, raw_link=True, lazy=True,
+                ),
+                io.Sigmas.Input("sigmas_2nd", optional=True, raw_link=True, lazy=True, tooltip=(
                     "Optional second-pass sigmas. "
                 )),
                 io.String.Input("project_name", default=""),
@@ -754,23 +1031,24 @@ class EasyMultiTrackProject(io.ComfyNode):
             progress_bar.update_absolute(progress_value, progress_total)
 
         report_step(0)
-        selected_model_loader = _first_input(kwargs.get("model_loader"))
-        if not isinstance(selected_model_loader, dict):
+        selected_model_loader = _raw_project_input(kwargs.get("model_loader"))
+        uses_linked_prepare = is_link(selected_model_loader)
+        if not uses_linked_prepare and not isinstance(selected_model_loader, dict):
             raise TypeError("model_loader must contain a FAST_MODEL_LOADER dictionary.")
 
-        model = selected_model_loader.get("model")
-        clip = selected_model_loader.get("clip")
-        vae = selected_model_loader.get("vae")
-        audio_vae = selected_model_loader.get("audio_vae")
-        preview_vae = selected_model_loader.get("preview_vae")
+        model = None if uses_linked_prepare else selected_model_loader.get("model")
+        clip = None if uses_linked_prepare else selected_model_loader.get("clip")
+        vae = None if uses_linked_prepare else selected_model_loader.get("vae")
+        audio_vae = None if uses_linked_prepare else selected_model_loader.get("audio_vae")
+        preview_vae = None if uses_linked_prepare else selected_model_loader.get("preview_vae")
         preview_node_id = str(
             _first_input(
                 getattr(getattr(cls, "hidden", None), "unique_id", None),
                 "",
             )
         )
-        has_sampling_preview = preview_vae is not None and bool(preview_node_id)
-        missing_components = [
+        has_sampling_preview = bool(preview_node_id) and (uses_linked_prepare or preview_vae is not None)
+        missing_components = [] if uses_linked_prepare else [
             name
             for name, value in (("model", model), ("clip", clip), ("vae", vae))
             if value is None
@@ -780,7 +1058,8 @@ class EasyMultiTrackProject(io.ComfyNode):
                 "model_loader is missing required components: "
                 + ", ".join(missing_components)
             )
-        _require_minimax_h3_model(model)
+        if not uses_linked_prepare:
+            _require_minimax_h3_model(model)
         info = parse_tracks_info(kwargs.get("tracks_info"))
         hidden_inputs = getattr(cls, "hidden", None)
         validate_h3_project_outputs(
@@ -827,33 +1106,35 @@ class EasyMultiTrackProject(io.ComfyNode):
             )
         )
         second_model = model
+        second_model_loader = None
         if run_second_pass:
-            second_model_loader = _first_input(
-                sampling_config.get("model_loader_2nd"),
-                _first_input(kwargs.get("model_loader_2nd")),
+            configured_second_loader = sampling_config.get("model_loader_2nd")
+            second_model_loader = _raw_project_input(
+                configured_second_loader if configured_second_loader is not None
+                else kwargs.get("model_loader_2nd")
             )
-            second_model = _h3_second_pass_model(
-                second_model_loader,
-                model=model,
-            )
-            _require_minimax_h3_model(second_model)
+            if not uses_linked_prepare:
+                second_model = _h3_second_pass_model(second_model_loader, model=model)
+                _require_minimax_h3_model(second_model)
         report_step(10)
 
-        turbo_detection = detect_turbo_model(model)
+        hidden_inputs = getattr(cls, "hidden", None)
         prompt_turbo_detection = None
-        if not turbo_detection.is_turbo:
-            hidden_inputs = getattr(cls, "hidden", None)
+        turbo_detection = None if uses_linked_prepare else detect_turbo_model(model)
+        if uses_linked_prepare or not turbo_detection.is_turbo:
             prompt_turbo_detection = detect_turbo_lora_from_prompt(
                 getattr(hidden_inputs, "prompt", None),
                 getattr(hidden_inputs, "unique_id", None),
             )
-            if prompt_turbo_detection is not None:
+            if uses_linked_prepare or prompt_turbo_detection is not None:
                 turbo_detection = prompt_turbo_detection
+        first_is_turbo = bool(turbo_detection and turbo_detection.is_turbo)
         report_step(15)
         second_turbo_detection = turbo_detection
-        if run_second_pass and second_model is not model:
+        if run_second_pass and not uses_linked_prepare and second_model is not model:
             second_turbo_detection = detect_turbo_model(second_model)
             report_step(16)
+        second_is_turbo = bool(second_turbo_detection and second_turbo_detection.is_turbo)
 
         safe_project_name = safe_h3_project_name(kwargs.get("project_name"))
         project_save = str(_first_input(kwargs.get("project_save"), "new"))
@@ -988,87 +1269,91 @@ class EasyMultiTrackProject(io.ComfyNode):
                 _first_input(kwargs.get("upscale_model"), "None"),
             )
         )
-        if audio_vae is None:
+        if not uses_linked_prepare and audio_vae is None:
             raise ValueError(
                 "model_loader must include audio_vae to decode MiniMax H3 audio."
             )
         report_step(25)
 
-        (
-            task_tracks_info_base,
-            shared_images,
-            shared_audio,
-            shared_video,
-            full_locked_audio,
-        ) = prepare_multitrack_project_media(info)
         graph = GraphBuilder()
         report_step(27)
         preset_name = str(_first_input(kwargs.get("sampling_plan"), "medium"))
-        first_pass_sampler: Any | None = None
-        first_pass_sigmas: Any | None = None
-        if any(task_index != resume_task_index for task_index, _ in selected_entries):
-            if is_selflift:
-                first_pass_sigmas = _h3_resolve_selflift_sigmas(
-                    graph,
-                    sigmas=_first_input(kwargs.get("sigmas")),
-                    preset_name=preset_name,
-                    is_turbo=turbo_detection.is_turbo,
-                )
-            else:
-                first_pass_sampler, first_pass_sigmas = _h3_resolve_pass_sampling(
-                    graph,
-                    pass_name="first_pass",
-                    sampler=_first_input(kwargs.get("sampler")),
-                    sigmas=_first_input(kwargs.get("sigmas")),
-                    preset_name=preset_name,
-                    has_second_pass=has_second_pass,
-                    is_turbo=turbo_detection.is_turbo,
-                )
-        second_pass_sampler: Any | None = None
-        second_pass_sigmas: Any | None = None
-        context_second_pass_sigmas: Any | None = None
-        if run_second_pass:
-            configured_second_pass_sampler = _first_input(
-                sampling_config.get("sampler_2nd"),
-                _first_input(kwargs.get("sampler_2nd")),
+        has_context_second_pass = run_second_pass and any(
+            task_index > 0 and isinstance(entry.get("task"), dict)
+            and isinstance(entry["task"].get("content"), dict)
+            and str(entry["task"]["content"].get("continuity_mode", "shot")).lower()
+            in H3_CONTEXT_CONTINUITY_MODES for task_index, entry in selected_entries
+        )
+        if uses_linked_prepare:
+            def raw_sampling_input(name: str) -> Any:
+                value = sampling_config.get(name)
+                return _raw_project_input(value if value is not None else kwargs.get(name))
+
+            tracks_info_link = _hidden_project_input_link(
+                hidden_inputs,
+                "tracks_info",
             )
-            configured_second_pass_sigmas = _first_input(
-                sampling_config.get("sigmas_2nd"),
-                _first_input(kwargs.get("sigmas_2nd")),
+            project_media_static = graph.node(
+                "easy h3ProjectStaticPrepare",
+                id="project_media_prepare",
+                tracks_info=tracks_info_link or info,
             )
-            has_custom_second_pass_sampling = (
-                configured_second_pass_sampler is not None
-                or configured_second_pass_sigmas is not None
+            model_inputs = {
+                "model_loader": selected_model_loader,
+                "sampling_plan": preset_name, "sampling_mode": sampling_mode,
+                "run_second_pass": run_second_pass,
+                "has_context_second_pass": has_context_second_pass,
+                "turbo_hint": first_is_turbo,
+            }
+            for name, value in (
+                ("model_loader_2nd", second_model_loader),
+                ("sampler", raw_sampling_input("sampler")),
+                ("sigmas", raw_sampling_input("sigmas")),
+                ("sampler_2nd", raw_sampling_input("sampler_2nd")),
+                ("sigmas_2nd", raw_sampling_input("sigmas_2nd")),
+            ):
+                if value is not None:
+                    model_inputs[name] = value
+            project_model_static = graph.node(
+                "easy h3ProjectStaticPrepare",
+                id="project_model_prepare",
+                **model_inputs,
             )
-            second_pass_sampler, second_pass_sigmas = _h3_resolve_pass_sampling(
-                graph,
-                pass_name="second_pass",
-                sampler=configured_second_pass_sampler,
-                sigmas=configured_second_pass_sigmas,
-                preset_name=preset_name,
-                has_second_pass=True,
-                is_turbo=second_turbo_detection.is_turbo,
-            )
-            has_context_second_pass = any(
-                task_index > 0
-                and isinstance(entry.get("task"), dict)
-                and isinstance(entry["task"].get("content"), dict)
-                and str(
-                    entry["task"]["content"].get("continuity_mode", "shot")
-                ).lower() in H3_CONTEXT_CONTINUITY_MODES
-                for task_index, entry in selected_entries
-            )
-            if has_context_second_pass:
-                context_second_pass_sigmas = (
-                    _h3_resolve_context_second_pass_sigmas(
-                        graph,
-                        preset_name=preset_name,
-                        is_turbo=second_turbo_detection.is_turbo,
-                        has_custom_second_pass_sampling=(
-                            has_custom_second_pass_sampling
-                        ),
-                    )
-                )
+            model, second_model = project_model_static.out(2), project_model_static.out(3)
+            clip, vae = project_model_static.out(4), project_model_static.out(5)
+            audio_vae, preview_vae = project_model_static.out(6), project_model_static.out(7)
+            full_locked_audio = project_media_static.out(8)
+            first_pass_sampler, first_pass_sigmas = project_model_static.out(9), project_model_static.out(10)
+            second_pass_sampler, second_pass_sigmas = project_model_static.out(11), project_model_static.out(12)
+            context_second_pass_sigmas = project_model_static.out(13)
+            task_tracks_info_base = shared_images = shared_audio = shared_video = None
+        else:
+            (task_tracks_info_base, shared_images, shared_audio, shared_video,
+             full_locked_audio) = prepare_multitrack_project_media(info)
+            first_pass_sampler = first_pass_sigmas = None
+            if any(task_index != resume_task_index for task_index, _ in selected_entries):
+                if is_selflift:
+                    first_pass_sigmas = _h3_resolve_selflift_sigmas(
+                        graph, sigmas=_first_input(kwargs.get("sigmas")),
+                        preset_name=preset_name, is_turbo=first_is_turbo)
+                else:
+                    first_pass_sampler, first_pass_sigmas = _h3_resolve_pass_sampling(
+                        graph, pass_name="first_pass", sampler=_first_input(kwargs.get("sampler")),
+                        sigmas=_first_input(kwargs.get("sigmas")), preset_name=preset_name,
+                        has_second_pass=has_second_pass, is_turbo=first_is_turbo)
+            second_pass_sampler = second_pass_sigmas = context_second_pass_sigmas = None
+            if run_second_pass:
+                configured_sampler = _first_input(sampling_config.get("sampler_2nd"), _first_input(kwargs.get("sampler_2nd")))
+                configured_sigmas = _first_input(sampling_config.get("sigmas_2nd"), _first_input(kwargs.get("sigmas_2nd")))
+                custom_second = configured_sampler is not None or configured_sigmas is not None
+                second_pass_sampler, second_pass_sigmas = _h3_resolve_pass_sampling(
+                    graph, pass_name="second_pass", sampler=configured_sampler,
+                    sigmas=configured_sigmas, preset_name=preset_name,
+                    has_second_pass=True, is_turbo=second_is_turbo)
+                if has_context_second_pass:
+                    context_second_pass_sigmas = _h3_resolve_context_second_pass_sigmas(
+                        graph, preset_name=preset_name, is_turbo=second_is_turbo,
+                        has_custom_second_pass_sampling=custom_second)
         report_step(31)
 
         report_step(33)
@@ -1124,40 +1409,49 @@ class EasyMultiTrackProject(io.ComfyNode):
                 task_start_frame,
                 int(entry.get("end_frame", task_start_frame)),
             )
-            (
-                task_shared_audio,
-                task_shared_video,
-                task_locked_audio,
-            ) = crop_multitrack_project_media(
-                shared_audio,
-                shared_video,
-                full_locked_audio,
-                task_start_frame,
-                task_end_frame - task_start_frame,
-                fps,
-            )
-            task_tracks_info = prepare_multitrack_project_task_info(
-                task_tracks_info_base,
-                shared_images,
-                task_shared_audio if generation_mode == "reference" else [],
-                task_shared_video if generation_mode == "reference" else [],
-            )
-            task_output = graph.node(
-                "easy multiTrackTaskOutput",
-                id=f"task_{task_index}",
-                tracks_info=task_tracks_info,
-                **(
-                    {"previous": previous_artifact}
-                    if previous_artifact is not None
-                    else {}
-                ),
-                task_index=task_index,
-                prompt_format="default",
-            )
-            base_task_length: Any = task_output.out(3)
-            if preserve_source_timing:
-                # Keep the source duration separately for delivery and context.
-                base_task_length = max(1, task_end_frame - task_start_frame)
+            task_duration_frames = max(1, task_end_frame - task_start_frame)
+            if uses_linked_prepare:
+                segment_static = graph.node(
+                    "easy h3ProjectStaticPrepare", id=f"segment_static_prepare_{task_index}",
+                    project_static=project_media_static.out(0), task_start_frame=task_start_frame,
+                    task_duration_frames=task_duration_frames, fps=fps,
+                    generation_mode=generation_mode,
+                    **(
+                        {"previous": previous_artifact}
+                        if previous_artifact is not None
+                        else {}
+                    ),
+                )
+                task_tracks_info, task_locked_audio = segment_static.out(1), segment_static.out(8)
+                task_output = graph.node(
+                    "easy multiTrackTaskOutput",
+                    id=f"task_{task_index}",
+                    tracks_info=task_tracks_info,
+                    task_index=task_index,
+                    prompt_format="default",
+                )
+                base_task_length = task_output.out(3)
+                if preserve_source_timing:
+                    base_task_length = task_duration_frames
+            else:
+                task_shared_audio, task_shared_video, task_locked_audio = crop_multitrack_project_media(
+                    shared_audio, shared_video, full_locked_audio, task_start_frame,
+                    task_duration_frames, fps,
+                )
+                task_tracks_info = prepare_multitrack_project_task_info(
+                    task_tracks_info_base, shared_images,
+                    task_shared_audio if generation_mode == "reference" else [],
+                    task_shared_video if generation_mode == "reference" else [],
+                )
+                task_output = graph.node(
+                    "easy multiTrackTaskOutput", id=f"task_{task_index}",
+                    tracks_info=task_tracks_info,
+                    **({"previous": previous_artifact} if previous_artifact is not None else {}),
+                    task_index=task_index, prompt_format="default",
+                )
+                base_task_length = task_output.out(3)
+                if preserve_source_timing:
+                    base_task_length = task_duration_frames
             task_length: Any = (
                 minimax_frame_count(base_task_length, round_up=True)
                 if preserve_source_timing
@@ -1176,49 +1470,42 @@ class EasyMultiTrackProject(io.ComfyNode):
                     expression=f"a + {context_generation_frames}",
                     **{"values.a": task_length},
                 ).out(1)
-            conditioning_inputs: dict[str, Any] = {
-                "clip": clip,
-                "vae": vae,
-                "audio_vae": audio_vae,
-                "images": task_output.out(4),
-                "prompt": task_output.out(1),
+            report_segment_step(0.10)
+            conditioning_inputs = {
+                "clip": clip, "vae": vae, "audio_vae": audio_vae,
+                "images": task_output.out(4), "prompt": task_output.out(1),
                 "mode": generation_mode,
                 "width": target_width if is_selflift else first_pass_width,
                 "height": target_height if is_selflift else first_pass_height,
-                "length": task_length,
-                "ref_image_size": ref_image_size,
+                "length": task_length, "ref_image_size": ref_image_size,
             }
             if generation_mode == "reference":
-                conditioning_inputs["audios"] = task_output.out(5)
-                conditioning_inputs["videos"] = task_output.out(6)
-            report_segment_step(0.10)
+                conditioning_inputs.update({
+                    "audios": task_output.out(5),
+                    "videos": task_output.out(6),
+                })
             conditioning = graph.node(
                 "easy minimaxH3ToVideo",
                 id=f"conditioning_{task_index}",
                 **conditioning_inputs,
             )
-            base_positive = conditioning.out(0)
-            second_pass_positive = base_positive
-            if (
-                run_second_pass
-                and (first_pass_width, first_pass_height)
-                != (target_width, target_height)
-            ):
-                second_pass_conditioning_inputs = dict(conditioning_inputs)
-                second_pass_conditioning_inputs.update(
-                    {
-                        "width": target_width,
-                        "height": target_height,
-                    }
-                )
-                second_pass_conditioning = graph.node(
+            base_positive = second_pass_positive = conditioning.out(0)
+            if run_second_pass and (
+                first_pass_width,
+                first_pass_height,
+            ) != (target_width, target_height):
+                second_inputs = {
+                    **conditioning_inputs,
+                    "width": target_width,
+                    "height": target_height,
+                }
+                second_pass_positive = graph.node(
                     "easy minimaxH3ToVideo",
                     id=f"second_pass_conditioning_{task_index}",
-                    **second_pass_conditioning_inputs,
-                )
-                second_pass_positive = second_pass_conditioning.out(0)
-            positive = base_positive
+                    **second_inputs,
+                ).out(0)
             initial_latent = conditioning.out(1)
+            positive = base_positive
 
             if (
                 uses_context
@@ -1352,6 +1639,8 @@ class EasyMultiTrackProject(io.ComfyNode):
                     and previous_low_context_latent is not None
                 ):
                     selflift_inputs["low_context_latent"] = previous_low_context_latent
+                if previous_artifact is not None:
+                    selflift_inputs["previous"] = previous_artifact
                 selflift_sample = graph.node(
                     "easy minimaxH3SelfLiftSampler",
                     id=f"selflift_sample_{task_index}",

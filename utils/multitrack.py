@@ -252,6 +252,35 @@ def _parse_track_data(track_data: str | dict) -> dict:
         return {}
     raise ValueError("TRACK_DATA must be a JSON string or object.")
 
+
+MULTITRACK_RUNTIME_CACHE_KEY = "_easy_media_runtime_cache"
+
+
+def multitrack_runtime_cache(
+    track_data: object,
+    *,
+    create: bool = False,
+) -> dict | None:
+    """Return the runtime cache attached to an upstream TRACKS_INFO object.
+
+    Dynamic expansion nodes can be evicted before they are reintroduced in a
+    later prompt. Keeping their media-only results on the original upstream
+    TRACKS_INFO object gives those results the same lifetime as the ordinary
+    workflow node without creating a process-global strong reference.
+    """
+    while isinstance(track_data, (list, tuple)) and len(track_data) == 1:
+        track_data = track_data[0]
+    if not isinstance(track_data, dict):
+        return None
+    cache = track_data.get(MULTITRACK_RUNTIME_CACHE_KEY)
+    if isinstance(cache, dict):
+        return cache
+    if not create:
+        return None
+    cache = {}
+    track_data[MULTITRACK_RUNTIME_CACHE_KEY] = cache
+    return cache
+
 def _as_list_input(value) -> list:
     if value is None:
         return []
