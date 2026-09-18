@@ -21,3 +21,16 @@ config.yaml
 superpowers/
 docs/superpowers/
 output/
+# Auto-added by github-engineer
+__pycache__/
+*.pyc
+*.pyd
+*.obj
+*.egg-info/
+build/
+*.so
+*.whl
+*.egg
+nem_stats.c
+*.exp
+*.lib

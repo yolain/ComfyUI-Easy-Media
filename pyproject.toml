@@ -13,3 +13,12 @@ Repository = "https://github.com/yolain/ComfyUI-Easy-Media"
 PublisherId = "yolain"
 DisplayName = "ComfyUI-Easy-Media"
 Icon = ""
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+norecursedirs = [".git", "nodes", "utils", "modules", "frontend", "example_workflows"]
+

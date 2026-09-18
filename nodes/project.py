@@ -701,7 +701,14 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                     isinstance(cached_segment, tuple)
                     and len(cached_segment) == 2
                 ):
-                    cached_task_info = cached_segment[0]
+                    # Shallow-copy so downstream mutations (runtime cache,
+                    # cache-status updates) never pollute the stored template.
+                    cached_task_info = dict(cached_segment[0])
+                    # Drop the stale runtime cache from a previous execution so
+                    # MultiTrackTaskOutput builds a fresh one instead of
+                    # returning an old NodeOutput with freed tensors/handles.
+                    cached_task_info.pop(MULTITRACK_RUNTIME_CACHE_KEY, None)
+                    multitrack_runtime_cache(cached_task_info, create=True)
                     cached_task_info["_easy_media_cache_status"] = {
                         **project_static.get("_cache_status", {}),
                         "segment_media": "命中恢复缓存",
