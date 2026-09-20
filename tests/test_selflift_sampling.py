@@ -149,6 +149,20 @@ def test_low_resolution_inputs_use_saved_low_context_for_masked_prefix(monkeypat
     assert torch.all(low_video[:, :, 2:] == 0.0)
 
 
+def test_video_context_prefix_steps_include_soft_release_tokens():
+    video_mask = torch.ones(1, 1, 7, 4, 6)
+    video_mask[:, :, :2] = 0.0
+    video_mask[:, :, 2] = 0.5
+    audio_mask = torch.ones(1, 1, 2, 9)
+
+    assert sampling._video_context_prefix_steps(
+        _NestedTensor((video_mask, audio_mask))
+    ) == 3
+    assert sampling._video_context_prefix_steps(
+        _NestedTensor((torch.ones_like(video_mask), audio_mask))
+    ) is None
+
+
 def test_resume_noise_recreates_lifted_state_while_retaining_clean_anchor():
     model_sampling = types.SimpleNamespace(noise_scale=1.25)
     sigma = torch.tensor(0.4)

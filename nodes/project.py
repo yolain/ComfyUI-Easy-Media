@@ -1649,7 +1649,6 @@ class EasyMultiTrackProject(io.ComfyNode):
                     })
                 if (
                     has_context_continuity
-                    and uses_swap
                     and previous_low_context_latent is not None
                 ):
                     selflift_inputs["low_context_latent"] = previous_low_context_latent

@@ -466,7 +466,7 @@ def _upstream_nodes(
                 queue.append(linked_node_id)
 
 
-TURBO_KEYWORDS = ("turbo", "acc", "8step", "4step")
+TURBO_KEYWORDS = ("turbo", "acc", "8step", "4step", "3step")
 
 def _has_turbo_name(value: Any) -> bool:
     if not isinstance(value, (str, Path)):
