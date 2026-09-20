@@ -224,7 +224,11 @@ def prepare_context_swap_latent(
         or copied_video.shape[3:] != target_video.shape[3:]
     ):
         raise ValueError(
-            "Easy-Media Drift-Control AV context and target video latent shapes differ"
+            "Easy-Media Drift-Control AV context and target video latent shapes "
+            f"differ: original context HxW={copied_video.shape[3]}x{copied_video.shape[4]}, "
+            f"current target HxW={target_video.shape[3]}x{target_video.shape[4]}; "
+            f"copied context prefix [B,C,T,H,W]={tuple(copied_video.shape)}, "
+            f"target [B,C,T,H,W]={tuple(target_video.shape)}"
         )
 
     output_video = target_video.clone()
