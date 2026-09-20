@@ -150,13 +150,13 @@ function MultiImagesLoaderContent(props: Readonly<ContentProps>) {
           </PopoverTrigger>
         ) : (
           <PopoverAnchor asChild>
-          <div className={`task-image-grid grid h-full min-h-0 w-full flex-1 content-start gap-2 overflow-y-auto rounded-md p-3 transition-colors ${props.dragOver ? 'border border-primary bg-accent/20' : 'bg-muted/20'}`}
+          <div className={`task-image-grid grid h-full min-h-0 w-full flex-1 auto-rows-max content-start gap-2 overflow-y-auto rounded-md p-3 transition-colors ${props.dragOver ? 'border border-primary bg-accent/20' : 'bg-muted/20'}`}
             style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
             {images.map((image, index) => {
               const url = mediaContentToViewUrl({ ...image, source_type: image.source_type ?? 'input' })
               const label = image.file_name ?? image.file_path ?? image.local_path ?? image.url ?? String(index + 1)
               return (
-                <div key={image.id} className="group relative aspect-square overflow-hidden rounded-md border border-border bg-black"
+                <div key={image.id} className="group relative aspect-square min-w-0 w-full self-start overflow-hidden rounded-md border border-border bg-black"
                   draggable
                   onDragStart={() => { props.dragId.current = image.id }}
                   onDragEnd={() => { props.dragId.current = null }}

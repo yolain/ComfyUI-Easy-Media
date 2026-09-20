@@ -730,7 +730,7 @@ export function TaskSegmentEditor({
                   <div
                     data-testid="task-image-grid"
                     className={cn(
-                      'task-image-grid relative grid h-full w-full content-start gap-2 overflow-y-auto rounded-md p-3 transition-colors',
+                      'task-image-grid relative grid h-full w-full auto-rows-max content-start gap-2 overflow-y-auto rounded-md p-3 transition-colors',
                       imageGridColumns,
                       imagePickerSurfaceClass,
                     )}
