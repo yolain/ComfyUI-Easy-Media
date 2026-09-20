@@ -2605,12 +2605,9 @@ def test_multitrack_h3_selflift_supports_context_and_locked_audio(
     assert context_node["inputs"]["latent"] == [audio_lock_id, 0]
     latent_output = 2 if continuity_mode == "context" else 1
     assert context_selflift["inputs"]["latent_image"] == [context_id, latent_output]
-    if continuity_mode == "context_swap":
-        low_context_link = context_selflift["inputs"]["low_context_latent"]
-        low_context_node = result.expand[low_context_link[0]]
-        assert low_context_node["class_type"] == "easy h3MotionContextLatentTrim"
-    else:
-        assert "low_context_latent" not in context_selflift["inputs"]
+    low_context_link = context_selflift["inputs"]["low_context_latent"]
+    low_context_node = result.expand[low_context_link[0]]
+    assert low_context_node["class_type"] == "easy h3MotionContextLatentTrim"
     if continuity_mode == "context_swap":
         assert context_selflift["inputs"]["model"] == [context_id, 0]
 
@@ -4106,6 +4103,49 @@ def test_multitrack_h3_context_loop_start_loads_single_saved_context(monkeypatch
     assert motion["inputs"]["context_latent"] == [loads["high"][0], 0]
 
 
+def test_multitrack_h3_context_swap_loop_start_uses_saved_high_context(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    project_module = sys.modules["easy_media.nodes.project"]
+    monkeypatch.setattr(
+        project_module, "has_h3_context_latent", lambda *args, **kwargs: True
+    )
+    info = _h3_project_inputs()["tracks_info"][0]
+    info["tracks"][0]["segments"].append(
+        {
+            "start_frame": 120,
+            "end_frame": 240,
+            "content": {
+                "task_mode": "default",
+                "continuity_mode": "context_swap",
+                "images": [],
+                "user_prompt": "resume swap",
+            },
+        }
+    )
+
+    result = module.EasyMultiTrackProject.execute(
+        **_h3_project_inputs(
+            tracks_info=[info],
+            segment_start_number=[2],
+            segment_count=[1],
+        )
+    )
+
+    loads = [
+        (node_id, node)
+        for node_id, node in result.expand.items()
+        if node["class_type"] == "easy h3ProjectContextLatentLoad"
+    ]
+    assert len(loads) == 1
+    assert loads[0][1]["inputs"]["resolution"] == "high"
+    swap = next(
+        node
+        for node in result.expand.values()
+        if node["class_type"] == "easy MiniMaxH3ContextSwap"
+    )
+    assert swap["inputs"]["context_latent"] == [loads[0][0], 0]
+
+
 def test_multitrack_h3_context_start_rejects_missing_previous_latent(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     project_module = sys.modules["easy_media.nodes.project"]
@@ -4171,6 +4211,47 @@ def test_multitrack_h3_selflift_context_start_requires_exact_low_latent(monkeypa
         )
 
     assert checked_resolutions == [("high", True), ("low", False)]
+
+
+def test_multitrack_h3_selflift_context_swap_start_uses_both_saved_resolutions(
+    monkeypatch,
+):
+    module = _load_minimax_node(monkeypatch)
+    project_module = sys.modules["easy_media.nodes.project"]
+    monkeypatch.setattr(
+        project_module, "has_h3_context_latent", lambda *args, **kwargs: True
+    )
+    info = _h3_project_inputs()["tracks_info"][0]
+    info["tracks"][0]["segments"].append(
+        {
+            "start_frame": 120,
+            "end_frame": 240,
+            "content": {
+                "task_mode": "default",
+                "continuity_mode": "context_swap",
+                "images": [],
+            },
+        }
+    )
+
+    result = module.EasyMultiTrackProject.execute(
+        **_h3_project_inputs(
+            tracks_info=[info],
+            sampling_mode=_h3_sampling_mode("selflift"),
+            segment_start_number=[2],
+            segment_count=[1],
+        )
+    )
+    loads = {
+        node["inputs"]["resolution"]: node_id
+        for node_id, node in result.expand.items()
+        if node["class_type"] == "easy h3ProjectContextLatentLoad"
+    }
+    assert set(loads) == {"high", "low"}
+    swap = _graph_node(result, "easy MiniMaxH3ContextSwap")
+    selflift = _graph_node(result, "easy minimaxH3SelfLiftSampler")
+    assert swap["inputs"]["context_latent"] == [loads["high"], 0]
+    assert selflift["inputs"]["low_context_latent"] == [loads["low"], 0]
 
 
 def test_multitrack_h3_project_uses_prompt_graph_as_last_turbo_fallback(
@@ -4453,6 +4534,48 @@ def test_h3_project_artifact_preserves_complete_first_pass_checkpoint(
         video, audio = latent["samples"].unbind()
         assert video.shape[2] == 12
         assert audio.shape[-1] == 65
+
+
+def test_h3_project_context_round_trip_matches_runtime_context(monkeypatch, tmp_path):
+    module = _load_minimax_node(monkeypatch)
+    monkeypatch.setattr(
+        module.folder_paths,
+        "get_output_directory",
+        lambda: str(tmp_path),
+    )
+    project_dir = tmp_path / "easy_media" / "projects" / "demo"
+    project_dir.mkdir(parents=True)
+    staged = project_dir / ".context-round-trip.mp4"
+    staged.write_bytes(b"video")
+    high = module.trim_motion_context_latent(
+        _h3_context_latent(3, video_steps=12)
+    )
+    low = module.trim_motion_context_latent(
+        _h3_context_latent(7, video_steps=12)
+    )
+    high["anchor_samples"] = _h3_video_anchor_latent(3)["samples"]
+    low["anchor_samples"] = _h3_video_anchor_latent(7)["samples"]
+
+    module.EasyH3ProjectArtifact.execute(
+        project_name="demo",
+        project_save="new",
+        segment_index=0,
+        context_latent=high,
+        context_latent_low=low,
+        video_path=f"output/{staged.relative_to(tmp_path)}",
+        tracks_info=_h3_project_inputs()["tracks_info"][0],
+        sampling_pass="single",
+    )
+
+    for resolution, runtime in (("high", high), ("low", low)):
+        loaded = module.EasyH3ProjectContextLatentLoad.execute(
+            "demo", 0, resolution=resolution
+        ).values[0]
+        for actual, expected in zip(
+            loaded["samples"].unbind(), runtime["samples"].unbind()
+        ):
+            assert torch.equal(actual, expected)
+        assert torch.equal(loaded["anchor_samples"], runtime["anchor_samples"])
 
 
 def test_h3_project_artifact_override_reuses_latest_generation(monkeypatch, tmp_path):

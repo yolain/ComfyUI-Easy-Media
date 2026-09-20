@@ -15,13 +15,23 @@ import torch.nn.functional
 import comfy.utils
 
 
-def paired_lifts(z0_low, vae, out_hw, latent_mode="nearest", latent_lifter=None,
-                 need_lat=True, need_pix=True):
+def paired_lifts(
+    z0_low,
+    vae,
+    out_hw,
+    latent_mode="nearest",
+    latent_lifter=None,
+    need_lat=True,
+    need_pix=True,
+    temporal_split=None,
+):
     """Direct latent lift and pixel-VAE re-encode of the low-res clean endpoint (Eqs. 4-5).
 
     z0_low: [B, C, T, h, w] video or [B, C, h, w] image clean latent prediction in the
     VAE's native latent space. latent_lifter: optional learned upsampler callable
-    (z0_low, out_hw) -> latent, used for the direct lift on MiniMax H3.
+        (z0_low, out_hw, temporal_split=...) -> latent, used for the direct lift
+        on MiniMax H3. ``temporal_split`` separates a disposable context prefix
+        from the retained generated suffix for temporal upscalers.
     need_lat/need_pix skip branches the correction weights would discard: rho=0 needs
     no pixel anchor, the pure anchor (rho=w=1) needs no direct lift.
     Returns (z_lat, z_pix) at the target resolution, None for skipped branches.
@@ -47,7 +57,11 @@ def paired_lifts(z0_low, vae, out_hw, latent_mode="nearest", latent_lifter=None,
     z_lat = None
     if need_lat:
         if latent_lifter is not None:
-            z_lat = latent_lifter(z0_low, (H, W))
+            z_lat = latent_lifter(
+                z0_low,
+                (H, W),
+                temporal_split=temporal_split,
+            )
         else:
             if latent_mode == "bilinear":
                 latent_mode = "trilinear"  # same method family, 5D name

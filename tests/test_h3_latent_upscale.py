@@ -76,15 +76,20 @@ class _FakeUpscaler:
         )
         self.fail = fail
         self.enable_chunking = None
+        self.calls = []
 
     def temporal_chunk_settings(self):
         return 32, 5
+
+    def temporal_convolution_radius(self):
+        return 2
 
     def temporal_window_budget(self, length):
         return min(length, 52)
 
     def __call__(self, value, *, scale, target_size, enable_chunking):
         self.enable_chunking = enable_chunking
+        self.calls.append((value.clone(), target_size))
         if self.fail:
             raise RuntimeError("inference failed")
         return value
@@ -154,3 +159,101 @@ def test_force_unload_runs_after_upscale_failure(monkeypatch):
 
     assert model.enable_chunking is False
     assert calls == [(patcher, False), "empty_cache"]
+
+
+def test_temporal_split_infers_segments_with_real_left_context(monkeypatch):
+    model = _FakeUpscaler()
+    patcher = types.SimpleNamespace(model=model)
+    monkeypatch.setattr(upscale, "_load_model", lambda *_args: patcher)
+    monkeypatch.setattr(upscale, "log_memory", lambda *_args: None)
+    monkeypatch.setattr(
+        upscale.comfy.model_management,
+        "load_models_gpu",
+        lambda *args, **kwargs: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        upscale.comfy.model_management,
+        "intermediate_device",
+        lambda: torch.device("cpu"),
+        raising=False,
+    )
+    latent = torch.arange(12, dtype=torch.float32).view(1, 1, 12, 1, 1)
+    latent = latent.expand(1, 24, 12, 1, 1).clone()
+
+    output = upscale.learned_latent_lift(
+        latent,
+        (1, 1),
+        "model.safetensors",
+        device=torch.device("cpu"),
+        enable_temporal_chunking=False,
+        temporal_split=6,
+    )
+
+    assert torch.equal(output, latent)
+    assert len(model.calls) == 2
+    prefix_input, prefix_target = model.calls[0]
+    suffix_input, suffix_target = model.calls[1]
+    assert prefix_target == suffix_target == (10, 1, 1)
+    assert torch.equal(
+        prefix_input[0, 0, :, 0, 0],
+        torch.tensor([0., 0., 0., 1., 2., 3., 4., 5., 5., 5.]),
+    )
+    assert torch.equal(
+        suffix_input[0, 0, :, 0, 0],
+        torch.tensor([4., 5., 6., 7., 8., 9., 10., 11., 11., 11.]),
+    )
+
+
+def test_short_temporal_split_preserves_whole_clip_inference(monkeypatch):
+    model = _FakeUpscaler()
+    patcher = types.SimpleNamespace(model=model)
+    monkeypatch.setattr(upscale, "_load_model", lambda *_args: patcher)
+    monkeypatch.setattr(upscale, "log_memory", lambda *_args: None)
+    monkeypatch.setattr(
+        upscale.comfy.model_management,
+        "load_models_gpu",
+        lambda *args, **kwargs: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        upscale.comfy.model_management,
+        "intermediate_device",
+        lambda: torch.device("cpu"),
+        raising=False,
+    )
+    latent = torch.arange(6, dtype=torch.float32).view(1, 1, 6, 1, 1)
+    latent = latent.expand(1, 24, 6, 1, 1).clone()
+
+    output = upscale.learned_latent_lift(
+        latent,
+        (1, 1),
+        "model.safetensors",
+        device=torch.device("cpu"),
+        enable_temporal_chunking=False,
+        temporal_split=3,
+    )
+
+    assert torch.equal(output, latent)
+    assert len(model.calls) == 1
+    assert model.calls[0][1] == (6, 1, 1)
+
+
+def test_temporal_convolution_radius_includes_residual_block_convolutions():
+    model = upscale.LatentResizer3D()
+    assert model.temporal_convolution_radius() == 74
+
+
+def test_groupnorm_statistics_depend_on_full_temporal_extent():
+    model = upscale.LatentResizer3D(
+        in_channels=24,
+        in_blocks=1,
+        out_blocks=1,
+        channels=32,
+        temporal_every=1,
+        temporal_kernel=5,
+    )
+    norm = model.in_blocks[0].in_layers[0]
+    short = torch.zeros(1, 32, 2, 1, 1)
+    extended = torch.cat((short, torch.ones(1, 32, 1, 1, 1)), dim=2)
+    assert not torch.equal(norm(short)[:, :, 0], norm(extended)[:, :, 0])

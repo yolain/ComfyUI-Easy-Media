@@ -151,6 +151,25 @@ class LatentResizer3D(nn.Module):
                 return 32, block.dwconv.weight.shape[2]
         return 32, 0
 
+    def temporal_convolution_radius(self) -> int:
+        """Return the convolution-only radius used to size split context.
+
+        GroupNorm uses statistics over the whole input segment, so this is
+        not an exact receptive field and splitting changes model output.
+        """
+        radius = int(self.conv_in.kernel_size[0]) // 2
+        for block in (*self.in_blocks, *self.out_blocks):
+            if isinstance(block, TemporalConv):
+                radius += int(block.dwconv.kernel_size[0]) // 2
+            elif isinstance(block, ResBlockEmb3D):
+                radius += sum(
+                    int(layer.kernel_size[0]) // 2
+                    for layer in (*block.in_layers, *block.out_layers)
+                    if isinstance(layer, nn.Conv3d)
+                )
+        radius += int(self.conv_out.kernel_size[0]) // 2
+        return radius
+
     def temporal_window_budget(self, length):
         chunk, overlap = self.temporal_chunk_settings()
         return length if length <= chunk else min(length + 2 * overlap, chunk + 4 * overlap)
@@ -321,9 +340,15 @@ def _load_model(model_name, device):
     return patcher
 
 
-def _inference_memory_required(model, z0_low, out_hw, enable_temporal_chunking=True):
+def _inference_memory_required(
+    model,
+    z0_low,
+    out_hw,
+    enable_temporal_chunking=True,
+    temporal_length=None,
+):
     H, W = out_hw
-    T = z0_low.shape[2]
+    T = int(temporal_length or z0_low.shape[2])
     temporal_window = model.temporal_window_budget(T) if enable_temporal_chunking else T
     feature_elements = z0_low.shape[0] * model.conv_in.out_channels * temporal_window * H * W
     return feature_elements * model.conv_in.weight.element_size() * 8
@@ -337,6 +362,7 @@ def learned_latent_lift(
     *,
     enable_temporal_chunking=True,
     force_unload=False,
+    temporal_split=None,
 ):
     """2D/3D learned upsample of the low-res clean endpoint to the target latent size.
 
@@ -351,19 +377,31 @@ def learned_latent_lift(
     log_memory("upscaler before_load", device)
     patcher = _load_model(model_name, device)
     model = patcher.model
+    length = int(z0_low.shape[2])
+    split = int(temporal_split or 0)
+    split_halo = 0
+    inference_length = length
+    if 0 < split < length:
+        candidate_halo = max(2, int(model.temporal_convolution_radius()))
+        candidate_length = max(split, length - split) + 2 * candidate_halo
+        # Keep the original model windowing when segment padding would process
+        # at least as many frames and add another normalization boundary.
+        if candidate_length < length:
+            split_halo = candidate_halo
+            inference_length = candidate_length
     memory_required = _inference_memory_required(
         model,
         z0_low,
         (H, W),
         enable_temporal_chunking=enable_temporal_chunking,
+        temporal_length=inference_length,
     )
-    length = z0_low.shape[2]
     chunk, overlap = model.temporal_chunk_settings()
     identity = (H, W) == (h, w)
-    chunked = enable_temporal_chunking and not identity and length > chunk
-    windows = list(_temporal_windows(length, chunk, overlap)) if chunked else []
-    actual_window = max(end - start + 2 * overlap for _, _, start, end in windows) if chunked else length
-    budget_window = model.temporal_window_budget(length) if enable_temporal_chunking else length
+    chunked = enable_temporal_chunking and not identity and inference_length > chunk
+    windows = list(_temporal_windows(inference_length, chunk, overlap)) if chunked else []
+    actual_window = max(end - start + 2 * overlap for _, _, start, end in windows) if chunked else inference_length
+    budget_window = model.temporal_window_budget(inference_length) if enable_temporal_chunking else inference_length
     logging.info("[SelfLift upscaler] model=%s dtype=%s input=%s target_hw=%s "
                  "spatial_lift=(%.4f, %.4f) scale_embedding=%.4f mode=%s "
                  "chunk=%d overlap=%d windows=%d max_input_window=%d budget_window=%d "
@@ -379,18 +417,81 @@ def learned_latent_lift(
         mean = torch.tensor(LATENTS_MEAN, dtype=dtype, device=device).view(1, -1, 1, 1, 1)
         std = torch.tensor(LATENTS_STD, dtype=dtype, device=device).view(1, -1, 1, 1, 1)
 
-        x = z0_low.to(device=device, dtype=dtype)
+        intermediate_device = comfy.model_management.intermediate_device()
         with torch.no_grad():
-            x = (x - mean) / std
-            out = model(
-                x,
-                scale=scale,
-                target_size=(z0_low.shape[2], H, W),
-                enable_chunking=enable_temporal_chunking,
-            )
-            out = (out * std + mean).float().to(
-                comfy.model_management.intermediate_device()
-            )
+            if split_halo:
+                # GroupNorm still sees each segment separately. The halo
+                # supplies convolution context, not whole-clip statistics.
+                halo = split_halo
+                prefix = z0_low[:, :, :split].to(device=device, dtype=dtype)
+                prefix_length = int(prefix.shape[2])
+                padded_prefix = F.pad(
+                    prefix,
+                    (0, 0, 0, 0, halo, halo),
+                    mode="replicate",
+                )
+                del prefix
+                padded_prefix = (padded_prefix - mean) / std
+                lifted_prefix = model(
+                    padded_prefix,
+                    scale=scale,
+                    target_size=(prefix_length + 2 * halo, H, W),
+                    enable_chunking=enable_temporal_chunking,
+                )[:, :, halo : halo + prefix_length]
+                del padded_prefix
+                # Stage each result on CPU before the next model invocation.
+                # This avoids retaining both large outputs on the GPU.
+                lifted_prefix = (lifted_prefix * std + mean).float().to("cpu")
+
+                suffix = z0_low[:, :, split:].to(device=device, dtype=dtype)
+                suffix_length = int(suffix.shape[2])
+                left_context = z0_low[:, :, max(0, split - halo) : split].to(
+                    device=device, dtype=dtype
+                )
+                if int(left_context.shape[2]) < halo:
+                    left_context = F.pad(
+                        left_context,
+                        (0, 0, 0, 0, halo - int(left_context.shape[2]), 0),
+                        mode="replicate",
+                    )
+                right_context = suffix[:, :, -1:].expand(
+                    -1, -1, halo, -1, -1
+                )
+                padded_suffix = torch.cat(
+                    (left_context, suffix, right_context),
+                    dim=2,
+                )
+                del suffix, left_context, right_context
+                padded_suffix = (padded_suffix - mean) / std
+                lifted_suffix = model(
+                    padded_suffix,
+                    scale=scale,
+                    target_size=(suffix_length + 2 * halo, H, W),
+                    enable_chunking=enable_temporal_chunking,
+                )[:, :, halo : halo + suffix_length]
+                del padded_suffix
+                lifted_suffix = (lifted_suffix * std + mean).float().to("cpu")
+                out = torch.cat((lifted_prefix, lifted_suffix), dim=2).to(
+                    intermediate_device
+                )
+                del lifted_prefix, lifted_suffix
+                logging.info(
+                    "[SelfLift upscaler] continuation boundary token=%d uses "
+                    "a real low-resolution left-context halo=%d; GroupNorm "
+                    "statistics remain segment-local",
+                    split,
+                    halo,
+                )
+            else:
+                x = z0_low.to(device=device, dtype=dtype)
+                x = (x - mean) / std
+                out = model(
+                    x,
+                    scale=scale,
+                    target_size=(z0_low.shape[2], H, W),
+                    enable_chunking=enable_temporal_chunking,
+                )
+                out = (out * std + mean).float().to(intermediate_device)
         log_memory("upscaler end", device)
         return out
     finally:
