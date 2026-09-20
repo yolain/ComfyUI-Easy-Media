@@ -49,7 +49,9 @@ describe('MultiImagesLoaderWidget', () => {
   it('shows the multitrack image picker across the empty area', () => {
     const { container } = renderWidget(0)
     expect(container.querySelector('.task-image-picker-empty')).not.toBeNull()
-    expect(container.querySelector('.task-image-picker-empty svg')?.getAttribute('class')).toContain('size-12')
+    const uploadIcon = container.querySelector('.task-image-picker-empty svg')
+    expect(uploadIcon?.getAttribute('class')).toContain('size-12')
+    expect(uploadIcon?.closest('button')).toBeNull()
     expect(screen.getByText('Select image')).toBeTruthy()
     expect(screen.getByText('Click to choose, or drag files here.')).toBeTruthy()
     expect(container.querySelector('.task-image-grid-add')).toBeNull()

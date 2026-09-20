@@ -139,15 +139,16 @@ function MultiImagesLoaderContent(props: Readonly<ContentProps>) {
         if (!open) props.setReplaceId(null)
       }}>
         {images.length === 0 ? (
-          <PopoverTrigger asChild>
-            <Button type="button" variant="ghost" className={`task-image-picker-empty flex h-full min-h-0 w-full flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-md px-4 py-2 text-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${props.dragOver ? 'border border-primary bg-accent/20' : 'bg-muted/20'}`}
-              aria-label={t('multitrack.selectImage')}
-              onClick={() => props.setReplaceId(null)}>
-              <CloudUpload className="size-12 shrink-0" />
-              <span className="mt-1 text-base font-semibold">{t('multitrack.selectImage')}</span>
-              <span className="max-w-full whitespace-normal text-center text-sm text-muted-foreground">{t('multitrack.imageDropHint')}</span>
-            </Button>
-          </PopoverTrigger>
+          <div className={`task-image-picker-empty relative flex h-full min-h-0 w-full flex-1 flex-col items-center justify-center gap-2 rounded-md px-4 py-2 text-foreground shadow-sm ${props.dragOver ? 'border border-primary bg-accent/20' : 'bg-muted/20'}`}>
+            <CloudUpload className="size-12 shrink-0" />
+            <span className="mt-1 text-base font-semibold">{t('multitrack.selectImage')}</span>
+            <span className="max-w-full whitespace-normal text-center text-sm text-muted-foreground">{t('multitrack.imageDropHint')}</span>
+            <PopoverTrigger asChild>
+              <Button type="button" variant="ghost" className="absolute inset-0 h-full w-full cursor-pointer rounded-md p-0 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                aria-label={t('multitrack.selectImage')}
+                onClick={() => props.setReplaceId(null)} />
+            </PopoverTrigger>
+          </div>
         ) : (
           <PopoverAnchor asChild>
           <div className={`task-image-grid grid h-full min-h-0 w-full flex-1 auto-rows-max content-start gap-2 overflow-y-auto rounded-md p-3 transition-colors ${props.dragOver ? 'border border-primary bg-accent/20' : 'bg-muted/20'}`}
