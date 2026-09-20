@@ -288,6 +288,40 @@ def test_context_swap_dynamic_mask_tracks_selflift_stage_resolution():
     assert state.current_video_mask is not None
     assert state.current_video_mask.shape == (1, 1, 7, 4, 6)
 
+
+def test_drift_control_reports_original_and_current_pixel_resolution():
+    context = _av_latent(video_steps=7, height=2, width=3)
+    target = _av_latent(video_steps=12, height=4, width=5)
+
+    with pytest.raises(ValueError) as error:
+        drift_control_av.prepare_context_swap_latent(
+            target,
+            context,
+            5,
+            continue_audio=True,
+            freeze_audio=False,
+        )
+
+    assert "original context 48x32 pixels" in str(error.value)
+    assert "current target 80x64 pixels" in str(error.value)
+    assert "(1, 24, 2, 2, 3)" in str(error.value)
+    assert "(1, 24, 12, 4, 5)" in str(error.value)
+
+
+def test_drift_control_rejects_video_channel_mismatch_with_shapes():
+    context = _av_latent(video_steps=7)
+    context["samples"][0] = context["samples"][0][:, :23]
+
+    with pytest.raises(ValueError, match=r"shapes differ: .*23.*24"):
+        drift_control_av.prepare_context_swap_latent(
+            _av_latent(video_steps=12),
+            context,
+            5,
+            continue_audio=True,
+            freeze_audio=False,
+        )
+
+
 def test_h3_hard_context_requires_native_video_and_audio_keyframes(monkeypatch):
     monkeypatch.setattr(
         core,

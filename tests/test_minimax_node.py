@@ -2605,12 +2605,9 @@ def test_multitrack_h3_selflift_supports_context_and_locked_audio(
     assert context_node["inputs"]["latent"] == [audio_lock_id, 0]
     latent_output = 2 if continuity_mode == "context" else 1
     assert context_selflift["inputs"]["latent_image"] == [context_id, latent_output]
-    if continuity_mode == "context_swap":
-        low_context_link = context_selflift["inputs"]["low_context_latent"]
-        low_context_node = result.expand[low_context_link[0]]
-        assert low_context_node["class_type"] == "easy h3MotionContextLatentTrim"
-    else:
-        assert "low_context_latent" not in context_selflift["inputs"]
+    low_context_link = context_selflift["inputs"]["low_context_latent"]
+    low_context_node = result.expand[low_context_link[0]]
+    assert low_context_node["class_type"] == "easy h3MotionContextLatentTrim"
     if continuity_mode == "context_swap":
         assert context_selflift["inputs"]["model"] == [context_id, 0]
 

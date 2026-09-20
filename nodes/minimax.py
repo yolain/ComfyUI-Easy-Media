@@ -1970,11 +1970,14 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
             def latent_lifter(
                 latent: torch.Tensor,
                 target_size: tuple[int, int],
+                *,
+                temporal_split: int | None = None,
             ) -> torch.Tensor:
                 return learned_latent_lift(
                     latent,
                     target_size,
                     selected_upscaler,
+                    temporal_split=temporal_split,
                 )
 
         log_node_info(

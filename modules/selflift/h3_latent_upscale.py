@@ -337,6 +337,7 @@ def learned_latent_lift(
     *,
     enable_temporal_chunking=True,
     force_unload=False,
+    temporal_split=None,
 ):
     """2D/3D learned upsample of the low-res clean endpoint to the target latent size.
 
@@ -351,13 +352,16 @@ def learned_latent_lift(
     log_memory("upscaler before_load", device)
     patcher = _load_model(model_name, device)
     model = patcher.model
+    length = int(z0_low.shape[2])
+    # Kept for callers that pass a context boundary. Whole-clip inference
+    # preserves the GroupNorm statistics used by the original upscaler path.
+    _ = temporal_split
     memory_required = _inference_memory_required(
         model,
         z0_low,
         (H, W),
         enable_temporal_chunking=enable_temporal_chunking,
     )
-    length = z0_low.shape[2]
     chunk, overlap = model.temporal_chunk_settings()
     identity = (H, W) == (h, w)
     chunked = enable_temporal_chunking and not identity and length > chunk
@@ -385,7 +389,7 @@ def learned_latent_lift(
             out = model(
                 x,
                 scale=scale,
-                target_size=(z0_low.shape[2], H, W),
+                target_size=(length, H, W),
                 enable_chunking=enable_temporal_chunking,
             )
             out = (out * std + mean).float().to(

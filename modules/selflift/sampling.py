@@ -239,6 +239,23 @@ def _low_resolution_inputs(
     return _pack(low_streams, nested), low_mask
 
 
+def _video_context_prefix_steps(noise_mask: Any | None) -> int | None:
+    """Return the temporal extent of a partially preserved video prefix."""
+    if noise_mask is None:
+        return None
+    masks, _ = _streams(noise_mask)
+    if not masks:
+        return None
+    video_mask = masks[0]
+    if not isinstance(video_mask, torch.Tensor) or video_mask.ndim != 5:
+        return None
+    preserved = (video_mask < 1.0 - 1e-6).any(dim=(0, 1, 3, 4))
+    preserved_steps = torch.nonzero(preserved, as_tuple=False).flatten()
+    if preserved_steps.numel() == 0:
+        return None
+    return int(preserved_steps[-1].item()) + 1
+
+
 def _resume_noise_for_anchor(
     model_sampling: Any,
     desired_streams: list[torch.Tensor],
@@ -509,6 +526,7 @@ def progressive_sample_h3(
 
     need_pixel_anchor = rho > 0.0 and w_max > 0.0
     need_direct_lift = not (rho >= 1.0 and w_min >= 1.0 and w_max >= 1.0)
+    temporal_split = _video_context_prefix_steps(latent_image.get("noise_mask"))
     direct_vae, pixel_vae = paired_lifts(
         clean_low_vae,
         vae,
@@ -517,6 +535,7 @@ def progressive_sample_h3(
         latent_lifter,
         need_lat=need_direct_lift,
         need_pix=need_pixel_anchor,
+        temporal_split=temporal_split,
     )
     transition_timer.mark("paired_lifts")
     log_memory("transition lifts_ready", model.load_device)
