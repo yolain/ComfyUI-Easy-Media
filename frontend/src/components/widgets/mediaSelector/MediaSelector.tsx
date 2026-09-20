@@ -737,7 +737,9 @@ export function MediaSelector({
   const [refreshCoolingDown, setRefreshCoolingDown] = useState(false)
   const lastRefreshAtRef = useRef<number | null>(null)
   const refreshCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const normalizedSelectionLimit = Math.max(1, Math.min(9, maxSelectionCount))
+  const normalizedSelectionLimit = Number.isFinite(maxSelectionCount)
+    ? Math.max(1, Math.floor(maxSelectionCount))
+    : 9
   const supportsMultipleSelection = mediaType === 'image'
     && allowMultipleSelection
   const effectiveValue = multipleSelection

@@ -200,6 +200,7 @@ resolution_combo_options = [
 TYPE_TIMELINE = io.Custom(io_type="TIMELINE")
 TYPE_TIMELINE_INFO = io.Custom(io_type="TIMELINE_INFO")
 TYPE_TRACK_DATA = io.Custom(io_type="TRACK_DATA")
+TYPE_IMAGE_DATA = io.Custom(io_type="IMAGE_DATA")
 TYPE_TRACKS_INFO = io.Custom(io_type="TRACKS_INFO")
 TYPE_LLAMACPP_MODEL = io.Custom(io_type="LLAMACPPMODEL")
 TYPE_LLAMACPP_MODEL_CONFIG = io.Custom(io_type="LLAMACPPMODEL_CONFIG")
@@ -1752,6 +1753,50 @@ class TimelineEditor(io.ComfyNode):
         }
 
         return io.NodeOutput(timeline_info, images_out, audio_out)
+
+
+class MultiImagesLoader(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy multiImagesLoader",
+            display_name="Multi Images Loader",
+            category=CATEGORY_MEDIA,
+            description="Load up to 25 images and resize each using the selected resolution.",
+            inputs=[
+                io.DynamicCombo.Input("resolution", options=resolution_combo_options),
+                TYPE_IMAGE_DATA.Input("image_data"),
+            ],
+            outputs=[io.Image.Output("IMAGES", is_output_list=True)],
+        )
+
+    @classmethod
+    def execute(cls, resolution: str | dict, image_data: str | dict) -> io.NodeOutput:
+        if isinstance(image_data, str):
+            try:
+                image_data = json.loads(image_data)
+            except json.JSONDecodeError as exc:
+                raise ValueError("IMAGE_DATA must be valid JSON.") from exc
+        if not isinstance(image_data, dict) or not isinstance(image_data.get("images"), list):
+            raise ValueError("IMAGE_DATA.images must be a list.")
+        images = image_data["images"]
+        if len(images) > 25:
+            raise ValueError("IMAGE_DATA supports at most 25 images.")
+
+        resize_method = _configured_resize_method(resolution)
+        output: list[torch.Tensor] = []
+        for index, item in enumerate(images):
+            if not isinstance(item, dict):
+                raise ValueError(f"IMAGE_DATA image {index + 1} must be an object.")
+            if item.get("source_type") not in {"input", "output", "local", "url"}:
+                raise ValueError(f"IMAGE_DATA image {index + 1} has an unsupported source type.")
+            image = _resolve_timeline_image_item(item, None)
+            if image is None:
+                raise ValueError(f"Unable to load IMAGE_DATA image {index + 1}.")
+            source_dimensions = (int(image.shape[2]), int(image.shape[1]))
+            width, height = _resolve_configured_dimensions(resolution, "None", source_dimensions)
+            output.append(resize_image(image, width, height, resize_method))
+        return io.NodeOutput(output)
 
 
 class MultiTrackEditor(io.ComfyNode):

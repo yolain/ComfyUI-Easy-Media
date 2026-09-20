@@ -408,6 +408,14 @@
     "webglUnavailable": "WebGL panorama rendering is unavailable.",
     "textureLoadFailed": "Failed to load this image as a panorama texture."
   },
+  "multiImagesLoader": {
+    "add": "Add images",
+    "replace": "Replace image {n}",
+    "preview": "Preview image",
+    "delete": "Delete image",
+    "imageCount": "Images: {n}",
+    "clearAll": "Clear all"
+  },
   "mediaSelector": {
     "tabInputs": "Inputs",
     "tabOutputs": "Outputs",

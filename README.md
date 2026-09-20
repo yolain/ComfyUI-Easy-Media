@@ -100,6 +100,8 @@ Connect `PROJECT_NAME` to the combine node to preview saved segments, choose a v
 
 > **Tips:** The advantage of the multi-track editor is its decoupling design — it is used solely for media editing and loading, and is not bound to any model. Users can freely choose any model node to process the media data output by the multi-track editor.
 
+`easy multiImagesLoader` provides the same resolution choices for an ordered list of up to 25 images. Add images through the media selector or drop image files onto the grid; the node resizes each image and outputs an IMAGE list in grid order.
+
 #### Overview
 
 ![multiTrackEditor](https://github.com/user-attachments/assets/45dc72fd-d2bc-4df9-9e46-5c3e7fc6aa62)

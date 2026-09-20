@@ -34,6 +34,7 @@
   --color-prompt-semantic: var(--prompt-semantic);
   --color-prompt-dialogue: var(--prompt-dialogue);
   --color-panorama-axis-z: var(--panorama-axis-z);
+  --color-image-tile-foreground: var(--image-tile-foreground);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -105,6 +106,7 @@
     --prompt-semantic: oklch(0.62 0.19 48);
     --prompt-dialogue: #cf3976;
     --panorama-axis-z: oklch(0.58 0.2 255);
+    --image-tile-foreground: oklch(0.985 0 0);
     --warning: oklch(0.922 0.191 90);
     --multitrack-video-bg: oklch(0.42 0.08 195);
     --multitrack-video-bg-strong: oklch(0.34 0.09 195);

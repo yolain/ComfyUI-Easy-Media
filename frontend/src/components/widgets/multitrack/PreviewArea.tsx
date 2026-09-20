@@ -28,6 +28,7 @@ import {
   type SelectedMultiTrackSegment,
 } from '@/lib/multitrack-utils'
 import { useMultiTrackResolutionInput } from '@/hooks/use-multitrack-resolution-input'
+import { useExpandedImagePreview } from '@/hooks/use-expanded-image-preview'
 import { useT } from '@/lib/i18n'
 import { mediaContentToViewUrl } from '@/lib/media-url'
 import { computeSlotItems } from '@/lib/timeline-utils'
@@ -58,9 +59,6 @@ import { VideoPreview } from './VideoPreview'
 import { SubtitleSettingsPanel } from './SubtitleSettingsPanel'
 
 const SUBTITLE_SETTINGS_PANEL_TOOLBAR_INSET = 'calc(max(35%, 18rem) + 12px)'
-const EXPANDED_IMAGE_MIN_ZOOM = 1
-const EXPANDED_IMAGE_MAX_ZOOM = 6
-const EXPANDED_IMAGE_ZOOM_STEP = 1.15
 
 interface PreviewAreaProps {
   data: TrackData
@@ -256,10 +254,11 @@ export function PreviewArea({
 }: Readonly<PreviewAreaProps>) {
   const t = useT()
   const draggedTaskImageIdRef = useRef<string | null>(null)
-  const expandedTaskImageRef = useRef<HTMLImageElement>(null)
   const [expandedTaskImageTarget, setExpandedTaskImageTarget] = useState<ExpandedTaskImageTarget | null>(null)
-  const [expandedTaskImageZoom, setExpandedTaskImageZoom] = useState(EXPANDED_IMAGE_MIN_ZOOM)
-  const [expandedTaskImageOrigin, setExpandedTaskImageOrigin] = useState({ x: 50, y: 50 })
+  const expandedImagePreview = useExpandedImagePreview(
+    expandedTaskImageTarget ? `${expandedTaskImageTarget.segmentId}:${expandedTaskImageTarget.imageId}` : null,
+    () => setExpandedTaskImageTarget(null),
+  )
   const [activeTaskPreviewImageId, setActiveTaskPreviewImageId] = useState<string | null>(null)
   const [previewLayoutMode, setPreviewLayoutMode] = useState<PreviewLayoutMode>('balanced')
   const [activeTaskMediaSelectorOpen, setActiveTaskMediaSelectorOpen] = useState(false)
@@ -394,20 +393,6 @@ export function PreviewArea({
       setExpandedTaskImageTarget(null)
     }
   }, [expandedTaskImageTarget, activeTaskImages?.segmentId])
-
-  useEffect(() => {
-    if (!expandedTaskImageTarget) return
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setExpandedTaskImageTarget(null)
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [expandedTaskImageTarget])
-
-  useEffect(() => {
-    setExpandedTaskImageZoom(EXPANDED_IMAGE_MIN_ZOOM)
-    setExpandedTaskImageOrigin({ x: 50, y: 50 })
-  }, [expandedTaskImageTarget?.imageId, expandedTaskImageTarget?.segmentId])
 
   useEffect(() => {
     if (!firstVideoUrl) {
@@ -1272,34 +1257,12 @@ export function PreviewArea({
     if (!imageUrl) return null
     const imageName = image.file_name ?? image.file_path ?? image.local_path ?? image.url ?? image.id
 
-    function handleWheel(event: React.WheelEvent<HTMLDivElement>) {
-      event.preventDefault()
-      event.stopPropagation()
-      const imageElement = expandedTaskImageRef.current
-      if (imageElement) {
-        const rect = imageElement.getBoundingClientRect()
-        if (rect.width > 0 && rect.height > 0) {
-          setExpandedTaskImageOrigin({
-            x: Math.max(0, Math.min(100, (event.clientX - rect.left) / rect.width * 100)),
-            y: Math.max(0, Math.min(100, (event.clientY - rect.top) / rect.height * 100)),
-          })
-        }
-      }
-      const zoomFactor = event.deltaY < 0
-        ? EXPANDED_IMAGE_ZOOM_STEP
-        : 1 / EXPANDED_IMAGE_ZOOM_STEP
-      setExpandedTaskImageZoom((current) => Math.max(
-        EXPANDED_IMAGE_MIN_ZOOM,
-        Math.min(EXPANDED_IMAGE_MAX_ZOOM, current * zoomFactor),
-      ))
-    }
-
     return (
       <div
         data-testid="task-image-expanded-preview"
-        data-zoom={expandedTaskImageZoom.toFixed(2)}
+        data-zoom={expandedImagePreview.zoom.toFixed(2)}
         className="absolute inset-0 z-30 flex items-center justify-center overflow-hidden bg-black p-3 pt-12"
-        onWheel={handleWheel}
+        onWheel={expandedImagePreview.onWheel}
       >
         <Button
           type="button"
@@ -1312,16 +1275,16 @@ export function PreviewArea({
           <span>{t('multitrack.backToPreview')}</span>
         </Button>
         <span className="pointer-events-none absolute right-2 top-2 z-20 rounded bg-background/70 px-2 py-1 text-[10px] tabular-nums text-foreground">
-          {Math.round(expandedTaskImageZoom * 100)}%
+          {Math.round(expandedImagePreview.zoom * 100)}%
         </span>
         <img
-          ref={expandedTaskImageRef}
+          ref={expandedImagePreview.imageRef}
           src={imageUrl}
           alt={imageName}
           className="max-h-full max-w-full object-contain transition-transform duration-100 ease-out"
           style={{
-            transform: `scale(${expandedTaskImageZoom})`,
-            transformOrigin: `${expandedTaskImageOrigin.x}% ${expandedTaskImageOrigin.y}%`,
+            transform: `scale(${expandedImagePreview.zoom})`,
+            transformOrigin: `${expandedImagePreview.origin.x}% ${expandedImagePreview.origin.y}%`,
           }}
           draggable={false}
         />

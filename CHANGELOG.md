@@ -2,6 +2,12 @@
 
 ---
 
+## [1.3.3] - PreRelease
+
+### ✨ New Features
+
+- **Multi-Image Loader**: Added the `easy multiImagesLoader` node, supporting loading up to 25 images.
+
 ## [1.3.2] - 2026-09-20
 
 ### ⚡ Improvements

@@ -57,6 +57,7 @@ class EasyMediaExtension(ComfyExtension):
             TimelineSegmentCount,
             # MultiTrack
             MultiTrackEditor,
+            MultiImagesLoader,
             MultiTrackTaskOutput,
             MultiTrackPromptEnhancer,
             MultiTrackPromptEnhanceToProject,

@@ -623,6 +623,17 @@
       }
     }
   },
+  "easy multiImagesLoader": {
+    "display_name": "多图像加载器",
+    "description": "加载最多 25 张图像，按所选分辨率处理后输出图像列表。",
+    "inputs": {
+      "resolution": { "name": "分辨率" },
+      "image_data": { "name": "图像数据" }
+    },
+    "outputs": {
+      "0": { "name": "图像列表" }
+    }
+  },
   "easy multiTrackEditor": {
     "display_name": "多轨编辑器",
     "description": "编辑多轨媒体数据，并输出轨道信息以及图像、音频和视频媒体列表。",

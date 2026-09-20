@@ -256,6 +256,31 @@ describe('MediaSelector', () => {
     expect(onChange).toHaveBeenCalledWith('a.png|MULTIPLE|b.png', 'input')
   })
 
+  it('allows 25 images when the caller requests 25', async () => {
+    const files = Array.from({ length: 26 }, (_, index) => ({
+      type: 'file',
+      name: `image-${String(index).padStart(2, '0')}.png`,
+      path: `image-${String(index).padStart(2, '0')}.png`,
+      url: `/view?filename=image-${index}.png&type=input&subfolder=`,
+      size: 10,
+      mtime: index,
+    }))
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ items: files }),
+    } as Response)
+    const onChange = vi.fn()
+
+    render(<MediaSelector value="" mediaType="image" allowMultipleSelection maxSelectionCount={25} onChange={onChange} />)
+    await screen.findByTitle('image-00.png')
+    fireEvent.click(screen.getByText('mediaSelector.filter'))
+    fireEvent.click(screen.getByText('mediaSelector.selectAll'))
+
+    expect(screen.getAllByRole('checkbox', { checked: true })).toHaveLength(25)
+    fireEvent.click(screen.getByText('mediaSelector.confirm'))
+    expect(onChange.mock.calls[0][0].split('|MULTIPLE|')).toHaveLength(25)
+  })
+
   it('navigates each level of a nested breadcrumb', async () => {
     vi.mocked(fetch).mockImplementation(async (input) => {
       const subfolder = new URL(String(input), 'http://localhost').searchParams.get('subfolder') ?? ''

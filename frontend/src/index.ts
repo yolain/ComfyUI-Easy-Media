@@ -1,11 +1,13 @@
 import { addInlineStyles } from "@/lib/add-stylesheet";
 import { getEasyMediaSyncPlayMenuItems, installEasyMediaSyncPlay } from "@/lib/sync-play";
 import { preserveTimelineEditorNodeSize } from "@/lib/timeline-node-size";
+import { preserveMultiImagesLoaderNodeSize } from '@/lib/multi-images-loader-node-size'
 import { preserveCompareVideoNodeSize } from "@/lib/compare-video-node-size";
 import { preserveVideoCombineNodeSize } from '@/lib/project-video-combine-node-size';
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 import type { TimelineData } from '@/types/timeline'
 import type { TrackData } from '@/types/multitrack'
+import type { ImageData } from '@/components/widgets/MultiImagesLoaderWidget'
 import type { CompareVideoSettings } from '@/components/widgets/compareVideoWidget'
 import type { ProjectData } from '@/types/project'
 import { DEFAULT_PROJECT_DATA } from '@/types/project'
@@ -22,7 +24,7 @@ declare global {
 
 const [
   { createReactWidget },
-  { TimelineWidget, MultiTrackWidget, CompareVideoWidget, PromptEnhancerAccountWidget, ProjectVideoCombineWidget },
+  { TimelineWidget, MultiTrackWidget, MultiImagesLoaderWidget, CompareVideoWidget, PromptEnhancerAccountWidget, ProjectVideoCombineWidget },
   { createDefaultTimelineData },
   { createDefaultTrackData },
 ] = await Promise.all([
@@ -55,6 +57,7 @@ comfyApp.registerExtension({
 
   beforeRegisterNodeDef(nodeType, nodeData) {
     preserveTimelineEditorNodeSize(nodeType, nodeData)
+    preserveMultiImagesLoaderNodeSize(nodeType, nodeData)
     preserveCompareVideoNodeSize(nodeType, nodeData)
     preserveVideoCombineNodeSize(nodeType, nodeData)
     installEasyMediaSyncPlay(nodeType, nodeData)
@@ -81,6 +84,15 @@ comfyApp.registerExtension({
         keepResponsiveWidthInLiteGraph: true,
         domWidgetOptions: {
           getMinHeight: () => 320,
+        },
+      }),
+      IMAGE_DATA: createReactWidget<ImageData>(MultiImagesLoaderWidget, {
+        defaultValue: JSON.stringify({ images: [] }),
+        keepResponsiveWidthInLiteGraph: true,
+        domWidgetOptions: {
+          getMinHeight: () => 320,
+          hideOnZoom: false,
+          serialize: true,
         },
       }),
       PROJECT_DATA: createReactWidget<ProjectData>(ProjectVideoCombineWidget, {

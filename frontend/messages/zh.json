@@ -408,6 +408,14 @@
     "webglUnavailable": "当前环境无法使用 WebGL 全景渲染。",
     "textureLoadFailed": "无法将此图片加载为全景纹理。"
   },
+  "multiImagesLoader": {
+    "add": "添加图像",
+    "replace": "替换图像 {n}",
+    "preview": "预览图像",
+    "delete": "删除图像",
+    "imageCount": "图片数量：{n}",
+    "clearAll": "清空所有"
+  },
   "mediaSelector": {
     "tabInputs": "输入",
     "tabOutputs": "输出",

@@ -5472,3 +5472,42 @@ def test_minimax_prompt_override_media_types_only_includes_referenced_media():
     assert module.minimax_prompt_override_media_types(payload) == {"image", "video"}
     assert module.is_minimax_prompt_override(payload) is True
     assert module.is_minimax_prompt_override("@图片1 legacy override") is False
+def test_multi_images_loader_resizes_ordered_image_list(monkeypatch):
+    module = _load_basic_module()
+    sources = {
+        "first.png": torch.zeros(1, 40, 80, 3),
+        "second.png": torch.ones(1, 100, 50, 3),
+    }
+    monkeypatch.setattr(
+        module,
+        "_resolve_timeline_image_item",
+        lambda item, unused: sources[item["file_path"]],
+    )
+    calls = []
+
+    def resize(image, width, height, method):
+        calls.append((width, height, method))
+        return torch.full((1, height, width, 3), float(len(calls)))
+
+    monkeypatch.setattr(module, "resize_image", resize)
+    image_data = {"images": [
+        {"source_type": "input", "file_path": "first.png"},
+        {"source_type": "input", "file_path": "second.png"},
+    ]}
+    result = module.MultiImagesLoader.execute(
+        {"resolution": "width x height (longest)", "resize_to_pixel": 120, "resize_method": "crop"},
+        json.dumps(image_data),
+    )
+
+    assert calls == [(120, 60, "crop"), (60, 120, "crop")]
+    assert len(result[0]) == 2
+    assert result[0][0].shape == (1, 60, 120, 3)
+    assert result[0][1].shape == (1, 120, 60, 3)
+
+
+def test_multi_images_loader_rejects_more_than_25_images():
+    module = _load_basic_module()
+    with pytest.raises(ValueError, match="at most 25"):
+        module.MultiImagesLoader.execute("width x height (auto)", {
+            "images": [{"source_type": "input", "file_path": "x.png"}] * 26,
+        })
