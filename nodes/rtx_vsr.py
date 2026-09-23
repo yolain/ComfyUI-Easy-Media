@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
 import tempfile
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +22,8 @@ QUALITY_LEVELS = ["LOW", "MEDIUM", "HIGH", "ULTRA"]
 CODECS = ["h264", "hevc", "av1"]
 PRESETS = ["P1", "P2", "P3", "P4", "P5", "P6", "P7"]
 MAX_OUTPUT_DIMENSION = 8192
+DECODE_BATCH_SIZE = 4
+DECODE_BUFFER_SIZE = 12
 
 # GPU I/O details are adapted from glarsson/fast-rtxvsr (MIT), especially the
 # PyNvVideoCodec GPU-buffer NVENC surface layout and the explicit CUDA-stream
@@ -143,15 +147,16 @@ def _parse_rate(raw: Any) -> float:
     if isinstance(raw, (tuple, list)) and len(raw) == 2:
         numerator, denominator = float(raw[0]), float(raw[1])
         return numerator / denominator if denominator else 0.0
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        pass
     text = str(raw)
     if "/" in text:
         numerator, denominator = text.split("/", 1)
         denominator_value = float(denominator)
         return float(numerator) / denominator_value if denominator_value else 0.0
-    try:
-        return float(text)
-    except ValueError:
-        return 0.0
+    return 0.0
 
 
 def _decoder_info(decoder: Any) -> tuple[int, int, float, int]:
@@ -169,12 +174,13 @@ def _decoder_info(decoder: Any) -> tuple[int, int, float, int]:
             metadata,
             "average_fps",
             "avg_frame_rate",
+            "frameRate",
             "frame_rate",
             "fps",
             "FrameRate",
         )
     )
-    frame_count = int(_meta_value(metadata, "num_frames", "n_frames", default=0) or 0)
+    frame_count = int(_meta_value(metadata, "num_frames", "numFrames", "n_frames", default=0) or 0)
     if frame_count <= 0:
         try:
             frame_count = int(len(decoder))
@@ -183,10 +189,11 @@ def _decoder_info(decoder: Any) -> tuple[int, int, float, int]:
     return width, height, fps, frame_count
 
 
-def _probe_fps(path: str) -> float:
+def _probe_fps_spec(path: str) -> tuple[float, str]:
+    """Return source frame rate as both float and an exact FFmpeg rate expression."""
     ffprobe = get_ffmpeg_path("ffprobe")
     if not ffprobe:
-        return 0.0
+        return 0.0, ""
     command = [
         ffprobe,
         "-v",
@@ -194,29 +201,44 @@ def _probe_fps(path: str) -> float:
         "-select_streams",
         "v:0",
         "-show_entries",
-        "stream=avg_frame_rate",
+        "stream=avg_frame_rate,r_frame_rate",
         "-of",
-        "default=noprint_wrappers=1:nokey=1",
+        "json",
         path,
     ]
     result = subprocess.run(command, capture_output=True, text=True, errors="replace")
     if result.returncode != 0:
-        return 0.0
-    return _parse_rate(result.stdout.strip())
+        return 0.0, ""
+    try:
+        streams = json.loads(result.stdout).get("streams", [])
+    except (json.JSONDecodeError, AttributeError):
+        return 0.0, ""
+    if not streams:
+        return 0.0, ""
+    for key in ("avg_frame_rate", "r_frame_rate"):
+        raw = streams[0].get(key, "")
+        value = _parse_rate(raw)
+        if value > 0:
+            return value, str(raw)
+    return 0.0, ""
+
+
+def _fps_expression(fps: float) -> str:
+    """Convert a floating frame rate into a stable rational expression for FFmpeg."""
+    if fps <= 0:
+        return "24/1"
+    # Common NTSC rates become 24000/1001, 30000/1001, 60000/1001, etc.
+    fraction = Fraction(fps).limit_denominator(1001)
+    return f"{fraction.numerator}/{fraction.denominator}"
 
 
 def _decoded_frames(decoder: Any):
-    if hasattr(decoder, "get_batch_frames"):
-        while True:
-            batch = decoder.get_batch_frames(1)
-            if not batch:
-                break
-            yield from batch
-        return
-
-    total = len(decoder)
-    for index in range(total):
-        yield decoder[index]
+    while True:
+        batch = decoder.get_batch_frames(DECODE_BATCH_SIZE)
+        if not batch:
+            break
+        # ThreadedDecoder keeps frames valid until the next batch call.
+        yield from batch
 
 
 def _decoded_rgb_tensor(frame: Any, torch_mod: Any):
@@ -312,6 +334,10 @@ def _make_encoder(nvc: Any, width: int, height: int, gpu: int, codec: str, prese
         "fps": max(1, int(round(fps or 24.0))),
         "bitrate": int(bitrate),
         "colorspace": "bt709",
+        # Keep encoded packets in display order for the raw-bitstream mux path.
+        # Raw bitstreams have no container PTS for FFmpeg to recover frame
+        # presentation order. Disable B-frames during this encode/mux workflow.
+        "bf": 0,
     }
     return nvc.CreateEncoder(width, height, "NV12", False, **params)
 
@@ -340,7 +366,7 @@ def _output_size(input_width: int, input_height: int, resize_type: dict[str, Any
     return width, height
 
 
-def _mux_elementary_video(elementary_path: str, output_path: str, fps: float) -> None:
+def _mux_elementary_video(elementary_path: str, output_path: str, fps: float, fps_expr: str = "") -> None:
     ffmpeg = get_ffmpeg_path("ffmpeg")
     if not ffmpeg:
         raise RuntimeError("RTX VSR Video requires FFmpeg to mux the NVENC bitstream.")
@@ -350,7 +376,7 @@ def _mux_elementary_video(elementary_path: str, output_path: str, fps: float) ->
         "-fflags",
         "+genpts",
         "-r",
-        str(fps or 24.0),
+        fps_expr or _fps_expression(fps),
         "-i",
         elementary_path,
         "-map",
@@ -465,17 +491,24 @@ def _run_streaming_vsr(
     if color_type is None or not hasattr(color_type, "RGBP"):
         raise RuntimeError("Installed PyNvVideoCodec does not expose OutputColorType.RGBP.")
 
-    decoder = nvc.SimpleDecoder(
-        source_path,
+    # PyNvVideoCodec 2.2 recommends background prefetch for continuous
+    # inference pipelines; keep the batch fully consumed before fetching again.
+    decoder = nvc.ThreadedDecoder(
+        enc_file_path=source_path,
+        buffer_size=DECODE_BUFFER_SIZE,
         gpu_id=gpu,
         use_device_memory=True,
         output_color_type=color_type.RGBP,
     )
     input_width, input_height, fps, total_frames = _decoder_info(decoder)
-    if fps <= 0:
-        fps = _probe_fps(source_path)
+    probed_fps, probed_fps_expr = _probe_fps_spec(source_path)
+    if probed_fps > 0:
+        fps = probed_fps
     if fps <= 0:
         fps = 24.0
+    # Use the source container's exact rational rate (e.g. 30000/1001) when
+    # rebuilding timestamps around the encoded elementary stream.
+    mux_fps_expr = probed_fps_expr or _fps_expression(fps)
 
     frame_iter = _decoded_frames(decoder)
     pending_frame = None
@@ -551,7 +584,7 @@ def _run_streaming_vsr(
                 torch.cuda.current_stream(gpu).synchronize()
                 handle.write(_packet_bytes(encoder.EndEncode()))
 
-        _mux_elementary_video(elementary_path, video_only_path, fps)
+        _mux_elementary_video(elementary_path, video_only_path, fps, mux_fps_expr)
     finally:
         try:
             os.unlink(elementary_path)
@@ -678,7 +711,7 @@ class EasyRTXVideoSuperResolution(io.ComfyNode):
                 video_only_path = None
 
             logger.info(
-                "[RTX VSR Video] completed: %d frames, %.3f fps source rate, %dx%d, %s/%s, %.1f Mbps",
+                "[RTX VSR Video] completed: %d frames, %.6f fps source rate, %dx%d, %s/%s, %.1f Mbps",
                 frames,
                 fps,
                 width,
