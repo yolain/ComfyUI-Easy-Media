@@ -417,6 +417,26 @@ def install_drift_control_av_model(
     return patched
 
 
+def inherit_drift_control_av_model(
+    source_model: Any,
+    target_model: Any,
+    latent: dict[str, Any],
+    sigmas: Any,
+) -> Any:
+    """Reapply project continuity to a replacement model with independent state."""
+    if source_model is target_model:
+        return target_model
+    state = source_model.model_options.get(_WRAPPER_KEY)
+    if state is None:
+        return target_model
+    return install_drift_control_av_model(
+        target_model,
+        latent,
+        sigmas,
+        prefix_steps=state.prefix_steps,
+    )
+
+
 def apply_context_swap_drift_control(
     model: Any,
     target_latent: dict[str, Any],

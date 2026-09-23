@@ -51,6 +51,52 @@ def _av_latent(
     return {"samples": [video, audio]}
 
 
+def test_hires_replacement_inherits_independent_drift_control(nested_tensor_module, monkeypatch):
+    patcher_extension = types.ModuleType("comfy.patcher_extension")
+    patcher_extension.WrappersMP = types.SimpleNamespace(APPLY_MODEL="apply_model")
+    monkeypatch.setitem(sys.modules, "comfy.patcher_extension", patcher_extension)
+
+    class Model:
+        def __init__(self, lora):
+            self.model = types.SimpleNamespace(model_type=types.SimpleNamespace(name="FLOW_AV"))
+            self.model_options = {"lora": lora}
+
+        def clone(self):
+            result = Model(self.model_options["lora"])
+            result.model_options = self.model_options.copy()
+            return result
+
+        def set_model_denoise_mask_function(self, callback):
+            self.model_options["denoise_mask_function"] = callback
+
+        def add_wrapper_with_key(self, kind, key, callback):
+            self.model_options["wrapper"] = callback
+
+    latent = _av_latent()
+    sigmas = torch.tensor([1.0, 0.8, 0.6, 0.3, 0.0])
+    source = drift_control_av.install_drift_control_av_model(Model("base"), latent, sigmas, 2)
+    replacement = Model("detail")
+    inherited = drift_control_av.inherit_drift_control_av_model(source, replacement, latent, sigmas)
+
+    assert inherited is not replacement
+    assert inherited.model_options["lora"] == "detail"
+    assert replacement.model_options == {"lora": "detail"}
+    source_state = source.model_options[drift_control_av._WRAPPER_KEY]
+    state = inherited.model_options[drift_control_av._WRAPPER_KEY]
+    assert state is not source_state
+    assert state.prefix_steps == source_state.prefix_steps == 2
+    assert state.sigmas == source_state.sigmas
+    assert state.video_shape == source_state.video_shape
+    mask = torch.ones(1, 1, sum(s.numel() for s in latent["samples"]))
+    inherited.model_options["denoise_mask_function"](torch.tensor(0.3), mask)
+    assert source_state.current_video_mask is None
+    assert state.current_video_mask is not None
+    wrapped = inherited.model_options["wrapper"](lambda **kwargs: kwargs)
+    assert wrapped["denoise_mask"] is state.current_video_mask
+    assert drift_control_av.inherit_drift_control_av_model(source, source, latent, sigmas) is source
+    assert drift_control_av.inherit_drift_control_av_model(Model("base"), replacement, latent, sigmas) is replacement
+
+
 def _video_latent(
     *,
     video_steps: int = 2,

@@ -1266,9 +1266,12 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
     assert sampling_mode_options[1][1] == []
     selflift_inputs = {port.name: port for port in sampling_mode_options[2][1]}
     assert list(selflift_inputs) == [
+        "model_hires",
         "transition_ratio",
         "lowres_scale",
     ]
+    for flag in ("optional", "raw_link", "lazy"):
+        assert selflift_inputs["model_hires"].kwargs[flag] is True
     assert selflift_inputs["transition_ratio"].kwargs["default"] == 0.6
     assert selflift_inputs["lowres_scale"].kwargs["default"] == 0.6
     for name in ("sampler_2nd", "sigmas_2nd", "model_loader_2nd"):
@@ -2156,6 +2159,7 @@ def test_multitrack_h3_project_has_matching_chinese_localization():
     assert translation["display_name"] == "多轨项目"
     assert set(translation["inputs"]) == {
         "model_loader",
+        "model_hires",
         "tracks_info",
         "sampler",
         "sigmas",
@@ -2590,13 +2594,39 @@ def test_multitrack_h3_selflift_passes_dynamic_sampling_values(monkeypatch):
     assert selflift["inputs"]["tile_count"] == 4
 
 
+@pytest.mark.parametrize("linked_loader", [False, True])
+@pytest.mark.parametrize("hires_input", [None, ["lora", 0], [["lora", 0]], [object()]])
+def test_multitrack_selflift_forwards_optional_hires_model(
+    monkeypatch, linked_loader, hires_input,
+):
+    module = _load_minimax_node(monkeypatch)
+    inputs = _h3_project_inputs(
+        sampling_mode=_h3_sampling_mode("selflift", model_hires=hires_input),
+    )
+    if linked_loader:
+        inputs["model_loader"] = [["loader", 0]]
+
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    sampler = _graph_node(result, "easy minimaxH3SelfLiftSampler")
+    if hires_input is None:
+        assert "model_hires" not in sampler["inputs"]
+    else:
+        expected = hires_input if hires_input == ["lora", 0] else hires_input[0]
+        assert sampler["inputs"]["model_hires"] == expected
+        assert sampler["inputs"]["model"] != expected
+
+
 @pytest.mark.parametrize("continuity_mode", ["context", "context_swap"])
+@pytest.mark.parametrize("with_hires", [False, True])
 def test_multitrack_h3_selflift_supports_context_and_locked_audio(
     monkeypatch,
     continuity_mode,
+    with_hires,
 ):
     module = _load_minimax_node(monkeypatch)
     inputs = _h3_project_inputs(sampling_mode=_h3_sampling_mode("selflift"))
+    if with_hires:
+        inputs["sampling_mode"][0]["model_hires"] = [["hires_lora", 0]]
     info = inputs["tracks_info"][0]
     info["tracks"][0]["segments"].append(
         {
@@ -2635,6 +2665,11 @@ def test_multitrack_h3_selflift_supports_context_and_locked_audio(
     ]
     assert len(selflift_nodes) == 2
     context_selflift = selflift_nodes[1][1]
+    for _, node in selflift_nodes:
+        if with_hires:
+            assert node["inputs"]["model_hires"] == ["hires_lora", 0]
+        else:
+            assert "model_hires" not in node["inputs"]
     audio_lock_id = next(
         node_id
         for node_id, node in result.expand.items()
@@ -2667,6 +2702,7 @@ def test_selflift_sampler_schema_forces_euler_by_not_exposing_a_sampler(monkeypa
     schema = module.EasyMiniMaxH3SelfLiftSampler.define_schema()
     inputs = {port.name: port for port in schema.inputs}
 
+    assert inputs["model_hires"].kwargs["optional"] is True
     assert schema.node_id == "easy minimaxH3SelfLiftSampler"
     assert schema.is_dev_only is True
     assert "sampler" not in inputs
@@ -2785,7 +2821,8 @@ def test_bundled_h3_latent_upscaler_preserves_audio_and_resizes_mask(monkeypatch
     assert output["batch_index"] == [0]
 
 
-def test_selflift_sampler_uses_lowres_scale(monkeypatch):
+@pytest.mark.parametrize("model_hires", [None, object()])
+def test_selflift_sampler_uses_lowres_scale(monkeypatch, model_hires):
     module = _load_minimax_node(monkeypatch)
     captured = {}
     sampled = {"samples": object()}
@@ -2805,6 +2842,7 @@ def test_selflift_sampler_uses_lowres_scale(monkeypatch):
 
     result = module.EasyMiniMaxH3SelfLiftSampler.execute(
         model=object(),
+        model_hires=model_hires,
         positive=[],
         vae=object(),
         latent_image={"samples": torch.zeros(1, 24, 1, 60, 104)},
@@ -2814,6 +2852,7 @@ def test_selflift_sampler_uses_lowres_scale(monkeypatch):
         lowres_scale=0.6,
     )
 
+    assert captured["model_hires"] is model_hires
     assert captured["lowres_scale"] == pytest.approx(0.6)
     assert captured["rho"] == pytest.approx(0.1)
     assert captured["w_min"] == 0.25

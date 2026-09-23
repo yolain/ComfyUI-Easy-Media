@@ -1268,6 +1268,10 @@
     "display_name": "MiniMax H3 SelfLift 渐进采样器",
     "description": "先在低分辨率执行前段去噪评估，再提升干净端点，并在目标分辨率继续同一条 Euler 调度；可复用上一段保存的低分辨率上下文。",
     "inputs": {
+      "model_hires": {
+        "name": "高分辨率模型",
+        "tooltip": "可选；仅用于 SelfLift 提升后的高分辨率去噪。未连接时沿用原模型；连接时使用该兼容 H3 模型及其完整 LoRA 组合，CLIP、VAE 与 Sigma 调度保持原配置。"
+      },
       "model": { "name": "模型" },
       "positive": { "name": "正向条件" },
       "vae": { "name": "VAE" },
@@ -1318,6 +1322,10 @@
     "display_name": "多轨项目",
     "description": "执行多轨 MiniMax H3 项目的一采与可选二采，并保存片段产物。",
     "inputs": {
+      "model_hires": {
+        "name": "高分辨率模型",
+        "tooltip": "可选；仅用于 SelfLift 提升后的高分辨率去噪。未连接时沿用原模型；连接时使用该兼容 H3 模型及其完整 LoRA 组合，CLIP、VAE 与 Sigma 调度保持原配置。"
+      },
       "model_loader": {
         "name": "模型加载器",
         "tooltip": "连接 FastUse 或模型加载器打包节点输出的 FAST_MODEL_LOADER。"

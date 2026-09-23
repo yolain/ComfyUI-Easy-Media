@@ -194,7 +194,8 @@ v1.3.0 新增多轨项目流水线，将时间线编排、逐段生成、上下�
 | `model_loader` | 一采 H3 模型与共用的 CLIP、视频 VAE、音频 VAE；视频项目也需要音频 VAE |
 | `model_loader_2nd` | 可选的二采 H3 模型；不接时复用一采模型，接入后也仍使用一采加载器的编码器和 VAE |
 | `sampling_plan` | 内置 `ultra_light`、`light`、`medium`、`high` 等预设，根据 Turbo / 非 Turbo 模型选择采样器和 sigmas；也可用 `custom` 自定义 |
-| `sampling_mode` | 可选 `single`、`dual` 或 `selflift`；SelfLift 会展开 `transition_ratio`、`lowres_scale` 和 `highres_tiling`。普通片段关闭像素/VAE 修正，上下文续接自动使用内部保守预设；同时分别保存低、高分辨率上下文 |
+| `sampling_mode` | 可选 `single`、`dual` 或 `selflift`；SelfLift 会展开 `model_hires`、`transition_ratio` 和 `lowres_scale`，高分辨率分块使用共用的 `enabled_tiling` 控件。普通片段关闭像素/VAE 修正，上下文续接自动使用内部保守预设；同时分别保存低、高分辨率上下文 |
+| `model_hires` | 仅在 SelfLift 模式显示的可选 MODEL 输入。未连接时两个阶段均沿用原模型；连接后仅在提升后的高分辨率去噪阶段使用该模型及其完整 LoRA 组合。须使用相同 H3 架构、latent 格式及噪声/音频缩放；CLIP、VAE 与 Sigma 调度保持原配置 |
 | `sampler` / `sigmas` | 成对接入以覆盖一采采样设置；二采对应 `sampler_2nd` / `sigmas_2nd`，也需成对接入。`custom` 需要为实际运行的每个采样阶段提供这两个输入 |
 | `upscale_by` | 相对于编辑器尺寸的二采放大倍率；默认 `1.250`，三位小数，步长 `0.001` |
 | `disable_2nd_noise` | 控制是否禁用二采新增噪声，不代表跳过二采 |

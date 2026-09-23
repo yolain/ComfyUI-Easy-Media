@@ -1919,6 +1919,15 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
                     optional=True,
                     tooltip="Optional project-loop execution dependency.",
                 ),
+                io.Model.Input(
+                    "model_hires",
+                    optional=True,
+                    tooltip=(
+                        "Optional compatible H3 model used only for high-resolution "
+                        "denoising after the lift, including its LoRA stack. "
+                        "Leave disconnected to use model for both stages."
+                    ),
+                ),
             ],
             outputs=[
                 io.Latent.Output("latent"),
@@ -1953,6 +1962,7 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
         segment_index: int = 0,
         sampling_pass: str = "selflift",
         previous: Any | None = None,
+        model_hires: Any | None = None,
     ) -> io.NodeOutput:
         del previous
         from ..modules.selflift.sampling import progressive_sample_h3
@@ -2024,11 +2034,13 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
             f"upscaler_model={selected_upscaler}, "
             f"enabled_tiling={tiling_enabled}, "
             f"low_context={'saved' if low_context_latent is not None else 'derived'}, "
+            f"hires_model={'custom' if model_hires is not None else 'same'}, "
             "sampling_route=selflift",
         )
         try:
             sampled, low_context = progressive_sample_h3(
                 model=model,
+                model_hires=model_hires,
                 positive=positive,
                 vae=vae,
                 latent_image=latent_image,
