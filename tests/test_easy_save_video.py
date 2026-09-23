@@ -900,7 +900,7 @@ def test_merge_videos_from_single_path_trims_loaded_video(monkeypatch, tmp_path)
     assert result.values == (str(tmp_path / "temp" / "clip-trimmed.mp4"),)
 
 
-def test_trim_video_uses_standard_suffix_for_comfy_annotated_paths(monkeypatch, tmp_path):
+def _load_real_video_utils(monkeypatch, tmp_path):
     utils_module_path = Path(__file__).resolve().parents[1] / "utils" / "video.py"
     folder_paths = types.ModuleType("folder_paths")
     folder_paths.get_temp_directory = lambda: str(tmp_path)
@@ -922,6 +922,23 @@ def test_trim_video_uses_standard_suffix_for_comfy_annotated_paths(monkeypatch, 
     monkeypatch.setitem(sys.modules, "easy_media.utils.video_real", utils_module)
     assert spec.loader is not None
     spec.loader.exec_module(utils_module)
+    return utils_module
+
+
+def test_merge_videos_accepts_nearly_equal_fps_but_rejects_different_rates(monkeypatch, tmp_path):
+    utils_module = _load_real_video_utils(monkeypatch, tmp_path)
+    spec = utils_module.MergeSpec
+    first = spec(320, 240, Fraction(24), False, None, None)
+    nearly_equal = spec(320, 240, Fraction("24.0000001"), False, None, None)
+    different_rate = spec(320, 240, Fraction(24000, 1001), False, None, None)
+
+    utils_module.validate_merge_compatibility([first, nearly_equal])
+    with pytest.raises(ValueError, match="'fps' mismatch"):
+        utils_module.validate_merge_compatibility([first, different_rate])
+
+
+def test_trim_video_uses_standard_suffix_for_comfy_annotated_paths(monkeypatch, tmp_path):
+    utils_module = _load_real_video_utils(monkeypatch, tmp_path)
 
     source = tmp_path / "source.mp4"
     source.write_bytes(b"video")
