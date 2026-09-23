@@ -2069,6 +2069,29 @@ def test_paused_multitrack_preview_uses_output_frame_sampling(tmp_path, monkeypa
     assert sampled[14, 8, 8, 2] > sampled[14, 8, 8, 0]
 
 
+def test_paused_multitrack_preview_seek_matches_full_decode(tmp_path):
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        pytest.skip("FFmpeg is unavailable")
+    source = tmp_path / "30fps-offset.mp4"
+    subprocess.run([
+        ffmpeg, "-v", "error", "-y",
+        "-f", "lavfi", "-i", "testsrc2=s=64x64:r=30:d=6",
+        "-an", "-c:v", "mpeg4", "-output_ts_offset", "5", str(source),
+    ], check=True)
+    _load_basic_module()
+    video_module = sys.modules["easy_media.utils.video"]
+
+    for frame in (96, 97, 120):
+        expected = subprocess.run([
+            ffmpeg, "-v", "error", "-i", str(source),
+            "-vf", f"setpts=PTS-STARTPTS,fps=fps=24:start_time=0,"
+                   f"select=eq(n\\,{frame}),scale=w='min(960,iw)':h=-2",
+            "-frames:v", "1", "-an", "-f", "image2pipe", "-vcodec", "mjpeg", "-",
+        ], capture_output=True, check=True, timeout=60).stdout
+        assert video_module.decode_multitrack_preview_frame(source, frame, 24) == expected
+
+
 def test_multitrack_task_output_reports_media_processing_progress():
     module = _load_basic_module()
     tracks_info = {

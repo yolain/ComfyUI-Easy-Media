@@ -100,6 +100,34 @@ describe('VideoPreview', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/easy-media/video/source-fps')
   })
 
+  it('uses the native video for URL sources without probing or requesting a frame', () => {
+    const urlVideo = activeVideo(8.5)
+    urlVideo.segment.content = {
+      media_type: 'video',
+      source_type: 'url',
+      url: 'https://example.com/shot.mp4',
+    }
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <VideoPreview
+        frameRate={24}
+        activeVideo={urlVideo}
+        resolution={resolution}
+        isPlaying={false}
+        muted
+        volume={1}
+      />,
+    )
+
+    const video = screen.getByTestId('multitrack-video-preview') as HTMLVideoElement
+    expect(video.src).toBe('https://example.com/shot.mp4')
+    expect(video.currentTime).toBeCloseTo(8.5)
+    expect(video.style.visibility).toBe('visible')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('seeks the video element to the active local time', () => {
     const { rerender } = render(
       <VideoPreview

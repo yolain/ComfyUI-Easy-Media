@@ -403,9 +403,15 @@ def decode_multitrack_preview_frame(
     ffmpeg = get_ffmpeg_path()
     if ffmpeg is None:
         raise RuntimeError("FFmpeg is required for frame-accurate preview")
+    # Accurate input seeking decodes from the preceding keyframe. Keep one second
+    # of source frames before the requested output frame so the fps filter has
+    # the same timestamp context as a full decode from frame zero.
+    seek_time = max(0, math.floor(frame / frame_rate) - 1)
+    seek_args = ["-ss", str(seek_time), "-copyts", "-start_at_zero"] if seek_time else []
+    timestamp_filter = "" if seek_time else "setpts=PTS-STARTPTS,"
     result = subprocess.run(
-        [ffmpeg, "-v", "error", "-i", str(video_path),
-         "-vf", f"setpts=PTS-STARTPTS,fps=fps={frame_rate}:start_time=0,"
+        [ffmpeg, "-v", "error", *seek_args, "-i", str(video_path),
+         "-vf", f"{timestamp_filter}fps=fps={frame_rate}:start_time=0,"
                 f"select=eq(n\\,{frame}),scale=w='min(960,iw)':h=-2",
          "-frames:v", "1", "-an", "-f", "image2pipe", "-vcodec", "mjpeg", "-"],
         capture_output=True, check=False, timeout=60,

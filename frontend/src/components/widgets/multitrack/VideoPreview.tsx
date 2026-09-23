@@ -61,6 +61,7 @@ export function VideoPreview({
   const safeVolume = Math.max(0, Math.min(volume, 1))
   const fit = objectFitForResizeMethod(resolution.resizeMethod)
   const activeSegmentId = activeVideo?.segment.id ?? null
+  const isUrlSource = activeVideo?.segment.content.source_type === 'url'
   const activeLocalTime = activeVideo?.localTime ?? 0
   const sourceFrame = Math.round(activeLocalTime * frameRate)
   const stillKey = activeVideo && videoUrl
@@ -71,7 +72,7 @@ export function VideoPreview({
     && Math.abs(sourceRate.fps - frameRate) <= 0.01
 
   useEffect(() => {
-    if (!activeVideo || !videoUrl) return
+    if (!activeVideo || !videoUrl || isUrlSource) return
     const controller = new AbortController()
     const content = activeVideo.segment.content
     const probedUrl = videoUrl
@@ -105,10 +106,10 @@ export function VideoPreview({
     }
     void probeFrameRate()
     return () => controller.abort()
-  }, [videoUrl])
+  }, [videoUrl, isUrlSource])
 
   useEffect(() => {
-    if (isPlaying || useNativeFrame || !sourceRateKnown || !activeVideo || !videoUrl || stillKey === null) {
+    if (isPlaying || isUrlSource || useNativeFrame || !sourceRateKnown || !activeVideo || !videoUrl || stillKey === null) {
       setStill(null)
       setFailedStillKey(null)
       return
@@ -151,7 +152,7 @@ export function VideoPreview({
       controller.abort()
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [activeVideo?.segment.id, frameRate, isPlaying, sourceFrame, sourceRateKnown, stillKey, useNativeFrame, videoUrl])
+  }, [activeVideo?.segment.id, frameRate, isPlaying, isUrlSource, sourceFrame, sourceRateKnown, stillKey, useNativeFrame, videoUrl])
 
   useEffect(() => {
     const video = videoRef.current
@@ -224,7 +225,7 @@ export function VideoPreview({
           onLoadedData={markNativeFrameReady}
           style={{
             objectFit: fit,
-            visibility: isPlaying || failedStillKey === stillKey
+            visibility: isPlaying || isUrlSource || failedStillKey === stillKey
               || (useNativeFrame && nativeReadyKey === stillKey) ? 'visible' : 'hidden',
           }}
         />
