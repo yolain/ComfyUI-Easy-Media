@@ -78,6 +78,7 @@ from .utils.video import (
 
 _SMART_SPLIT_LOCK = asyncio.Lock()
 _SUBTITLE_SPEECH_LOCK = asyncio.Lock()
+_PREVIEW_FRAME_LOCK = asyncio.Lock()
 _RUNNINGHUB_ACCOUNT_ENDPOINT = "https://www.runninghub.cn/uc/openapi/accountStatus"
 
 register_workflow_routes(
@@ -529,7 +530,8 @@ async def handle_video_source_fps(request: web.Request) -> web.Response:
             video_path = temp_path
         else:
             video_path = resolve_segment_video_path(data)
-        info = await asyncio.to_thread(ffprobe_info, str(video_path))
+        async with _PREVIEW_FRAME_LOCK:
+            info = await asyncio.to_thread(ffprobe_info, str(video_path))
         fps = info.get("fps")
         if not isinstance(fps, (int, float)) or not math.isfinite(fps) or fps <= 0:
             raise ValueError("Unable to read source video frame rate")
@@ -569,7 +571,8 @@ async def handle_video_preview_frame(request: web.Request) -> web.Response:
             video_path = temp_path
         else:
             video_path = resolve_segment_video_path(data)
-        image = await asyncio.to_thread(decode_multitrack_preview_frame, video_path, frame, float(fps))
+        async with _PREVIEW_FRAME_LOCK:
+            image = await asyncio.to_thread(decode_multitrack_preview_frame, video_path, frame, float(fps))
         return web.Response(body=image, content_type="image/jpeg")
     except (ValueError, FileNotFoundError) as error:
         return web.json_response({"error": str(error)}, status=400)

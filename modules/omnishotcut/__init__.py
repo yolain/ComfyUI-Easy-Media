@@ -111,7 +111,7 @@ def _read_video(video_path: Path, width: int, height: int, fps: float) -> np.nda
         [ffmpeg, "-v", "error", "-i", str(video_path),
          "-vf", f"setpts=PTS-STARTPTS,fps=fps={fps}:start_time=0,scale={width}:{height}",
          "-an", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-        capture_output=True, check=False,
+        capture_output=True, check=False, timeout=600,
     )
     if result.returncode != 0 or not result.stdout or len(result.stdout) % frame_size:
         raise RuntimeError(

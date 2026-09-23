@@ -39,6 +39,8 @@ describe('VideoPreview', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    Reflect.deleteProperty(URL, 'createObjectURL')
+    Reflect.deleteProperty(URL, 'revokeObjectURL')
   })
 
   it('requests the output-sampled frame when paused and hides the native video', async () => {
