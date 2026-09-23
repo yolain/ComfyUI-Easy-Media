@@ -58,6 +58,7 @@ from ..utils import (
     prompt_override_has_frame_ranges,
     prompt_override_has_value,
     resize_image,
+    render_single_video_segment_with_ffmpeg,
     resolve_video_path,
     silence,
     trim_audio,
@@ -685,6 +686,40 @@ def _merge_video_track(
     audio_muted: bool = False,
     resize_method: str | None = None,
 ):
+    if len(segments) == 1 and total_length > 0 and frame_rate > 0:
+        segment, video = segments[0]
+        content = segment.get("content", {})
+        if not isinstance(content, dict):
+            content = {}
+        segment_start = int(segment.get("start_frame", 0))
+        segment_end = int(segment.get("end_frame", 0))
+        origin_start = int(segment.get("origin_start_frame", segment_start))
+        if (
+            segment_start == 0
+            and segment_end == total_length
+            and resize_method is not None
+            and tuple(video.get_dimensions()) != (width, height)
+        ):
+            source = _video_stream_source(video)
+            if source is not None:
+                log_node_info(
+                    "MultiTrack Video Track",
+                    "单片段覆盖任务窗口，直接裁剪缩放",
+                )
+                rendered_path = render_single_video_segment_with_ffmpeg(
+                    source,
+                    max(0, segment_start - origin_start),
+                    total_length,
+                    frame_rate,
+                    width,
+                    height,
+                    resize_method,
+                    audio_volume_db=base_volume_db + audio_volume_db(content),
+                    audio_muted=audio_muted or audio_is_muted(content),
+                )
+                if rendered_path is not None:
+                    return InputImpl.VideoFromFile(rendered_path)
+
     file_segments: list[dict] = []
     for segment, video in segments:
         source = _video_stream_source(video)
@@ -2935,6 +2970,10 @@ class MultiTrackTaskOutput(io.ComfyNode):
             f"segment {requested_index} / media_loading ｜ "
             f"{info.get('width', 544)}x{info.get('height', 960)}",
         ):
+            log_node_info(
+                "MultiTrack Task Output",
+                f"segment={requested_index} | 开始加载分段媒体",
+            )
             selected_images = [
                 item
                 for item in _as_list_input(preloaded_media.get("images"))
@@ -3232,6 +3271,11 @@ class MultiTrackTaskOutput(io.ComfyNode):
                         resolved_video_segments.append((local_segment, resolved_video))
                     has_video = has_video or bool(local_segments)
                     if not is_minimax or resolved_video_segments:
+                        log_node_info(
+                            "MultiTrack Task Output",
+                            f"segment={requested_index} | 开始合成视频轨 "
+                            f"({len(resolved_video_segments)} 个片段)",
+                        )
                         merged_video = _merge_video_track(
                             resolved_video_segments,
                             local_duration,
@@ -3244,6 +3288,10 @@ class MultiTrackTaskOutput(io.ComfyNode):
                         )
                         selected_video.append(merged_video)
                         if locked_audio_priority < 1 and locked_audio_track:
+                            log_node_info(
+                                "MultiTrack Task Output",
+                                f"segment={requested_index} | 开始提取锁定视频原声",
+                            )
                             video_audio = extract_video_audio(
                                 merged_video,
                                 cache=video_audio_cache,
