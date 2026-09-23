@@ -811,7 +811,9 @@ export function TaskSegmentEditor({
                         draggable
                         data-testid={`task-image-${image.id}`}
                         className={`task-image-grid-item group/task-image relative flex aspect-square w-full self-start cursor-pointer items-center justify-center overflow-hidden rounded-md border bg-black ${
-                          image.shared_reference ? 'border-highlight' : 'border-border'
+                          image.shared_reference
+                            ? (image.muted === true ? 'border-highlight opacity-50' : 'border-highlight')
+                            : 'border-border'
                         }`}
                         role="button"
                         tabIndex={0}
@@ -913,7 +915,7 @@ export function TaskSegmentEditor({
                                   size="icon"
                                   variant={image.muted === true ? 'secondary' : 'ghost'}
                                   data-testid={`task-image-muted-${image.id}`}
-                                  className="h-auto w-auto cursor-pointer bg-background/70 font-bold text-muted-foreground hover:bg-background/90"
+                                  className={`h-auto w-auto cursor-pointer bg-background/70 font-bold hover:bg-background/90 ${image.muted === true ? 'text-destructive hover:text-destructive' : 'text-muted-foreground'}`}
                                   style={{ width: actionSize, height: actionSize, fontSize: textIconSize }}
                                   aria-label={image.muted === true ? t('multitrack.includeImage') : t('multitrack.bypassImage')}
                                   aria-pressed={image.muted === true}
