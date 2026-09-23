@@ -6,7 +6,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
 import type { MediaTab } from '@/components/widgets/mediaSelector/MediaSelector'
 import { useT } from '@/lib/i18n'
-import { computeSlotItems } from '@/lib/timeline-utils'
+import { mediaPathToViewUrl } from '@/lib/media-url'
+import { computeSlotItems, type SlotItem } from '@/lib/timeline-utils'
 import type { SubtitleRecognitionMethod } from '@/lib/subtitle-recognition'
 import type { MultiTrack, MultiTrackSourceType } from '@/types/multitrack'
 import { MULTITRACK_LEFT_GUTTER } from './MultiTrackRuler'
@@ -30,6 +31,7 @@ interface VideoTrackProps {
     sourceType: MultiTrackSourceType,
     startFrame?: number,
     endFrame?: number,
+    previewUrl?: string,
   ) => void
   onSelectSegment: (segmentId: string, mode?: 'replace' | 'toggle' | 'add') => void
   onDeleteSegment: (segmentId: string) => void
@@ -44,7 +46,7 @@ interface VideoTrackProps {
   onDragPreviewChange: (segmentId: string, nextStartTime: number, clientY: number) => void
   getDragPreviewStart?: (segmentId: string, nextStartTime: number, clientY: number) => number
   onDragPreviewEnd: () => void
-  onReplaceVideo: (trackId: string, segmentId: string, filePath: string, sourceType: MultiTrackSourceType) => void
+  onReplaceVideo: (trackId: string, segmentId: string, filePath: string, sourceType: MultiTrackSourceType, previewUrl?: string) => void
   onSmartSplit: (segmentId: string) => void
   onSmartSplitTasks: (segmentId: string) => void
   onRecognizeSubtitles?: (segmentId: string, method: SubtitleRecognitionMethod) => void
@@ -59,6 +61,11 @@ function sourceTypeToTab(sourceType: MultiTrackSourceType | undefined): MediaTab
   if (sourceType === 'url') return 'url'
   if (sourceType === 'slot') return 'slot'
   return 'inputs'
+}
+
+function slotVideoPreviewUrl(filePath: string, slotItems: SlotItem[]): string | undefined {
+  const videoName = slotItems.find((item) => item.value === filePath)?.video_name
+  return videoName ? mediaPathToViewUrl(videoName, 'input') : undefined
 }
 
 export function VideoTrack({
@@ -103,10 +110,12 @@ export function VideoTrack({
   const reselectSegment = reselectAnchor
     ? track.segments.find((segment) => segment.id === reselectAnchor.segmentId)
     : undefined
-  const reselectValue = reselectSegment?.content.file_path
+  const reselectValue = reselectSegment?.content.source_type === 'slot' && reselectSegment.content.slot_name
+    ? `__slot__:${reselectSegment.content.slot_name}`
+    : reselectSegment?.content.file_path
     ?? reselectSegment?.content.local_path
     ?? reselectSegment?.content.url
-    ?? (reselectSegment?.content.slot_name ? `__slot__:${reselectSegment.content.slot_name}` : '')
+    ?? ''
   const lastEnd = track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0)
   const addLeft = (lastEnd / Math.max(totalLength, 1)) * width
   const gaps = getTrackSegmentGaps(track.segments)
@@ -192,7 +201,7 @@ export function VideoTrack({
                 defaultTab="inputs"
                 slotItems={slotItems}
                 onChange={(filePath, sourceType = 'input') => {
-                  onAddVideo(track.id, filePath, sourceType, gap.startFrame, gap.endFrame)
+                  onAddVideo(track.id, filePath, sourceType, gap.startFrame, gap.endFrame, slotVideoPreviewUrl(filePath, slotItems))
                 }}
               />
             </PopoverContent>
@@ -222,7 +231,7 @@ export function VideoTrack({
                 defaultTab="inputs"
                 slotItems={slotItems}
                 onChange={(filePath, sourceType = 'input') => {
-                  onAddVideo(track.id, filePath, sourceType)
+                  onAddVideo(track.id, filePath, sourceType, undefined, undefined, slotVideoPreviewUrl(filePath, slotItems))
                   setMediaSelectorOpen(false)
                 }}
               />
@@ -265,7 +274,7 @@ export function VideoTrack({
               slotItems={slotItems}
               onChange={(filePath, sourceType = 'input') => {
                 if (!reselectAnchor) return
-                onReplaceVideo(track.id, reselectAnchor.segmentId, filePath, sourceType)
+                onReplaceVideo(track.id, reselectAnchor.segmentId, filePath, sourceType, slotVideoPreviewUrl(filePath, slotItems))
                 setReselectAnchor(null)
               }}
             />

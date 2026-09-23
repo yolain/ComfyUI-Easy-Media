@@ -66,6 +66,26 @@ describe('computeSlotItems', () => {
     expect(computeSlotItems(node, app, 'video')[0]?.value).toBe('__slot__:video1')
   })
 
+  it('finds the file selected by an upstream LoadVideo in a video list', () => {
+    const { node, app } = makeGraph('VIDEO')
+    const source = app.graph.getNodeById(1) as { type: string; widgets: Array<{ name: string; value: string }> }
+    source.type = 'LoadVideo'
+    source.widgets = [{ name: 'file', value: 'clips/source.mp4' }]
+
+    expect(computeSlotItems(node, app, 'video')[0]?.video_name).toBe('clips/source.mp4')
+  })
+
+  it('finds the file selected by a directly connected LoadVideo', () => {
+    const { node, app } = makeGraph('VIDEO', true)
+    node.inputs[0].link = 7
+    app.graph.links[7] = { origin_id: 1, origin_slot: 0 }
+    const source = app.graph.getNodeById(1) as { type: string; widgets_values: string[] }
+    source.type = 'LoadVideo'
+    source.widgets_values = ['source.mp4']
+
+    expect(computeSlotItems(node, app, 'video')[0]?.video_name).toBe('source.mp4')
+  })
+
   it.each([
     ['image', 'IMAGE', '__slot__:image1'],
     ['video', 'VIDEO', '__slot__:video1'],

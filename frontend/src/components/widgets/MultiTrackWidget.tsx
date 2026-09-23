@@ -25,6 +25,7 @@ import {
   mergeSelectedTaskSegments,
   MULTITRACK_DEFAULT_VOLUME_DB,
   MULTITRACK_MEDIA_TRACK_LIMIT,
+  MULTITRACK_MIN_DURATION_SECONDS,
   MULTITRACK_TRACK_COLORS,
   moveSelectedSegments,
   moveSegmentBetweenCompatibleTracks,
@@ -416,14 +417,16 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     sourceType: MultiTrackSourceType,
     requestedStartFrame?: number,
     requestedEndFrame?: number,
+    previewUrl?: string,
   ) {
     const content = createMultiTrackVideoContent(filePath, sourceType)
+    if (previewUrl) content.url = previewUrl
     const src = mediaContentToViewUrl(content)
-    let duration = 1
+    let duration: number | undefined
     if (src) {
       try {
         const metadata = await loadBrowserVideoMetadata(src)
-        duration = Math.max(metadata.duration, 1)
+        if (Number.isFinite(metadata.duration) && metadata.duration > 0) duration = metadata.duration
       } catch (error) {
         console.error('[MultiTrackWidget] failed to read video metadata:', error)
       }
@@ -437,7 +440,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         ? snapTimeToFrame(track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0), latestData.frame_rate)
         : Math.max(0, Math.round(requestedStartFrame))
       const endFrame = requestedEndFrame === undefined
-        ? startFrame + Math.max(1, snapSecondsToFrame(duration, latestData.frame_rate))
+        ? startFrame + Math.max(1, snapSecondsToFrame(duration ?? MULTITRACK_MIN_DURATION_SECONDS, latestData.frame_rate))
         : Math.max(startFrame + 1, Math.round(requestedEndFrame))
       addedVideoRange.added = true
       addedVideoRange.startFrame = startFrame
@@ -452,7 +455,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             color: track.color,
             content: {
               ...content,
-              duration,
+              ...(duration === undefined ? {} : { duration }),
             },
           }
           if (requestedStartFrame === undefined) return [...track.segments, nextSegment]
@@ -485,7 +488,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     const content = createMultiTrackAudioContent(filePath, sourceType)
     if (previewUrl) content.url = previewUrl
     const src = mediaContentToViewUrl(content)
-    let duration = 5
+    let duration: number | undefined
     if (src) {
       try {
         duration = (await loadBrowserAudioMetadata(src)).duration
@@ -500,7 +503,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         ? track.segments.reduce((max, segment) => Math.max(max, segment.end_frame), 0)
         : Math.max(0, Math.round(requestedStartFrame))
       const endFrame = requestedEndFrame === undefined
-        ? startFrame + Math.max(1, snapSecondsToFrame(duration, latestData.frame_rate))
+        ? startFrame + Math.max(1, snapSecondsToFrame(duration ?? MULTITRACK_MIN_DURATION_SECONDS, latestData.frame_rate))
         : Math.max(startFrame + 1, Math.round(requestedEndFrame))
       return {
         ...track,
@@ -510,7 +513,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             start_frame: startFrame,
             end_frame: endFrame,
             color: track.color,
-            content: { ...content, duration },
+            content: { ...content, ...(duration === undefined ? {} : { duration }) },
           }
           if (requestedStartFrame === undefined) return [...track.segments, nextSegment]
           return insertSegmentAtFrame(track.segments, nextSegment)
@@ -546,8 +549,6 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         ...track,
         segments: track.segments.map((segment) => {
           if (segment.id !== segmentId) return segment
-          const fallbackDuration = Math.max(1, segment.end_frame - segment.start_frame)
-            / Math.max(1, latestData.frame_rate)
           return {
             ...segment,
             end_frame: duration === null
@@ -556,7 +557,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             origin_start_frame: segment.start_frame,
             content: {
               ...content,
-              duration: duration ?? fallbackDuration,
+              ...(duration === null ? {} : { duration }),
               muted: segment.content.muted ?? content.muted,
               volume_db: segment.content.volume_db ?? content.volume_db,
               shared_reference: segment.content.shared_reference === true,
@@ -701,14 +702,16 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
     segmentId: string,
     filePath: string,
     sourceType: MultiTrackSourceType,
+    previewUrl?: string,
   ) {
     const content = createMultiTrackVideoContent(filePath, sourceType)
+    if (previewUrl) content.url = previewUrl
     const src = mediaContentToViewUrl(content)
-    let duration = 1
+    let duration: number | undefined
     if (src) {
       try {
         const metadata = await loadBrowserVideoMetadata(src)
-        duration = Math.max(metadata.duration, 1)
+        if (Number.isFinite(metadata.duration) && metadata.duration > 0) duration = metadata.duration
       } catch (error) {
         console.error('[MultiTrackWidget] failed to read replacement video metadata:', error)
       }
@@ -724,7 +727,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                 ...segment,
                 content: {
                   ...content,
-                  duration,
+                  ...(duration === undefined ? {} : { duration }),
                   shared_reference: segment.content.shared_reference === true,
                 },
               }
@@ -955,7 +958,8 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
           const nextSegment = segmentIndex >= 0 && segmentIndex < sortedSegments.length - 1
             ? sortedSegments[segmentIndex + 1]
             : null
-          const sourceDuration = segment.content.duration && segment.content.duration > 0
+          const hasReadableSlotSource = segment.content.source_type !== 'slot' || Boolean(segment.content.url)
+          const sourceDuration = hasReadableSlotSource && segment.content.duration && segment.content.duration > 0
             ? Math.max(1, snapSecondsToFrame(segment.content.duration, sourceData.frame_rate))
             : Number.POSITIVE_INFINITY
 

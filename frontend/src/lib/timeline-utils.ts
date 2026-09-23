@@ -15,6 +15,8 @@ export interface SlotItem {
   img?: string
   /** Audio name for audio slots */
   audio_name?: string
+  /** Input file selected by a LoadVideo source, when available */
+  video_name?: string
 }
 
 interface SlotInputDescriptor {
@@ -29,9 +31,17 @@ interface SlotLinkDescriptor {
 }
 
 interface SlotSourceNodeDescriptor {
+  type?: string
   inputs?: SlotInputDescriptor[]
   widgets?: Array<{ name?: string; value?: unknown }>
   widgets_values?: unknown[]
+}
+
+function loadVideoFileName(sourceNode: SlotSourceNodeDescriptor | undefined): string | undefined {
+  if (sourceNode?.type !== 'LoadVideo') return undefined
+  const file = sourceNode.widgets?.find((widget) => widget.name === 'file')?.value
+    ?? sourceNode.widgets_values?.[0]
+  return typeof file === 'string' && file.trim() ? file : undefined
 }
 
 function getInputLink(
@@ -120,6 +130,7 @@ export function computeSlotItems(
         for (const [connectedIndex, { inp, link: inputLink }] of indexedInputs.entries()) {
           let imgsrc: string | undefined
           let audio_name: string | undefined
+          let video_name: string | undefined
           if (inputLink) {
             const currentNodeId = traceToRootSource(inputLink.origin_id, inputLink.origin_slot, app.graph)
             if (currentNodeId !== null) {
@@ -128,11 +139,13 @@ export function computeSlotItems(
                 imgsrc = currentNode?.imgs?.[0]?.currentSrc
               } else if (mediaType == 'audio') {
                 audio_name = (currentNode.widgets_values?.[0] as string) ?? (currentNode.widgets?.[0]?.value as string)
+              } else if (mediaType === 'video') {
+                video_name = loadVideoFileName(currentNode)
               }
             }
           }
           const slotName = skipEmpty ? `${mediaType}${connectedIndex + 1}` : inp.name
-          result.push({ label: inp.name, img: imgsrc, audio_name: audio_name, value: `__slot__:${slotName}` })
+          result.push({ label: inp.name, img: imgsrc, audio_name, video_name, value: `__slot__:${slotName}` })
         }
       } else {
         // Fallback: represent base input as a single list reference
@@ -142,6 +155,7 @@ export function computeSlotItems(
       // Try to trace to find the actual image source
       let imgsrc: string | undefined
       let audio_name: string | undefined
+      let video_name: string | undefined
       const currentNodeId = traceToRootSource(link.origin_id, link.origin_slot, app.graph)
       const node = currentNodeId !== null
         ? app.graph.getNodeById(currentNodeId)
@@ -150,8 +164,10 @@ export function computeSlotItems(
         imgsrc = node?.imgs?.[0]?.currentSrc
       } else if (mediaType == 'audio' && node?.type == 'LoadAudio') {
         audio_name = (node.widgets_values?.[0] as string) ?? (node.widgets?.[0]?.value as string)
+      } else if (mediaType === 'video') {
+        video_name = loadVideoFileName(node)
       }
-      result.push({ label: input.name, img: imgsrc, audio_name: audio_name, value: `__slot__:${input.name}` })
+      result.push({ label: input.name, img: imgsrc, audio_name, video_name, value: `__slot__:${input.name}` })
     }
 
     // Only process the first connected input of this type

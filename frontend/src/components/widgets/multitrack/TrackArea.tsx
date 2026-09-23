@@ -41,6 +41,7 @@ interface TrackAreaProps {
     sourceType: MultiTrackSourceType,
     startFrame?: number,
     endFrame?: number,
+    previewUrl?: string,
   ) => void
   onAddAudio: (
     trackId: string,
@@ -60,7 +61,7 @@ interface TrackAreaProps {
   onAddTrack: (type: MultiTrackType) => void
   onAddSubtitleSegment: (trackId: string, startFrame?: number, endFrame?: number) => void
   onImportSubtitles?: (trackId: string, srtText: string, startFrame: number) => void
-  onReplaceVideo: (trackId: string, segmentId: string, filePath: string, sourceType: MultiTrackSourceType) => void
+  onReplaceVideo: (trackId: string, segmentId: string, filePath: string, sourceType: MultiTrackSourceType, previewUrl?: string) => void
   onAddTaskSegment: (
     trackId: string,
     startFrame?: number,

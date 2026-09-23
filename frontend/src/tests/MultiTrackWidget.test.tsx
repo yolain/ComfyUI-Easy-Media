@@ -137,7 +137,7 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
     onAddTrack: (type: MultiTrackType) => void
     onDeleteTrack: (trackId: string) => void
     onReorderTrack?: (sourceTrackId: string, targetTrackId: string) => void
-    onAddVideo: (trackId: string, filePath: string, sourceType: 'input', startFrame?: number, endFrame?: number) => void
+    onAddVideo: (trackId: string, filePath: string, sourceType: 'input', startFrame?: number, endFrame?: number, previewUrl?: string) => void
     onAddAudio: (trackId: string, filePath: string, sourceType: 'input', previewUrl?: string, startFrame?: number, endFrame?: number) => void
     onReplaceAudio: (trackId: string, segmentId: string, filePath: string, sourceType: 'input') => void
     onAddTaskSegment: (
@@ -243,6 +243,18 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
           onClick={() => onAddVideo(data.tracks[1].id, 'gap.mp4', 'input', 24, 72)}
         >
           fill video gap
+        </button>
+        <button type="button" onClick={() => onAddVideo(data.tracks[1].id, '__slot__:video', 'input')}>
+          add video slot segment
+        </button>
+        <button
+          type="button"
+          onClick={() => onAddVideo(
+            data.tracks[1].id, '__slot__:video', 'input', undefined, undefined,
+            '/view?filename=source.mp4&type=input&subfolder=clips',
+          )}
+        >
+          add load video slot segment
         </button>
         {taskTrack ? (
           <button type="button" onClick={() => onAddTaskSegment(taskTrack.id, 24, 72)}>fill task gap</button>
@@ -372,6 +384,16 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
         {videoSegment ? (
           <button type="button" onClick={() => onResizeSegment(videoSegment.id, 'end', 8)}>trim video end</button>
         ) : null}
+        {videoSegment ? (
+          <button type="button" onClick={() => onResizeSegment(videoSegment.id, 'end', videoSegment.end_frame + 24)}>
+            extend video end
+          </button>
+        ) : null}
+        {audioSegment ? (
+          <button type="button" onClick={() => onResizeSegment(audioSegment.id, 'end', audioSegment.end_frame + 24)}>
+            extend audio end
+          </button>
+        ) : null}
         {segment ? (
           <button type="button" onClick={() => onResizeSegment(segment.id, 'end', segment.end_frame + 12)}>
             extend first task end
@@ -402,6 +424,11 @@ vi.mock('@/components/widgets/multitrack/TrackArea', () => ({
             onClick={() => onAddAudio(audioTrack.id, '__slot__:audio', 'input', '/view?filename=voice.wav&type=input&subfolder=')}
           >
             add audio slot segment
+          </button>
+        ) : null}
+        {audioTrack ? (
+          <button type="button" onClick={() => onAddAudio(audioTrack.id, '__slot__:audio', 'input')}>
+            add audio slot without preview
           </button>
         ) : null}
       </div>
@@ -1434,8 +1461,8 @@ describe('MultiTrackWidget', () => {
     expect((onChange.mock.lastCall?.[0] as TrackData).tracks.at(-1)?.segments[0]).toMatchObject({
       start_frame: 24,
       end_frame: 120,
-      content: { duration: 4 },
     })
+    expect((onChange.mock.lastCall?.[0] as TrackData).tracks.at(-1)?.segments[0].content.duration).toBeUndefined()
     expect(consoleError).toHaveBeenCalledWith(
       '[MultiTrackWidget] failed to read replacement audio metadata:',
       expect.any(Error),
@@ -1620,6 +1647,91 @@ describe('MultiTrackWidget', () => {
         duration: 2,
       },
     })
+  })
+
+  it('uses the upstream LoadVideo file to read a video slot duration', async () => {
+    vi.mocked(loadBrowserVideoMetadata).mockResolvedValueOnce({ duration: 3.5, width: 1920, height: 1080 })
+    const onChange = vi.fn()
+    render(<MultiTrackWidget {...widgetProps()} onChange={onChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'add load video slot segment' }))
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+
+    expect(loadBrowserVideoMetadata).toHaveBeenCalledWith('/view?filename=source.mp4&type=input&subfolder=clips')
+    expect((onChange.mock.lastCall?.[0] as TrackData).tracks[1].segments[0]).toMatchObject({
+      end_frame: 84,
+      content: {
+        source_type: 'slot',
+        slot_name: 'video',
+        url: '/view?filename=source.mp4&type=input&subfolder=clips',
+        duration: 3.5,
+      },
+    })
+  })
+
+  it.each(['video', 'audio'] as const)(
+    'allows a %s slot without readable metadata to extend beyond its initial range',
+    async (trackType) => {
+      const data = createDefaultTrackData()
+      if (trackType === 'audio') {
+        data.tracks.push({
+          id: 'audio-track', name: 'Audio 0', type: 'audio', color: 'var(--highlight)',
+          muted: false, locked: false, segments: [],
+        })
+      }
+      const onChange = vi.fn()
+      const props = { ...widgetProps(), value: data, onChange }
+      const { rerender } = render(<MultiTrackWidget {...props} />)
+
+      fireEvent.click(screen.getByRole('button', {
+        name: trackType === 'video' ? 'add video slot segment' : 'add audio slot without preview',
+      }))
+      await waitFor(() => expect(onChange).toHaveBeenCalled())
+
+      const added = onChange.mock.lastCall?.[0] as TrackData
+      const segment = added.tracks.find((track) => track.type === trackType)?.segments[0]
+      expect(segment).toMatchObject({
+        start_frame: 0,
+        end_frame: 5 * added.frame_rate,
+        content: { source_type: 'slot', slot_name: trackType },
+      })
+      expect(segment?.content.duration).toBeUndefined()
+
+      rerender(<MultiTrackWidget {...props} value={added} />)
+      fireEvent.click(screen.getByRole('button', { name: `extend ${trackType} end` }))
+      expect((onChange.mock.lastCall?.[0] as TrackData).tracks
+        .find((track) => track.type === trackType)?.segments[0].end_frame).toBe(6 * added.frame_rate)
+    },
+  )
+
+  it('does not treat an unknown video duration as a one-second source limit', async () => {
+    vi.mocked(loadBrowserVideoMetadata).mockResolvedValueOnce({ duration: 0, width: 1920, height: 1080 })
+    const onChange = vi.fn()
+    render(<MultiTrackWidget {...widgetProps()} onChange={onChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'insert video segment' }))
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+
+    const segment = (onChange.mock.lastCall?.[0] as TrackData).tracks[1].segments[0]
+    expect(segment.end_frame - segment.start_frame).toBe(120)
+    expect(segment.content.duration).toBeUndefined()
+  })
+
+  it('can extend a saved video slot with the old one-second fallback duration', () => {
+    const data = createDefaultTrackData()
+    data.tracks[1].segments = [{
+      id: 'saved-video-slot',
+      start_frame: 0,
+      end_frame: 24,
+      color: data.tracks[1].color,
+      content: { media_type: 'video', source_type: 'slot', slot_name: 'video', duration: 1 },
+    }]
+    const onChange = vi.fn()
+    render(<MultiTrackWidget {...widgetProps()} value={data} onChange={onChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'extend video end' }))
+
+    expect((onChange.mock.lastCall?.[0] as TrackData).tracks[1].segments[0].end_frame).toBe(48)
   })
 
   it('applies selected subtitle style changes to every segment on the same subtitle track', () => {

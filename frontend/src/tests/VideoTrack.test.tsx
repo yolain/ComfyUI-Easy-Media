@@ -177,7 +177,7 @@ describe('VideoTrack', () => {
     fireEvent.click(screen.getByTestId('track-gap-add-24-72'))
     fireEvent.click(screen.getAllByTestId('media-selector')[0])
 
-    expect(onAddVideo).toHaveBeenCalledWith('video-track', 'new.mp4', 'input', 24, 72)
+    expect(onAddVideo).toHaveBeenCalledWith('video-track', 'new.mp4', 'input', 24, 72, undefined)
     expect(screen.getByRole('button', { name: 'shared-first' }).getAttribute('aria-pressed')).toBe('true')
     fireEvent.click(screen.getByRole('button', { name: 'shared-first' }))
     expect(onSharedReferenceChange).toHaveBeenCalledWith('video-track', 'first', false)
@@ -234,6 +234,7 @@ describe('VideoTrack', () => {
       source_type: 'slot',
       slot_name: 'video1',
       file_name: 'video1',
+      url: '/view?filename=source.mp4&type=input&subfolder=',
     }
     const sourceNode = {
       outputs: [{ shape: 0, link: null }],
@@ -287,5 +288,61 @@ describe('VideoTrack', () => {
     expect(selector?.getAttribute('data-value')).toBe('__slot__:video1')
     expect(selector?.getAttribute('data-default-tab')).toBe('slot')
     expect(selector?.getAttribute('data-slot-items')).toBe('__slot__:video')
+  })
+
+  it('passes a connected LoadVideo file URL when adding a video slot', () => {
+    const track = videoTrack()
+    track.segments = []
+    const sourceNode = {
+      type: 'LoadVideo',
+      outputs: [{ shape: 0, link: null }],
+      widgets: [{ name: 'file', value: 'clips/source.mp4' }],
+    }
+    const node = { inputs: [{ name: 'video', type: 'VIDEO', link: 7 }] }
+    const app = {
+      graph: {
+        links: { 7: { origin_id: 3, origin_slot: 0 } },
+        getNodeById: () => sourceNode,
+      },
+    }
+    const onAddVideo = vi.fn()
+
+    render(
+      <TooltipProvider>
+        <VideoTrack
+          track={track}
+          totalLength={120}
+          frameRate={24}
+          width={480}
+          canvasScale={1}
+          selectedSegmentIds={new Set()}
+          node={node}
+          app={app}
+          onAddVideo={onAddVideo}
+          onSelectSegment={vi.fn()}
+          onDeleteSegment={vi.fn()}
+          onCloneSegment={vi.fn()}
+          canDeleteTrack={false}
+          onDeleteTrack={vi.fn()}
+          onTrackAudioSettingsChange={vi.fn()}
+          onResizeSegment={vi.fn()}
+          onResizeSegmentPreview={vi.fn()}
+          onMoveSegment={vi.fn()}
+          onDragPreviewChange={vi.fn()}
+          onDragPreviewEnd={vi.fn()}
+          onReplaceVideo={vi.fn()}
+          onSmartSplit={vi.fn()}
+          onSmartSplitTasks={vi.fn()}
+          cutMode={false}
+          onCutSegment={vi.fn()}
+        />
+      </TooltipProvider>,
+    )
+
+    fireEvent.click(screen.getAllByTestId('media-selector')[0])
+    expect(onAddVideo).toHaveBeenCalledWith(
+      'video-track', '__slot__:video', 'input', undefined, undefined,
+      '/view?filename=source.mp4&type=input&subfolder=clips',
+    )
   })
 })
