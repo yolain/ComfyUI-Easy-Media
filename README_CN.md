@@ -504,6 +504,7 @@ bun run build:release
 - [Drift Control for H3 motion context](https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop)
 - [MiniMax H3 Latent Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler)
 - [SelfLift for H3 Sampling](https://github.com/facok/comfyui-SelfLift)
+- [Nvidia-RTX-VSR for video](https://github.com/glarsson/fast-rtxvsr)
 
 ## Source of Inspiration
 

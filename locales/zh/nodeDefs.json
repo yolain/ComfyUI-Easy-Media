@@ -113,6 +113,79 @@
       }
     }
   },
+  "easy rtxVideoSuperResolution": {
+    "display_name": "RTX 视频超分辨率",
+    "description": "通过 NVDEC → NVIDIA RTX 视频超分辨率 → NVENC 流式处理 VIDEO。基于文件的 VIDEO 输入保持为视频/GPU 表面，而不会转换为 ComfyUI 图像批次。",
+    "inputs": {
+      "video": {
+        "name": "视频"
+      },
+      "resize_type": {
+        "name": "缩放方式",
+        "tooltip": "按倍率缩放或输出为指定的目标尺寸。",
+        "options": {
+          "scale by multiplier": "按倍率缩放",
+          "target dimensions": "指定目标尺寸"
+        }
+      },
+      "scale": {
+        "name": "缩放倍率",
+        "tooltip": "按此倍率放大解码后的视频尺寸。"
+      },
+      "width": {
+        "name": "宽度"
+      },
+      "height": {
+        "name": "高度"
+      },
+      "quality": {
+        "name": "质量",
+        "options": {
+          "LOW": "低",
+          "MEDIUM": "中",
+          "HIGH": "高",
+          "ULTRA": "极高"
+        }
+      },
+      "codec": {
+        "name": "编码格式",
+        "options": {
+          "h264": "H.264",
+          "hevc": "HEVC (H.265)",
+          "av1": "AV1"
+        }
+      },
+      "preset": {
+        "name": "编码预设",
+        "options": {
+          "P1": "P1",
+          "P2": "P2",
+          "P3": "P3",
+          "P4": "P4",
+          "P5": "P5",
+          "P6": "P6",
+          "P7": "P7"
+        }
+      },
+      "bitrate_mbps": {
+        "name": "码率 (Mbps)",
+        "tooltip": "NVENC 目标码率，单位 Mbit/s。"
+      },
+      "device": {
+        "name": "CUDA 设备",
+        "tooltip": "NVDEC、VSR 和 NVENC 使用的 CUDA 设备索引。"
+      },
+      "preserve_audio": {
+        "name": "保留音频",
+        "tooltip": "VSR 处理后在不重新编码已处理视频流的前提下重新封装源音频。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "视频"
+      }
+    }
+  },
   "easy getAudioFromVideo": {
     "display_name": "从视频中提取音频",
     "description": "从 VIDEO 中提取音频轨。优先使用 FFmpeg，失败时回退到 ComfyUI VIDEO components。",

@@ -7,5 +7,6 @@ from .ltxv import *
 from .minimax import *
 from .project import *
 from .video import *
+from .rtx_vsr import *
 from .subtitle import *
 from .wan import *
