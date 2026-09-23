@@ -70,6 +70,7 @@ from .utils.video import (
     download_audio_to_temp,
     download_video_to_temp,
     extract_video_audio_to_temp,
+    ffprobe_info,
     resolve_segment_audio_path,
     resolve_segment_video_path,
 )
@@ -510,6 +511,40 @@ async def handle_model_download(request: web.Request) -> web.Response:
     except Exception as error:
         traceback.print_exc()
         return web.json_response({"error": f"Automatic download failed: {error}"}, status=500)
+
+
+@PromptServer.instance.routes.post("/easy-media/video/source-fps")
+async def handle_video_source_fps(request: web.Request) -> web.Response:
+    """Read a source video's frame rate for the native preview fast path."""
+    temp_path: Path | None = None
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            raise ValueError("request body must be a JSON object")
+        if data.get("source_type") == "url":
+            url = data.get("url")
+            if not isinstance(url, str) or not url:
+                raise ValueError("url is required for URL video segments")
+            temp_path = await download_video_to_temp(url)
+            video_path = temp_path
+        else:
+            video_path = resolve_segment_video_path(data)
+        info = await asyncio.to_thread(ffprobe_info, str(video_path))
+        fps = info.get("fps")
+        if not isinstance(fps, (int, float)) or not math.isfinite(fps) or fps <= 0:
+            raise ValueError("Unable to read source video frame rate")
+        return web.json_response({"fps": fps})
+    except (ValueError, FileNotFoundError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"Video frame rate probe failed: {error}"}, status=500)
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError as error:
+                print(f"[Easy Media] Failed to remove frame rate probe temporary video: {error}")
 
 
 @PromptServer.instance.routes.post("/easy-media/video/preview-frame")

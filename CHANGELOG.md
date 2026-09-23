@@ -10,6 +10,7 @@
 
 ### 🐛 Bug Fixes
 
+- **MultiTrack Editor**: [Motion transfer & subject replacement] When the source video frame rate differs from the editor frame rate, smart-split segments now split using the editor frame rate, and when paused or stepping frame-by-frame the requested frame is returned via ffmpeg's `fps` filter as the preview image.
 - **MultiTrack Project**: [Motion transfer & subject replacement] Locked videos now use uniform temporal resampling. Previously, when the locked duration did not conform to the `17k+5` frame pattern, the value was rounded up and padded to fit the current frame count, which caused some frames to freeze early. Resampling now uses a uniform temporal distribution so added frames are spread evenly across the timeline rather than clustered at the tail, eliminating the freeze.
 - **Audio Lock**: Fixed redundant repeated encoding/loading when locking audio across multiple segments of long videos. Due to the multitrack project design, all audio locks are processed before the reference video generation node, so when video is present, ffmpeg is used to extract and cache the audio. Videos without audio and muted tracks no longer lock audio or repeat audio probing, while their video timeline timing remains unchanged. The `audio` input on `easy minimaxH3AudioLock` is now optional; leaving it disconnected passes the latent through unchanged instead of erroring.
 

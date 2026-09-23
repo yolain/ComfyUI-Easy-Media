@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { VideoPreview } from '@/components/widgets/multitrack/VideoPreview'
 import type { ActivePreviewVideoSegment, MultiTrackPreviewResolution } from '@/lib/multitrack-utils'
@@ -39,15 +39,12 @@ describe('VideoPreview', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
-    Reflect.deleteProperty(URL, 'createObjectURL')
-    Reflect.deleteProperty(URL, 'revokeObjectURL')
   })
 
   it('requests the output-sampled frame when paused and hides the native video', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      blob: async () => new Blob(['frame'], { type: 'image/jpeg' }),
-    })
+    const fetchMock = vi.fn((url: string, _options?: RequestInit) => Promise.resolve(url.endsWith('/source-fps')
+      ? { ok: true, json: async () => ({ fps: 30 }) }
+      : { ok: true, blob: async () => new Blob(['frame'], { type: 'image/jpeg' }) }))
     vi.stubGlobal('fetch', fetchMock)
     Object.defineProperty(URL, 'createObjectURL', {
       configurable: true, value: vi.fn(() => 'blob:timeline-frame'),
@@ -70,7 +67,37 @@ describe('VideoPreview', () => {
     expect((screen.getByTestId('multitrack-video-preview') as HTMLVideoElement).style.visibility).toBe('hidden')
     await waitFor(() => expect(screen.getByTestId('multitrack-timeline-frame').getAttribute('src'))
       .toBe('blob:timeline-frame'))
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ frame: 204, fps: 24 })
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/easy-media/video/source-fps', '/easy-media/video/preview-frame',
+    ])
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toMatchObject({ frame: 204, fps: 24 })
+  })
+
+  it('uses the native seek when source and timeline frame rates match', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ fps: 24 }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <VideoPreview
+        frameRate={24}
+        activeVideo={activeVideo(8.5)}
+        resolution={resolution}
+        isPlaying={false}
+        muted
+        volume={1}
+      />,
+    )
+
+    const video = screen.getByTestId('multitrack-video-preview') as HTMLVideoElement
+    await act(async () => { await Promise.resolve() })
+    expect(video.style.visibility).toBe('hidden')
+    fireEvent.seeked(video)
+    expect(video.style.visibility).toBe('visible')
+    expect(screen.queryByTestId('multitrack-timeline-frame')).toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe('/easy-media/video/source-fps')
   })
 
   it('seeks the video element to the active local time', () => {

@@ -46,6 +46,8 @@ export function VideoPreview({
   const videoRef = useRef<HTMLVideoElement>(null)
   const [still, setStill] = useState<{ key: string; url: string } | null>(null)
   const [failedStillKey, setFailedStillKey] = useState<string | null>(null)
+  const [sourceRate, setSourceRate] = useState<{ url: string; fps: number | null } | null>(null)
+  const [nativeReadyKey, setNativeReadyKey] = useState<string | null>(null)
   const videoUrl = useMemo(() => {
     if (!activeVideo) return null
     return mediaContentToViewUrl({
@@ -64,9 +66,49 @@ export function VideoPreview({
   const stillKey = activeVideo && videoUrl
     ? `${videoUrl}:${frameRate}:${sourceFrame}`
     : null
+  const sourceRateKnown = sourceRate?.url === videoUrl
+  const useNativeFrame = sourceRateKnown && sourceRate.fps !== null
+    && Math.abs(sourceRate.fps - frameRate) <= 0.01
 
   useEffect(() => {
-    if (isPlaying || !activeVideo || !videoUrl || stillKey === null) {
+    if (!activeVideo || !videoUrl) return
+    const controller = new AbortController()
+    const content = activeVideo.segment.content
+    const probedUrl = videoUrl
+    async function probeFrameRate() {
+      try {
+        const response = await fetch('/easy-media/video/source-fps', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source_type: content.source_type ?? 'input',
+            file_path: content.file_path,
+            local_path: content.local_path,
+            url: content.url,
+          }),
+          signal: controller.signal,
+        })
+        if (!response.ok) throw new Error(`Video frame rate request failed (${response.status})`)
+        const result: unknown = await response.json()
+        const fps = result && typeof result === 'object' && 'fps' in result
+          ? (result as { fps: unknown }).fps : null
+        if (typeof fps !== 'number' || !Number.isFinite(fps) || fps <= 0) {
+          throw new Error('Video frame rate response is invalid')
+        }
+        if (!controller.signal.aborted) setSourceRate({ url: probedUrl, fps })
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.error('[VideoPreview] failed to probe source frame rate:', error)
+          setSourceRate({ url: probedUrl, fps: null })
+        }
+      }
+    }
+    void probeFrameRate()
+    return () => controller.abort()
+  }, [videoUrl])
+
+  useEffect(() => {
+    if (isPlaying || useNativeFrame || !sourceRateKnown || !activeVideo || !videoUrl || stillKey === null) {
       setStill(null)
       setFailedStillKey(null)
       return
@@ -109,7 +151,7 @@ export function VideoPreview({
       controller.abort()
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [activeVideo?.segment.id, frameRate, isPlaying, sourceFrame, stillKey, videoUrl])
+  }, [activeVideo?.segment.id, frameRate, isPlaying, sourceFrame, sourceRateKnown, stillKey, useNativeFrame, videoUrl])
 
   useEffect(() => {
     const video = videoRef.current
@@ -123,6 +165,26 @@ export function VideoPreview({
     if (!video || !activeVideo || isPlaying) return
     seekVideo(video, activeVideo.localTime)
   }, [activeVideo, activeLocalTime, isPlaying])
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (
+      useNativeFrame && !isPlaying && video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+      && !video.seeking && Math.abs(video.currentTime - activeLocalTime) < 1 / frameRate
+    ) {
+      setNativeReadyKey(stillKey)
+    }
+  }, [activeLocalTime, frameRate, isPlaying, stillKey, useNativeFrame])
+
+  function markNativeFrameReady() {
+    const video = videoRef.current
+    if (
+      useNativeFrame && !isPlaying && video && !video.seeking
+      && Math.abs(video.currentTime - activeLocalTime) < 1 / frameRate
+    ) {
+      setNativeReadyKey(stillKey)
+    }
+  }
 
   useEffect(() => {
     const video = videoRef.current
@@ -158,7 +220,13 @@ export function VideoPreview({
           muted={muted}
           playsInline
           preload="auto"
-          style={{ objectFit: fit, visibility: isPlaying || failedStillKey === stillKey ? 'visible' : 'hidden' }}
+          onSeeked={markNativeFrameReady}
+          onLoadedData={markNativeFrameReady}
+          style={{
+            objectFit: fit,
+            visibility: isPlaying || failedStillKey === stillKey
+              || (useNativeFrame && nativeReadyKey === stillKey) ? 'visible' : 'hidden',
+          }}
         />
       ) : activeVideo?.segment.content.source_type === 'slot' ? (
         <div
