@@ -5,15 +5,16 @@ from __future__ import annotations
 import gc
 import math
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
-import cv2
 import folder_paths
 import numpy as np
 import torch
 
 from ...utils.models import require_model_path
+from ...utils.video import get_ffmpeg_path
 
 MODEL_CATEGORY = "checkpoints"
 MODEL_DIRECTORY = Path(folder_paths.models_dir) / MODEL_CATEGORY
@@ -98,27 +99,25 @@ def _load_model(checkpoint_path: Path) -> tuple[torch.nn.Module, Any, torch.devi
     return model, args, torch.device(device)
 
 
-def _read_video(video_path: Path, width: int, height: int) -> tuple[np.ndarray, float]:
-    capture = cv2.VideoCapture(str(video_path))
-    if not capture.isOpened():
-        capture.release()
-        raise RuntimeError(f"Unable to open video: {video_path}")
-    try:
-        fps = float(capture.get(cv2.CAP_PROP_FPS))
-        if not math.isfinite(fps) or fps <= 0:
-            fps = 24.0
-        frames: list[np.ndarray] = []
-        while True:
-            ok, frame = capture.read()
-            if not ok:
-                break
-            resized = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
-            frames.append(cv2.cvtColor(resized, cv2.COLOR_BGR2RGB))
-    finally:
-        capture.release()
-    if not frames:
-        raise RuntimeError(f"Video contains no readable frames: {video_path}")
-    return np.stack(frames), fps
+def _read_video(video_path: Path, width: int, height: int, fps: float) -> np.ndarray:
+    """Decode the same numbered timeline frames used by the video-track merger."""
+    if not math.isfinite(fps) or fps <= 0 or width <= 0 or height <= 0:
+        raise ValueError("fps, width, and height must be positive")
+    ffmpeg = get_ffmpeg_path()
+    if ffmpeg is None:
+        raise RuntimeError("FFmpeg is required for frame-aligned smart split")
+    frame_size = width * height * 3
+    result = subprocess.run(
+        [ffmpeg, "-v", "error", "-i", str(video_path),
+         "-vf", f"setpts=PTS-STARTPTS,fps=fps={fps}:start_time=0,scale={width}:{height}",
+         "-an", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+        capture_output=True, check=False,
+    )
+    if result.returncode != 0 or not result.stdout or len(result.stdout) % frame_size:
+        raise RuntimeError(
+            f"Unable to decode timeline frames: {result.stderr.decode(errors='replace')[-600:]}"
+        )
+    return np.frombuffer(result.stdout, dtype=np.uint8).reshape(-1, height, width, 3).copy()
 
 
 def _split_video(video: np.ndarray, window_size: int, context_frames: int) -> list[np.ndarray]:
@@ -195,19 +194,6 @@ def _merge_predictions(
         target_inter.append(inter[index])
 
 
-def _remap_ranges(ranges: list[list[int]], source_fps: float, target_fps: float) -> list[list[int]]:
-    if not math.isfinite(target_fps) or target_fps <= 0:
-        raise ValueError("fps must be a positive finite number")
-    scale = target_fps / source_fps
-    remapped: list[list[int]] = []
-    for start, end in ranges:
-        mapped_start = round(start * scale)
-        mapped_end = round(end * scale)
-        if mapped_end > mapped_start:
-            remapped.append([mapped_start, mapped_end])
-    return remapped
-
-
 def _release_model(model: torch.nn.Module | None) -> None:
     if model is not None:
         try:
@@ -239,7 +225,7 @@ def detect_shots(
     try:
         checkpoint = Path(checkpoint_path) if checkpoint_path else find_checkpoint()
         model, args, device = _load_model(checkpoint)
-        video, source_fps = _read_video(Path(video_path), args.process_width, args.process_height)
+        video = _read_video(Path(video_path), args.process_width, args.process_height, fps)
         _, _, _, transform_class, intra_mapping, inter_mapping = _load_implementation()
         transform = transform_class(set_type="val")
         window_size = int(args.max_process_window_length)
@@ -272,6 +258,6 @@ def detect_shots(
                 for shot_range, intra_label in zip(ranges, intra_labels, strict=True)
                 if intra_label == general_label
             ]
-        return _remap_ranges(ranges, source_fps, fps)
+        return ranges
     finally:
         _release_model(model)

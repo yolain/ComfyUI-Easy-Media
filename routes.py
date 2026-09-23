@@ -66,6 +66,7 @@ from .modules.asr.subtitle_recognition import (
 from .utils.speech import generate_voxcpm2_speech
 from .utils.workflow_submission import register_workflow_routes
 from .utils.video import (
+    decode_multitrack_preview_frame,
     download_audio_to_temp,
     download_video_to_temp,
     extract_video_audio_to_temp,
@@ -509,6 +510,43 @@ async def handle_model_download(request: web.Request) -> web.Response:
     except Exception as error:
         traceback.print_exc()
         return web.json_response({"error": f"Automatic download failed: {error}"}, status=500)
+
+
+@PromptServer.instance.routes.post("/easy-media/video/preview-frame")
+async def handle_video_preview_frame(request: web.Request) -> web.Response:
+    """Serve a paused timeline frame with the same sampling as task output."""
+    temp_path: Path | None = None
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            raise ValueError("request body must be a JSON object")
+        frame = data.get("frame")
+        fps = data.get("fps")
+        if not isinstance(frame, int) or isinstance(frame, bool) or frame < 0:
+            raise ValueError("frame must be a nonnegative integer")
+        if not isinstance(fps, (int, float)) or not math.isfinite(fps) or fps <= 0:
+            raise ValueError("fps must be a positive finite number")
+        if data.get("source_type") == "url":
+            url = data.get("url")
+            if not isinstance(url, str) or not url:
+                raise ValueError("url is required for URL video segments")
+            temp_path = await download_video_to_temp(url)
+            video_path = temp_path
+        else:
+            video_path = resolve_segment_video_path(data)
+        image = await asyncio.to_thread(decode_multitrack_preview_frame, video_path, frame, float(fps))
+        return web.Response(body=image, content_type="image/jpeg")
+    except (ValueError, FileNotFoundError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": f"Video preview failed: {error}"}, status=500)
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError as error:
+                print(f"[Easy Media] Failed to remove preview temporary video: {error}")
 
 
 @PromptServer.instance.routes.post("/easy-media/video/smart-split")

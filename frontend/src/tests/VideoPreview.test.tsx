@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { VideoPreview } from '@/components/widgets/multitrack/VideoPreview'
 import type { ActivePreviewVideoSegment, MultiTrackPreviewResolution } from '@/lib/multitrack-utils'
 
@@ -34,11 +34,49 @@ describe('VideoPreview', () => {
   beforeEach(() => {
     vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
     vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined)
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    Reflect.deleteProperty(URL, 'createObjectURL')
+    Reflect.deleteProperty(URL, 'revokeObjectURL')
+  })
+
+  it('requests the output-sampled frame when paused and hides the native video', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      blob: async () => new Blob(['frame'], { type: 'image/jpeg' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true, value: vi.fn(() => 'blob:timeline-frame'),
+    })
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true, value: vi.fn(),
+    })
+
+    render(
+      <VideoPreview
+        frameRate={24}
+        activeVideo={activeVideo(204 / 24)}
+        resolution={resolution}
+        isPlaying={false}
+        muted
+        volume={1}
+      />,
+    )
+
+    expect((screen.getByTestId('multitrack-video-preview') as HTMLVideoElement).style.visibility).toBe('hidden')
+    await waitFor(() => expect(screen.getByTestId('multitrack-timeline-frame').getAttribute('src'))
+      .toBe('blob:timeline-frame'))
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ frame: 204, fps: 24 })
   })
 
   it('seeks the video element to the active local time', () => {
     const { rerender } = render(
       <VideoPreview
+        frameRate={24}
         activeVideo={activeVideo(1.25)}
         resolution={resolution}
         isPlaying={false}
@@ -55,6 +93,7 @@ describe('VideoPreview', () => {
 
     rerender(
       <VideoPreview
+        frameRate={24}
         activeVideo={activeVideo(2)}
         resolution={resolution}
         isPlaying={false}
@@ -71,6 +110,7 @@ describe('VideoPreview', () => {
   it('shows a black frame when no active video is available', () => {
     render(
       <VideoPreview
+        frameRate={24}
         activeVideo={null}
         resolution={resolution}
         isPlaying={false}
@@ -94,6 +134,7 @@ describe('VideoPreview', () => {
 
     render(
       <VideoPreview
+        frameRate={24}
         activeVideo={slotVideo}
         resolution={resolution}
         isPlaying={false}
@@ -109,6 +150,7 @@ describe('VideoPreview', () => {
   it('keeps the video out of layout flow so intrinsic dimensions cannot expand the stage', () => {
     render(
       <VideoPreview
+        frameRate={24}
         activeVideo={activeVideo(0)}
         resolution={resolution}
         isPlaying={false}
@@ -142,6 +184,7 @@ describe('VideoPreview', () => {
 
     const { rerender } = render(
       <VideoPreview
+        frameRate={24}
         activeVideo={activeVideo(0)}
         resolution={resolution}
         isPlaying
@@ -155,6 +198,7 @@ describe('VideoPreview', () => {
 
     rerender(
       <VideoPreview
+        frameRate={24}
         activeVideo={activeVideo(1 / 24)}
         resolution={resolution}
         isPlaying
@@ -183,6 +227,7 @@ describe('VideoPreview', () => {
 
     const { rerender } = render(
       <VideoPreview
+        frameRate={24}
         activeVideo={activeVideo(3)}
         resolution={resolution}
         isPlaying
@@ -196,6 +241,7 @@ describe('VideoPreview', () => {
 
     rerender(
       <VideoPreview
+        frameRate={24}
         activeVideo={activeVideo(0)}
         resolution={resolution}
         isPlaying

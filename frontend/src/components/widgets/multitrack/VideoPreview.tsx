@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useRef } from 'react'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import type { ActivePreviewVideoSegment, MultiTrackPreviewResolution } from '@/lib/multitrack-utils'
 import { useT } from '@/lib/i18n'
 import { mediaContentToViewUrl, mediaSlotNumber } from '@/lib/media-url'
@@ -11,6 +11,7 @@ interface VideoPreviewProps {
   playbackNonce?: number
   muted: boolean
   volume: number
+  frameRate: number
   className?: string
   children?: ReactNode
 }
@@ -37,11 +38,14 @@ export function VideoPreview({
   playbackNonce = 0,
   muted,
   volume,
+  frameRate,
   className,
   children,
 }: Readonly<VideoPreviewProps>) {
   const t = useT()
   const videoRef = useRef<HTMLVideoElement>(null)
+  const [still, setStill] = useState<{ key: string; url: string } | null>(null)
+  const [failedStillKey, setFailedStillKey] = useState<string | null>(null)
   const videoUrl = useMemo(() => {
     if (!activeVideo) return null
     return mediaContentToViewUrl({
@@ -56,6 +60,56 @@ export function VideoPreview({
   const fit = objectFitForResizeMethod(resolution.resizeMethod)
   const activeSegmentId = activeVideo?.segment.id ?? null
   const activeLocalTime = activeVideo?.localTime ?? 0
+  const sourceFrame = Math.round(activeLocalTime * frameRate)
+  const stillKey = activeVideo && videoUrl
+    ? `${videoUrl}:${frameRate}:${sourceFrame}`
+    : null
+
+  useEffect(() => {
+    if (isPlaying || !activeVideo || !videoUrl || stillKey === null) {
+      setStill(null)
+      setFailedStillKey(null)
+      return
+    }
+    const requestedKey = stillKey
+    const controller = new AbortController()
+    let objectUrl: string | null = null
+    const content = activeVideo.segment.content
+    async function loadFrame() {
+      try {
+        const response = await fetch('/easy-media/video/preview-frame', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source_type: content.source_type ?? 'input',
+            file_path: content.file_path,
+            local_path: content.local_path,
+            url: content.url,
+            frame: sourceFrame,
+            fps: frameRate,
+          }),
+          signal: controller.signal,
+        })
+        if (!response.ok) throw new Error(`Preview frame request failed (${response.status})`)
+        objectUrl = URL.createObjectURL(await response.blob())
+        if (!controller.signal.aborted) {
+          setFailedStillKey(null)
+          setStill({ key: requestedKey, url: objectUrl })
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          console.error('[VideoPreview] failed to load timeline frame:', error)
+          setFailedStillKey(requestedKey)
+        }
+      }
+    }
+    const timer = setTimeout(() => { void loadFrame() }, 60)
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [activeVideo?.segment.id, frameRate, isPlaying, sourceFrame, stillKey, videoUrl])
 
   useEffect(() => {
     const video = videoRef.current
@@ -104,7 +158,7 @@ export function VideoPreview({
           muted={muted}
           playsInline
           preload="auto"
-          style={{ objectFit: fit }}
+          style={{ objectFit: fit, visibility: isPlaying || failedStillKey === stillKey ? 'visible' : 'hidden' }}
         />
       ) : activeVideo?.segment.content.source_type === 'slot' ? (
         <div
@@ -117,6 +171,15 @@ export function VideoPreview({
         </div>
       ) : (
         <div data-testid="multitrack-black-frame" className="h-full w-full bg-black" />
+      )}
+      {!isPlaying && still?.key === stillKey && (
+        <img
+          src={still.url}
+          alt=""
+          data-testid="multitrack-timeline-frame"
+          className="absolute inset-0 h-full w-full"
+          style={{ objectFit: fit }}
+        />
       )}
       {children}
     </div>

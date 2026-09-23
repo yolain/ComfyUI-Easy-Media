@@ -392,6 +392,31 @@ def get_ffmpeg_path(name: str = "ffmpeg") -> str | None:
     return None
 
 
+def decode_multitrack_preview_frame(
+    video_path: str | Path,
+    frame: int,
+    frame_rate: float,
+) -> bytes:
+    """Return the exact frame selected by the video-track FFmpeg fps filter."""
+    if frame < 0 or not math.isfinite(frame_rate) or frame_rate <= 0:
+        raise ValueError("Invalid preview frame or frame rate")
+    ffmpeg = get_ffmpeg_path()
+    if ffmpeg is None:
+        raise RuntimeError("FFmpeg is required for frame-accurate preview")
+    result = subprocess.run(
+        [ffmpeg, "-v", "error", "-i", str(video_path),
+         "-vf", f"setpts=PTS-STARTPTS,fps=fps={frame_rate}:start_time=0,"
+                f"select=eq(n\\,{frame}),scale=w='min(960,iw)':h=-2",
+         "-frames:v", "1", "-an", "-f", "image2pipe", "-vcodec", "mjpeg", "-"],
+        capture_output=True, check=False, timeout=60,
+    )
+    if result.returncode != 0 or not result.stdout:
+        raise RuntimeError(
+            f"Unable to decode preview frame: {result.stderr.decode(errors='replace')[-600:]}"
+        )
+    return result.stdout
+
+
 def video_input_to_local_file(
     video: Any,
     suffix: str = ".mp4",

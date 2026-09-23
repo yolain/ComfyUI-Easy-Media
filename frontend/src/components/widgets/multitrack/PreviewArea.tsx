@@ -1445,6 +1445,7 @@ export function PreviewArea({
                 playbackNonce={playbackNonce}
                 muted
                 volume={0}
+                frameRate={data.frame_rate}
                 className={selectedSubtitleStyle ? 'absolute inset-0 h-full w-full' : undefined}
               >
                 {activeSubtitleSegments.map((segment) => (

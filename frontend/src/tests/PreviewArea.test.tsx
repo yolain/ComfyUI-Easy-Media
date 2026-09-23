@@ -105,6 +105,7 @@ function addActiveTaskTrack(data: TrackData): void {
 describe('PreviewArea', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
     vi.stubGlobal('ResizeObserver', class {
       observe() {}
       unobserve() {}
@@ -115,6 +116,7 @@ describe('PreviewArea', () => {
   })
 
   afterEach(() => {
+    vi.unstubAllGlobals()
     vi.useRealTimers()
   })
 
