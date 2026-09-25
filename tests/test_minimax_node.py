@@ -2983,6 +2983,32 @@ def test_multitrack_project_uses_flat_upscale_by(
         assert (conditionings[1]["width"], conditionings[1]["height"]) == expected_size
 
 
+def test_multitrack_reference_dual_reuses_conditioning_for_second_pass(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    module.comfy_nodes.NODE_CLASS_MAPPINGS["ImageResizeKJv2"] = _ImageResizeKJWithNvidia
+    inputs = _h3_project_inputs(sampling_mode=_h3_sampling_mode("dual"))
+    inputs["tracks_info"][0]["tracks"][0]["segments"][0]["content"]["task_mode"] = "ref"
+
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    graph = result.expand
+    conditioning_nodes = [
+        node for node in graph.values()
+        if node["class_type"] == "easy minimaxH3ToVideo"
+    ]
+    assert len(conditioning_nodes) == 1
+    assert conditioning_nodes[0]["inputs"]["mode"] == "reference"
+    cache_id = next(
+        node_id for node_id, node in graph.items()
+        if node["class_type"] == "easy h3ConditioningCache"
+    )
+    guiders = [
+        node for node in graph.values()
+        if node["class_type"] == "BasicGuider"
+    ]
+    assert len(guiders) == 2
+    assert all(node["inputs"]["conditioning"] == [cache_id, 0] for node in guiders)
+
+
 def test_multitrack_h3_project_forwards_override_save_mode(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     assert module is not None

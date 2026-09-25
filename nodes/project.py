@@ -1522,7 +1522,9 @@ class EasyMultiTrackProject(io.ComfyNode):
                 latent=encoded_conditioning.out(1),
             )
             base_positive = second_pass_positive = conditioning.out(0)
-            if run_second_pass and (
+            # Reference conditioning has no canvas-sized keyframes. Its text and
+            # media embeddings can be shared by both sampling resolutions.
+            if run_second_pass and generation_mode != "reference" and (
                 first_pass_width,
                 first_pass_height,
             ) != (target_width, target_height):
