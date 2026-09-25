@@ -81,6 +81,7 @@ class EasyMediaExtension(ComfyExtension):
             EasyGetAudioFromVideo,
             EasyMergeVideos,
             EasyMergeVideosFromPaths,
+            EasyRTXVideoSuperResolution,
             # Split
             SplitImages,
             SplitAudios,

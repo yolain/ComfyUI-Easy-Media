@@ -6,6 +6,7 @@
 
 ### ✨ 新功能
 
+- **RTX-VSR视频超分**: 新增 `easy rtxVideoSuperResolution` 节点，支持视频超分辨率处理，使用Nvidia-RTX-VSR模型进行视频帧增强，该节点直接使用VIDEO进行处理无需转换成tensor。
 - **多图像加载器**：新增 `easy multiImagesLoader` 节点，支持最多25张图像的加载。
 
 ### 🐛 问题修复
