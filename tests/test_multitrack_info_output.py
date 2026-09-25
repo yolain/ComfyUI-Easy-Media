@@ -362,6 +362,9 @@ def _load_basic_module():
     video_module = importlib.util.module_from_spec(video_spec)
     sys.modules[video_spec.name] = video_module
     video_spec.loader.exec_module(video_module)
+    utils_module.render_single_video_segment_with_ffmpeg = (
+        video_module.render_single_video_segment_with_ffmpeg
+    )
     from contextlib import nullcontext
     utils_module.log_stage_time = lambda *_args, **_kwargs: nullcontext()
     utils_module.canonicalize_multitrack_slot_content = multitrack_module.canonicalize_multitrack_slot_content
@@ -2217,6 +2220,37 @@ def test_video_track_passes_source_trim_offset_to_ffmpeg():
     assert calls[0][0]["source_start_frame"] == 24
 
 
+def test_single_full_video_segment_uses_direct_render_when_resize_is_needed():
+    module = _load_basic_module()
+    video = _FakeVideo(
+        _VideoComponents(torch.zeros(4, 4, 4, 3), None, Fraction(2)),
+        source="source.mp4",
+    )
+    calls = []
+    module.render_single_video_segment_with_ffmpeg = lambda *args, **kwargs: (
+        calls.append((args, kwargs)) or "single.mp4"
+    )
+    module.merge_video_track_with_ffmpeg = lambda *_args, **_kwargs: (
+        pytest.fail("single full-window video must not use timeline overlay")
+    )
+
+    result = module._merge_video_track(
+        [({
+            "start_frame": 0,
+            "end_frame": 4,
+            "origin_start_frame": -2,
+            "content": {"volume_db": -3},
+        }, video)],
+        4, 2, 2, 2, resize_method="stretch",
+    )
+
+    assert result.source == "single.mp4"
+    assert calls == [(("source.mp4", 2, 4, 2, 2, 2, "stretch"), {
+        "audio_volume_db": -3,
+        "audio_muted": False,
+    })]
+
+
 def test_ffmpeg_video_merge_applies_segment_audio_filters(tmp_path, monkeypatch):
     module = _load_video_utils_module(tmp_path)
     source = tmp_path / "source.mp4"
@@ -2230,8 +2264,9 @@ def test_ffmpeg_video_merge_applies_segment_audio_filters(tmp_path, monkeypatch)
     )
     commands = []
 
-    def fake_run(command, capture_output):
+    def fake_run(command, capture_output, timeout):
         commands.append(command)
+        assert timeout == 60
         return types.SimpleNamespace(returncode=0, stderr=b"")
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
@@ -2266,7 +2301,8 @@ def test_ffprobe_info_ignores_na_duration(tmp_path, monkeypatch):
     source.write_bytes(b"video")
     monkeypatch.setattr(module, "get_ffmpeg_path", lambda _name="ffprobe": "ffprobe")
 
-    def fake_run(command, capture_output=False, text=False):
+    def fake_run(command, capture_output=False, text=False, timeout=None):
+        assert timeout == 30
         return types.SimpleNamespace(
             returncode=0,
             stdout=json.dumps({
@@ -2290,6 +2326,20 @@ def test_ffprobe_info_ignores_na_duration(tmp_path, monkeypatch):
     assert info["height"] == 1080
     assert info["fps"] == 24.0
     assert info["frame_count"] == 48
+
+
+def test_ffprobe_timeout_reports_error(tmp_path, monkeypatch):
+    module = _load_video_utils_module(tmp_path)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    monkeypatch.setattr(module, "get_ffmpeg_path", lambda _name="ffprobe": "ffprobe")
+
+    def timed_out(command, capture_output=False, text=False, timeout=None):
+        raise subprocess.TimeoutExpired(cmd=command, timeout=timeout)
+
+    monkeypatch.setattr(module.subprocess, "run", timed_out)
+    with pytest.raises(RuntimeError, match="FFprobe timed out"):
+        module.ffprobe_info(str(source))
 
 
 def test_ffmpeg_resize_skips_na_progress_and_outputs_standard_mp4(tmp_path, monkeypatch):
@@ -4290,6 +4340,28 @@ def test_extract_video_audio_caches_missing_audio(monkeypatch):
 
     assert cache == {"silent.mp4": None}
     assert ffmpeg_calls == []
+    assert video.components_calls == 0
+
+
+def test_extract_video_audio_timeout_does_not_start_full_frame_decode(
+    monkeypatch,
+):
+    _load_basic_module()
+    video_module = sys.modules["easy_media.utils.video"]
+    video = _FakeVideo(
+        _VideoComponents(torch.zeros(4, 2, 2, 3), None, Fraction(2)),
+        source="locked.mp4",
+    )
+    monkeypatch.setattr(os.path, "isfile", lambda _path: True)
+    monkeypatch.setattr(video_module, "ffprobe_info", lambda _path: {"has_audio": True})
+
+    def timed_out(_path):
+        raise subprocess.TimeoutExpired(cmd="ffmpeg", timeout=60)
+
+    monkeypatch.setattr(video_module, "ffmpeg_extract_audio", timed_out)
+
+    with pytest.raises(RuntimeError, match="FFmpeg audio extraction timed out"):
+        video_module.extract_video_audio(video)
     assert video.components_calls == 0
 
 

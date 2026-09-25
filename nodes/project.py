@@ -767,9 +767,14 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                     }
                 else:
                     info = parse_tracks_info(tracks_info)
+                    log_node_info(
+                        "H3 Project Static Prepare",
+                        "开始加载项目媒体（包括锁定视频原声）",
+                    )
                     task_base, images, audio, video, locked = (
                         prepare_multitrack_project_media(info)
                     )
+                    log_node_info("H3 Project Static Prepare", "项目媒体加载完成")
                     task_base.pop(MULTITRACK_RUNTIME_CACHE_KEY, None)
                     media_data = {
                         "task_tracks_info_base": task_base,

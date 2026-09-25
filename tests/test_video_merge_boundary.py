@@ -44,8 +44,9 @@ def test_video_merge_pads_each_segment_to_its_exact_timeline_frame_count(
     monkeypatch.setattr(module, "ffprobe_info", lambda _source: {"has_audio": False})
     commands: list[list[str]] = []
 
-    def fake_run(command: list[str], capture_output: bool):
+    def fake_run(command: list[str], capture_output: bool, timeout: float):
         commands.append(command)
+        assert timeout == 60
         return types.SimpleNamespace(returncode=0, stderr=b"")
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
@@ -85,8 +86,9 @@ def test_video_merge_uses_sample_boundaries_only_for_locked_audio(
     monkeypatch.setattr(module, "ffprobe_info", lambda _source: {"has_audio": True})
     commands: list[list[str]] = []
 
-    def fake_run(command: list[str], capture_output: bool):
+    def fake_run(command: list[str], capture_output: bool, timeout: float):
         commands.append(command)
+        assert timeout == 60
         return types.SimpleNamespace(returncode=0, stderr=b"")
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
@@ -136,8 +138,9 @@ def test_video_merge_uses_separate_original_audio_for_locked_segment(
     monkeypatch.setattr(module, "ffprobe_info", lambda _source: {"has_audio": True})
     commands: list[list[str]] = []
 
-    def fake_run(command: list[str], capture_output: bool):
+    def fake_run(command: list[str], capture_output: bool, timeout: float):
         commands.append(command)
+        assert timeout == 60
         return types.SimpleNamespace(returncode=0, stderr=b"")
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
@@ -170,6 +173,87 @@ def test_video_merge_uses_separate_original_audio_for_locked_segment(
     ) in filter_graph
     assert "[3:a]aresample=44100:first_pts=0" in filter_graph
     assert "atrim=start_sample=22050:end_sample=110250" in filter_graph
+
+
+def test_video_merge_timeout_surfaces_error_and_removes_partial_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = _load_video_utils_module(tmp_path)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    monkeypatch.setattr(module, "get_ffmpeg_path", lambda _name="ffmpeg": "ffmpeg")
+    monkeypatch.setattr(module, "ffprobe_info", lambda _source: {"has_audio": False})
+
+    def fake_run(command: list[str], capture_output: bool, timeout: float):
+        assert capture_output
+        raise subprocess.TimeoutExpired(cmd=command, timeout=timeout)
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="video track merge timed out"):
+        module.merge_video_track_with_ffmpeg(
+            [{"source": str(source), "start_frame": 0, "end_frame": 24}],
+            total_length=24, frame_rate=24, width=320, height=180,
+        )
+    assert sorted(tmp_path.glob("*.mp4")) == [source]
+
+
+def test_single_video_render_seeks_and_limits_input_before_resizing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    module = _load_video_utils_module(tmp_path)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"video")
+    monkeypatch.setattr(module, "get_ffmpeg_path", lambda _name="ffmpeg": "ffmpeg")
+    monkeypatch.setattr(module, "ffprobe_info", lambda _source: {"has_audio": True})
+    commands = []
+
+    def fake_run(command: list[str], capture_output: bool, timeout: float):
+        commands.append(command)
+        assert capture_output and timeout == 60
+        return types.SimpleNamespace(returncode=0, stderr=b"")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    output = module.render_single_video_segment_with_ffmpeg(
+        str(source), 48, 24, 24, 320, 180, "crop",
+        audio_volume_db=-3, audio_muted=False,
+    )
+
+    assert output is not None
+    command = commands[0]
+    assert command[command.index("-ss") + 1] == "2.0"
+    assert command[command.index("-i") - 2:command.index("-i")] == ["-t", "1.0"]
+    assert "color=c=black" not in " ".join(command)
+    assert "overlay=" not in " ".join(command)
+    assert "volume=-3dB" in command[command.index("-af") + 1]
+
+
+@pytest.mark.skipif(
+    shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None,
+    reason="FFmpeg is required for the single-segment render test",
+)
+def test_single_video_render_outputs_exact_task_span_with_audio(tmp_path: Path):
+    module = _load_video_utils_module(tmp_path)
+    source = tmp_path / "source.mp4"
+    created = subprocess.run([
+        shutil.which("ffmpeg"), "-y", "-v", "error",
+        "-f", "lavfi", "-i", "testsrc2=s=64x64:r=30:d=3",
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=3",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+        str(source),
+    ], capture_output=True)
+    assert created.returncode == 0, created.stderr.decode(errors="replace")
+
+    output = module.render_single_video_segment_with_ffmpeg(
+        str(source), 48, 24, 24, 32, 32, "stretch",
+    )
+
+    assert output is not None
+    info = module.ffprobe_info(output)
+    assert (info["width"], info["height"], info["frame_count"]) == (32, 32, 24)
+    assert info["has_audio"] is True
 
 
 @pytest.mark.skipif(
