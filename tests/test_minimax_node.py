@@ -1261,9 +1261,11 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
         "single",
         "dual",
         "selflift",
+        "passthrough",
     ]
     assert sampling_mode_options[0][1] == []
     assert sampling_mode_options[1][1] == []
+    assert sampling_mode_options[3][1] == []
     selflift_inputs = {port.name: port for port in sampling_mode_options[2][1]}
     assert list(selflift_inputs) == [
         "transition_ratio",
@@ -1288,6 +1290,27 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
         "PROJECT_NAME",
         "LOCKED_AUDIO",
     ]
+
+
+def test_h3_project_passthrough_skips_conditioning_and_keeps_context(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    result = module.EasyMultiTrackProject.execute(
+        **_h3_project_inputs(sampling_mode=_h3_sampling_mode("passthrough"))
+    )
+    nodes = list(result.expand.values())
+    types = {node["class_type"] for node in nodes}
+    assert "easy h3PassthroughVideo" in types
+    assert "easy minimaxH3ToVideo" not in types
+    assert "easy h3ConditioningCache" not in types
+    assert "SamplerCustomAdvanced" not in types
+    assert "easy h3SegmentSamplingStart" not in types
+    passthrough = _graph_node(result, "easy h3PassthroughVideo")
+    assert passthrough["inputs"]["frame_count"] == 120
+    assert passthrough["inputs"]["fps"] == 24.0
+    artifact = _graph_node(result, "easy h3ProjectArtifact")
+    context = result.expand[artifact["inputs"]["context_latent"][0]]
+    assert context["class_type"] == "easy h3MotionContextLatentTrim"
+    assert context["inputs"]["context_length"] == "22"
 
 
 def test_h3_project_static_prepare_exposes_media_cache_boundary(monkeypatch):
