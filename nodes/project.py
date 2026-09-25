@@ -885,7 +885,8 @@ class EasyMultiTrackProject(io.ComfyNode):
                     raw_link=True,
                     lazy=True,
                     tooltip=(
-                        "Optional second-pass model. Encoding and VAE "
+                        "Optional second-pass model for Dual sampling or the "
+                        "high-resolution SelfLift stage. Encoding and VAE "
                         "components remain from the first-pass loader."
                     ),
                 ),
@@ -1124,7 +1125,7 @@ class EasyMultiTrackProject(io.ComfyNode):
         )
         second_model = model
         second_model_loader = None
-        if run_second_pass:
+        if run_second_pass or is_selflift:
             configured_second_loader = sampling_config.get("model_loader_2nd")
             second_model_loader = _raw_project_input(
                 configured_second_loader if configured_second_loader is not None
@@ -1724,6 +1725,11 @@ class EasyMultiTrackProject(io.ComfyNode):
                 report_segment_step(0.38)
                 selflift_inputs: dict[str, Any] = {
                     "model": first_pass_sampling_model,
+                    "highres_model": (
+                        second_model
+                        if second_model_loader is not None
+                        else first_pass_sampling_model
+                    ),
                     "positive": positive,
                     "vae": vae,
                     "latent_image": initial_latent,
