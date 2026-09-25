@@ -947,6 +947,19 @@ class EasyMultiTrackProject(io.ComfyNode):
                         io.DynamicCombo.Option(
                             "selflift",
                             [
+                                io.Model.Input(
+                                    "model_hires",
+                                    optional=True,
+                                    raw_link=True,
+                                    lazy=True,
+                                    tooltip=(
+                                        "Optional model used only for high-resolution "
+                                        "denoising after the lift. Leave disconnected "
+                                        "to use the original model. Connect a compatible "
+                                        "H3 model with the desired LoRA stack; CLIP, "
+                                        "VAE and the sigma schedule stay unchanged."
+                                    ),
+                                ),
                                 io.Float.Input(
                                     "transition_ratio",
                                     default=0.6,
@@ -1089,8 +1102,10 @@ class EasyMultiTrackProject(io.ComfyNode):
         has_second_pass = sampling_mode == "dual"
         transition_ratio = 0.6
         lowres_scale = 0.6
+        model_hires = None
         tiling_enabled, tile_count = _h3_tiling_config(kwargs.get("enabled_tiling"))
         if is_selflift:
+            model_hires = _raw_project_input(sampling_config.get("model_hires"))
             transition_ratio = float(
                 _first_input(sampling_config.get("transition_ratio"), 0.6)
             )
@@ -1663,6 +1678,8 @@ class EasyMultiTrackProject(io.ComfyNode):
                     "enabled_tiling": tiling_enabled,
                     "tile_count": tile_count,
                 }
+                if model_hires is not None:
+                    selflift_inputs["model_hires"] = model_hires
                 if has_sampling_preview:
                     selflift_inputs.update({
                         "preview_vae": preview_vae,

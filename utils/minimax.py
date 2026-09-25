@@ -24,6 +24,38 @@ def selflift_transition_step(step_count: int, ratio: float) -> int:
     return max(1, min(step_count - 1, nearest))
 
 
+def validate_selflift_hires_model(model: Any, model_hires: Any) -> None:
+    """Require compatible latent coordinates for a mid-schedule model switch."""
+    import comfy.model_sampling
+
+    if not callable(getattr(model_hires, "get_model_object", None)):
+        raise ValueError("SelfLift: model_hires must be a ComfyUI MODEL")
+    if type(model.model) is not type(model_hires.model):
+        raise ValueError("SelfLift: model_hires must use the same model architecture")
+
+    source_format = model.get_model_object("latent_format")
+    target_format = model_hires.get_model_object("latent_format")
+    format_fields = (
+        "latent_channels", "latent_dimensions", "spacial_downscale_ratio",
+        "temporal_downscale_ratio", "scale_factor", "shift_factor",
+    )
+    if type(source_format) is not type(target_format) or any(
+        getattr(source_format, field, None) != getattr(target_format, field, None)
+        for field in format_fields
+    ):
+        raise ValueError("SelfLift: model_hires must use the same latent format")
+
+    source_sampling = model.get_model_object("model_sampling")
+    target_sampling = model_hires.get_model_object("model_sampling")
+    if not isinstance(target_sampling, comfy.model_sampling.CONST):
+        raise ValueError("SelfLift: model_hires must use rectified-flow sampling")
+    if any(
+        getattr(source_sampling, field, 1.0) != getattr(target_sampling, field, 1.0)
+        for field in ("noise_scale", "audio_scale")
+    ):
+        raise ValueError("SelfLift: model_hires must use the same noise and audio scales")
+
+
 def h3_phase_aligned_context_start(
     total_frames: int,
     context_frames: int = 22,

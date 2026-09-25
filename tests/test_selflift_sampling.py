@@ -5,6 +5,7 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
 import torch
 
 
@@ -20,8 +21,11 @@ def _load_sampling_module():
     selflift_package.paired_lifts = lambda *args, **kwargs: (args[0], None)
     utils_package = types.ModuleType("selflift_test.utils")
     utils_package.__path__ = [str(root / "utils")]
-    minimax_module = types.ModuleType("selflift_test.utils.minimax")
-    minimax_module.selflift_transition_step = lambda steps, ratio: round(steps * ratio)
+    minimax_spec = importlib.util.spec_from_file_location(
+        "selflift_test.utils.minimax", root / "utils" / "minimax.py",
+    )
+    minimax_module = importlib.util.module_from_spec(minimax_spec)
+    minimax_spec.loader.exec_module(minimax_module)
     sys.modules.update(
         {
             "selflift_test": package,
@@ -53,6 +57,9 @@ class _NestedTensor:
 
     def unbind(self):
         return self.tensors
+
+    def to(self, *args, **kwargs):
+        return _NestedTensor([tensor.to(*args, **kwargs) for tensor in self.tensors])
 
 
 def _install_nested_tensor(monkeypatch):
@@ -243,3 +250,201 @@ def test_highres_tiling_patches_only_when_enabled(monkeypatch):
     assert calls == [
         (model, [(1, 24, 3, 4, 6), (1, 32, 2, 9)])
     ]
+
+
+@pytest.fixture
+def progressive_runtime(monkeypatch):
+    """Exercise the complete CPU transition with only ComfyUI execution stubbed."""
+    _install_nested_tensor(monkeypatch)
+    comfy = sys.modules["comfy"]
+
+    class ConstSampling:
+        noise_scale = 1.0
+        audio_scale = 1.0
+
+        def noise_scaling(self, sigma, noise, latent):
+            return sigma * noise + (1 - sigma) * latent
+
+    class LatentFormat:
+        scale_factor = 1.0
+
+        def process_in(self, value):
+            return value
+
+        def process_out(self, value):
+            return value
+
+    class Model:
+        def __init__(self, value):
+            self.value = value
+            self.load_device = torch.device("cpu")
+            self.model_options = {"lora": value}
+            self.model = types.SimpleNamespace(
+                process_latent_in=lambda latent: latent,
+                process_latent_out=lambda latent: latent,
+            )
+            self.objects = {
+                "model_sampling": ConstSampling(),
+                "latent_format": LatentFormat(),
+            }
+
+        def get_model_object(self, name):
+            return self.objects[name]
+
+    calls = []
+
+    def sample(model, noise, positive, negative, cfg, device, sampler, sigmas,
+               model_options, *, latent_image, callback, **kwargs):
+        calls.append((model, sigmas.clone(), model_options, kwargs))
+        denoised = _NestedTensor([
+            torch.full_like(stream, model.value) for stream in latent_image.unbind()
+        ])
+        for step in range(len(sigmas) - 1):
+            callback(step, denoised, latent_image, len(sigmas) - 1)
+        return denoised
+
+    def pack_latents(streams):
+        return torch.cat([s.reshape(s.shape[0], 1, -1) for s in streams], dim=-1), None
+
+    def unpack_latents(packed, shapes):
+        sizes = [torch.Size(shape[1:]).numel() for shape in shapes]
+        return [part.reshape(shape) for part, shape in zip(packed.split(sizes, dim=-1), shapes)]
+
+    modules = {
+        "model_management": dict(intermediate_device=lambda: "cpu", intermediate_dtype=lambda: torch.float32),
+        "model_sampling": dict(CONST=ConstSampling),
+        "sample": dict(
+            fix_empty_latent_channels=lambda model, samples, *args: samples,
+            prepare_noise=lambda latent, *args: (
+                _NestedTensor([torch.zeros_like(s) for s in latent.unbind()])
+                if getattr(latent, "is_nested", False) else torch.zeros_like(latent)
+            ),
+        ),
+        "samplers": dict(sample=sample, sampler_object=lambda name: object()),
+        "utils": dict(PROGRESS_BAR_ENABLED=False, pack_latents=pack_latents, unpack_latents=unpack_latents),
+    }
+    for name, attributes in modules.items():
+        module = types.ModuleType(f"comfy.{name}")
+        module.__dict__.update(attributes)
+        monkeypatch.setitem(sys.modules, f"comfy.{name}", module)
+        monkeypatch.setattr(comfy, name, module, raising=False)
+    monkeypatch.setattr(sampling, "_validate_euler_sampler", lambda sampler: None)
+    monkeypatch.setattr(sampling, "_prepare_sampling_callback", lambda *args: lambda *args: None)
+    monkeypatch.setattr(sampling, "paired_lifts", lambda latent, vae, size, *args, **kwargs: (
+        sampling._resize_video_spatial(latent, *size, mode="nearest"), None,
+    ))
+    return Model, calls
+
+
+@pytest.mark.parametrize("hires_mode", ["omitted", "same", "replacement"])
+@pytest.mark.parametrize("tiling", [False, True])
+def test_progressive_sample_switches_only_high_stage_and_preserves_schedule(
+    monkeypatch, progressive_runtime, hires_mode, tiling,
+):
+    Model, calls = progressive_runtime
+    model = Model(1.0)
+    replacement = Model(2.0)
+    model_hires = {"omitted": None, "same": model, "replacement": replacement}[hires_mode]
+    expected_high = replacement if hires_mode == "replacement" else model
+    tiled = Model(expected_high.value)
+    tile_calls = []
+    tiling_module = types.ModuleType("selflift_test.modules.selflift.h3_tiling")
+    tiling_module.tiled_model = lambda model, shapes, **kwargs: tile_calls.append(
+        (model, shapes, kwargs)
+    ) or tiled
+    monkeypatch.setitem(sys.modules, tiling_module.__name__, tiling_module)
+    video = torch.zeros(1, 24, 3, 8, 8)
+    audio = torch.zeros(1, 32, 2, 9)
+    mask = _NestedTensor((torch.ones(1, 1, 3, 8, 8), torch.zeros(1, 1, 2, 9)))
+    latent = {"samples": _NestedTensor((video, audio)), "noise_mask": mask}
+    sigmas = torch.tensor([1.0, 0.8, 0.6, 0.3, 0.0])
+    preview_steps = []
+
+    result, low_result = sampling.progressive_sample_h3(
+        model, [], object(), latent, sigmas, 42, 0.5, 0.5,
+        model_hires=model_hires,
+        highres_tiling=tiling,
+        tile_count=2,
+        preview_callback=lambda step, *args: preview_steps.append(step),
+    )
+
+    assert len(calls) == 2
+    assert calls[0][0] is model
+    assert calls[1][0] is (tiled if tiling else expected_high)
+    assert calls[0][2] is model.model_options
+    assert calls[1][2] is calls[1][0].model_options
+    assert torch.equal(calls[0][1], sigmas[:3])
+    assert torch.equal(calls[1][1], sigmas[2:])
+    assert calls[1][3]["denoise_mask"] is mask
+    assert preview_steps == [0, 1, 2, 3]
+    assert result["samples"].unbind()[0].shape == video.shape
+    assert torch.all(result["samples"].unbind()[0] == expected_high.value)
+    assert low_result["samples"].unbind()[0].shape[-2:] == (4, 4)
+    assert torch.all(low_result["samples"].unbind()[0] == model.value)
+    assert model.model_options == {"lora": 1.0}
+    assert replacement.model_options == {"lora": 2.0}
+    if tiling:
+        assert tile_calls == [(expected_high, [tuple(video.shape), tuple(audio.shape)], {"tile_count": 2})]
+    else:
+        assert tile_calls == []
+
+
+@pytest.mark.parametrize("mismatch, message", [
+    ("architecture", "architecture"),
+    ("latent_format", "latent format"),
+    ("latent_scale", "latent format"),
+    ("model_sampling", "rectified-flow"),
+    ("noise_scale", "noise and audio scales"),
+    ("audio_scale", "noise and audio scales"),
+])
+def test_incompatible_hires_model_fails_before_sampling(progressive_runtime, mismatch, message):
+    Model, calls = progressive_runtime
+    model, replacement = Model(1.0), Model(2.0)
+    if mismatch == "architecture":
+        replacement.model = object()
+    elif mismatch in {"latent_format", "model_sampling"}:
+        replacement.objects[mismatch] = object()
+    elif mismatch == "latent_scale":
+        replacement.objects["latent_format"].scale_factor = 2.0
+    else:
+        setattr(replacement.objects["model_sampling"], mismatch, 2.0)
+    latent = {"samples": _NestedTensor((torch.zeros(1, 24, 3, 8, 8), torch.zeros(1, 32, 2, 9)))}
+    with pytest.raises(ValueError, match=message):
+        sampling.progressive_sample_h3(
+            model, [], object(), latent, torch.tensor([1.0, 0.5, 0.0]), 42, 0.5, 0.5,
+            model_hires=replacement,
+        )
+    assert calls == []
+
+
+def test_progressive_sample_applies_continuity_before_highres_tiling(
+    monkeypatch, progressive_runtime,
+):
+    from selflift_test.modules.motion_context import drift_control_av
+
+    Model, calls = progressive_runtime
+    model, replacement, patched = Model(1.0), Model(2.0), Model(2.0)
+    latent = {"samples": _NestedTensor((torch.zeros(1, 24, 3, 8, 8), torch.zeros(1, 32, 2, 9)))}
+    sigmas = torch.tensor([1.0, 0.5, 0.0])
+    preparation = []
+
+    def inherit(source, target, anchor, schedule):
+        assert source is model and target is replacement
+        assert anchor is latent and schedule is sigmas
+        preparation.append("continuity")
+        return patched
+
+    def tile(target, streams, enabled, tile_count):
+        assert target is patched and enabled and tile_count == 2
+        preparation.append("tiling")
+        return target
+
+    monkeypatch.setattr(drift_control_av, "inherit_drift_control_av_model", inherit)
+    monkeypatch.setattr(sampling, "_highres_sampling_model", tile)
+    sampling.progressive_sample_h3(
+        model, [], object(), latent, sigmas, 42, 0.5, 0.5,
+        model_hires=replacement, highres_tiling=True, tile_count=2,
+    )
+    assert preparation == ["continuity", "tiling"]
+    assert calls[0][0] is model
+    assert calls[1][0] is patched

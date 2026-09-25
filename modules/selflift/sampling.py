@@ -14,7 +14,7 @@ import torch
 
 from . import artifact_aware_consistency_lift, paired_lifts
 from .diagnostics import log_memory
-from ...utils.minimax import selflift_transition_step
+from ...utils.minimax import selflift_transition_step, validate_selflift_hires_model
 
 
 class _StageTimer:
@@ -368,6 +368,7 @@ def progressive_sample_h3(
     transition_ratio: float,
     lowres_scale: float,
     *,
+    model_hires: Any | None = None,
     latent_lifter: Callable[[torch.Tensor, tuple[int, int]], torch.Tensor] | None = None,
     low_context_latent: dict[str, Any] | None = None,
     rho: float = 0.0,
@@ -396,6 +397,14 @@ def progressive_sample_h3(
     model_sampling = model.get_model_object("model_sampling")
     if not isinstance(model_sampling, comfy.model_sampling.CONST):
         raise ValueError("SelfLift requires a rectified-flow model")
+    hires_base = model
+    if model_hires is not None and model_hires is not model:
+        from ..motion_context.drift_control_av import inherit_drift_control_av_model
+
+        validate_selflift_hires_model(model, model_hires)
+        hires_base = inherit_drift_control_av_model(
+            model, model_hires, latent_image, sigmas,
+        )
     sampler = comfy.samplers.sampler_object("euler")
     _validate_euler_sampler(sampler)
 
@@ -407,7 +416,7 @@ def progressive_sample_h3(
     )
     streams, nested = _streams(fixed_samples)
     high_model = _highres_sampling_model(
-        model,
+        hires_base,
         streams,
         highres_tiling,
         tile_count=tile_count,
