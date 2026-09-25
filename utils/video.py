@@ -735,7 +735,12 @@ def validate_merge_compatibility(specs: list[MergeSpec]) -> None:
         for label in labels:
             baseline_val = getattr(baseline, label)
             spec_val = getattr(spec, label)
-            if baseline_val != spec_val:
+            if label == "fps":
+                # Decoders can report the same nominal rate with tiny rounding differences.
+                matches = math.isclose(float(baseline_val), float(spec_val), rel_tol=0, abs_tol=1e-4)
+            else:
+                matches = baseline_val == spec_val
+            if not matches:
                 raise ValueError(
                     f"Video {index} is incompatible: '{label}' mismatch "
                     f"(expected {baseline_val!r}, got {spec_val!r})"
