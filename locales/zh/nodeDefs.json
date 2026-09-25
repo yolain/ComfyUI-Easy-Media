@@ -1355,7 +1355,8 @@
       },
       "sampling_mode": {
         "name": "采样模式",
-        "tooltip": "single 单次采样效果最好；dual 使用原有两次独立采样；selflift 使用单条渐进分辨率调度，并分别维护低、高分辨率上下文。"
+        "tooltip": "single 单次采样效果最好；dual 使用原有两次独立采样；selflift 使用单条渐进分辨率调度；passthrough 直接输出第 0 个完整时间线参考视频，并保存下一段所需的上下文。",
+        "options": {"single": "单次采样", "dual": "两次采样", "selflift": "SelfLift", "passthrough": "直通"}
       },
       "transition_ratio": {
         "name": "步数过渡比例",

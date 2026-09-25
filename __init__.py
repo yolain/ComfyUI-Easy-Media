@@ -106,6 +106,7 @@ class EasyMediaExtension(ComfyExtension):
             EasyMiniMaxH3SelfLiftSampler,
             EasyH3SegmentSaveEnd,
             EasyH3ContextMediaTrim,
+            EasyH3PassthroughVideo,
             EasyH3AudioContextLatent,
             EasyH3LockedAudioDurationAlign,
             EasyH3LockedAudioSelect,

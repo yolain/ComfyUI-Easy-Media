@@ -384,8 +384,8 @@ def _h3_sampling_mode_config(value: Any) -> tuple[str, dict[str, Any]]:
     # Keep workflows saved with the original mode name loadable.
     if sampling_mode == "dual_selflift":
         sampling_mode = "selflift"
-    if sampling_mode not in {"single", "dual", "selflift"}:
-        raise ValueError("sampling_mode must be 'single', 'dual', or 'selflift'")
+    if sampling_mode not in {"single", "dual", "selflift", "passthrough"}:
+        raise ValueError("sampling_mode must be 'single', 'dual', 'selflift', or 'passthrough'")
     return sampling_mode, config
 
 
@@ -636,7 +636,7 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                 io.Float.Input("fps", default=24.0, min=0.001, optional=True),
                 io.Combo.Input("generation_mode", options=["reference", "multi_frames", "last_frame"], default="multi_frames", optional=True),
                 io.String.Input("sampling_plan", default="light", optional=True),
-                io.Combo.Input("sampling_mode", options=["single", "dual", "selflift"], default="single", optional=True),
+                io.Combo.Input("sampling_mode", options=["single", "dual", "selflift", "passthrough"], default="single", optional=True),
                 io.Sampler.Input("sampler", optional=True, raw_link=True),
                 io.Sigmas.Input("sigmas", optional=True, raw_link=True),
                 io.Sampler.Input("sampler_2nd", optional=True, raw_link=True),
@@ -820,7 +820,9 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                 second_is_turbo = detect_turbo_model(second_model).is_turbo
             graph = GraphBuilder()
             first_sampler = None
-            if sampling_mode == "selflift":
+            if sampling_mode == "passthrough":
+                first_sampler = first_sigmas = None
+            elif sampling_mode == "selflift":
                 first_sigmas = _h3_resolve_selflift_sigmas(
                     graph, sigmas=sigmas, preset_name=str(sampling_plan),
                     is_turbo=first_is_turbo,
@@ -973,6 +975,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                                 ),
                             ],
                         ),
+                        io.DynamicCombo.Option("passthrough", []),
                     ],
                 ),
                 io.Boolean.Input(
@@ -1085,6 +1088,7 @@ class EasyMultiTrackProject(io.ComfyNode):
         sampling_mode, sampling_config = _h3_sampling_mode_config(
             kwargs.get("sampling_mode")
         )
+        is_passthrough = sampling_mode == "passthrough"
         is_selflift = sampling_mode == "selflift"
         has_second_pass = sampling_mode == "dual"
         transition_ratio = 0.6
@@ -1214,6 +1218,7 @@ class EasyMultiTrackProject(io.ComfyNode):
         if (
             first_selected_index > 0
             and first_selected_continuity in H3_CONTEXT_CONTINUITY_MODES
+            and not is_passthrough
         ):
             previous_index = first_selected_index - 1
             if not has_h3_context_latent(
@@ -1344,7 +1349,7 @@ class EasyMultiTrackProject(io.ComfyNode):
             (task_tracks_info_base, shared_images, shared_audio, shared_video,
              full_locked_audio) = prepare_multitrack_project_media(info)
             first_pass_sampler = first_pass_sigmas = None
-            if any(task_index != resume_task_index for task_index, _ in selected_entries):
+            if not is_passthrough and any(task_index != resume_task_index for task_index, _ in selected_entries):
                 if is_selflift:
                     first_pass_sigmas = _h3_resolve_selflift_sigmas(
                         graph, sigmas=_first_input(kwargs.get("sigmas")),
@@ -1432,7 +1437,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     project_static=project_media_static.out(0), task_start_frame=task_start_frame,
                     task_index=task_index,
                     task_duration_frames=task_duration_frames, fps=fps,
-                    generation_mode=generation_mode,
+                    generation_mode="reference" if is_passthrough else generation_mode,
                     **(
                         {"previous": previous_artifact}
                         if previous_artifact is not None
@@ -1457,8 +1462,8 @@ class EasyMultiTrackProject(io.ComfyNode):
                 )
                 task_tracks_info = prepare_multitrack_project_task_info(
                     task_tracks_info_base, shared_images,
-                    task_shared_audio if generation_mode == "reference" else [],
-                    task_shared_video if generation_mode == "reference" else [],
+                    task_shared_audio if generation_mode == "reference" or is_passthrough else [],
+                    task_shared_video if generation_mode == "reference" or is_passthrough else [],
                     task_entry=entry,
                 )
                 task_output = graph.node(
@@ -1470,6 +1475,76 @@ class EasyMultiTrackProject(io.ComfyNode):
                 base_task_length = task_output.out(3)
                 if preserve_source_timing:
                     base_task_length = task_duration_frames
+            if is_passthrough:
+                if audio_only:
+                    raise ValueError("Passthrough requires a video project, not audio-only mode")
+                passthrough = graph.node(
+                    "easy h3PassthroughVideo",
+                    id=f"passthrough_video_{task_index}",
+                    videos=task_output.out(6),
+                    frame_count=task_duration_frames,
+                    fps=fps,
+                )
+                output_images, output_audio = passthrough.out(0), passthrough.out(1)
+                context_latent = _h3_encode_context_media(
+                    graph, output_images, output_audio, vae, audio_vae,
+                    f"passthrough_context_{task_index}",
+                )
+                runtime_context_latent = graph.node(
+                    "easy h3MotionContextLatentTrim",
+                    id=f"trim_hires_context_latent_{task_index}",
+                    latent=context_latent,
+                    context_length=str(H3_CONTEXT_SOURCE_FRAMES),
+                ).out(0)
+                saved_video = graph.node(
+                    "easy saveVideo",
+                    id=f"save_video_{task_index}",
+                    input_mode="images+audio",
+                    **{
+                        "input_mode.images": output_images,
+                        "input_mode.audio": output_audio,
+                        "input_mode.fps": fps,
+                        "output_mode": "hide&save",
+                    },
+                    filename_prefix=(
+                        f"easy_media/projects/{safe_project_name}/"
+                        f".staging_video_{task_index}"
+                    ),
+                )
+                saved_video_end = graph.node(
+                    "easy h3SegmentSaveEnd",
+                    id=f"save_end_{task_index}",
+                    video_path=saved_video.out(1),
+                    project_name=safe_project_name,
+                    segment_index=task_index,
+                )
+                artifact_inputs = {
+                    "project_name": safe_project_name,
+                    "project_save": project_save,
+                    "segment_index": task_index,
+                    "context_latent": runtime_context_latent,
+                    "video_path": saved_video_end.out(0),
+                    "tracks_info": output_info,
+                    "continuity_mode": continuity_mode,
+                    "seed": first_pass_seed,
+                    "sampling_pass": "single",
+                }
+                if previous_artifact is not None:
+                    artifact_inputs["previous"] = previous_artifact
+                artifact = graph.node(
+                    "easy h3ProjectArtifact",
+                    id=f"artifact_{task_index}",
+                    **artifact_inputs,
+                )
+                previous_artifact = last_project_output = artifact.out(0)
+                previous_hires_context_latent = runtime_context_latent
+                previous_low_context_latent = runtime_context_latent
+                segment_nodes.update({
+                    node_id: task_index
+                    for node_id in graph.nodes.keys() - previous_graph_nodes
+                })
+                report_segment_step(1.0)
+                continue
             aligned_task_length: Any = (
                 minimax_frame_count(base_task_length, round_up=True)
                 if preserve_source_timing
