@@ -168,3 +168,123 @@ describe('scaleImageItemsToDuration', () => {
     ])
   })
 })
+
+describe('dynamic combo widget heights', () => {
+  const USER_HEIGHT = 714.0284202571102
+  const SNAPPED_HEIGHT = 514
+
+  type TestWidget = {
+    name: string
+    type?: string
+    value?: unknown
+    callback?: (...args: unknown[]) => unknown
+  }
+
+  function createMultitrackNode() {
+    class NodeType {
+      size: [number, number] = [800, USER_HEIGHT]
+      properties: Record<string, unknown> = {}
+      widgets: TestWidget[] = []
+      inputs: Array<Record<string, unknown>> = []
+      setSize = vi.fn((size: [number, number]) => {
+        this.size = size
+      })
+      setDirtyCanvas = vi.fn()
+    }
+
+    preserveTimelineEditorNodeHeight(NodeType, { name: 'easy multiTrackEditor' })
+    return new NodeType() as InstanceType<typeof NodeType> & {
+      onNodeCreated?: () => void
+      onConfigure?: (serialisedNode: unknown) => void
+      onWidgetChanged?: (name: string, value: unknown, oldValue: unknown, widget: unknown) => void
+    }
+  }
+
+  /** Mirrors ComfyUI's front end: a chained dynamic combo callback assigns node.size. */
+  function addDynamicCombo(node: { size: [number, number], widgets: TestWidget[] }) {
+    const callback = vi.fn(() => {
+      node.size = [node.size[0], SNAPPED_HEIGHT]
+    })
+    node.widgets = [
+      { name: 'resolution', type: 'combo', value: 'megapixels', callback },
+      { name: 'resolution.aspect_ratio', type: 'combo', value: '16:9' },
+      { name: 'resolution.megapixels', type: 'number', value: 1.2 },
+    ]
+    return callback
+  }
+
+  it('keeps the height a dynamic combo callback tries to snap away', () => {
+    const node = createMultitrackNode()
+    const callback = addDynamicCombo(node)
+    node.onNodeCreated?.()
+    node.size = [800, USER_HEIGHT]
+    node.properties.easyMediaTimelineHeight = USER_HEIGHT
+
+    node.widgets[0].callback?.()
+
+    expect(callback).toHaveBeenCalledTimes(1)
+    expect(node.size[1]).toBe(USER_HEIGHT)
+    expect(node.properties.easyMediaTimelineHeight).toBe(USER_HEIGHT)
+  })
+
+  it('leaves a combo without sub-widgets untouched', () => {
+    const node = createMultitrackNode()
+    const callback = vi.fn(() => {
+      node.size = [800, SNAPPED_HEIGHT]
+    })
+    node.widgets = [{ name: 'format', type: 'combo', value: 'MiniMax', callback }]
+    node.onNodeCreated?.()
+
+    node.widgets[0].callback?.()
+
+    expect(node.size[1]).toBe(SNAPPED_HEIGHT)
+  })
+
+  it('guards a dynamic combo only once across repeated hooks', () => {
+    const node = createMultitrackNode()
+    const callback = addDynamicCombo(node)
+    node.onNodeCreated?.()
+    node.onConfigure?.({ size: [800, USER_HEIGHT], properties: {} })
+    node.onNodeCreated?.()
+    node.size = [800, USER_HEIGHT]
+    node.properties.easyMediaTimelineHeight = USER_HEIGHT
+
+    node.widgets[0].callback?.()
+
+    expect(callback).toHaveBeenCalledTimes(1)
+    expect(node.size[1]).toBe(USER_HEIGHT)
+  })
+
+  it('restores the height in onWidgetChanged when the snap happened first', () => {
+    const node = createMultitrackNode()
+    addDynamicCombo(node)
+    node.onNodeCreated?.()
+    node.properties.easyMediaTimelineHeight = USER_HEIGHT
+    node.size = [800, SNAPPED_HEIGHT]
+
+    node.onWidgetChanged?.('resolution', 'megapixels', 'custom', node.widgets[0])
+    expect(node.size[1]).toBe(USER_HEIGHT)
+  })
+
+  it('still propagates callback errors', () => {
+    const node = createMultitrackNode()
+    node.widgets = [
+      {
+        name: 'resolution',
+        type: 'combo',
+        value: 'megapixels',
+        callback: () => {
+          node.size = [800, SNAPPED_HEIGHT]
+          throw new Error('invalid dynamic combo value')
+        },
+      },
+      { name: 'resolution.megapixels', type: 'number', value: 1.2 },
+    ]
+    node.onNodeCreated?.()
+    node.size = [800, USER_HEIGHT]
+    node.properties.easyMediaTimelineHeight = USER_HEIGHT
+
+    expect(() => node.widgets[0].callback?.()).toThrow('invalid dynamic combo value')
+    expect(node.size[1]).toBe(USER_HEIGHT)
+  })
+})

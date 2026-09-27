@@ -2,6 +2,7 @@ const TIMELINE_NODE_NAME = new Set(['easy timelineEditor', 'easy multiTrackEdito
 const TIMELINE_HEIGHT_PROPERTY = 'easyMediaTimelineHeight'
 const TIMELINE_WIDGET_RESIZE_GUARD = '__easyMediaTimelineWidgetResizeGuard'
 const TIMELINE_HEIGHT_RESTORE_VERSION = '__easyMediaTimelineHeightRestoreVersion'
+const DYNAMIC_COMBO_HEIGHT_GUARD = '__easyMediaDynamicComboHeightGuard'
 const TIMELINE_WIDGET_DEFAULT_SIZES: Record<string, [number, number]> = {
   'easy timelineEditor': [520, 430],
   'easy multiTrackEditor': [800, 700],
@@ -108,6 +109,56 @@ function beginWidgetResizeGuard(node: any) {
   } satisfies ResizeGuard
 }
 
+/** Dynamic combos own sub-widgets (and matching inputs) named `<name>.<key>`. */
+function ownsSubWidgets(node: any, widgets: any[], name: string): boolean {
+  const prefix = `${name}.`
+  const hasSubWidget = widgets.some(
+    (widget) => typeof widget?.name === 'string' && widget.name.startsWith(prefix),
+  )
+  if (hasSubWidget) return true
+
+  const inputs: any[] = Array.isArray(node?.inputs) ? node.inputs : []
+  return inputs.some((input) => typeof input?.name === 'string' && input.name.startsWith(prefix))
+}
+
+/**
+ * ComfyUI's front end gives dynamic combo widgets (for example `resolution`) a chained
+ * callback that snaps the node to its computed content height after every value change:
+ *
+ *   widget.callback = useChainCallback(widget.callback, () => {
+ *     node.size = [node.size[0], node.computeSize([...node.size])[1]]
+ *   })
+ *
+ * That assignment bypasses `setSize` and `onResize`, so a node the user made taller is
+ * silently shrunk back to the widget layout height. Wrapping the callback re-applies the
+ * previous height in the same task, so the smaller size is never painted.
+ */
+function guardDynamicComboWidgetHeights(node: any) {
+  const widgets: any[] = Array.isArray(node?.widgets) ? node.widgets : []
+  for (const widget of widgets) {
+    if (!widget || widget[DYNAMIC_COMBO_HEIGHT_GUARD]) continue
+    const name = widget.name
+    if (typeof name !== 'string' || widget.type !== 'combo') continue
+    if (typeof widget.callback !== 'function') continue
+    if (!ownsSubWidgets(node, widgets, name)) continue
+
+    const originalCallback = widget.callback
+    widget[DYNAMIC_COMBO_HEIGHT_GUARD] = true
+    widget.callback = function guardedDynamicComboCallback(this: unknown, ...args: unknown[]) {
+      const heightBefore = readSize(node?.size)?.[1] ?? null
+      try {
+        return originalCallback.apply(this, args)
+      } finally {
+        const sizeAfterCallback = readSize(node?.size)
+        if (heightBefore !== null && sizeAfterCallback && sizeAfterCallback[1] !== heightBefore) {
+          preserveHeight(node, heightBefore)
+          applyHeight(node, heightBefore, sizeAfterCallback[0])
+        }
+      }
+    }
+  }
+}
+
 export function preserveTimelineEditorNodeSize(nodeType: any, nodeData: { name?: string }) {
   if (!TIMELINE_NODE_NAME.has(nodeData.name || '')) return
 
@@ -119,6 +170,7 @@ export function preserveTimelineEditorNodeSize(nodeType: any, nodeData: { name?:
 
   nodeType.prototype.onNodeCreated = function () {
     originalOnNodeCreated?.call(this)
+    guardDynamicComboWidgetHeights(this)
     const nodeName = nodeData.name || ''
     const defaultSize = TIMELINE_WIDGET_DEFAULT_SIZES[nodeName]
     if (!defaultSize) return
@@ -134,6 +186,7 @@ export function preserveTimelineEditorNodeSize(nodeType: any, nodeData: { name?:
     invalidatePendingHeightRestores(this)
     if (savedHeight !== null) preserveHeight(this, savedHeight)
     restoreHeight(this, savedHeight, readSize(serialisedNode?.size)?.[0])
+    guardDynamicComboWidgetHeights(this)
   }
 
   nodeType.prototype.onResize = function (size: unknown) {
@@ -159,8 +212,14 @@ export function preserveTimelineEditorNodeSize(nodeType: any, nodeData: { name?:
   ) {
     beginWidgetResizeGuard(this)
     originalOnWidgetChanged?.call(this, name, value, oldValue, widget)
+    guardDynamicComboWidgetHeights(this)
     const resizeGuard = readWidgetResizeGuard(this)
-    if (resizeGuard) restoreHeight(this, resizeGuard.height, resizeGuard.width)
+    if (resizeGuard) {
+      // A dynamic combo callback can resize the node before this hook runs, so restore the
+      // height here as well: doing it in this task keeps the smaller size from being painted.
+      applyHeight(this, resizeGuard.height, resizeGuard.width)
+      restoreHeight(this, resizeGuard.height, resizeGuard.width)
+    }
   }
 
   nodeType.prototype.onSerialize = function (serialisedNode: any) {
