@@ -52,6 +52,7 @@ from ..utils.minimax import (
     remove_output_files_by_prefix,
 )
 from ..utils.prompt_override import build_minimax_prompt_override_json
+from ..utils.video import passthrough_video_media
 
 
 CATEGORY_MINIMAX = "EasyUse/MiniMax"
@@ -1919,6 +1920,7 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
                     optional=True,
                     tooltip="Optional project-loop execution dependency.",
                 ),
+                io.Model.Input("highres_model", optional=True),
             ],
             outputs=[
                 io.Latent.Output("latent"),
@@ -1953,6 +1955,7 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
         segment_index: int = 0,
         sampling_pass: str = "selflift",
         previous: Any | None = None,
+        highres_model: Any | None = None,
     ) -> io.NodeOutput:
         del previous
         from ..modules.selflift.sampling import progressive_sample_h3
@@ -2029,6 +2032,7 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
         try:
             sampled, low_context = progressive_sample_h3(
                 model=model,
+                highres_model=highres_model,
                 positive=positive,
                 vae=vae,
                 latent_image=latent_image,
@@ -2108,6 +2112,33 @@ class EasyH3AudioContextLatent(io.ComfyNode):
             (audio.shape[0], 24, _temporal_shape(output_frames)[1], 2, 2)
         )
         return io.NodeOutput({"samples": comfy.nested_tensor.NestedTensor((video, audio))})
+
+
+class EasyH3PassthroughVideo(io.ComfyNode):
+    """Select the first reference video for a complete task timeline."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy h3PassthroughVideo",
+            display_name="H3 Passthrough Video",
+            category="EasyUse/H3/dev",
+            is_dev_only=True,
+            is_input_list=True,
+            inputs=[
+                io.Video.Input("videos"),
+                io.Int.Input("frame_count", min=1),
+                io.Float.Input("fps", min=0.001),
+            ],
+            outputs=[io.Image.Output("images"), io.Audio.Output("audio")],
+        )
+
+    @classmethod
+    def execute(
+        cls, videos: list[object], frame_count: list[int], fps: list[float]
+    ) -> io.NodeOutput:
+        images, audio = passthrough_video_media(videos, int(frame_count[0]), float(fps[0]))
+        return io.NodeOutput(images, audio)
 
 
 class EasyH3ContextMediaTrim(io.ComfyNode):

@@ -368,6 +368,7 @@ def progressive_sample_h3(
     transition_ratio: float,
     lowres_scale: float,
     *,
+    highres_model: Any | None = None,
     latent_lifter: Callable[[torch.Tensor, tuple[int, int]], torch.Tensor] | None = None,
     low_context_latent: dict[str, Any] | None = None,
     rho: float = 0.0,
@@ -396,6 +397,10 @@ def progressive_sample_h3(
     model_sampling = model.get_model_object("model_sampling")
     if not isinstance(model_sampling, comfy.model_sampling.CONST):
         raise ValueError("SelfLift requires a rectified-flow model")
+    highres_model = highres_model if highres_model is not None else model
+    highres_model_sampling = highres_model.get_model_object("model_sampling")
+    if not isinstance(highres_model_sampling, comfy.model_sampling.CONST):
+        raise ValueError("SelfLift high-resolution model requires rectified flow")
     sampler = comfy.samplers.sampler_object("euler")
     _validate_euler_sampler(sampler)
 
@@ -407,7 +412,7 @@ def progressive_sample_h3(
     )
     streams, nested = _streams(fixed_samples)
     high_model = _highres_sampling_model(
-        model,
+        highres_model,
         streams,
         highres_tiling,
         tile_count=tile_count,
@@ -551,8 +556,8 @@ def progressive_sample_h3(
 
     target_shapes = [tuple(stream.shape) for stream in streams]
     packed_anchor, _ = comfy.utils.pack_latents(streams)
-    model.model.latent_shapes = target_shapes
-    processed_anchor = model.model.process_latent_in(packed_anchor)
+    highres_model.model.latent_shapes = target_shapes
+    processed_anchor = highres_model.model.process_latent_in(packed_anchor)
     anchor_streams = list(comfy.utils.unpack_latents(processed_anchor, target_shapes))
     clean_high = _anchor_masked_clean_video(
         clean_high,
@@ -566,7 +571,7 @@ def progressive_sample_h3(
         (int(seed) + 1) % (1 << 64),
         latent_image.get("batch_index"),
     ).to(clean_high)
-    video_state = model_sampling.noise_scaling(
+    video_state = highres_model_sampling.noise_scaling(
         sigma_prediction, video_noise, clean_high
     )
     next_streams = [
@@ -581,7 +586,7 @@ def progressive_sample_h3(
     # AV latent remains available to ComfyUI's inpaint-mask machinery.
     resume_noise = _pack(
         _resume_noise_for_anchor(
-            model_sampling,
+            highres_model_sampling,
             next_streams,
             anchor_streams,
             sigma_resume,

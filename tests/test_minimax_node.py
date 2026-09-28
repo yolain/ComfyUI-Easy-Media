@@ -1261,9 +1261,11 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
         "single",
         "dual",
         "selflift",
+        "passthrough",
     ]
     assert sampling_mode_options[0][1] == []
     assert sampling_mode_options[1][1] == []
+    assert sampling_mode_options[3][1] == []
     selflift_inputs = {port.name: port for port in sampling_mode_options[2][1]}
     assert list(selflift_inputs) == [
         "transition_ratio",
@@ -1288,6 +1290,27 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
         "PROJECT_NAME",
         "LOCKED_AUDIO",
     ]
+
+
+def test_h3_project_passthrough_skips_conditioning_and_keeps_context(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    result = module.EasyMultiTrackProject.execute(
+        **_h3_project_inputs(sampling_mode=_h3_sampling_mode("passthrough"))
+    )
+    nodes = list(result.expand.values())
+    types = {node["class_type"] for node in nodes}
+    assert "easy h3PassthroughVideo" in types
+    assert "easy minimaxH3ToVideo" not in types
+    assert "easy h3ConditioningCache" not in types
+    assert "SamplerCustomAdvanced" not in types
+    assert "easy h3SegmentSamplingStart" not in types
+    passthrough = _graph_node(result, "easy h3PassthroughVideo")
+    assert passthrough["inputs"]["frame_count"] == 120
+    assert passthrough["inputs"]["fps"] == 24.0
+    artifact = _graph_node(result, "easy h3ProjectArtifact")
+    context = result.expand[artifact["inputs"]["context_latent"][0]]
+    assert context["class_type"] == "easy h3MotionContextLatentTrim"
+    assert context["inputs"]["context_length"] == "22"
 
 
 def test_h3_project_static_prepare_exposes_media_cache_boundary(monkeypatch):
@@ -2535,6 +2558,7 @@ def test_multitrack_h3_selflift_uses_target_size_and_one_progressive_sample(
     assert "segment_index" not in selflift["inputs"]
     assert "upscale_by" not in selflift["inputs"]
     assert selflift["inputs"]["upscaler_model"] == "None"
+    assert selflift["inputs"]["highres_model"] is selflift["inputs"]["model"]
     assert artifact["inputs"]["sampling_pass"] == "single"
     assert artifact["inputs"]["tracks_info"]["width"] == 1344
     assert artifact["inputs"]["tracks_info"]["height"] == 768
@@ -2670,6 +2694,8 @@ def test_selflift_sampler_schema_forces_euler_by_not_exposing_a_sampler(monkeypa
     assert schema.node_id == "easy minimaxH3SelfLiftSampler"
     assert schema.is_dev_only is True
     assert "sampler" not in inputs
+    assert list(inputs)[-2:] == ["previous", "highres_model"]
+    assert inputs["highres_model"].kwargs["optional"] is True
     assert inputs["transition_ratio"].kwargs["default"] == 0.6
     assert inputs["lowres_scale"].kwargs["default"] == 0.6
     assert inputs["rho"].kwargs["default"] == pytest.approx(0.1)
@@ -2821,6 +2847,34 @@ def test_selflift_sampler_uses_lowres_scale(monkeypatch):
     assert captured["highres_tiling"] is False
     assert captured["low_context_latent"] is None
     assert result.values == (sampled, low_context)
+
+
+def test_selflift_sampler_forwards_high_resolution_model(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    captured = {}
+    sampling_module = types.ModuleType("easy_media.modules.selflift.sampling")
+
+    def progressive_sample_h3(**kwargs):
+        captured.update(kwargs)
+        return {"samples": object()}, {"samples": object()}
+
+    sampling_module.progressive_sample_h3 = progressive_sample_h3
+    monkeypatch.setitem(sys.modules, "easy_media.modules.selflift.sampling", sampling_module)
+    first_model = object()
+    second_model = object()
+
+    module.EasyMiniMaxH3SelfLiftSampler.execute(
+        model=first_model,
+        highres_model=second_model,
+        positive=[],
+        vae=object(),
+        latent_image={"samples": torch.zeros(1, 24, 1, 60, 104)},
+        sigmas=torch.tensor([1.0, 0.0]),
+        seed=42,
+    )
+
+    assert captured["model"] is first_model
+    assert captured["highres_model"] is second_model
 
 
 def test_selflift_sampler_forwards_artifact_correction_controls(monkeypatch):
@@ -2981,6 +3035,32 @@ def test_multitrack_project_uses_flat_upscale_by(
         conditionings = [node["inputs"] for node in result.expand.values()
                         if node["class_type"] == "easy minimaxH3ToVideo"]
         assert (conditionings[1]["width"], conditionings[1]["height"]) == expected_size
+
+
+def test_multitrack_reference_dual_reuses_conditioning_for_second_pass(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    module.comfy_nodes.NODE_CLASS_MAPPINGS["ImageResizeKJv2"] = _ImageResizeKJWithNvidia
+    inputs = _h3_project_inputs(sampling_mode=_h3_sampling_mode("dual"))
+    inputs["tracks_info"][0]["tracks"][0]["segments"][0]["content"]["task_mode"] = "ref"
+
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    graph = result.expand
+    conditioning_nodes = [
+        node for node in graph.values()
+        if node["class_type"] == "easy minimaxH3ToVideo"
+    ]
+    assert len(conditioning_nodes) == 1
+    assert conditioning_nodes[0]["inputs"]["mode"] == "reference"
+    cache_id = next(
+        node_id for node_id, node in graph.items()
+        if node["class_type"] == "easy h3ConditioningCache"
+    )
+    guiders = [
+        node for node in graph.values()
+        if node["class_type"] == "BasicGuider"
+    ]
+    assert len(guiders) == 2
+    assert all(node["inputs"]["conditioning"] == [cache_id, 0] for node in guiders)
 
 
 def test_multitrack_h3_project_forwards_override_save_mode(monkeypatch):
@@ -3269,6 +3349,54 @@ def test_multitrack_h3_dynamic_dual_model_loader_uses_second_model_for_second_pa
     assert guider_models == [first_model, second_model]
     assert _graph_node(result, "VAEDecode")["inputs"]["vae"] is first_vae
     assert _graph_node(result, "VAEDecodeAudio")["inputs"]["vae"] is first_audio_vae
+
+
+def test_multitrack_h3_selflift_uses_second_model_only_for_high_resolution(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    first_model = _MiniMaxH3Model()
+    second_model = _MiniMaxH3Model()
+
+    result = module.EasyMultiTrackProject.execute(
+        **_h3_project_inputs(
+            model_loader=[{
+                "model": first_model,
+                "clip": object(),
+                "vae": object(),
+                "audio_vae": object(),
+            }],
+            sampling_mode=_h3_sampling_mode(
+                "selflift",
+                model_loader_2nd=[{"model": second_model}],
+            ),
+        )
+    )
+
+    selflift = _graph_node(result, "easy minimaxH3SelfLiftSampler")
+    assert selflift["inputs"]["model"] is first_model
+    assert selflift["inputs"]["highres_model"] is second_model
+
+
+def test_linked_selflift_forwards_second_model_loader(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    result = module.EasyMultiTrackProject.execute(
+        **_h3_project_inputs(
+            model_loader=[["first-loader", 0]],
+            sampling_mode=_h3_sampling_mode(
+                "selflift", model_loader_2nd=[["second-loader", 0]]
+            ),
+        )
+    )
+
+    model_id, model_prepare = next(
+        (node_id, node)
+        for node_id, node in result.expand.items()
+        if node["class_type"] == "easy h3ProjectStaticPrepare"
+        and node_id.endswith("project_model_prepare")
+    )
+    selflift = _graph_node(result, "easy minimaxH3SelfLiftSampler")
+    assert model_prepare["inputs"]["model_loader_2nd"] == ["second-loader", 0]
+    assert selflift["inputs"]["model"] == [model_id, 2]
+    assert selflift["inputs"]["highres_model"] == [model_id, 3]
 
 
 def test_multitrack_h3_rejects_incomplete_custom_sampling(monkeypatch):

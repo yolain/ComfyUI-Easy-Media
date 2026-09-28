@@ -18,10 +18,54 @@ from typing import Any, Callable
 import folder_paths
 import torch
 
+
+def passthrough_video_media(
+    videos: list[object] | object,
+    frame_count: int,
+    fps: float,
+) -> tuple[torch.Tensor, dict[str, Any]]:
+    """Read video zero at the project frame rate without changing its timing."""
+    candidates = videos if isinstance(videos, list) else [videos]
+    video = candidates[0] if candidates else None
+    if video is None:
+        raise ValueError("Passthrough requires a video reference at index 0")
+    if frame_count < 1 or not math.isfinite(fps) or fps <= 0:
+        raise ValueError("Passthrough requires a positive timeline length and fps")
+    try:
+        components = video.get_components()
+    except (AttributeError, RuntimeError, TypeError, ValueError) as error:
+        raise ValueError("Unable to read passthrough video reference") from error
+    images = components.images
+    source_fps = float(components.frame_rate)
+    if not isinstance(images, torch.Tensor) or images.ndim != 4 or images.shape[0] == 0:
+        raise ValueError("Passthrough video has no valid frames")
+    if not math.isfinite(source_fps) or source_fps <= 0:
+        raise ValueError("Passthrough video has an invalid frame rate")
+    if images.shape[0] / source_fps + 1e-6 < frame_count / fps:
+        raise ValueError("Passthrough video must cover the complete task timeline")
+    indices = torch.floor(
+        torch.arange(frame_count, device=images.device) * source_fps / fps
+    ).long().clamp(max=images.shape[0] - 1)
+    output_images = images.index_select(0, indices)
+    audio = components.audio
+    waveform = audio.get("waveform") if isinstance(audio, dict) else None
+    sample_rate = audio.get("sample_rate") if isinstance(audio, dict) else None
+    if not isinstance(waveform, torch.Tensor) or not isinstance(sample_rate, int) or sample_rate <= 0:
+        sample_rate = 44100
+        waveform = torch.zeros((1, 2, 0), dtype=torch.float32)
+    sample_count = max(1, round(frame_count / fps * sample_rate))
+    waveform = waveform[..., :sample_count]
+    if waveform.shape[-1] < sample_count:
+        waveform = torch.nn.functional.pad(waveform, (0, sample_count - waveform.shape[-1]))
+    return output_images, {"waveform": waveform, "sample_rate": sample_rate}
+
 logger = logging.getLogger(__name__)
 
 FFMPEG_RESIZE_METHODS = frozenset({"stretch", "resize", "pad", "pad (white)", "crop"})
 _VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"})
+
+
+_FFMPEG_TIMEOUT_SECONDS = 60.0
 
 
 def _video_output_suffix(path: str) -> str:
@@ -173,6 +217,89 @@ def resize_video_with_ffmpeg(
     return output_path
 
 
+def render_single_video_segment_with_ffmpeg(
+    source: str,
+    source_start_frame: int,
+    frame_count: int,
+    frame_rate: float,
+    width: int,
+    height: int,
+    resize_method: str,
+    *,
+    audio_volume_db: float = 0.0,
+    audio_muted: bool = False,
+) -> str | None:
+    """Render one task-length clip without a full-timeline overlay graph."""
+    ffmpeg = get_ffmpeg_path("ffmpeg")
+    resize_filter = _ffmpeg_resize_filter(width, height, resize_method)
+    if (
+        ffmpeg is None or resize_filter is None or not os.path.isfile(source)
+        or frame_count <= 0 or frame_rate <= 0 or width % 2 or height % 2
+    ):
+        return None
+
+    duration = frame_count / frame_rate
+    source_start = max(0, source_start_frame) / frame_rate
+    has_audio = ffprobe_info(source).get("has_audio") is True
+    output_fd, output_path = tempfile.mkstemp(
+        suffix=".mp4", dir=folder_paths.get_temp_directory(),
+    )
+    os.close(output_fd)
+    command = [
+        ffmpeg, "-y", "-nostdin", "-loglevel", "error",
+        "-ss", str(source_start), "-t", str(duration), "-i", source,
+        "-map", "0:v:0",
+    ]
+    if has_audio:
+        command.extend(["-map", "0:a:0"])
+    command.extend([
+        "-vf",
+        f"fps=fps={frame_rate}:start_time=0,{resize_filter},"
+        f"tpad=stop_mode=clone:stop_duration={duration},"
+        f"trim=end_frame={frame_count},setpts=PTS-STARTPTS",
+    ])
+    if has_audio:
+        try:
+            volume_db = float(audio_volume_db)
+        except (TypeError, ValueError):
+            volume_db = 0.0
+        if not math.isfinite(volume_db):
+            volume_db = 0.0
+        volume_filter = "volume=0" if audio_muted else f"volume={volume_db:g}dB"
+        command.extend([
+            "-af",
+            f"aresample=44100:first_pts=0,atrim=duration={duration},"
+            f"asetpts=PTS-STARTPTS,{volume_filter},"
+            f"apad=pad_dur={duration},atrim=duration={duration}",
+        ])
+    command.extend([
+        "-frames:v", str(frame_count), "-t", str(duration),
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+        "-movflags", "+faststart", output_path,
+    ])
+    try:
+        result = subprocess.run(
+            command, capture_output=True, timeout=_FFMPEG_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        try:
+            os.unlink(output_path)
+        except OSError:
+            pass
+        raise RuntimeError(f"FFmpeg single video segment render failed: {exc}") from exc
+    if result.returncode != 0:
+        try:
+            os.unlink(output_path)
+        except OSError:
+            pass
+        raise RuntimeError(
+            "FFmpeg single video segment render failed: "
+            + result.stderr.decode(errors="replace")[-600:]
+        )
+    return output_path
+
+
 def merge_video_track_with_ffmpeg(
     segments: list[dict],
     total_length: int,
@@ -206,6 +333,8 @@ def merge_video_track_with_ffmpeg(
     command = [
         ffmpeg,
         "-y",
+        "-nostdin",
+        "-loglevel", "error",
         "-f",
         "lavfi",
         "-i",
@@ -353,7 +482,17 @@ def merge_video_track_with_ffmpeg(
         output_path,
     ])
     try:
-        result = subprocess.run(command, capture_output=True)
+        result = subprocess.run(
+            command, capture_output=True, timeout=_FFMPEG_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        try:
+            os.unlink(output_path)
+        except OSError:
+            pass
+        raise RuntimeError(
+            f"FFmpeg video track merge timed out after {exc.timeout:g} seconds"
+        ) from exc
     except OSError as exc:
         logger.warning("FFmpeg video track merge failed to start: %s", exc)
         try:
@@ -596,7 +735,12 @@ def validate_merge_compatibility(specs: list[MergeSpec]) -> None:
         for label in labels:
             baseline_val = getattr(baseline, label)
             spec_val = getattr(spec, label)
-            if baseline_val != spec_val:
+            if label == "fps":
+                # Decoders can report the same nominal rate with tiny rounding differences.
+                matches = math.isclose(float(baseline_val), float(spec_val), rel_tol=0, abs_tol=1e-4)
+            else:
+                matches = baseline_val == spec_val
+            if not matches:
                 raise ValueError(
                     f"Video {index} is incompatible: '{label}' mismatch "
                     f"(expected {baseline_val!r}, got {spec_val!r})"
@@ -806,16 +950,20 @@ def ffprobe_info(path: str) -> dict[str, Any]:
     ffprobe = get_ffmpeg_path("ffprobe")
     if not ffprobe:
         return {}
-    result = subprocess.run(
-        [
-            ffprobe, "-v", "error",
-            "-show_entries", "format=duration:stream=codec_type,width,height,r_frame_rate,avg_frame_rate,nb_frames,nb_read_frames",
-            "-of", "json",
-            path,
-        ],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            [
+                ffprobe, "-v", "error",
+                "-show_entries", "format=duration:stream=codec_type,width,height,r_frame_rate,avg_frame_rate,nb_frames,nb_read_frames",
+                "-of", "json",
+                path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"FFprobe timed out for {path} after 30 seconds") from exc
     if result.returncode != 0:
         return {}
     try:
@@ -1162,6 +1310,8 @@ def ffmpeg_extract_audio(video_path: str) -> dict | None:
     cmd = [
         ffmpeg,
         "-y",
+        "-nostdin",
+        "-loglevel", "error",
         "-i",
         video_path,
         "-vn",
@@ -1170,7 +1320,10 @@ def ffmpeg_extract_audio(video_path: str) -> dict | None:
         audio_path,
     ]
     try:
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        result = subprocess.run(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=False, timeout=_FFMPEG_TIMEOUT_SECONDS,
+        )
         if result.returncode != 0:
             logger.warning(
                 "[ffmpeg_extract_audio] FFmpeg audio extraction failed: %s",
@@ -1178,6 +1331,9 @@ def ffmpeg_extract_audio(video_path: str) -> dict | None:
             )
             return None
         return _load_wav_audio(audio_path)
+    except subprocess.TimeoutExpired:
+        # A stalled decoder must not fall through to a second full-frame decode.
+        raise
     except Exception as exc:
         logger.warning("[ffmpeg_extract_audio] FFmpeg audio extraction error: %s", exc)
         return None
@@ -1236,6 +1392,11 @@ def _extract_video_audio_uncached(video, source_path) -> "dict | None":
         ffmpeg_attempted = True
         try:
             audio = ffmpeg_extract_audio(source_path)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"FFmpeg audio extraction timed out for {source_path} "
+                f"after {exc.timeout:g} seconds"
+            ) from exc
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "[extract_video_audio] FFmpeg audio extraction raised: %s",

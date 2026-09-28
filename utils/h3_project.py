@@ -1404,6 +1404,7 @@ def prepare_multitrack_project_media(
     locked_audio: dict | None = None
     locked_audio_priority = 0
     shared_image_identities: set[tuple[str, str]] = set()
+    shared_image_sources: list[tuple[str, str] | None] = []
     shared_audio_identities: set[tuple[str, str]] = set()
     shared_video_identities: set[tuple[str, str]] = set()
     resize_cache: dict[tuple, object] = {}
@@ -1445,6 +1446,7 @@ def prepare_multitrack_project_media(
                             image, panorama_view, width, height,
                         )
                     shared_images.append(image)
+                    shared_image_sources.append(identity)
                     if identity is not None:
                         shared_image_identities.add(identity)
                 if isinstance(content, dict):
@@ -1563,9 +1565,14 @@ def prepare_multitrack_project_media(
                         image
                         for image in images
                         if not isinstance(image, dict)
+                        or multitrack_is_muted_image(image)
                         or multitrack_media_identity(image)
                         not in shared_image_identities
                     ]
+
+    task_info["_project_shared_image_sources"] = (
+        shared_image_sources[:MAX_MULTITRACK_PROJECT_IMAGES]
+    )
 
     return (
         task_info,
@@ -1618,11 +1625,32 @@ def prepare_multitrack_project_task_info(
     images: list[torch.Tensor],
     audio: list[dict[str, Any]],
     video: list[object],
+    task_entry: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Attach already-loaded project references to one task's runtime context."""
     task_info = dict(tracks_info)
+    muted_sources: set[tuple[str, str]] = set()
+    task = task_entry.get("task", {}) if isinstance(task_entry, dict) else {}
+    content = task.get("content", {}) if isinstance(task, dict) else {}
+    if isinstance(content, dict):
+        task_images = content.get("images", [])
+        for image in task_images if isinstance(task_images, list) else []:
+            if multitrack_is_muted_image(image):
+                identity = multitrack_media_identity(image)
+                if identity is not None:
+                    muted_sources.add(identity)
+    image_sources = tracks_info.get("_project_shared_image_sources", [])
+    selected_images = [
+        image
+        for index, image in enumerate(images)
+        if not (
+            isinstance(image_sources, list)
+            and index < len(image_sources)
+            and image_sources[index] in muted_sources
+        )
+    ]
     task_info["_preloaded_media"] = {
-        "images": list(images),
+        "images": selected_images,
         "audio": list(audio),
         "video": list(video),
     }

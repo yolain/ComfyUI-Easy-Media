@@ -136,9 +136,13 @@ def multitrack_task_images_with_shared(
         identity = multitrack_media_identity(shared_image)
         matching = next(
             (image for image in local_images if multitrack_media_identity(image) == identity),
-            shared_image,
+            None,
         )
-        normalized = canonicalize_multitrack_slot_content(matching)
+        normalized = canonicalize_multitrack_slot_content(
+            matching if matching is not None else shared_image
+        )
+        if matching is None:
+            normalized.pop("muted", None)
         normalized["shared_reference"] = True
         normalized.pop("speaker_reference", None)
         prefixed.append(normalized)
@@ -156,6 +160,7 @@ def multitrack_slot_media_types(data: dict) -> set[str]:
     tracks = data.get("tracks", [])
     if not isinstance(tracks, list):
         return required
+    shared_images = multitrack_shared_task_images(tracks)
 
     for track in tracks:
         if not isinstance(track, dict):
@@ -171,8 +176,10 @@ def multitrack_slot_media_types(data: dict) -> set[str]:
             if not isinstance(content, dict):
                 continue
             if track_type == "task":
-                images = content.get("images", [])
-                if isinstance(images, list) and any(
+                images = multitrack_task_images_with_shared(
+                    content.get("images", []), shared_images,
+                )
+                if any(
                     isinstance(image, dict)
                     and not multitrack_is_muted_image(image)
                     and multitrack_slot_name(image) is not None
