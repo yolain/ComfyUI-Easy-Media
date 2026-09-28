@@ -102,9 +102,13 @@ vi.mock('@/components/widgets/multitrack/PreviewArea', () => ({
 }))
 
 vi.mock('@/components/widgets/multitrack/MultiTrackRuler', () => ({
-  MultiTrackRuler: ({ totalLength, onSeek, taskMarkers, onMoveTaskMarker, onDeleteTaskMarker }: {
+  MULTITRACK_LEFT_GUTTER: 28,
+  MULTITRACK_RIGHT_RESERVE: 48,
+  MultiTrackRuler: ({ totalLength, onSeek, onScrubStart, onScrubEnd, taskMarkers, onMoveTaskMarker, onDeleteTaskMarker }: {
     totalLength: number
     onSeek: (time: number) => void
+    onScrubStart?: () => void
+    onScrubEnd?: () => void
     taskMarkers: TrackData['task_markers']
     onMoveTaskMarker: (markerId: string, frame: number) => void
     onDeleteTaskMarker: (markerId: string) => void
@@ -116,6 +120,16 @@ vi.mock('@/components/widgets/multitrack/MultiTrackRuler', () => ({
       <button type="button" onClick={() => onSeek(totalLength)}>
         seek timeline end
       </button>
+      <button type="button" onClick={() => onSeek(totalLength / 2)}>
+        seek timeline midpoint
+      </button>
+      <button type="button" onClick={() => { onScrubStart?.(); onSeek(totalLength * 0.52) }}>
+        scrub near right edge
+      </button>
+      <button type="button" onClick={() => onSeek(totalLength * 0.05)}>
+        scrub near left edge
+      </button>
+      <button type="button" onClick={onScrubEnd}>end ruler scrub</button>
       <span data-testid="task-marker-count">{taskMarkers?.length ?? 0}</span>
       {taskMarkers?.[0] ? (
         <>
@@ -455,6 +469,7 @@ vi.mock('@/components/widgets/multitrack/MultiTrackToolbar', () => ({
     onUndo,
     onRedo,
     onPlayPause,
+    onZoomChange,
     currentTime,
   }: {
     onToggleTimeline: () => void
@@ -474,11 +489,13 @@ vi.mock('@/components/widgets/multitrack/MultiTrackToolbar', () => ({
     onUndo: () => void
     onRedo: () => void
     onPlayPause: () => void
+    onZoomChange: (zoom: number) => void
     currentTime: number
   }) => (
     <div>
       <span data-testid="toolbar-current-time">{currentTime}</span>
       <button type="button" onClick={onPlayPause}>toggle playback</button>
+      <button type="button" onClick={() => onZoomChange(2)}>zoom timeline</button>
       <button type="button" onClick={onToggleTimeline}>toggle timeline</button>
       <button type="button" disabled={!canAddTaskMarker} onClick={onAddTaskMarker}>add task marker</button>
       <button type="button" onClick={() => onTaskOverviewChange(!taskOverview)}>toggle task overview</button>
@@ -746,6 +763,115 @@ describe('MultiTrackWidget', () => {
 
     expect(timelinePanel.className).toContain('grid-rows-[0fr]')
     expect(timelinePanel.getAttribute('aria-hidden')).toBe('true')
+  })
+
+  it('scrolls the zoomed timeline horizontally with a mouse wheel or trackpad', () => {
+    render(<MultiTrackWidget {...widgetProps()} />)
+    const container = screen.getByTestId('multitrack-timeline-scroll')
+    Object.defineProperties(container, {
+      clientWidth: { configurable: true, value: 480 },
+      scrollWidth: { configurable: true, value: 960 },
+    })
+
+    expect(fireEvent.wheel(screen.getByTestId('multitrack-track-area'), { deltaY: 5, deltaMode: 1, cancelable: true })).toBe(false)
+    expect(container.scrollLeft).toBe(80)
+
+    expect(fireEvent.wheel(container, { deltaX: 30, deltaY: 2, cancelable: true })).toBe(false)
+    expect(container.scrollLeft).toBe(110)
+
+    fireEvent.wheel(container, { deltaY: 1000 })
+    expect(container.scrollLeft).toBe(480)
+  })
+
+  it('leaves nested editors and modifier wheel gestures alone', () => {
+    render(<MultiTrackWidget {...widgetProps()} />)
+    const container = screen.getByTestId('multitrack-timeline-scroll')
+    Object.defineProperties(container, {
+      clientWidth: { configurable: true, value: 480 },
+      scrollWidth: { configurable: true, value: 960 },
+    })
+    const editor = document.createElement('div')
+    editor.dataset.captureWheel = 'true'
+    container.append(editor)
+
+    expect(fireEvent.wheel(editor, { deltaY: 100 })).toBe(true)
+    expect(fireEvent.wheel(container, { deltaY: 100, ctrlKey: true })).toBe(true)
+    expect(container.scrollLeft).toBe(0)
+  })
+
+  it('pages the visible time range only when playback reaches its edge', () => {
+    const data = createDefaultTrackData()
+    data.frame_rate = 10
+    data.total_length = 100
+    let animationFrame: FrameRequestCallback | null = null
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      animationFrame = callback
+      return 1
+    }))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+
+    try {
+      render(<MultiTrackWidget {...widgetProps()} value={data} />)
+      const container = screen.getByTestId('multitrack-timeline-scroll')
+      Object.defineProperties(container, {
+        clientWidth: { configurable: true, value: 480 },
+        scrollWidth: { configurable: true, value: 960 },
+      })
+      fireEvent.click(screen.getByRole('button', { name: 'seek timeline midpoint' }))
+      expect(screen.getByTestId('toolbar-current-time').textContent).toBe('25')
+      fireEvent.click(screen.getByRole('button', { name: 'toggle playback' }))
+      fireEvent.click(screen.getByRole('button', { name: 'zoom timeline' }))
+
+      expect(container.scrollLeft).toBe(0)
+      expect(animationFrame).not.toBeNull()
+
+      act(() => animationFrame?.(performance.now() + 1000))
+      expect(screen.getByTestId('toolbar-current-time').textContent).toBe('35')
+      expect(container.scrollLeft).toBe(432)
+
+      act(() => animationFrame?.(performance.now() + 2000))
+      expect(screen.getByTestId('toolbar-current-time').textContent).toBe('45')
+      expect(container.scrollLeft).toBe(432)
+
+      act(() => animationFrame?.(performance.now() + 2400))
+      expect(screen.getByTestId('toolbar-current-time').textContent).toBe('49')
+      expect(container.scrollLeft).toBe(432)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('pages forward and backward when the ruler is scrubbed to a visible edge', () => {
+    render(<MultiTrackWidget {...widgetProps()} />)
+    const container = screen.getByTestId('multitrack-timeline-scroll')
+    Object.defineProperties(container, {
+      clientWidth: { configurable: true, value: 480 },
+      scrollWidth: { configurable: true, value: 960 },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'zoom timeline' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'scrub near right edge' }))
+    expect(container.scrollLeft).toBe(432)
+
+    fireEvent.click(screen.getByRole('button', { name: 'scrub near left edge' }))
+    expect(container.scrollLeft).toBe(0)
+    fireEvent.click(screen.getByRole('button', { name: 'end ruler scrub' }))
+  })
+
+  it('does not move the timeline to the playhead when zooming while paused', () => {
+    const data = createDefaultTrackData()
+    data.total_length = 100
+    render(<MultiTrackWidget {...widgetProps()} value={data} />)
+    const container = screen.getByTestId('multitrack-timeline-scroll')
+    Object.defineProperties(container, {
+      clientWidth: { configurable: true, value: 480 },
+      scrollWidth: { configurable: true, value: 960 },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'seek timeline midpoint' }))
+    fireEvent.click(screen.getByRole('button', { name: 'zoom timeline' }))
+
+    expect(container.scrollLeft).toBe(0)
   })
 
   it('serializes task markers at the playhead, deletes them from the ruler, and toggles overview', () => {

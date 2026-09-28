@@ -67,7 +67,7 @@ describe('MultiTrackRuler task marker dragging', () => {
     expect(onMoveTaskMarker).not.toHaveBeenCalled()
   })
 
-  it('seeks to 12 seconds on a 20-second timeline using the rendered ruler width', () => {
+  it('seeks to the clicked frame using the canvas scale', () => {
     const onSeek = vi.fn()
     const view = render(
       <MultiTrackRuler
@@ -86,13 +86,55 @@ describe('MultiTrackRuler task marker dragging', () => {
     )
     const ruler = view.container.firstElementChild as HTMLDivElement
     vi.spyOn(ruler, 'getBoundingClientRect').mockReturnValue({
-      left: 0, right: 480, top: 0, bottom: 24, width: 480, height: 24, x: 0, y: 0,
+      left: 100, right: 580, top: 0, bottom: 24, width: 480, height: 24, x: 100, y: 0,
       toJSON: () => ({}),
     })
 
-    fireEvent.mouseDown(ruler, { clientX: 270.4 })
-    fireEvent.mouseUp(window, { clientX: 270.4 })
+    fireEvent.mouseDown(ruler, { clientX: 438 })
+    fireEvent.mouseUp(window, { clientX: 438 })
 
     expect(onSeek).toHaveBeenCalledWith(288)
+  })
+
+  it('keeps scrub time continuous when the viewport pages', () => {
+    const onSeek = vi.fn()
+    const onScrubStart = vi.fn()
+    const onScrubEnd = vi.fn()
+    const view = render(
+      <MultiTrackRuler
+        totalLength={480}
+        frameRate={24}
+        width={480}
+        canvasScale={1.25}
+        currentTime={0}
+        taskMarkers={[]}
+        selectedTaskMarkerId={null}
+        onSeek={onSeek}
+        onScrubStart={onScrubStart}
+        onScrubEnd={onScrubEnd}
+        onSelectTaskMarker={vi.fn()}
+        onMoveTaskMarker={vi.fn()}
+        onDeleteTaskMarker={vi.fn()}
+      />,
+    )
+    const ruler = view.container.firstElementChild as HTMLDivElement
+    let rulerLeft = 100
+    vi.spyOn(ruler, 'getBoundingClientRect').mockImplementation(() => ({
+      left: rulerLeft, right: rulerLeft + 600, top: 0, bottom: 30,
+      width: 600, height: 30, x: rulerLeft, y: 0, toJSON: () => ({}),
+    }))
+
+    fireEvent.mouseDown(ruler, { clientX: 438 })
+    expect(onScrubStart).toHaveBeenCalledOnce()
+    expect(onSeek).toHaveBeenLastCalledWith(288)
+
+    rulerLeft = -25
+    fireEvent.mouseMove(window, { clientX: 438 })
+    expect(onSeek).toHaveBeenLastCalledWith(288)
+    fireEvent.mouseMove(window, { clientX: 439.25 })
+    expect(onSeek).toHaveBeenLastCalledWith(289)
+
+    fireEvent.mouseUp(window)
+    expect(onScrubEnd).toHaveBeenCalledOnce()
   })
 })

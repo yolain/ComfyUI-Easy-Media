@@ -17,6 +17,8 @@ interface MultiTrackRulerProps {
   taskMarkers: MultiTrackTaskMarker[]
   selectedTaskMarkerId: string | null
   onSeek: (time: number) => void
+  onScrubStart?: () => void
+  onScrubEnd?: () => void
   onSelectTaskMarker: (markerId: string) => void
   onMoveTaskMarker: (markerId: string, frame: number) => void
   onDeleteTaskMarker: (markerId: string) => void
@@ -77,6 +79,8 @@ export function MultiTrackRuler({
   taskMarkers,
   selectedTaskMarkerId,
   onSeek,
+  onScrubStart,
+  onScrubEnd,
   onSelectTaskMarker,
   onMoveTaskMarker,
   onDeleteTaskMarker,
@@ -90,12 +94,7 @@ export function MultiTrackRuler({
   const playheadLeft = MULTITRACK_LEFT_GUTTER + (currentTime / safeLength) * playableWidth
   const reserveLeft = MULTITRACK_LEFT_GUTTER + playableWidth
 
-  function renderedCoordinateScale(rectWidth: number): number {
-    const measuredScale = rectWidth / Math.max(width, 1)
-    return Number.isFinite(measuredScale) && measuredScale > 0.01
-      ? measuredScale
-      : Math.max(canvasScale, 0.01)
-  }
+  const coordinateScale = Math.max(canvasScale, 0.01)
 
   function timeFromClientX(clientX: number, rectLeft: number, coordinateScale: number): number {
     const x = Math.max(0, (clientX - rectLeft) / coordinateScale - MULTITRACK_LEFT_GUTTER)
@@ -106,16 +105,18 @@ export function MultiTrackRuler({
   function handleMouseDown(event: React.MouseEvent<HTMLDivElement>) {
     event.preventDefault()
     const rect = event.currentTarget.getBoundingClientRect()
-    const coordinateScale = renderedCoordinateScale(rect.width)
+    onScrubStart?.()
     onSeek(timeFromClientX(event.clientX, rect.left, coordinateScale))
 
     function handleMouseMove(moveEvent: MouseEvent) {
+      // Keep the drag anchored to its starting ruler position when the viewport pages.
       onSeek(timeFromClientX(moveEvent.clientX, rect.left, coordinateScale))
     }
 
     function handleMouseUp() {
       globalThis.removeEventListener('mousemove', handleMouseMove)
       globalThis.removeEventListener('mouseup', handleMouseUp)
+      onScrubEnd?.()
     }
 
     globalThis.addEventListener('mousemove', handleMouseMove)
@@ -127,7 +128,6 @@ export function MultiTrackRuler({
     if (!marker) return
     const rulerRect = rulerRef.current?.getBoundingClientRect()
     const rectLeft = rulerRect?.left ?? 0
-    const coordinateScale = renderedCoordinateScale(rulerRect?.width ?? 0)
     const originalFrame = marker.frame
     let lastValidFrame = originalFrame
 
