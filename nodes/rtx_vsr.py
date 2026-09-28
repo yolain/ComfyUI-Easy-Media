@@ -116,7 +116,8 @@ def _load_gpu_runtime():
         import PyNvVideoCodec as nvc
     except Exception as exc:  # pragma: no cover - runtime dependency
         raise RuntimeError(
-            "RTX VSR Video requires PyNvVideoCodec for NVDEC/NVENC GPU video I/O."
+            "RTX VSR Video requires PyNvVideoCodec for NVDEC/NVENC GPU video I/O. "
+            "Install it with: pip install PyNvVideoCodec"
         ) from exc
 
     if not torch.cuda.is_available():
