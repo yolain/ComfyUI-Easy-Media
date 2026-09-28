@@ -442,6 +442,16 @@ def h3_task_type(entry: dict[str, Any], info: dict[str, Any]) -> str:
     return "i2v" if image_count > 0 else "t2v"
 
 
+def h3_task_is_passthrough(entry: dict[str, Any]) -> bool:
+    """Return whether this task segment requests direct media output."""
+    task = entry.get("task", {})
+    content = task.get("content", {}) if isinstance(task, dict) else {}
+    return (
+        isinstance(content, dict)
+        and str(content.get("task_mode", "default")).lower() == "passthrough"
+    )
+
+
 def _h3_locked_track(
     entry: dict[str, Any],
     info: dict[str, Any],
@@ -757,6 +767,35 @@ def has_h3_context_latent(
     except ValueError:
         return False
     return latent_path.is_file()
+
+
+def h3_active_segment_is_passthrough(
+    project_name: Any,
+    segment_index: int,
+    output_directory: str | Path | None = None,
+) -> bool:
+    """Check the saved mode of a segment's active generation."""
+    safe_name = safe_h3_project_name(project_name)
+    project_dir = (
+        Path(output_directory).resolve() / "easy_media" / "projects" / safe_name
+        if output_directory is not None
+        else h3_project_directory(safe_name)
+    )
+    try:
+        manifest = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+        segment = manifest["segments"][str(int(segment_index))]
+        generation = segment["generations"][str(int(segment["active_generation"]))]
+        mode = generation.get("task_mode", segment.get("task_mode"))
+    except (
+        AttributeError,
+        KeyError,
+        OSError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ):
+        return False
+    return isinstance(mode, str) and mode.lower() == "passthrough"
 
 
 def clear_h3_project_segments_from(

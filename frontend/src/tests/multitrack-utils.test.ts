@@ -512,11 +512,21 @@ describe('multitrack utilities', () => {
   })
 
   it('maintains task modes separately from media track types', () => {
-    expect(MULTITRACK_TASK_MODES).toEqual(['default', 'ref', 'edit', 'l2v'])
+    expect(MULTITRACK_TASK_MODES).toEqual(['default', 'ref', 'edit', 'l2v', 'passthrough'])
     expect(getMultiTrackTaskModeLabel('default', (key) => key)).toBe('multitrackTaskModes.default')
     expect(getMultiTrackTaskModeLabel('l2v', (key) => key)).toBe('multitrackTaskModes.l2v')
     expect(getMultiTrackTaskModeLabel('ref', (key) => key)).toBe('multitrackTaskModes.ref')
     expect(getMultiTrackTaskModeLabel('edit', (key) => key)).toBe('multitrackTaskModes.edit')
+    expect(getMultiTrackTaskModeLabel('passthrough', (key) => key)).toBe('multitrackTaskModes.passthrough')
+    const data = createDefaultTrackData()
+    data.tracks[0].segments = [{
+      id: 'passthrough-task',
+      start_frame: 0,
+      end_frame: 120,
+      color: data.tracks[0].color,
+      content: { media_type: 'none', task_mode: 'passthrough' },
+    }]
+    expect(normalizeTrackData(data).tracks[0].segments[0].content.task_mode).toBe('passthrough')
   })
 
   it('migrates legacy segment tracks to task tracks', () => {

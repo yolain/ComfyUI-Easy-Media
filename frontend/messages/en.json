@@ -105,6 +105,7 @@
   },
   "multitrackTaskModes": {
     "default": "TI2V",
+    "passthrough": "Passthrough",
     "l2v": "L2V",
     "t2v": "T2V",
     "i2v": "I2V",
@@ -175,7 +176,7 @@
     "applyPromptToAllConfirm": "Replace all",
     "taskNumber": "Segment {n}",
     "taskMode": "Task mode",
-    "taskModeTooltip": "Choose how this segment generates video.",
+    "taskModeTooltip": "Choose how this segment produces video. Passthrough skips sampling, uses the source video when available, and otherwise outputs black video.",
     "continuityMode": "Continuity mode",
     "continuityModeTooltip": "Start a new shot, continue with a five-frame video anchor, or preserve motion while replacing the character appearance.",
     "refImageSize": "Reference image size",

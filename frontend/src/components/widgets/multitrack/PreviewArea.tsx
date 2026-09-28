@@ -1110,7 +1110,7 @@ export function PreviewArea({
           </div>
         )}
         <span className="shrink-0 px-1 text-[9px] leading-4 text-secondary">|</span>
-        {resolutionInput.format === 'MiniMax' && activeTaskPrompt.index > 0 && (
+        {resolutionInput.format === 'MiniMax' && activeTaskPrompt.taskMode !== 'passthrough' && activeTaskPrompt.index > 0 && (
           <>
             <Select
               value={activeTaskPrompt.content.continuity_mode ?? MULTITRACK_DEFAULT_CONTINUITY_MODE}
@@ -1209,7 +1209,7 @@ export function PreviewArea({
             </Tooltip>
           </TooltipProvider>
           <SelectContent>
-            {MULTITRACK_TASK_MODES.map((taskMode) => (
+            {MULTITRACK_TASK_MODES.filter((taskMode) => taskMode !== 'passthrough' || resolutionInput.format === 'MiniMax').map((taskMode) => (
               <SelectItem key={taskMode} value={taskMode}>
                 <span className="text-[10px]">
                   {getMultiTrackTaskModeLabel(taskMode, t)}

@@ -52,7 +52,7 @@ from ..utils.minimax import (
     remove_output_files_by_prefix,
 )
 from ..utils.prompt_override import build_minimax_prompt_override_json
-from ..utils.video import passthrough_video_media
+from ..utils.video import stage_passthrough_video_media
 
 
 CATEGORY_MINIMAX = "EasyUse/MiniMax"
@@ -2115,7 +2115,7 @@ class EasyH3AudioContextLatent(io.ComfyNode):
 
 
 class EasyH3PassthroughVideo(io.ComfyNode):
-    """Select the first reference video for a complete task timeline."""
+    """Stage the first task video and expose only its continuation suffix."""
 
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -2129,16 +2129,42 @@ class EasyH3PassthroughVideo(io.ComfyNode):
                 io.Video.Input("videos"),
                 io.Int.Input("frame_count", min=1),
                 io.Float.Input("fps", min=0.001),
+                io.Int.Input("width", min=1),
+                io.Int.Input("height", min=1),
+                io.String.Input("project_name"),
+                io.Int.Input("segment_index", min=0),
             ],
-            outputs=[io.Image.Output("images"), io.Audio.Output("audio")],
+            outputs=[
+                io.String.Output("video_path"),
+                io.Image.Output("tail_images"),
+                io.Audio.Output("tail_audio"),
+            ],
+            not_idempotent=True,
         )
 
     @classmethod
     def execute(
-        cls, videos: list[object], frame_count: list[int], fps: list[float]
+        cls,
+        videos: list[object],
+        frame_count: list[int],
+        fps: list[float],
+        width: list[int],
+        height: list[int],
+        project_name: list[str],
+        segment_index: list[int],
     ) -> io.NodeOutput:
-        images, audio = passthrough_video_media(videos, int(frame_count[0]), float(fps[0]))
-        return io.NodeOutput(images, audio)
+        video = videos[0] if videos else None
+        safe_name = safe_h3_project_name(project_name[0])
+        staging_path = (
+            Path(folder_paths.get_output_directory()).resolve()
+            / "easy_media" / "projects" / safe_name
+            / f".staging_video_{int(segment_index[0])}.mp4"
+        )
+        video_path, tail_images, tail_audio = stage_passthrough_video_media(
+            video, int(frame_count[0]), float(fps[0]),
+            int(width[0]), int(height[0]), staging_path,
+        )
+        return io.NodeOutput(video_path, tail_images, tail_audio)
 
 
 class EasyH3ContextMediaTrim(io.ComfyNode):
@@ -2600,6 +2626,13 @@ class EasyH3ProjectArtifact(io.ComfyNode):
             "sampling_pass": sampling_pass,
             "updated_at": time.time(),
         }
+        task_mode: str | None = None
+        task_segments = manifest.get("task_segments", [])
+        if isinstance(task_segments, list) and 0 <= int(segment_index) < len(task_segments):
+            task_segment = task_segments[int(segment_index)]
+            if isinstance(task_segment, dict):
+                task_mode = str(task_segment.get("task_mode", "default"))
+                generation_manifest["task_mode"] = task_mode
         if target_context_latent_low is not None:
             generation_manifest["context_latent_low"] = (
                 target_context_latent_low.name
@@ -2607,13 +2640,8 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         versions[str(generation)] = generation_manifest
         segment_manifest["active_generation"] = generation
         segment_manifest["continuity_mode"] = continuity_mode
-        task_segments = manifest.get("task_segments", [])
-        if isinstance(task_segments, list) and 0 <= int(segment_index) < len(task_segments):
-            task_segment = task_segments[int(segment_index)]
-            if isinstance(task_segment, dict):
-                segment_manifest["task_mode"] = str(
-                    task_segment.get("task_mode", "default")
-                )
+        if task_mode is not None:
+            segment_manifest["task_mode"] = task_mode
         segment_manifest["updated_at"] = time.time()
         temporary_manifest = project_dir / ".project.json.tmp"
         try:

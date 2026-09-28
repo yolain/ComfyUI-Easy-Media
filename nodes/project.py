@@ -16,6 +16,7 @@ from ..utils.h3_presets import get_h3_preset_keys, load_h3_presets, select_h3_pr
 from ..utils.h3_project import (
     clear_h3_project_segments_from,
     compose_h3_project_video,
+    h3_active_segment_is_passthrough,
     h3_generation_mode,
     h3_locked_audio_track,
     h3_locked_video_track,
@@ -25,6 +26,7 @@ from ..utils.h3_project import (
     has_h3_context_latent,
     has_h3_first_pass_checkpoint,
     h3_task_entries,
+    h3_task_is_passthrough,
     h3_task_type,
     initialize_h3_project,
     parse_tracks_info,
@@ -1201,6 +1203,9 @@ class EasyMultiTrackProject(io.ComfyNode):
             raise ValueError(
                 "No H3 task segments are available from segment_start_number."
             )
+        has_sampling_tasks = not is_passthrough and any(
+            not h3_task_is_passthrough(entry) for _, entry in selected_entries
+        )
 
         first_selected_index, first_selected_entry = selected_entries[0]
         first_selected_task = first_selected_entry.get("task", {})
@@ -1220,6 +1225,7 @@ class EasyMultiTrackProject(io.ComfyNode):
             first_selected_index > 0
             and first_selected_continuity in H3_CONTEXT_CONTINUITY_MODES
             and not is_passthrough
+            and not h3_task_is_passthrough(first_selected_entry)
         ):
             previous_index = first_selected_index - 1
             if not has_h3_context_latent(
@@ -1234,12 +1240,20 @@ class EasyMultiTrackProject(io.ComfyNode):
                     "has no active context latent. Generate or restore the "
                     "previous segment first."
                 )
+            previous_is_passthrough = (
+                h3_active_segment_is_passthrough(
+                    safe_project_name,
+                    previous_index,
+                    folder_paths.get_output_directory(),
+                )
+                if is_selflift else False
+            )
             if is_selflift and not has_h3_context_latent(
                 safe_project_name,
                 previous_index,
                 resolution="low",
                 output_directory=folder_paths.get_output_directory(),
-                allow_low_fallback=False,
+                allow_low_fallback=previous_is_passthrough,
             ):
                 raise ValueError(
                     f"Cannot start SelfLift segment {first_selected_index + 1} "
@@ -1297,8 +1311,9 @@ class EasyMultiTrackProject(io.ComfyNode):
         graph = GraphBuilder()
         report_step(27)
         preset_name = str(_first_input(kwargs.get("sampling_plan"), "medium"))
-        has_context_second_pass = run_second_pass and any(
+        has_context_second_pass = run_second_pass and has_sampling_tasks and any(
             task_index > 0 and isinstance(entry.get("task"), dict)
+            and not h3_task_is_passthrough(entry)
             and isinstance(entry["task"].get("content"), dict)
             and str(entry["task"]["content"].get("continuity_mode", "shot")).lower()
             in H3_CONTEXT_CONTINUITY_MODES for task_index, entry in selected_entries
@@ -1319,8 +1334,9 @@ class EasyMultiTrackProject(io.ComfyNode):
             )
             model_inputs = {
                 "model_loader": selected_model_loader,
-                "sampling_plan": preset_name, "sampling_mode": sampling_mode,
-                "run_second_pass": run_second_pass,
+                "sampling_plan": preset_name,
+                "sampling_mode": sampling_mode if has_sampling_tasks else "passthrough",
+                "run_second_pass": run_second_pass and has_sampling_tasks,
                 "has_context_second_pass": has_context_second_pass,
                 "turbo_hint": first_is_turbo,
             }
@@ -1350,7 +1366,10 @@ class EasyMultiTrackProject(io.ComfyNode):
             (task_tracks_info_base, shared_images, shared_audio, shared_video,
              full_locked_audio) = prepare_multitrack_project_media(info)
             first_pass_sampler = first_pass_sigmas = None
-            if not is_passthrough and any(task_index != resume_task_index for task_index, _ in selected_entries):
+            if has_sampling_tasks and any(
+                task_index != resume_task_index and not h3_task_is_passthrough(entry)
+                for task_index, entry in selected_entries
+            ):
                 if is_selflift:
                     first_pass_sigmas = _h3_resolve_selflift_sigmas(
                         graph, sigmas=_first_input(kwargs.get("sigmas")),
@@ -1361,7 +1380,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                         sigmas=_first_input(kwargs.get("sigmas")), preset_name=preset_name,
                         has_second_pass=has_second_pass, is_turbo=first_is_turbo)
             second_pass_sampler = second_pass_sigmas = context_second_pass_sigmas = None
-            if run_second_pass:
+            if run_second_pass and has_sampling_tasks:
                 configured_sampler = _first_input(sampling_config.get("sampler_2nd"), _first_input(kwargs.get("sampler_2nd")))
                 configured_sigmas = _first_input(sampling_config.get("sigmas_2nd"), _first_input(kwargs.get("sigmas_2nd")))
                 custom_second = configured_sampler is not None or configured_sigmas is not None
@@ -1399,15 +1418,7 @@ class EasyMultiTrackProject(io.ComfyNode):
             generation_mode = h3_generation_mode(task_type)
             task = entry.get("task", {})
             content = task.get("content", {}) if isinstance(task, dict) else {}
-            continuity_mode = (
-                str(content.get("continuity_mode", "shot")).lower()
-                if isinstance(content, dict)
-                else "shot"
-            )
-            if continuity_mode == "context_test":
-                continuity_mode = "context"
-            uses_context = continuity_mode in H3_CONTEXT_CONTINUITY_MODES
-            uses_swap = continuity_mode == "context_swap"
+            task_is_passthrough = is_passthrough or h3_task_is_passthrough(entry)
             locked_audio_track = h3_locked_audio_track(entry, info)
             locked_video_track = h3_locked_video_track(entry, info)
             has_task_locked_audio = locked_audio_track is not None
@@ -1438,7 +1449,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     project_static=project_media_static.out(0), task_start_frame=task_start_frame,
                     task_index=task_index,
                     task_duration_frames=task_duration_frames, fps=fps,
-                    generation_mode="reference" if is_passthrough else generation_mode,
+                    generation_mode="reference" if task_is_passthrough else generation_mode,
                     **(
                         {"previous": previous_artifact}
                         if previous_artifact is not None
@@ -1463,8 +1474,8 @@ class EasyMultiTrackProject(io.ComfyNode):
                 )
                 task_tracks_info = prepare_multitrack_project_task_info(
                     task_tracks_info_base, shared_images,
-                    task_shared_audio if generation_mode == "reference" or is_passthrough else [],
-                    task_shared_video if generation_mode == "reference" or is_passthrough else [],
+                    task_shared_audio if generation_mode == "reference" or task_is_passthrough else [],
+                    task_shared_video if generation_mode == "reference" or task_is_passthrough else [],
                     task_entry=entry,
                 )
                 task_output = graph.node(
@@ -1476,7 +1487,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                 base_task_length = task_output.out(3)
                 if preserve_source_timing:
                     base_task_length = task_duration_frames
-            if is_passthrough:
+            if task_is_passthrough:
                 if audio_only:
                     raise ValueError("Passthrough requires a video project, not audio-only mode")
                 passthrough = graph.node(
@@ -1485,10 +1496,13 @@ class EasyMultiTrackProject(io.ComfyNode):
                     videos=task_output.out(6),
                     frame_count=task_duration_frames,
                     fps=fps,
+                    width=target_width,
+                    height=target_height,
+                    project_name=safe_project_name,
+                    segment_index=task_index,
                 )
-                output_images, output_audio = passthrough.out(0), passthrough.out(1)
                 context_latent = _h3_encode_context_media(
-                    graph, output_images, output_audio, vae, audio_vae,
+                    graph, passthrough.out(1), passthrough.out(2), vae, audio_vae,
                     f"passthrough_context_{task_index}",
                 )
                 runtime_context_latent = graph.node(
@@ -1497,25 +1511,10 @@ class EasyMultiTrackProject(io.ComfyNode):
                     latent=context_latent,
                     context_length=str(H3_CONTEXT_SOURCE_FRAMES),
                 ).out(0)
-                saved_video = graph.node(
-                    "easy saveVideo",
-                    id=f"save_video_{task_index}",
-                    input_mode="images+audio",
-                    **{
-                        "input_mode.images": output_images,
-                        "input_mode.audio": output_audio,
-                        "input_mode.fps": fps,
-                        "output_mode": "hide&save",
-                    },
-                    filename_prefix=(
-                        f"easy_media/projects/{safe_project_name}/"
-                        f".staging_video_{task_index}"
-                    ),
-                )
                 saved_video_end = graph.node(
                     "easy h3SegmentSaveEnd",
                     id=f"save_end_{task_index}",
-                    video_path=saved_video.out(1),
+                    video_path=passthrough.out(0),
                     project_name=safe_project_name,
                     segment_index=task_index,
                 )
@@ -1526,7 +1525,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     "context_latent": runtime_context_latent,
                     "video_path": saved_video_end.out(0),
                     "tracks_info": output_info,
-                    "continuity_mode": continuity_mode,
+                    "continuity_mode": "shot",
                     "seed": first_pass_seed,
                     "sampling_pass": "single",
                 }
@@ -1546,6 +1545,15 @@ class EasyMultiTrackProject(io.ComfyNode):
                 })
                 report_segment_step(1.0)
                 continue
+            continuity_mode = (
+                str(content.get("continuity_mode", "shot")).lower()
+                if isinstance(content, dict)
+                else "shot"
+            )
+            if continuity_mode == "context_test":
+                continuity_mode = "context"
+            uses_context = continuity_mode in H3_CONTEXT_CONTINUITY_MODES
+            uses_swap = continuity_mode == "context_swap"
             aligned_task_length: Any = (
                 minimax_frame_count(base_task_length, round_up=True)
                 if preserve_source_timing

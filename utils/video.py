@@ -19,45 +19,156 @@ import folder_paths
 import torch
 
 
-def passthrough_video_media(
-    videos: list[object] | object,
+def stage_passthrough_video_media(
+    video: object | None,
     frame_count: int,
     fps: float,
-) -> tuple[torch.Tensor, dict[str, Any]]:
-    """Read video zero at the project frame rate without changing its timing."""
-    candidates = videos if isinstance(videos, list) else [videos]
-    video = candidates[0] if candidates else None
-    if video is None:
-        raise ValueError("Passthrough requires a video reference at index 0")
+    width: int,
+    height: int,
+    output_path: str | Path,
+    *,
+    context_frames: int = 22,
+) -> tuple[str, torch.Tensor, dict[str, Any]]:
+    """Stage a task video or black fallback with FFmpeg and decode its suffix."""
+    from .minimax import H3_VAE_FRAME_CHUNK, H3_VAE_FRAME_REMAINDER, h3_phase_aligned_context_start
+    from .multitrack import _video_stream_source
+
     if frame_count < 1 or not math.isfinite(fps) or fps <= 0:
-        raise ValueError("Passthrough requires a positive timeline length and fps")
+        raise ValueError("Passthrough requires a positive frame count and fps")
+    if width < 1 or height < 1 or width % 2 or height % 2:
+        raise ValueError("Passthrough requires positive even output dimensions")
+    ffmpeg = get_ffmpeg_path("ffmpeg")
+    if ffmpeg is None:
+        raise RuntimeError("Passthrough requires FFmpeg")
+    source_path = _video_stream_source(video) if video is not None else None
+    temporary_paths: list[str] = []
+    if video is not None and source_path is None:
+        source_fd, source_path = tempfile.mkstemp(
+            suffix=".mp4", dir=folder_paths.get_temp_directory(),
+        )
+        os.close(source_fd)
+        temporary_paths.append(source_path)
+        try:
+            video.save_to(source_path)
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as error:
+            Path(source_path).unlink(missing_ok=True)
+            raise ValueError("Unable to materialize passthrough VIDEO input") from error
+    destination = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    duration = frame_count / fps
     try:
-        components = video.get_components()
-    except (AttributeError, RuntimeError, TypeError, ValueError) as error:
-        raise ValueError("Unable to read passthrough video reference") from error
-    images = components.images
-    source_fps = float(components.frame_rate)
-    if not isinstance(images, torch.Tensor) or images.ndim != 4 or images.shape[0] == 0:
-        raise ValueError("Passthrough video has no valid frames")
-    if not math.isfinite(source_fps) or source_fps <= 0:
-        raise ValueError("Passthrough video has an invalid frame rate")
-    if images.shape[0] / source_fps + 1e-6 < frame_count / fps:
-        raise ValueError("Passthrough video must cover the complete task timeline")
-    indices = torch.floor(
-        torch.arange(frame_count, device=images.device) * source_fps / fps
-    ).long().clamp(max=images.shape[0] - 1)
-    output_images = images.index_select(0, indices)
-    audio = components.audio
-    waveform = audio.get("waveform") if isinstance(audio, dict) else None
-    sample_rate = audio.get("sample_rate") if isinstance(audio, dict) else None
-    if not isinstance(waveform, torch.Tensor) or not isinstance(sample_rate, int) or sample_rate <= 0:
-        sample_rate = 44100
-        waveform = torch.zeros((1, 2, 0), dtype=torch.float32)
-    sample_count = max(1, round(frame_count / fps * sample_rate))
-    waveform = waveform[..., :sample_count]
-    if waveform.shape[-1] < sample_count:
-        waveform = torch.nn.functional.pad(waveform, (0, sample_count - waveform.shape[-1]))
-    return output_images, {"waveform": waveform, "sample_rate": sample_rate}
+        has_audio = False
+        command = [ffmpeg, "-y", "-nostdin", "-v", "error"]
+        if source_path is not None:
+            source_info = ffprobe_info(source_path)
+            if not source_info.get("has_video"):
+                raise ValueError("Passthrough source has no video stream")
+            source_duration = source_info.get("duration")
+            source_frames = source_info.get("frame_count")
+            source_fps = source_info.get("fps")
+            if isinstance(source_frames, int) and isinstance(source_fps, (int, float)) and source_fps > 0:
+                source_duration = source_frames / source_fps
+            if isinstance(source_duration, (int, float)) and source_duration + 1e-3 < duration:
+                raise ValueError("Passthrough video must cover the complete task timeline")
+            has_audio = source_info.get("has_audio") is True
+            command.extend(["-i", source_path])
+        else:
+            command.extend([
+                "-f", "lavfi", "-i",
+                f"color=c=black:s={width}x{height}:r={fps}:d={duration}",
+            ])
+        if not has_audio:
+            command.extend(["-f", "lavfi", "-i", f"anullsrc=r=44100:cl=stereo:d={duration}"])
+        command.extend([
+            "-map", "0:v:0", "-map", "0:a:0" if has_audio else "1:a:0",
+            "-vf", (
+                f"fps=fps={fps}:start_time=0,scale={width}:{height},"
+                f"tpad=stop_mode=clone:stop_duration={duration},"
+                f"trim=end_frame={frame_count},setpts=PTS-STARTPTS"
+            ),
+            "-af", (
+                "aresample=44100:first_pts=0,"
+                f"atrim=duration={duration},asetpts=PTS-STARTPTS,"
+                f"apad=pad_dur={duration},atrim=duration={duration}"
+            ),
+            "-frames:v", str(frame_count), "-t", str(duration),
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+            str(destination),
+        ])
+        try:
+            result = subprocess.run(command, capture_output=True, timeout=600)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise RuntimeError(f"Passthrough FFmpeg staging failed: {error}") from error
+        if result.returncode != 0:
+            raise RuntimeError(
+                "Passthrough FFmpeg staging failed: "
+                + result.stderr.decode(errors="replace")[-800:]
+            )
+        staged_info = ffprobe_info(str(destination))
+        if staged_info.get("frame_count") != frame_count:
+            raise RuntimeError(
+                f"Passthrough FFmpeg staging produced {staged_info.get('frame_count')} "
+                f"frames instead of {frame_count}"
+            )
+        aligned_count = (
+            H3_VAE_FRAME_CHUNK * max(
+                0, math.ceil((frame_count - H3_VAE_FRAME_REMAINDER) / H3_VAE_FRAME_CHUNK)
+            ) + H3_VAE_FRAME_REMAINDER
+        )
+        suffix_start = (
+            h3_phase_aligned_context_start(aligned_count, context_frames)
+            if aligned_count >= context_frames else 0
+        )
+        suffix_start = min(suffix_start, frame_count - 1)
+        suffix_count = frame_count - suffix_start
+        seek_time = suffix_start / fps
+        video_result = subprocess.run(
+            [ffmpeg, "-v", "error", "-ss", str(seek_time), "-i", str(destination),
+             "-map", "0:v:0", "-frames:v", str(suffix_count),
+             "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+            capture_output=True, timeout=120,
+        )
+        expected_bytes = suffix_count * width * height * 3
+        if video_result.returncode != 0 or len(video_result.stdout) != expected_bytes:
+            raise RuntimeError(
+                "Passthrough tail video decode failed: "
+                + video_result.stderr.decode(errors="replace")[-600:]
+            )
+        images = torch.frombuffer(bytearray(video_result.stdout), dtype=torch.uint8)
+        images = images.reshape(suffix_count, height, width, 3).to(torch.float32) / 255.0
+        if suffix_count < context_frames:
+            images = torch.cat(
+                (images, images[-1:].expand(context_frames - suffix_count, -1, -1, -1)),
+                dim=0,
+            )
+        audio_start = max(0.0, duration - context_frames / fps)
+        audio_result = subprocess.run(
+            [ffmpeg, "-v", "error", "-ss", str(audio_start), "-i", str(destination),
+             "-map", "0:a:0", "-t", str(duration - audio_start),
+             "-f", "f32le", "-acodec", "pcm_f32le", "-ac", "2", "-ar", "44100", "-"],
+            capture_output=True, timeout=120,
+        )
+        if audio_result.returncode != 0:
+            raise RuntimeError(
+                "Passthrough tail audio decode failed: "
+                + audio_result.stderr.decode(errors="replace")[-600:]
+            )
+        samples = torch.frombuffer(bytearray(audio_result.stdout), dtype=torch.float32)
+        if samples.numel() % 2:
+            raise RuntimeError("Passthrough tail audio has an invalid sample count")
+        waveform = samples.reshape(-1, 2).T.contiguous().unsqueeze(0)
+        wanted_samples = max(1, round(context_frames / fps * 44100))
+        waveform = waveform[..., -wanted_samples:]
+        if waveform.shape[-1] < wanted_samples:
+            waveform = torch.nn.functional.pad(waveform, (wanted_samples - waveform.shape[-1], 0))
+        return str(destination), images, {"waveform": waveform, "sample_rate": 44100}
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        for path in temporary_paths:
+            Path(path).unlink(missing_ok=True)
 
 logger = logging.getLogger(__name__)
 
