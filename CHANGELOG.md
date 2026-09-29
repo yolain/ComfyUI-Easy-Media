@@ -6,6 +6,7 @@
 
 ### ✨ New Features
 
+- **RTX-VSR Video Super-Resolution**: Added the `easy rtxVideoSuperResolution` node for video super-resolution using the Nvidia RTX-VSR model to enhance video frames. The node operates directly on `VIDEO` and does not require conversion to tensors.
 - **Multi-Image Loader**: Added the `easy multiImagesLoader` node, supporting loading up to 25 images.
 
 ### 🐛 Bug Fixes

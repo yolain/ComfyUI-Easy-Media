@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Download, ExternalLink, Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -78,7 +78,7 @@ import { uuid } from '@/lib/uuid'
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
 import { adjustMultiTrackEditorNodeHeight } from '@/lib/timeline-node-size'
 import type { MultiTrack, MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSourceType, MultiTrackTaskImage, MultiTrackType, TrackData } from '@/types/multitrack'
-import { MultiTrackRuler } from './multitrack/MultiTrackRuler'
+import { MultiTrackRuler, MULTITRACK_LEFT_GUTTER, MULTITRACK_RIGHT_RESERVE } from './multitrack/MultiTrackRuler'
 import { MultiTrackToolbar } from './multitrack/MultiTrackToolbar'
 import { PreviewArea } from './multitrack/PreviewArea'
 import { SplitTaskSegmentDialog } from './multitrack/SplitTaskSegmentDialog'
@@ -143,6 +143,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   const [currentTime, setCurrentTime] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [zoom, setZoom] = useState(1)
+  const [isScrubbing, setIsScrubbing] = useState(false)
   const [snapEnabled, setSnapEnabled] = useState(true)
   const [timelineCollapsed, setTimelineCollapsed] = useState(false)
   const [selectedTaskMarkerId, setSelectedTaskMarkerId] = useState<string | null>(null)
@@ -161,10 +162,60 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
   const startedAtRef = useRef(0)
   const startTimeRef = useRef(0)
   const currentTimeRef = useRef(0)
+  const previousViewportTimeRef = useRef(0)
   const timelineWidth = Math.max(1, useElementWidth(timelineContainerRef))
   const scaledTimelineWidth = timelineWidth * zoom
   const canvasScale = useCanvasScale(app)
   const resolutionInput = useMultiTrackResolutionInput(node)
+  // React's wheel listener can be passive; cancel native scrolling before moving the timeline.
+  // useLayoutEffect attaches the non-passive listener before paint so the very first wheel
+  // gesture on the timeline is intercepted rather than falling through to native scroll.
+  useLayoutEffect(() => {
+    const container = timelineContainerRef.current
+    if (!container) return
+
+    function handleWheel(event: WheelEvent) {
+      if (!container || container.scrollWidth <= container.clientWidth || event.ctrlKey || event.metaKey) return
+      if (event.target instanceof Element && event.target.closest('[data-capture-wheel="true"]')) return
+
+      event.preventDefault()
+
+      const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? container.clientWidth : 1
+      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY
+      container.scrollLeft = Math.max(0, Math.min(
+        container.scrollWidth - container.clientWidth,
+        container.scrollLeft + delta * unit,
+      ))
+    }
+
+    container.addEventListener('wheel', handleWheel, { passive: false })
+    return () => container.removeEventListener('wheel', handleWheel)
+  }, [timelineContainerRef])
+  useLayoutEffect(() => {
+    const previousTime = previousViewportTimeRef.current
+    previousViewportTimeRef.current = currentTime
+    const container = timelineContainerRef.current
+    if ((!isPlaying && !isScrubbing) || !container || !container.clientWidth || data.total_length <= 0) return
+
+    const visibleWidth = container.clientWidth
+    const playableWidth = Math.max(1, scaledTimelineWidth - MULTITRACK_LEFT_GUTTER - MULTITRACK_RIGHT_RESERVE)
+    const playheadX = MULTITRACK_LEFT_GUTTER + currentTime / data.total_length * playableWidth
+    const pageWidth = visibleWidth * 0.9
+    const margin = visibleWidth * 0.02
+    const maxScroll = Math.max(0, scaledTimelineWidth - visibleWidth)
+    const scrollLeft = container.scrollLeft
+
+    if (isPlaying && !isScrubbing && currentTime < previousTime) {
+      container.scrollLeft = 0
+    } else if (playheadX > scrollLeft + visibleWidth - margin) {
+      const pages = Math.ceil((playheadX - scrollLeft - visibleWidth + margin) / pageWidth)
+      container.scrollLeft = Math.min(maxScroll, scrollLeft + pages * pageWidth)
+    } else if ((playheadX < scrollLeft || (isScrubbing && currentTime < previousTime)) &&
+      playheadX < scrollLeft + margin) {
+      const pages = Math.ceil((scrollLeft + margin - playheadX) / pageWidth)
+      container.scrollLeft = Math.max(0, scrollLeft - pages * pageWidth)
+    }
+  }, [currentTime, isPlaying, isScrubbing, scaledTimelineWidth, data.total_length])
   const selectedSegment = selectedSegmentIds.size <= 1
     ? getSelectedMultiTrackSegment(data, selectedSegmentId)
     : null
@@ -1444,7 +1495,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             className={`grid shrink-0 transition-[grid-template-rows] duration-300 ease-in-out ${timelineCollapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]'}`}
           >
             <div className="min-h-0 shrink-0 overflow-hidden">
-              <div ref={timelineContainerRef} className="no-scrollbar shrink-0 overflow-x-auto overflow-y-hidden">
+              <div ref={timelineContainerRef} data-testid="multitrack-timeline-scroll" className="no-scrollbar shrink-0 overflow-x-auto overflow-y-hidden">
                 <div className="min-h-full" style={{ width: scaledTimelineWidth, minWidth: '100%' }}>
                   <MultiTrackRuler
                     totalLength={data.total_length}
@@ -1455,6 +1506,8 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
                     taskMarkers={data.task_markers ?? []}
                     selectedTaskMarkerId={selectedTaskMarkerId}
                     onSeek={setPlayheadTime}
+                    onScrubStart={() => setIsScrubbing(true)}
+                    onScrubEnd={() => setIsScrubbing(false)}
                     onSelectTaskMarker={(markerId) => {
                       setSingleSelectedSegment(null)
                       setSelectedTaskMarkerId(markerId)
