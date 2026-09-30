@@ -68,6 +68,7 @@ from ..utils import (
     write_srt_file,
 )
 from ..utils.prompt_builder import build_llm_prompt, build_prompt_request
+from ..utils.h3_conditioning_cache import h3_media_input_signature
 from ..utils.multitrack import (
     _as_list_input,
     _embedded_multitrack_media,
@@ -2826,6 +2827,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 io.Video.Output("VIDEO", is_output_list=True),
                 io.String.Output("IMAGE_INDEXES"),
                 io.Audio.Output("LOCKED_AUDIO"),
+                io.String.Output("MEDIA_SIGNATURE"),
             ],
         )
 
@@ -2884,25 +2886,25 @@ class MultiTrackTaskOutput(io.ComfyNode):
         if isinstance(cached_task_output, io.NodeOutput):
             cache_status = info.get("_easy_media_cache_status", {})
             if isinstance(cache_status, dict):
-                cache_status["task_output"] = "命中恢复缓存"
+                cache_status["task_output"] = "restored from cache"
             log_node_info(
                 "MultiTrack Cache",
                 f"segment={requested_index} | "
-                f"项目媒体={cache_status.get('project_media', '未知')} | "
-                f"分段媒体={cache_status.get('segment_media', '未知')} | "
-                "TaskOutput=命中恢复缓存",
+                f"project media={cache_status.get('project_media', 'unknown')} | "
+                f"segment media={cache_status.get('segment_media', 'unknown')} | "
+                "TaskOutput=restored from cache",
             )
             return cached_task_output
         if "_preloaded_media" in info:
             cache_status = info.get("_easy_media_cache_status", {})
             if isinstance(cache_status, dict):
-                cache_status["task_output"] = "首次加载"
+                cache_status["task_output"] = "first load"
             log_node_info(
                 "MultiTrack Cache",
                 f"segment={requested_index} | "
-                f"项目媒体={cache_status.get('project_media', '未知')} | "
-                f"分段媒体={cache_status.get('segment_media', '未知')} | "
-                "TaskOutput=首次加载",
+                f"project media={cache_status.get('project_media', 'unknown')} | "
+                f"segment media={cache_status.get('segment_media', 'unknown')} | "
+                "TaskOutput=first load",
             )
 
         tracks = info.get("tracks", [])
@@ -3406,6 +3408,13 @@ class MultiTrackTaskOutput(io.ComfyNode):
             (selected_video or [None]) if is_minimax else selected_video,
             image_indexes,
             locked_audio,
+            h3_media_input_signature(
+                selected_images,
+                selected_audio or [None],
+                selected_video or [None],
+            )
+            if is_minimax
+            else "",
         )
         if can_restore_runtime:
             runtime_cache[task_cache_key] = output
@@ -3681,14 +3690,14 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
                 comfy_nodes, "NODE_CLASS_MAPPINGS", {}
             ):
                 raise RuntimeError(
-                    f"Missing node '{LLAMA_CPP_INSTRUCT_NODE_ID}'. 未找到该节点。请前往 "
-                    f"{LLAMA_CPP_INSTALL_URL} 下载并安装 ComfyUI-llama-cpp_vlm，"
-                    "然后重启 ComfyUI。"
+                    f"Missing node '{LLAMA_CPP_INSTRUCT_NODE_ID}'. Visit "
+                    f"{LLAMA_CPP_INSTALL_URL} to install ComfyUI-llama-cpp_vlm, "
+                    "then restart ComfyUI."
                 )
             selected_llama_model = _unwrap_singleton_container(llama_model, None)
             if selected_llama_model is None:
                 raise RuntimeError(
-                    "llama_model must be connected when model is llama.cpp (本地)."
+                    "llama_model must be connected when model is llama.cpp (local)."
                 )
             if not isinstance(selected_llama_model, dict) and not is_link(
                 selected_llama_model

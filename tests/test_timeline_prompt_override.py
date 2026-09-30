@@ -126,8 +126,8 @@ def _load_basic_module(monkeypatch):
     utils.image_tensor_data_uris = lambda values, **kwargs: []
     utils.video_data_uris = lambda values: []
     utils.video_frame_data_uris = lambda values, **kwargs: []
-    utils.LLAMACPP_MODEL = "llama.cpp (本地)"
-    utils.MINIMAX_MODEL = "h3-context-ir (海螺官方)"
+    utils.LLAMACPP_MODEL = "llama.cpp (local)"
+    utils.MINIMAX_MODEL = "h3-context-ir (MiniMax official)"
     utils.PROMPT_ENHANCER_MODELS = [utils.MINIMAX_MODEL]
     utils.PROMPT_ENHANCER_MAX_TOKENS = {}
     utils.PromptEnhancerApiError = RuntimeError

@@ -574,7 +574,7 @@ def detect_turbo_lora_from_prompt(
                     )
             continue
 
-        # fast h3Loader — check 主模型 and 副模型 for turbo
+        # fast h3Loader — check primary and secondary model inputs for turbo.
         if class_type == "fast h3Loader":
             inputs = node.get("inputs")
             if not isinstance(inputs, Mapping):
@@ -587,7 +587,8 @@ def detect_turbo_lora_from_prompt(
                         source="graph_prompt",
                         evidence=(
                             f"upstream fast h3Loader node {node_id} "
-                            f"{model_key} is Turbo: {model_value}"
+                            f"{('primary' if model_key == '主模型' else 'secondary')} "
+                            f"model is Turbo: {model_value}"
                         ),
                     )
     return None

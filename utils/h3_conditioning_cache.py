@@ -13,7 +13,7 @@ from typing import Any
 import torch
 
 
-H3_CONDITIONING_CACHE_SCHEMA_VERSION = "3"
+H3_CONDITIONING_CACHE_SCHEMA_VERSION = "4"
 H3_CONDITIONING_CACHE_METADATA_KEY = "easy_media_h3_conditioning_cache"
 H3_CONDITIONING_CACHE_MAX_SEGMENTS = 5
 H3_CONDITIONING_CACHE_MANIFEST = "cache.json"
@@ -37,11 +37,11 @@ class H3ConditioningCacheStats:
 
 
 _CACHE_CATEGORY_LABELS = {
-    "conditioning": "主条件",
-    "reference_image": "参考图片",
-    "reference_video": "参考视频",
-    "reference_audio": "参考音频",
-    "keyframe": "关键帧",
+    "conditioning": "conditioning",
+    "reference_image": "reference image",
+    "reference_video": "reference video",
+    "reference_audio": "reference audio",
+    "keyframe": "keyframe",
 }
 
 
@@ -60,6 +60,52 @@ def h3_encoder_signature(
     )
     payload = json.dumps(components, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def h3_conditioning_input_signature(
+    *,
+    prompt: Any,
+    mode: Any,
+    width: Any,
+    height: Any,
+    length: Any,
+    ref_image_size: Any,
+    locked_video_timing_frames: Any,
+    images: Any,
+    audios: Any,
+    videos: Any,
+    media_signature: Any | None = None,
+) -> str:
+    """Fingerprint the inputs that affect MiniMax H3 conditioning."""
+    digest = hashlib.sha256()
+    _update_h3_input_digest(
+        digest,
+        {
+            "prompt": prompt,
+            "mode": mode,
+            "width": width,
+            "height": height,
+            "length": length,
+            "ref_image_size": ref_image_size,
+            "locked_video_timing_frames": locked_video_timing_frames,
+            "media_signature": (
+                media_signature
+                if media_signature is not None
+                else h3_media_input_signature(images, audios, videos)
+            ),
+        },
+    )
+    return digest.hexdigest()
+
+
+def h3_media_input_signature(images: Any, audios: Any, videos: Any) -> str:
+    """Fingerprint the media selected for one H3 conditioning pass."""
+    digest = hashlib.sha256()
+    _update_h3_input_digest(
+        digest,
+        {"images": images, "audios": audios, "videos": videos},
+    )
+    return digest.hexdigest()
 
 
 def h3_conditioning_cache_path(cache_dir: Path, segment_index: int) -> Path:
@@ -166,6 +212,7 @@ def save_h3_conditioning_cache(
     path: Path,
     encoder_signature: str,
     scope_token: str,
+    input_signature: str | None = None,
 ) -> H3ConditioningCacheStats:
     """Atomically save H3 conditioning and metadata for rebuilding zero AV latent."""
     if path.suffix.lower() != ".safetensors":
@@ -194,6 +241,7 @@ def save_h3_conditioning_cache(
                 "schema_version": H3_CONDITIONING_CACHE_SCHEMA_VERSION,
                 "encoder_signature": str(encoder_signature),
                 "scope_token": str(scope_token),
+                "input_signature": str(input_signature or ""),
                 "structure": structure,
             },
             ensure_ascii=True,
@@ -243,13 +291,14 @@ def format_h3_conditioning_cache_stats(stats: H3ConditioningCacheStats) -> str:
         size = stats.stored_bytes_by_category.get(category, 0)
         if size:
             parts.append(f"{label}({_format_bytes(size)})")
-    return f"文件({_format_bytes(stats.file_bytes)})=" + "+".join(parts)
+    return f"file({_format_bytes(stats.file_bytes)})=" + "+".join(parts)
 
 
 def load_h3_conditioning_cache(
     path: Path,
     encoder_signature: str,
     scope_token: str,
+    input_signature: str | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """Load and validate one MiniMax H3 conditioning cache artifact."""
     if path.suffix.lower() != ".safetensors":
@@ -271,6 +320,11 @@ def load_h3_conditioning_cache(
         raise ValueError("H3 conditioning cache encoder signature does not match")
     if cache_metadata["scope_token"] != str(scope_token):
         raise ValueError("H3 conditioning cache pool scope does not match")
+    if (
+        input_signature is not None
+        and cache_metadata["input_signature"] != str(input_signature)
+    ):
+        raise ValueError("H3 conditioning cache inputs do not match")
     if not isinstance(tensors, dict):
         raise ValueError("H3 conditioning cache tensors are invalid")
     owned_tensors: dict[str, torch.Tensor] = {}
@@ -299,6 +353,7 @@ def h3_conditioning_cache_matches(
     path: Path,
     encoder_signature: str,
     scope_token: str,
+    input_signature: str | None = None,
 ) -> bool:
     """Check cache metadata without materializing its tensors when possible."""
     if not path.is_file() or path.suffix.lower() != ".safetensors":
@@ -337,7 +392,168 @@ def h3_conditioning_cache_matches(
     return (
         cache_metadata["encoder_signature"] == str(encoder_signature)
         and cache_metadata["scope_token"] == str(scope_token)
+        and (
+            input_signature is None
+            or cache_metadata["input_signature"] == str(input_signature)
+        )
     )
+
+
+def _update_h3_input_digest(
+    digest: Any,
+    value: Any,
+    seen: set[int] | None = None,
+) -> None:
+    """Add a deterministic representation of one H3 input to a digest."""
+    if seen is None:
+        seen = set()
+    if value is None:
+        _digest_text(digest, "none")
+        return
+    if isinstance(value, torch.Tensor):
+        _update_h3_tensor_digest(digest, value)
+        return
+    if isinstance(value, (str, int, float, bool)):
+        _digest_text(digest, type(value).__qualname__)
+        _digest_text(digest, repr(value))
+        return
+    if isinstance(value, bytes):
+        _digest_text(digest, "bytes")
+        _digest_bytes(digest, value)
+        return
+    if isinstance(value, Path):
+        _digest_text(digest, "path")
+        _digest_text(digest, str(value))
+        return
+    if isinstance(value, dict):
+        identity = id(value)
+        if identity in seen:
+            _digest_text(digest, "cycle")
+            return
+        seen.add(identity)
+        _digest_text(digest, "dict")
+        for key in sorted(value, key=lambda item: str(item)):
+            if key in {"_easy_media_cache_status", "_easy_media_runtime_cache"}:
+                continue
+            _update_h3_input_digest(digest, str(key), seen)
+            _update_h3_input_digest(digest, value[key], seen)
+        seen.remove(identity)
+        return
+    if isinstance(value, (list, tuple)):
+        identity = id(value)
+        if identity in seen:
+            _digest_text(digest, "cycle")
+            return
+        seen.add(identity)
+        _digest_text(digest, type(value).__qualname__)
+        for item in value:
+            _update_h3_input_digest(digest, item, seen)
+        seen.remove(identity)
+        return
+    if isinstance(value, set):
+        _digest_text(digest, "set")
+        for item in sorted(value, key=lambda item: repr(item)):
+            _update_h3_input_digest(digest, item, seen)
+        return
+    if _update_h3_video_digest(digest, value, seen):
+        return
+    _digest_text(digest, "object")
+    _digest_text(digest, f"{type(value).__module__}.{type(value).__qualname__}")
+    _digest_text(digest, repr(value))
+
+
+def _update_h3_video_digest(digest: Any, value: Any, seen: set[int]) -> bool:
+    """Fingerprint ComfyUI video inputs without relying on object identity."""
+    class_name = type(value).__name__
+    if class_name == "VideoFromComponents" and callable(
+        getattr(value, "get_components", None)
+    ):
+        components = value.get_components()
+        _digest_text(digest, "video-components")
+        _update_h3_input_digest(digest, getattr(components, "images", None), seen)
+        _update_h3_input_digest(digest, getattr(components, "audio", None), seen)
+        _update_h3_input_digest(digest, getattr(components, "frame_rate", None), seen)
+        _update_h3_input_digest(digest, getattr(components, "metadata", None), seen)
+        _update_h3_input_digest(digest, getattr(components, "alpha", None), seen)
+        _update_h3_input_digest(
+            digest,
+            getattr(value, "get_bit_depth", lambda: None)(),
+            seen,
+        )
+        _update_h3_input_digest(
+            digest,
+            getattr(value, "get_color_space", lambda: None)(),
+            seen,
+        )
+        return True
+    if class_name != "VideoFromFile" or not callable(
+        getattr(value, "get_stream_source", None)
+    ):
+        return False
+    source = value.get_stream_source()
+    _digest_text(digest, "video-file")
+    if isinstance(source, (str, Path)):
+        source_path = Path(source)
+        _digest_text(digest, str(source_path))
+        try:
+            stat = source_path.stat()
+        except OSError:
+            _digest_text(digest, "missing")
+        else:
+            _digest_text(digest, str(stat.st_size))
+            _digest_text(digest, str(stat.st_mtime_ns))
+    else:
+        _update_h3_input_digest(digest, source.getvalue(), seen)
+    _update_h3_input_digest(
+        digest,
+        getattr(value, "get_active_trim_window", lambda: None)(),
+        seen,
+    )
+    _update_h3_input_digest(
+        digest,
+        getattr(value, "get_dimensions", lambda: None)(),
+        seen,
+    )
+    _update_h3_input_digest(
+        digest,
+        getattr(value, "get_bit_depth", lambda: None)(),
+        seen,
+    )
+    _update_h3_input_digest(
+        digest,
+        getattr(value, "get_color_space", lambda: None)(),
+        seen,
+    )
+    return True
+
+
+def _update_h3_tensor_digest(digest: Any, value: torch.Tensor) -> None:
+    _digest_text(digest, "tensor")
+    if value.is_nested:
+        _digest_text(digest, str(value.dtype))
+        for tensor in value.unbind():
+            _update_h3_tensor_digest(digest, tensor)
+        return
+    tensor = value.detach()
+    if tensor.layout != torch.strided:
+        tensor = tensor.to_dense()
+    tensor = tensor.to(device="cpu").contiguous()
+    _digest_text(digest, str(tensor.dtype))
+    _digest_text(digest, repr(tuple(tensor.shape)))
+    try:
+        data = tensor.view(torch.uint8).numpy().tobytes()
+    except (RuntimeError, TypeError):
+        data = tensor.to(dtype=torch.float32).numpy().tobytes()
+    _digest_bytes(digest, data)
+
+
+def _digest_text(digest: Any, value: str) -> None:
+    _digest_bytes(digest, str(value).encode("utf-8"))
+
+
+def _digest_bytes(digest: Any, value: bytes) -> None:
+    digest.update(len(value).to_bytes(8, byteorder="big"))
+    digest.update(value)
 
 
 def _runtime_component_token(value: Any | None) -> str:
@@ -725,4 +941,6 @@ def _parse_cache_metadata(metadata: Any) -> dict[str, Any]:
         raise ValueError("H3 conditioning cache encoder signature is missing")
     if not isinstance(parsed.get("scope_token"), str):
         raise ValueError("H3 conditioning cache pool scope is missing")
+    if not isinstance(parsed.get("input_signature"), str):
+        raise ValueError("H3 conditioning cache input signature is missing")
     return parsed

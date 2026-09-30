@@ -1,10 +1,10 @@
 export const PROMPT_ENHANCER_MODELS = {
-  minimax: 'h3-context-ir (海螺官方)',
-  volcengine: 'doubao-seed-2-0-pro-260215 (火山引擎)',
-  zhipu: 'glm-5v-turbo (智谱)',
+  minimax: 'h3-context-ir (MiniMax official)',
+  volcengine: 'doubao-seed-2-0-pro-260215 (Volcengine)',
+  zhipu: 'glm-5v-turbo (Zhipu)',
   runningHubDoubao: 'bytedance/doubao-seed-2.0-pro (RunningHub)',
   runningHubGlm: 'glm-5v-turbo (RunningHub)',
-  local: 'llama.cpp (本地)',
+  local: 'llama.cpp (local)',
 } as const
 
 export interface PromptEnhancerBalanceRequest {

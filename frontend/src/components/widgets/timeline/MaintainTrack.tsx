@@ -53,7 +53,7 @@ function calcSegmentDuration(frameRate: number): number {
   return frameRate * 2 + 1
 }
 
-/** Evenly distribute all segments across total span. Extra frames go to front segments (前大后小). */
+/** Evenly distribute all segments across total span. Extra frames go to front segments. */
 function distributeEvenly(segs: Segment[], totalFrames: number): Segment[] {
   if (segs.length === 0) return segs
   const base = Math.floor(totalFrames / segs.length)
@@ -332,7 +332,7 @@ export function MaintainTrack({
     const newEnd = Math.max(minEnd, Math.min(seg.end_frame + delta, totalFrames - 1))
     updated[idx] = resizeSegmentWithScaledImages(seg, seg.start_frame, newEnd)
 
-    // 当有后续片段时，让它们跟随到当前片段后面（无论拉伸还是缩减）
+    // When later segments exist, keep them following the current segment after resizing.
     if (next) {
       const expectedStart = newEnd + 1
       if (next.start_frame !== expectedStart) {
@@ -353,7 +353,7 @@ export function MaintainTrack({
     updated[idx] = resizeSegmentWithScaledImages(seg, newStart, seg.end_frame)
     if (prev) updated[idx - 1] = resizeSegmentWithScaledImages(prev, prev.start_frame, newStart - 1)
 
-    // 让后续片段跟随到当前片段后面
+    // Keep later segments following the current segment.
     for (let i = idx + 1; i < updated.length; i++) {
       const expectedStart = updated[i - 1].end_frame + 1
       if (updated[i].start_frame !== expectedStart) {
@@ -925,7 +925,7 @@ export function MaintainTrack({
                   const fileName = path.split('/').pop() ?? path
                   const isUrl = path.startsWith('http')
 
-                  // Calculate segment span (evenly distribute remaining frames, 前大后小)
+                  // Calculate segment span and distribute remaining frames.
                   const remainingFrames = totalFrames - currentEndFrame
                   const remainingSlots = paths.length - i
                   const baseSpan = Math.floor(remainingFrames / remainingSlots)
