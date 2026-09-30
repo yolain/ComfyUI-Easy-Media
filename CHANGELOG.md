@@ -2,6 +2,17 @@
 
 ---
 
+## [1.3.4] - 2026-09-30
+
+### ✨ New Features
+
+- **RTX-VSR Video Super-Resolution**: Added the `easy rtxVideoSuperResolution` node for video super-resolution using the Nvidia RTX-VSR model to enhance video frames. The node operates directly on `VIDEO` and does not require conversion to tensors.
+
+### 🐛 Bug Fixes
+
+- **MultiTrack Editor**: Fixed mouse wheel being unable to scroll within the time range when zooming tracks.
+- **MultiTrack Editor**: Renamed the previous `context_swap` to `context_drift`.
+
 ## [1.3.3] - 2026-09-25
 
 ### ✨ New Features
