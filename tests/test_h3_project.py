@@ -173,13 +173,13 @@ def test_compact_project_tasks_keep_only_modes_and_index():
     )
 
 
-def test_compact_project_tasks_preserve_context_swap_mode():
+def test_compact_project_tasks_migrate_context_swap_mode():
     info = _tracks_info()
     info["tracks"][0]["segments"][1]["content"]["continuity_mode"] = (
         "context_swap"
     )
 
-    assert compact_h3_task_segments(info)[1]["continuity_mode"] == "context_swap"
+    assert compact_h3_task_segments(info)[1]["continuity_mode"] == "context_drift"
 
 
 def test_compact_project_tasks_migrate_context_test_to_context():
@@ -665,7 +665,7 @@ def test_load_h3_project_data_marks_shot_and_context(monkeypatch, tmp_path):
     )
 
 
-def test_load_h3_project_data_preserves_context_swap(monkeypatch, tmp_path):
+def test_load_h3_project_data_migrates_context_swap(monkeypatch, tmp_path):
     project_dir = _write_render_project(tmp_path)
     manifest_path = project_dir / "project.json"
     manifest = json.loads(manifest_path.read_text())
@@ -684,7 +684,7 @@ def test_load_h3_project_data_preserves_context_swap(monkeypatch, tmp_path):
 
     data = load_h3_project_data("demo")
 
-    assert data["clips"][1]["continuity_mode"] == "context_swap"
+    assert data["clips"][1]["continuity_mode"] == "context_drift"
 
 
 def test_load_h3_project_data_lists_all_video_files_for_the_same_index(monkeypatch, tmp_path):
@@ -718,7 +718,7 @@ def test_load_h3_project_data_lists_all_video_files_for_the_same_index(monkeypat
     assert [file["source_frame_count"] for file in data["clips"][0]["video_files"]] == [120, 96]
     assert [file["continuity_mode"] for file in data["clips"][0]["video_files"]] == [
         "shot",
-        "context_swap",
+        "context_drift",
     ]
 
 
@@ -745,9 +745,9 @@ def test_load_h3_project_data_uses_active_generation_continuity_mode(monkeypatch
     data = load_h3_project_data("demo")
 
     assert data["clips"][0]["file_name"] == alternate.name
-    assert data["clips"][0]["continuity_mode"] == "context_swap"
+    assert data["clips"][0]["continuity_mode"] == "context_drift"
     assert data["clips"][0]["video_files"][0]["continuity_mode"] == "shot"
-    assert data["clips"][0]["video_files"][1]["continuity_mode"] == "context_swap"
+    assert data["clips"][0]["video_files"][1]["continuity_mode"] == "context_drift"
 
 
 def test_compose_h3_project_video_uses_selected_file_for_same_index(monkeypatch, tmp_path):

@@ -73,7 +73,7 @@ The new **continuity mode** determines how a task follows the previous segment. 
 |-----------------|---------------------|-----------|
 | **Shot (`shot`)** | Generates independently, without inheriting motion or audio context from the previous segment | New shots, scene changes, and deliberate cuts |
 | **Context (`context`)** | Uses the tail of the previous result's audio/video latent to continue motion and sound | Continuous action, long takes, and ongoing audio |
-| **Character Swap Context (`context_swap`)** | Uses disposable tapered noise on the previous video context in both sampling passes while preserving its audio | Character or appearance replacement that should retain the previous motion |
+| **Drift Control Context (`context_drift`)** | In the first pass, applies Drift-Control to the copied video prefix: a denoise mask recalculated for each sampling step allows more change away from the seam and tapers to a fixed boundary. This limits visual drift while carrying motion forward; audio transitions softly. The second pass uses the standard high-resolution anchor without Drift-Control. | Change a subject or appearance while retaining the previous motion |
 
 The first segment starts in Shot mode. Set subsequent segments individually or select multiple tasks to change them together. For example, “Shot → Context → Context → Shot” creates three connected segments followed by a new shot. This setting affects **generation**, rather than adding a crossfade during assembly. Context does not guarantee seamless continuity across arbitrary scene or prompt changes.
 

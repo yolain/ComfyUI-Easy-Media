@@ -68,7 +68,7 @@
     "selectClipFileFailed": "视频版本选择保存失败",
     "continuityShot": "分镜",
     "continuityContext": "上下文",
-    "continuityContextSwap": "上下文(替换)",
+    "continuityContextDrift": "上下文(漂移)",
     "emptyPreview": "请刷新项目以预览已生成的视频片段。",
     "refreshFailed": "项目刷新失败",
     "combineFailed": "项目合并失败",
@@ -306,7 +306,7 @@
   "multitrackContinuityModes": {
     "shot": "分镜",
     "context": "上下文",
-    "context_swap": "上下文(主体替换)"
+    "context_drift": "上下文(漂移控制)"
   },
   "multitrackRefImageSizes": {
     "match": "匹配尺寸",

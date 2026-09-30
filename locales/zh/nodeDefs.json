@@ -1531,7 +1531,7 @@
       },
       "continuity_mode": {
         "name": "衔接模式",
-        "tooltip": "每个片段的衔接模式。支持 shot、context、context_swap；context 使用 5 帧视频硬锚点且保持音频生成。单个值会应用到所有片段，逗号分隔值会按顺序设置，少于片段数时复用最后一个值。"
+        "tooltip": "每个片段的衔接模式。支持 shot、context、context_drift（兼容旧值 context_swap）；context 使用 5 帧视频硬锚点且保持音频生成。单个值会应用到所有片段，逗号分隔值会按顺序设置，少于片段数时复用最后一个值。"
       },
       "system_prompt": {
         "name": "系统提示词",

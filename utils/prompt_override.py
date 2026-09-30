@@ -8,7 +8,7 @@ MINIMAX_PROMPT_OVERRIDE_TYPE = "minimax_prompt_override"
 MINIMAX_DEFAULT_GENERATION_TYPE = "r2v"
 MINIMAX_DEFAULT_CONTINUITY_MODE = "shot"
 MINIMAX_GENERATION_TYPES = {"r2v", "t2v", "i2v", "v2v", "l2v"}
-MINIMAX_CONTINUITY_MODES = {"shot", "context", "context_swap"}
+MINIMAX_CONTINUITY_MODES = {"shot", "context", "context_drift", "context_swap"}
 
 _IMAGE_REF_RE = re.compile(r'@(?:图像|图片|图|image|img)(\d+)', re.IGNORECASE)
 _AUDIO_REF_RE = re.compile(r'@(?:audio|auido|音频)(\d+)', re.IGNORECASE)
@@ -411,13 +411,14 @@ def _parse_minimax_generation_types(value, count: int) -> list[str]:
 
 
 def _parse_minimax_continuity_modes(value, count: int) -> list[str]:
-    return _parse_minimax_multi_value(
+    modes = _parse_minimax_multi_value(
         value,
         count,
         default=MINIMAX_DEFAULT_CONTINUITY_MODE,
         allowed=MINIMAX_CONTINUITY_MODES,
         field_name="continuity_mode",
     )
+    return ["context_drift" if mode == "context_swap" else mode for mode in modes]
 
 
 def _minimax_task_mode_for_generation_type(generation_type: str) -> str:

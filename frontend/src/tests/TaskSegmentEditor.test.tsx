@@ -142,8 +142,8 @@ describe('TaskSegmentEditor', () => {
     fireEvent.click(screen.getByRole('option', { name: 'Context' }))
     expect(onContentChange).toHaveBeenCalledWith({ continuity_mode: 'context' })
     fireEvent.click(continuitySelect)
-    fireEvent.click(screen.getByRole('option', { name: 'Swap Context' }))
-    expect(onContentChange).toHaveBeenCalledWith({ continuity_mode: 'context_swap' })
+    fireEvent.click(screen.getByRole('option', { name: 'Drift Control Context' }))
+    expect(onContentChange).toHaveBeenCalledWith({ continuity_mode: 'context_drift' })
 
     rerender(
       <TaskSegmentEditor

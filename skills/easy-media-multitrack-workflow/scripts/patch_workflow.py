@@ -364,11 +364,13 @@ def validate_track_data(
                 raise WorkflowError(f"{where}.content.media_type must be {track_type!r}")
             if track_type == "task" and "continuity_mode" in content:
                 continuity_mode = content.get("continuity_mode")
-                if continuity_mode not in {"shot", "context", "context_swap"}:
+                if continuity_mode not in {"shot", "context", "context_drift", "context_swap"}:
                     raise WorkflowError(
                         f"{where}.content.continuity_mode must be 'shot', 'context', "
-                        "or 'context_swap'"
+                        "'context_drift', or 'context_swap'"
                     )
+                if continuity_mode == "context_swap":
+                    content["continuity_mode"] = "context_drift"
             if "shared_reference" in content:
                 if not isinstance(content.get("shared_reference"), bool):
                     raise WorkflowError(

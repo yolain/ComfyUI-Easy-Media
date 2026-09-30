@@ -296,7 +296,7 @@ def test_rejects_unknown_task_continuity_mode(patch_workflow_module):
 
     with pytest.raises(
         patch_workflow_module.WorkflowError,
-        match="continuity_mode must be 'shot', 'context', or 'context_swap'",
+        match="continuity_mode must be 'shot', 'context', 'context_drift', or 'context_swap'",
     ):
         patch_workflow_module.validate_track_data(track_data, recalculate=False)
 

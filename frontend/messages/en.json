@@ -68,7 +68,7 @@
     "selectClipFileFailed": "Video selection could not be saved",
     "continuityShot": "Shot",
     "continuityContext": "Context",
-    "continuityContextSwap": "Swap Context",
+    "continuityContextDrift": "Drift Context",
     "emptyPreview": "Refresh the project to preview its generated clips.",
     "refreshFailed": "Project refresh failed",
     "combineFailed": "Project combine failed",
@@ -306,7 +306,7 @@
   "multitrackContinuityModes": {
     "shot": "Shot",
     "context": "Context",
-    "context_swap": "Swap Context"
+    "context_drift": "Drift Control Context"
   },
   "multitrackRefImageSizes": {
     "match": "Match",

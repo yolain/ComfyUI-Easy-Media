@@ -3995,8 +3995,9 @@ def test_multitrack_h3_dual_context_uses_separate_low_and_hires_latents(monkeypa
         ]
 
 
+@pytest.mark.parametrize("continuity_mode", ["context_drift", "context_swap"])
 def test_multitrack_h3_context_swap_uses_drift_control_only_in_first_pass(
-    monkeypatch,
+    monkeypatch, continuity_mode,
 ):
     module = _load_minimax_node(monkeypatch)
     module.comfy_nodes.NODE_CLASS_MAPPINGS.update(
@@ -4012,7 +4013,7 @@ def test_multitrack_h3_context_swap_uses_drift_control_only_in_first_pass(
             "end_frame": 240,
             "content": {
                 "task_mode": "ref",
-                "continuity_mode": "context_swap",
+                "continuity_mode": continuity_mode,
                 "images": [{"media_index": 0}],
                 "user_prompt": "replace the character and preserve motion",
             },
@@ -4056,7 +4057,7 @@ def test_multitrack_h3_context_swap_uses_drift_control_only_in_first_pass(
     assert hires["inputs"]["previous_hires_latent"] == artifacts[0]["inputs"][
         "context_latent"
     ]
-    assert artifacts[1]["inputs"]["continuity_mode"] == "context_swap"
+    assert artifacts[1]["inputs"]["continuity_mode"] == continuity_mode
     assert all(
         artifact["inputs"]["context_latent"] != [first_noise_id, 0]
         for artifact in artifacts

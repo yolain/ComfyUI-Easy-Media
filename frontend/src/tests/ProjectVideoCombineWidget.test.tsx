@@ -738,7 +738,7 @@ describe('ProjectVideoCombineWidget', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: alternate.file_name }))
     fireEvent.click(original)
 
-    expect(screen.getByText('Swap Context')).not.toBeNull()
+    expect(screen.getByText('Drift Context')).not.toBeNull()
   })
 
   it('persists the primary video selection for the next segment context', async () => {

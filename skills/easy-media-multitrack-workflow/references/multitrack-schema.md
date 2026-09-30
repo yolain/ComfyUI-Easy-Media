@@ -125,7 +125,7 @@ custom 示例：
 ```
 
 - `task_mode`: `default`、`l2v`、`ref`、`edit`。
-- `continuity_mode`: `shot`（独立镜头）、`context`（普通上下文衔接）或 `context_swap`（上下文主体替换）。
+- `continuity_mode`: `shot`（独立镜头）、`context`（普通上下文衔接）或 `context_drift`（上下文漂移控制）；旧值 `context_swap` 仍可读取。
 - `ref_image_size`: `match` 或 `max`。
 - `images` 最多 9 张，顺序决定 Picture 引用顺序。
 - 编辑已有任务时保留未要求改变的 `system_prompt`、prompt variant、连续性和参考图策略。
@@ -146,11 +146,11 @@ custom 示例：
 
 上下文分段需要反复使用同一张参考图时，可在图片项上设置 `"shared_reference": true`。该图片会成为公用图片，自动排在每个任务片段的私有图片之前；公用和私有图片合计仍不得超过 9 张。不要为了共享而在每个任务中手工复制相同图片。
 
-## 上下文主体替换模式
+## 上下文漂移控制模式
 
-`context_swap` 是“上下文主体替换”衔接模式：沿用前一段的场景和运动上下文，同时允许模型根据参考视频替换主体、人物、物体或局部区域。用户提供视频作为主体替换、人物替换、物体替换、服装/脸部等局部替换参考时，按以下规则编排：
+`context_drift` 是“上下文漂移控制”衔接模式：沿用前一段的场景和运动上下文，同时允许模型根据参考视频替换主体、人物、物体或局部区域。用户提供视频作为主体替换、人物替换、物体替换、服装/脸部等局部替换参考时，按以下规则编排：
 
-- 将本次范围内所有 task segment 的 `content.continuity_mode` 设为 `context_swap`；不要只修改第二段或后续片段。首段虽然没有前序生成上下文，也保持同一模式，以便项目元数据和后续重生成一致。
+- 将本次范围内所有 task segment 的 `content.continuity_mode` 设为 `context_drift`；不要只修改第二段或后续片段。首段虽然没有前序生成上下文，也保持同一模式，以便项目元数据和后续重生成一致。
 - 参考视频放在 video track，并覆盖全部目标 task segment 的时间范围。若它还需要跨任务作为模型参考，在视频片段 `content` 上设置 `shared_reference: true`。
 - 在该 video track 设置轨道级 `audio_locked: true`，让源视频时间驱动生成；同时只把其他 video track 的 `audio_locked` 显式设为 `false`。若要替换原声，可另锁定一条 audio track，后者会优先作为音频来源。仅沿用视频原声时，锁定前确认视频包含可用音轨并覆盖全部目标 task segment。
 - 用户明确指定片段长度或边界时以用户要求为准。否则按连续 10 秒拆分 task segment：每段帧数为 `round(10 * frame_rate)`，最后一段使用参考视频的剩余帧，不补齐、不丢弃余数，也不创建空末段。参考视频本身可保留为覆盖完整范围的单个 video segment，无需为每个 task segment 重复复制。

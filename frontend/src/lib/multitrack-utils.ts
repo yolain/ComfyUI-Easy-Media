@@ -18,7 +18,7 @@ export const MULTITRACK_DEFAULT_TOTAL_LENGTH = 120
 export const MULTITRACK_MIN_DURATION_SECONDS = 5
 export const MULTITRACK_TASK_MODES = ['default', 'ref', 'edit', 'l2v'] as const
 export const MULTITRACK_DEFAULT_TASK_MODE: MultiTrackTaskMode = 'default'
-export const MULTITRACK_CONTINUITY_MODES = ['shot', 'context', 'context_swap'] as const
+export const MULTITRACK_CONTINUITY_MODES = ['shot', 'context', 'context_drift'] as const
 export const MULTITRACK_DEFAULT_CONTINUITY_MODE: MultiTrackContinuityMode = 'shot'
 export const MULTITRACK_REF_IMAGE_SIZES = ['match', 'max'] as const
 export const MULTITRACK_DEFAULT_REF_IMAGE_SIZE: MultiTrackRefImageSize = 'match'
@@ -392,6 +392,7 @@ function normalizeTaskMode(value: unknown): MultiTrackTaskMode {
 }
 
 function normalizeContinuityMode(value: unknown): MultiTrackContinuityMode {
+  if (value === 'context_swap') return 'context_drift'
   return typeof value === 'string' && (MULTITRACK_CONTINUITY_MODES as readonly string[]).includes(value)
     ? value as MultiTrackContinuityMode
     : MULTITRACK_DEFAULT_CONTINUITY_MODE

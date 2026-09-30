@@ -918,8 +918,8 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
                             {t('projectVideoCombine.clipContinuity', {
                               mode: t(clip.continuity_mode === 'shot'
                                 ? 'projectVideoCombine.continuityShot'
-                                : clip.continuity_mode === 'context_swap'
-                                  ? 'projectVideoCombine.continuityContextSwap'
+                                : clip.continuity_mode === 'context_drift' || clip.continuity_mode === 'context_swap'
+                                  ? 'projectVideoCombine.continuityContextDrift'
                                   : 'projectVideoCombine.continuityContext'),
                             })}
                           </span>
