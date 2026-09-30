@@ -6,6 +6,7 @@ from .ltx import *
 from .ltxv import *
 from .minimax import *
 from .project import *
+from .h3_previous_frame import *
 from .video import *
 from .rtx_vsr import *
 from .subtitle import *

@@ -54,6 +54,7 @@ import {
   taskImageReferenceIndex,
   taskImageSlotNumber,
   taskImagesFromContent,
+  togglePreviousFrame,
   uploadTaskImageFile,
 } from '@/lib/task-image-utils'
 import { invalidateMediaListCache } from '@/stores/media-list-store'
@@ -269,6 +270,7 @@ export function TaskSegmentEditor({
   )).join('|')
   const [combinedPromptInput, setCombinedPromptInput] = useState(combinedPromptValue)
   const taskIndex = Math.max(0, editableSegments.findIndex((item) => item.id === segment.id))
+  const previousFrameImage = images.find((image) => image.source_type === 'previous_frame')
   const firstTaskSegmentId = editableSegments.reduce((first, item) => (
     item.start_frame < first.start_frame ? item : first
   )).id
@@ -294,7 +296,7 @@ export function TaskSegmentEditor({
       type: 'image' as const,
       index: index + 1,
       label: t('multitrack.referencePicture', { n: index + 1 }),
-      detail: imageDisplayName(image),
+      detail: image.source_type === 'previous_frame' ? t('multitrack.previousFrame') : imageDisplayName(image),
       token: `@${t('multitrack.referencePicture', { n: index + 1 })}`,
       color: getSegmentTrackPresentation('task').backgroundColor,
       thumbnailUrl: mediaContentToViewUrl({
@@ -737,12 +739,24 @@ export function TaskSegmentEditor({
             minSize={TASK_IMAGE_PANEL_MIN_SIZE}
             maxSize={TASK_IMAGE_PANEL_MAX_SIZE}
           >
+            <div className="flex h-full min-h-0 flex-col gap-1">
+            {format === 'MiniMax' && mode !== 'passthrough' && taskIndex > 0 && (
+              <div className="flex shrink-0 justify-end">
+                <Button type="button" size="sm" variant={previousFrameImage && previousFrameImage.muted !== true ? 'secondary' : 'ghost'}
+                  className="h-6 px-2 text-[10px]" aria-pressed={!!previousFrameImage && previousFrameImage.muted !== true}
+                  disabled={!previousFrameImage && images.length >= MAX_TASK_IMAGES}
+                  title={t('multitrack.previousFrameTooltip')}
+                  onClick={() => onContentChange({ images: togglePreviousFrame(images) })}>
+                  {t('multitrack.previousFrame')}
+                </Button>
+              </div>
+            )}
             <div
               ref={imageDropZoneRef}
               data-testid="task-image-drop-zone"
               aria-label={t('multitrack.taskImageDropZone')}
               className={cn(
-                'task-image-drop-zone flex h-full min-h-0 w-full items-center justify-center rounded-md border border-dashed transition-colors',
+                'task-image-drop-zone flex min-h-0 w-full flex-1 items-center justify-center rounded-md border border-dashed transition-colors',
                 isImageDragOver ? 'border-primary bg-accent/20' : 'border-border bg-muted/30',
               )}
               onDragEnter={handleImageDragEnter}
@@ -817,8 +831,9 @@ export function TaskSegmentEditor({
                         }`}
                         role="button"
                         tabIndex={0}
-                        aria-label={t('multitrack.reselectImage', { name: imageDisplayName(image) })}
+                        aria-label={image.source_type === 'previous_frame' ? t('multitrack.previousFrame') : t('multitrack.reselectImage', { name: imageDisplayName(image) })}
                         onClick={() => {
+                          if (image.source_type === 'previous_frame') return
                           setReselectImageId(image.id)
                           setMediaSelectorOpen(true)
                         }}
@@ -826,6 +841,7 @@ export function TaskSegmentEditor({
                           if (event.target !== event.currentTarget) return
                           if (event.key !== 'Enter' && event.key !== ' ') return
                           event.preventDefault()
+                          if (image.source_type === 'previous_frame') return
                           setReselectImageId(image.id)
                           setMediaSelectorOpen(true)
                         }}
@@ -863,7 +879,9 @@ export function TaskSegmentEditor({
                           />
                         ) : (
                           <div className="flex h-full w-full items-center justify-center px-2 text-center text-[8px] text-muted-foreground">
-                            {image.source_type === 'slot'
+                            {image.source_type === 'previous_frame'
+                              ? t('multitrack.previousFramePlaceholder')
+                              : image.source_type === 'slot'
                               ? t('mediaSelector.slotImage', { n: taskImageSlotNumber(image, index) })
                               : imageDisplayName(image)}
                           </div>
@@ -877,7 +895,7 @@ export function TaskSegmentEditor({
                           data-testid={`task-image-actions-${image.id}`}
                           className="absolute right-0.5 top-1 z-10 flex gap-1 opacity-0 transition-opacity group-hover/task-image:opacity-100 group-focus-within/task-image:opacity-100"
                         >
-                          <TooltipProvider>
+                          {image.source_type !== 'previous_frame' && <TooltipProvider>
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Button
@@ -906,7 +924,7 @@ export function TaskSegmentEditor({
                                   : t('multitrack.sharedImageLimitTooltip')}
                               </TooltipContent>
                             </Tooltip>
-                          </TooltipProvider>
+                          </TooltipProvider>}
                           <TooltipProvider>
                             <Tooltip>
                               <TooltipTrigger asChild>
@@ -1017,6 +1035,7 @@ export function TaskSegmentEditor({
                 />
               </PopoverContent>
             </Popover>
+            </div>
             </div>
           </ResizablePanel>
         )}

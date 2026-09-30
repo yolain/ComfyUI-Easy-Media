@@ -10,7 +10,7 @@ export type MultiTrackUserPromptVariant = 'a' | 'b'
 
 export type MultiTrackMediaType = 'image' | 'audio' | 'video' | 'subtitle' | 'none'
 
-export type MultiTrackSourceType = 'preset' | 'input' | 'output' | 'local' | 'url' | 'slot'
+export type MultiTrackSourceType = 'preset' | 'input' | 'output' | 'local' | 'url' | 'slot' | 'previous_frame'
 
 export interface MultiTrackPanoramaView {
   version: 1

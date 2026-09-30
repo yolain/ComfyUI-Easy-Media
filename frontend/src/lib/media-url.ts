@@ -3,7 +3,7 @@ import type { AudioContent } from '@/types/timeline'
 type ViewSourceType = 'input' | 'output' | 'temp'
 
 export interface ViewableMediaContent {
-  source_type: 'preset' | 'input' | 'output' | 'local' | 'url' | 'slot'
+  source_type: 'preset' | 'input' | 'output' | 'local' | 'url' | 'slot' | 'previous_frame'
   file_path?: string
   local_path?: string
   url?: string
@@ -30,6 +30,7 @@ export function addMediaRevision(url: string, revision?: string | number): strin
 }
 
 export function mediaContentToViewUrl(content: ViewableMediaContent): string | null {
+  if (content.source_type === 'previous_frame') return null
   if (content.url) return content.url
   if (content.local_path) return `file://${content.local_path}`
   if (content.source_type !== 'input' && content.source_type !== 'output') return null

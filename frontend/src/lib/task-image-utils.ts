@@ -5,6 +5,21 @@ import type { MultiTrack, MultiTrackSegment, MultiTrackSourceType, MultiTrackTas
 export const MAX_TASK_IMAGES = 9
 export const MULTIPLE_MEDIA_SEPARATOR = '|MULTIPLE|'
 
+export function togglePreviousFrame(images: MultiTrackTaskImage[]): MultiTrackTaskImage[] {
+  const previous = images.find((image) => image.source_type === 'previous_frame')
+  if (previous) return images.map((image) => image.id === previous.id ? { ...image, muted: image.muted !== true } : image)
+  if (images.length >= MAX_TASK_IMAGES) return images
+  return [...images, { id: uuid(), source_type: 'previous_frame' }]
+}
+
+function preservePreviousFramePosition(images: MultiTrackTaskImage[], ordered: MultiTrackTaskImage[]): MultiTrackTaskImage[] {
+  const result = ordered.filter((image) => image.source_type !== 'previous_frame')
+  images.forEach((image, index) => {
+    if (image.source_type === 'previous_frame') result.splice(Math.min(index, result.length), 0, { ...image, shared_reference: false })
+  })
+  return result.slice(0, MAX_TASK_IMAGES)
+}
+
 export function taskImagesFromContent(images: MultiTrackTaskImage[] | undefined): MultiTrackTaskImage[] {
   return Array.isArray(images) ? images : []
 }
@@ -39,6 +54,7 @@ export function canEnableSharedTaskImage(
   segments: MultiTrackSegment[],
   image: MultiTrackTaskImage,
 ): boolean {
+  if (image.source_type === 'previous_frame') return false
   const identity = taskImageIdentity(image)
   return segments.every((segment) => {
     const images = taskImagesFromContent(segment.content.images)
@@ -67,11 +83,11 @@ export function sharedTaskImageUpdates(
           }
       return {
         segmentId: segment.id,
-        images: [
+        images: preservePreviousFramePosition(images, [
           ...images.filter((item) => item.shared_reference === true && taskImageIdentity(item) !== identity),
           sharedImage,
           ...images.filter((item) => item.shared_reference !== true && taskImageIdentity(item) !== identity),
-        ].slice(0, MAX_TASK_IMAGES),
+        ]),
       }
     }
     return {
@@ -94,7 +110,7 @@ export function synchronizeSharedTaskImages(tracks: MultiTrack[]): MultiTrack[] 
   const sharedImages = new Map<string, MultiTrackTaskImage>()
   for (const segment of taskSegments) {
     for (const image of taskImagesFromContent(segment.content.images)) {
-      if (image.shared_reference !== true) continue
+      if (image.shared_reference !== true || image.source_type === 'previous_frame') continue
       const identity = taskImageIdentity(image)
       if (!sharedImages.has(identity)) sharedImages.set(identity, image)
     }
@@ -123,7 +139,7 @@ export function synchronizeSharedTaskImages(tracks: MultiTrack[]): MultiTrack[] 
           ...segment,
           content: {
             ...segment.content,
-            images: [...common, ...local].slice(0, MAX_TASK_IMAGES),
+            images: preservePreviousFramePosition(images, [...common, ...local]),
           },
         }
       }),

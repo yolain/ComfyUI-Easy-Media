@@ -860,6 +860,7 @@ def clear_h3_project_segments_from(
                 "context_latent_low",
                 "anchor_latent",
                 "anchor_latent_low",
+                "last_frame",
             ):
                 filename = generation.get(key)
                 if not filename:
@@ -887,7 +888,7 @@ def clear_h3_project_segments_from(
         raise RuntimeError(f"Failed to clear project segments: {error}") from error
 
     artifact_pattern = re.compile(
-        r"^\.?(?:video|audio|locked_audio|latent|context_latent|context_latent_low|anchor_latent|anchor_latent_low|staging_video)_"
+        r"^\.?(?:video|audio|locked_audio|latent|context_latent|context_latent_low|anchor_latent|anchor_latent_low|staging_video|last_frame)_"
         r"(\d+)(?:_|\.)"
     )
     for path in project_dir.iterdir():
@@ -964,7 +965,7 @@ def delete_h3_project_video(project_name: str, segment_index: int, file_path: st
     if not generation_keys:
         raise ValueError("Video does not belong to this project segment")
 
-    artifact_keys = ("video", "locked_audio", "latent", "context_latent", "context_latent_low")
+    artifact_keys = ("video", "locked_audio", "latent", "context_latent", "context_latent_low", "last_frame")
     artifacts: set[Path] = set()
     for key in generation_keys:
         for field in artifact_keys:
@@ -1670,6 +1671,7 @@ def prepare_multitrack_project_task_info(
 ) -> dict[str, Any]:
     """Attach already-loaded project references to one task's runtime context."""
     task_info = dict(tracks_info)
+    task_info["_h3_project_runtime"] = True
     muted_sources: set[tuple[str, str]] = set()
     task = task_entry.get("task", {}) if isinstance(task_entry, dict) else {}
     content = task.get("content", {}) if isinstance(task, dict) else {}

@@ -529,6 +529,9 @@ def test_delete_video_saves_remaining_generation_and_preserves_other_segments(mo
     monkeypatch.setattr("utils.video.ffprobe_info", lambda _path: {"frame_count": 120})
     manifest_path = project_dir / "project.json"
     manifest = json.loads(manifest_path.read_text())
+    for key, filename in (("last_frame", "last_frame_0_1.png"),):
+        manifest["segments"]["0"]["generations"]["1"][key] = filename
+        (project_dir / filename).write_bytes(b"version artifact")
     manifest["segments"]["0"]["generations"]["2"] = {"video": "video_0_2.mp4"}
     (project_dir / "video_0_2.mp4").write_bytes(b"remaining")
     manifest_path.write_text(json.dumps(manifest))
@@ -541,6 +544,7 @@ def test_delete_video_saves_remaining_generation_and_preserves_other_segments(mo
     assert saved["segments"]["1"] == manifest["segments"]["1"]
     assert not (project_dir / "video_0_1.mp4").exists()
     assert not (project_dir / "locked_audio_0_1.wav").exists()
+    assert not (project_dir / "last_frame_0_1.png").exists()
     assert (project_dir / "video_0_2.mp4").read_bytes() == b"remaining"
     assert result["clips"][0]["file_name"] == "video_0_2.mp4"
     assert result == load_h3_project_data("demo")

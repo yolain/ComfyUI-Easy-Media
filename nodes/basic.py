@@ -2980,6 +2980,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 if isinstance(item, torch.Tensor)
             ]
             selected_image_indexes: set[int] = set()
+            previous_frame_count = 0
             selected_shared_image_identities: set[tuple[str, str]] = set()
             marker_image_frames: list[int] = []
             deferred_images = _multitrack_media_is_deferred(info, "image")
@@ -2992,6 +2993,11 @@ class MultiTrackTaskOutput(io.ComfyNode):
                     if not isinstance(image_info, dict):
                         continue
                     if multitrack_is_muted_image(image_info):
+                        continue
+                    if image_info.get("source_type") == "previous_frame":
+                        if not info.get("_h3_project_runtime"):
+                            raise ValueError("Previous-frame images require MultiTrack Project execution")
+                        previous_frame_count += 1
                         continue
                     shared_identity = (
                         multitrack_media_identity(image_info)
@@ -3356,7 +3362,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
 
             media_progress.update_absolute(2)
 
-        task_type = _multitrack_task_type(task, len(selected_images), has_video)
+        task_type = _multitrack_task_type(task, len(selected_images) + previous_frame_count, has_video)
         prompt = _selected_multitrack_user_prompt(content)
         system_prompt, api_prompt, json_mode = build_prompt_request(
             task_type,

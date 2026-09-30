@@ -2110,6 +2110,8 @@ def test_h3_project_artifact_schema(monkeypatch):
         "segment_index",
         "context_latent",
         "context_latent_low",
+        "last_frame",
+        "previous_frame_source",
         "video_path",
         "tracks_info",
         "continuity_mode",

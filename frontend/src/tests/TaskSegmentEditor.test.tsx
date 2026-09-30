@@ -145,6 +145,9 @@ describe('TaskSegmentEditor', () => {
     fireEvent.click(screen.getByRole('option', { name: 'Drift Control Context' }))
     expect(onContentChange).toHaveBeenCalledWith({ continuity_mode: 'context_drift' })
 
+    fireEvent.click(screen.getByRole('button', { name: 'Previous tail frame' }))
+    expect(onContentChange).toHaveBeenCalledWith({ images: [expect.objectContaining({ source_type: 'previous_frame' })] })
+
     rerender(
       <TaskSegmentEditor
         segment={first}
@@ -154,6 +157,7 @@ describe('TaskSegmentEditor', () => {
       />,
     )
     expect(screen.queryByRole('combobox', { name: 'Continuity mode' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Previous tail frame' })).toBeNull()
 
     rerender(
       <TaskSegmentEditor

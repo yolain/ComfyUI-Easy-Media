@@ -122,6 +122,9 @@
     "taskLabel": "Segment {n} {mode}"
   },
   "multitrack": {
+    "previousFrame": "Previous tail frame",
+    "previousFrameTooltip": "Use the previous completed Project segment's last frame. Drag the image to choose its slot; independent of continuity mode.",
+    "previousFramePlaceholder": "Previous last frame · resolved during Project execution",
     "audio": "Audio",
     "globalAudio": "MainAudio",
     "audioSettings": "Audio settings",

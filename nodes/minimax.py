@@ -2439,6 +2439,8 @@ class EasyH3ProjectArtifact(io.ComfyNode):
                 io.Int.Input("segment_index", min=0),
                 io.Latent.Input("context_latent"),
                 io.Latent.Input("context_latent_low", optional=True),
+                io.Image.Input("last_frame", optional=True),
+                io.String.Input("previous_frame_source", default="", optional=True),
                 io.String.Input("video_path", default="", optional=True),
                 TYPE_TRACKS_INFO.Input("tracks_info"),
                 io.Combo.Input(
@@ -2480,6 +2482,8 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         sampling_pass: str = "single",
         seed: int = 0,
         context_latent_low: dict[str, Any] | None = None,
+        last_frame: torch.Tensor | None = None,
+        previous_frame_source: str = "",
         previous: Any | None = None,
         video_path: str = "",
         audio: dict[str, Any] | None = None,
@@ -2628,6 +2632,15 @@ class EasyH3ProjectArtifact(io.ComfyNode):
             "sampling_pass": sampling_pass,
             "updated_at": time.time(),
         }
+        from ..utils.h3_previous_frame import save_tail_image
+        tail_path = project_dir / f"last_frame_{int(segment_index)}_{generation}.png"
+        if not audio_only and sampling_pass != "first" and last_frame is not None:
+            save_tail_image(last_frame, tail_path)
+            generation_manifest["last_frame"] = tail_path.name
+        elif tail_path.exists():
+            tail_path.unlink()
+        if previous_frame_source:
+            generation_manifest["previous_frame_source"] = json.loads(previous_frame_source)
         task_mode: str | None = None
         task_segments = manifest.get("task_segments", [])
         if isinstance(task_segments, list) and 0 <= int(segment_index) < len(task_segments):

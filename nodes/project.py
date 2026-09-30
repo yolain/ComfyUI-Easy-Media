@@ -13,6 +13,7 @@ from comfy.utils import ProgressBar
 
 from ..utils import instrument_node_timing, log_node_info
 from ..utils.h3_presets import get_h3_preset_keys, load_h3_presets, select_h3_preset
+from ..utils.h3_previous_frame import previous_frame_position
 from ..utils.h3_project import (
     clear_h3_project_segments_from,
     compose_h3_project_video,
@@ -1528,6 +1529,8 @@ class EasyMultiTrackProject(io.ComfyNode):
                     "continuity_mode": "shot",
                     "seed": first_pass_seed,
                     "sampling_pass": "single",
+                    "last_frame": graph.node("easy h3LastFrame", id=f"tail_frame_{task_index}",
+                                             images=passthrough.out(1)).out(0),
                 }
                 if previous_artifact is not None:
                     artifact_inputs["previous"] = previous_artifact
@@ -1554,6 +1557,19 @@ class EasyMultiTrackProject(io.ComfyNode):
                 continuity_mode = "context"
             uses_context = continuity_mode in H3_CONTEXT_CONTINUITY_MODES
             uses_swap = continuity_mode in {"context_drift", "context_swap"}
+            task_images = task_output.out(4)
+            previous_frame_source = None
+            previous_position = previous_frame_position(content)
+            if previous_position is not None:
+                if task_index == 0 or audio_only:
+                    raise ValueError("Previous-frame reference requires a previous video segment")
+                previous_image = graph.node(
+                    "easy h3PreviousFrame", id=f"previous_frame_{task_index}", images=task_images,
+                    project_name=safe_project_name, segment_index=task_index, position=previous_position,
+                    resume=task_index == resume_task_index,
+                    **({"previous": previous_artifact} if previous_artifact is not None else {}),
+                )
+                task_images, previous_frame_source = previous_image.out(0), previous_image.out(1)
             aligned_task_length: Any = (
                 minimax_frame_count(base_task_length, round_up=True)
                 if preserve_source_timing
@@ -1576,7 +1592,7 @@ class EasyMultiTrackProject(io.ComfyNode):
             report_segment_step(0.10)
             conditioning_inputs = {
                 "clip": clip, "vae": vae, "audio_vae": audio_vae,
-                "images": task_output.out(4), "prompt": task_output.out(1),
+                "images": task_images, "prompt": task_output.out(1),
                 "mode": generation_mode,
                 "width": target_width if is_selflift else first_pass_width,
                 "height": target_height if is_selflift else first_pass_height,
@@ -1596,7 +1612,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                 id=f"conditioning_{task_index}",
                 **conditioning_inputs,
             )
-            conditioning = graph.node(
+            conditioning = encoded_conditioning if previous_position is not None else graph.node(
                 "easy h3ConditioningCache",
                 id=f"conditioning_cache_{task_index}",
                 project_name=safe_project_name,
@@ -2262,6 +2278,12 @@ class EasyMultiTrackProject(io.ComfyNode):
                     if completed_sampling_pass == "first"
                     else runtime_low_context_latent
                 )
+            if not audio_only and completed_sampling_pass != "first":
+                artifact_inputs["last_frame"] = graph.node(
+                    "easy h3LastFrame", id=f"tail_frame_{task_index}", images=output_images,
+                ).out(0)
+            if previous_frame_source is not None:
+                artifact_inputs["previous_frame_source"] = previous_frame_source
             if previous_artifact is not None:
                 artifact_inputs["previous"] = previous_artifact
             report_segment_step(0.95)

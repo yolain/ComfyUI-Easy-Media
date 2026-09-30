@@ -151,7 +151,11 @@ def multitrack_task_images_with_shared(
         for image in local_images
         if multitrack_media_identity(image) not in shared_identities
     ]
-    return (prefixed + local)[:MAX_MULTITRACK_TASK_IMAGES]
+    ordered = prefixed + [image for image in local if image.get("source_type") != "previous_frame"]
+    for index, image in enumerate(local_images):
+        if image.get("source_type") == "previous_frame":
+            ordered.insert(min(index, len(ordered)), {**image, "shared_reference": False})
+    return ordered[:MAX_MULTITRACK_TASK_IMAGES]
 
 
 def multitrack_slot_media_types(data: dict) -> set[str]:
@@ -598,6 +602,8 @@ def _index_slot_audio(audio_input, slot_name: str | None) -> 'dict | None':
     return None
 
 def _resolve_timeline_image_item(item: dict, image_input, image_loader=load_image_tensor) -> 'torch.Tensor | None':
+    if item.get("source_type") == "previous_frame":
+        return None  # Resolved at the Project segment boundary, after its predecessor is saved.
     slot_name = multitrack_slot_name(item)
     if slot_name is not None:
         return _index_slot_image(image_input, slot_name)

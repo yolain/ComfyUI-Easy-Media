@@ -77,6 +77,8 @@ The new **continuity mode** determines how a task follows the previous segment. 
 
 The first segment starts in Shot mode. Set subsequent segments individually or select multiple tasks to change them together. For example, “Shot → Context → Context → Shot” creates three connected segments followed by a new shot. This setting affects **generation**, rather than adding a crossfade during assembly. Context does not guarantee seamless continuity across arbitrary scene or prompt changes.
 
+**Previous tail frame** is a separate toggle above the image panel for segments after the first. It adds a movable reference card, works with every continuity mode, and follows the selected task mode's normal image behavior. Project resolves it from the preceding segment's selected completed version; the final frame is saved as `last_frame_<segment>_<version>.png` beside its latent. Existing versions extract this image from their saved video when first needed. Keep clean character references first unless you intentionally want the generated frame in `image1`.
+
 #### 2. MultiTrack Project: Encoding, Sampling, and Segment Loops
 
 Connect the editor's `TRACKS_INFO` to `tracks_info`, then connect a `model_loader` containing the H3 model, CLIP, video VAE, and audio VAE. The node automatically expands the tasks in sequence, so no manual segment-index loop is needed:
