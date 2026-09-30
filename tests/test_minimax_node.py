@@ -1292,7 +1292,7 @@ def test_multitrack_h3_project_schema_exposes_pipeline_configuration(monkeypatch
     ]
 
 
-def test_h3_project_passthrough_skips_conditioning_and_keeps_context(monkeypatch):
+def test_h3_project_passthrough_shot_keeps_outgoing_context(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     result = module.EasyMultiTrackProject.execute(
         **_h3_project_inputs(sampling_mode=_h3_sampling_mode("passthrough"))
@@ -1307,10 +1307,126 @@ def test_h3_project_passthrough_skips_conditioning_and_keeps_context(monkeypatch
     passthrough = _graph_node(result, "easy h3PassthroughVideo")
     assert passthrough["inputs"]["frame_count"] == 120
     assert passthrough["inputs"]["fps"] == 24.0
+    assert "easy saveVideo" not in types
     artifact = _graph_node(result, "easy h3ProjectArtifact")
+    assert "context_latent" in artifact["inputs"]
+    assert artifact["inputs"]["continuity_mode"] == "shot"
+
+
+def test_h3_project_task_passthrough_can_mix_with_sampling(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    inputs = _h3_project_inputs()
+    task_segments = inputs["tracks_info"][0]["tracks"][0]["segments"]
+    task_segments[0]["content"]["task_mode"] = "passthrough"
+    task_segments.extend([
+        {
+            "start_frame": 120,
+            "end_frame": 240,
+            "content": {
+                "task_mode": "default",
+                "continuity_mode": "context",
+                "images": [],
+                "user_prompt": "continue after source",
+            },
+        },
+        {
+            "start_frame": 240,
+            "end_frame": 360,
+            "content": {
+                "task_mode": "passthrough",
+                "continuity_mode": "context_swap",
+                "images": [],
+                "user_prompt": "ignored",
+            },
+        },
+        {
+            "start_frame": 360,
+            "end_frame": 480,
+            "content": {
+                "task_mode": "default",
+                "continuity_mode": "context",
+                "images": [],
+                "user_prompt": "continue after second source",
+            },
+        },
+    ])
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    nodes = list(result.expand.values())
+    assert sum(node["class_type"] == "easy h3PassthroughVideo" for node in nodes) == 2
+    assert sum(node["class_type"] == "easy minimaxH3ToVideo" for node in nodes) == 2
+    assert sum(node["class_type"] == "easy h3ProjectArtifact" for node in nodes) == 4
+    assert not any(node["class_type"] == "easy h3ProjectContextLatentLoad" for node in nodes)
+    artifacts = [node for node in nodes if node["class_type"] == "easy h3ProjectArtifact"]
+    assert [node["inputs"]["continuity_mode"] for node in artifacts] == ["shot", "context", "shot", "context"]
+
+
+def test_h3_project_single_task_passthrough_skips_prior_context_and_sampler(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    inputs = _h3_project_inputs(segment_start_number=[2], segment_count=[1])
+    task_segments = inputs["tracks_info"][0]["tracks"][0]["segments"]
+    task_segments.append({
+        "start_frame": 120,
+        "end_frame": 240,
+        "content": {
+            "task_mode": "passthrough",
+            "continuity_mode": "context",
+            "images": [],
+            "user_prompt": "ignored",
+        },
+    })
+    monkeypatch.setattr(module._project_module, "has_h3_context_latent", lambda *args, **kwargs: False)
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    types = {node["class_type"] for node in result.expand.values()}
+    assert "easy h3PassthroughVideo" in types
+    assert "easy h3ProjectContextLatentLoad" not in types
+    assert "SamplerCustomAdvanced" not in types
+    assert "easy minimaxH3ToVideo" not in types
+
+
+@pytest.mark.parametrize("continuity_mode", ["shot", "context", "context_swap"])
+def test_h3_project_passthrough_ignores_continuity_mode_and_encodes_tail(
+    monkeypatch, continuity_mode,
+):
+    module = _load_minimax_node(monkeypatch)
+    inputs = _h3_project_inputs(sampling_mode=_h3_sampling_mode("passthrough"))
+    inputs["tracks_info"][0]["tracks"][0]["segments"][0]["content"]["continuity_mode"] = continuity_mode
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    passthrough = _graph_node(result, "easy h3PassthroughVideo")
+    assert "keep_context" not in passthrough["inputs"]
+    artifact = _graph_node(result, "easy h3ProjectArtifact")
+    assert artifact["inputs"]["continuity_mode"] == "shot"
     context = result.expand[artifact["inputs"]["context_latent"][0]]
     assert context["class_type"] == "easy h3MotionContextLatentTrim"
     assert context["inputs"]["context_length"] == "22"
+
+
+def test_h3_project_context_loads_saved_passthrough_shot_tail(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    inputs = _h3_project_inputs(segment_start_number=[2], segment_count=[1])
+    task_segments = inputs["tracks_info"][0]["tracks"][0]["segments"]
+    task_segments.append({
+        "start_frame": 120,
+        "end_frame": 240,
+        "content": {
+            "task_mode": "default",
+            "continuity_mode": "context",
+            "images": [],
+            "user_prompt": "a new scene",
+        },
+    })
+    monkeypatch.setattr(module._project_module, "has_h3_context_latent", lambda *args, **kwargs: True)
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    assert any(
+        node["class_type"] == "easy h3ProjectContextLatentLoad"
+        for node in result.expand.values()
+    )
+    assert any(
+        node["class_type"] == "ComfyMathExpression"
+        and node["inputs"]["expression"] == "a + 34"
+        for node in result.expand.values()
+    )
+    artifact = _graph_node(result, "easy h3ProjectArtifact")
+    assert artifact["inputs"]["continuity_mode"] == "context"
 
 
 def test_h3_project_static_prepare_exposes_media_cache_boundary(monkeypatch):
@@ -4395,6 +4511,55 @@ def test_multitrack_h3_selflift_context_start_requires_exact_low_latent(monkeypa
     assert checked_resolutions == [("high", True), ("low", False)]
 
 
+def test_multitrack_h3_selflift_resumes_after_saved_passthrough(
+    monkeypatch, tmp_path,
+):
+    module = _load_minimax_node(monkeypatch)
+    monkeypatch.setattr(module.folder_paths, "get_output_directory", lambda: str(tmp_path))
+    project_dir = tmp_path / "easy_media" / "projects" / "demo"
+    project_dir.mkdir(parents=True)
+    (project_dir / "context_latent_0_1.safetensors").write_bytes(b"saved context")
+    (project_dir / "project.json").write_text(json.dumps({
+        "segments": {
+            "0": {
+                "active_generation": 1,
+                "task_mode": "default",
+                "generations": {
+                    "1": {
+                        "task_mode": "passthrough",
+                        "context_latent": "context_latent_0_1.safetensors",
+                    },
+                },
+            },
+        },
+    }))
+    info = _h3_project_inputs()["tracks_info"][0]
+    info["tracks"][0]["segments"][0]["content"]["task_mode"] = "passthrough"
+    info["tracks"][0]["segments"].append({
+        "start_frame": 120,
+        "end_frame": 240,
+        "content": {
+            "task_mode": "default",
+            "continuity_mode": "context",
+            "images": [],
+        },
+    })
+
+    result = module.EasyMultiTrackProject.execute(**_h3_project_inputs(
+        project_name=["demo"],
+        tracks_info=[info],
+        sampling_mode=_h3_sampling_mode("selflift"),
+        segment_start_number=[2],
+        segment_count=[1],
+    ))
+
+    loads = [node for node in result.expand.values()
+             if node["class_type"] == "easy h3ProjectContextLatentLoad"]
+    assert {node["inputs"]["resolution"] for node in loads} == {"high", "low"}
+    assert any(node["class_type"] == "easy minimaxH3SelfLiftSampler"
+               for node in result.expand.values())
+
+
 def test_multitrack_h3_selflift_context_swap_start_uses_both_saved_resolutions(
     monkeypatch,
 ):
@@ -4631,6 +4796,52 @@ def test_h3_project_artifact_writes_manifest_and_rotates_ten_generations(
     assert "anchor_latent_low" not in active_files
     assert active_files["continuity_mode"] == "shot"
     assert active_files["seed"] == 0xFFFFFFFFFFFFFFFF
+
+
+def test_h3_project_artifact_shot_saves_outgoing_context(monkeypatch, tmp_path):
+    module = _load_minimax_node(monkeypatch)
+    monkeypatch.setattr(module.folder_paths, "get_output_directory", lambda: str(tmp_path))
+    project_dir = tmp_path / "easy_media" / "projects" / "demo"
+    project_dir.mkdir(parents=True)
+    staged = project_dir / ".staging_video_0.mp4"
+    staged.write_bytes(b"video")
+
+    tracks_info = _h3_project_inputs()["tracks_info"][0]
+    tracks_info["tracks"][0]["segments"][0]["content"]["task_mode"] = "passthrough"
+    module.EasyH3ProjectArtifact.execute(
+        project_name="demo",
+        project_save="new",
+        segment_index=0,
+        context_latent=_h3_context_latent(1),
+        video_path=f"output/{staged.relative_to(tmp_path)}",
+        tracks_info=tracks_info,
+        continuity_mode="shot",
+    )
+
+    manifest = json.loads((project_dir / "project.json").read_text())
+    active = str(manifest["segments"]["0"]["active_generation"])
+    generation = manifest["segments"]["0"]["generations"][active]
+    assert "context_cut" not in generation
+    assert generation["task_mode"] == "passthrough"
+    assert generation["context_latent"] == f"context_latent_0_{active}.safetensors"
+    assert module._project_module.has_h3_context_latent(
+        "demo", 0, resolution="high", output_directory=tmp_path,
+    )
+
+    context_path = project_dir / generation["context_latent"]
+    old_context = context_path.read_bytes()
+    staged.write_bytes(b"replacement video")
+    module.EasyH3ProjectArtifact.execute(
+        project_name="demo",
+        project_save="override",
+        segment_index=0,
+        context_latent=_h3_context_latent(2),
+        video_path=f"output/{staged.relative_to(tmp_path)}",
+        tracks_info=tracks_info,
+        continuity_mode="shot",
+    )
+    assert context_path.exists()
+    assert context_path.read_bytes() != old_context
 
 
 def test_h3_project_artifact_notifies_only_after_new_video_is_in_manifest(

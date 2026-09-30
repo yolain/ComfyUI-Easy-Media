@@ -1227,7 +1227,7 @@ export function TaskSegmentEditor({
         </div>
 
         <div className="flex items-center gap-2">
-          {format === 'MiniMax' && (taskIndex > 0 || hasSelectedContinuityTargets) && (
+          {format === 'MiniMax' && mode !== 'passthrough' && (taskIndex > 0 || hasSelectedContinuityTargets) && (
             <Select
               value={continuityMode}
               onValueChange={(value) => handleDropdownContentChange({
@@ -1295,7 +1295,7 @@ export function TaskSegmentEditor({
               </Tooltip>
             </TooltipProvider>
             <SelectContent>
-              {MULTITRACK_TASK_MODES.map((taskMode) => (
+              {MULTITRACK_TASK_MODES.filter((taskMode) => taskMode !== 'passthrough' || format === 'MiniMax').map((taskMode) => (
                 <SelectItem key={taskMode} value={taskMode}>
                   <span className="text-[10px]">
                     {t(`multitrackTaskModes.${getMultiTrackTaskType(taskMode, images.length, segmentHasVideoInRange)}`)}

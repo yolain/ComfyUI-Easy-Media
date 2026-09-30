@@ -828,6 +828,27 @@ describe('PreviewArea', () => {
     expect(screen.queryByTestId('task-continuity-mode-select')).toBeNull()
   })
 
+  it('hides continuity for an active passthrough task', () => {
+    const { data } = trackData()
+    addActiveTaskTrack(data)
+    data.tracks[0].segments[1].content.task_mode = 'passthrough'
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={36}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [{ name: 'format', value: 'MiniMax' }] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onTrackSegmentsContentChange={vi.fn()}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId('task-mode-select').textContent).toContain('Passthrough')
+    expect(screen.queryByTestId('task-continuity-mode-select')).toBeNull()
+  })
+
   it('shows an editable active task prompt placeholder and toggles image/video layout', () => {
     const { data } = trackData()
     data.tracks[0].segments[0].end_frame = 48

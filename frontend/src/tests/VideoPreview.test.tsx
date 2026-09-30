@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { VideoPreview } from '@/components/widgets/multitrack/VideoPreview'
 import type { ActivePreviewVideoSegment, MultiTrackPreviewResolution } from '@/lib/multitrack-utils'
@@ -38,6 +38,7 @@ describe('VideoPreview', () => {
   })
 
   afterEach(() => {
+    cleanup()
     vi.unstubAllGlobals()
     Reflect.deleteProperty(URL, 'createObjectURL')
     Reflect.deleteProperty(URL, 'revokeObjectURL')

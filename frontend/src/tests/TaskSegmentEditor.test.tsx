@@ -291,6 +291,24 @@ describe('TaskSegmentEditor', () => {
     expect(onContentChange).toHaveBeenCalledWith({ task_mode: 'l2v' })
   })
 
+  it('offers passthrough and hides its unused continuity selector', () => {
+    const onContentChange = vi.fn()
+    const first = taskSegment()
+    const second = secondTaskSegment()
+    second.content.task_mode = 'passthrough'
+    render(
+      <TaskSegmentEditor
+        segment={second}
+        trackSegments={[first, second]}
+        format="MiniMax"
+        onContentChange={onContentChange}
+      />,
+    )
+    expect(screen.queryByRole('combobox', { name: 'Continuity mode' })).toBeNull()
+    fireEvent.click(screen.getByRole('combobox', { name: 'Task mode' }))
+    expect(screen.getByRole('option', { name: 'Passthrough' })).not.toBeNull()
+  })
+
   it.each([
     [0, 'T2V'],
     [1, 'I2V'],
