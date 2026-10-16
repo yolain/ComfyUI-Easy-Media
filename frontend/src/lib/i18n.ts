@@ -39,8 +39,8 @@ export function translate(
  *
  * @example
  * const t = useT()
- * t('toolbar.frames')                          // "Frames" | "帧"
- * t('promptTrack.segmentLabel', { n: 2 })      // "Segment 2" | "片段 2"
+ * t('toolbar.frames')                          // "Frames" | "Frames"
+ * t('promptTrack.segmentLabel', { n: 2 })      // "Segment 2" | "Segment 2"
  */
 export function useT() {
   const raw = useContext(LocaleContext)

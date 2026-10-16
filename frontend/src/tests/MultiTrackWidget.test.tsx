@@ -1968,7 +1968,7 @@ describe('MultiTrackWidget', () => {
       color: '#9D4937',
       content: {
         media_type: 'subtitle',
-        text: '默认文字',
+        text: 'Default text',
         subtitle_style: {
           font_size: 12,
           color: '#ffffff',

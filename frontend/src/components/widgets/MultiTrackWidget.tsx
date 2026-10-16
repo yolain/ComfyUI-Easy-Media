@@ -857,7 +857,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
         color: track.color || MULTITRACK_SUBTITLE_COLOR,
         content: {
           media_type: 'subtitle' as const,
-          text: '默认文字',
+          text: 'Default text',
           subtitle_style: { ...(existingStyle ?? DEFAULT_SUBTITLE_STYLE) },
         },
       }

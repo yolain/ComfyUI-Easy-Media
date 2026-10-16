@@ -27,12 +27,12 @@ import yaml
 from PIL import Image
 
 
-MINIMAX_MODEL = "h3-context-ir (海螺官方)"
-VOLCENGINE_MODEL = "doubao-seed-2-0-pro-260215 (火山引擎)"
-ZHIPU_MODEL = "glm-5v-turbo (智谱)"
+MINIMAX_MODEL = "h3-context-ir (MiniMax official)"
+VOLCENGINE_MODEL = "doubao-seed-2-0-pro-260215 (Volcengine)"
+ZHIPU_MODEL = "glm-5v-turbo (Zhipu)"
 RUNNINGHUB_DOUBAO_MODEL = "bytedance/doubao-seed-2.0-pro (RunningHub)"
 RUNNINGHUB_GLM_MODEL = "glm-5v-turbo (RunningHub)"
-LLAMACPP_MODEL = "llama.cpp (本地)"
+LLAMACPP_MODEL = "llama.cpp (local)"
 
 __all__ = [
     "ApiModelConfig",

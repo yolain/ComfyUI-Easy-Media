@@ -657,12 +657,12 @@ def test_h3_conditioning_cache_round_trips_and_skips_lazy_inputs(
     cache_metadata = json.loads(
         stored["metadata"]["easy_media_h3_conditioning_cache"]
     )
-    assert cache_metadata["schema_version"] == "3"
+    assert cache_metadata["schema_version"] == "4"
     assert cache_metadata["scope_token"]
-    assert "文件(" in cache_logs[-1][1]
-    assert "=主条件(" in cache_logs[-1][1]
-    assert "+参考视频(" in cache_logs[-1][1]
-    assert "+参考音频(" in cache_logs[-1][1]
+    assert "file(" in cache_logs[-1][1]
+    assert "=conditioning(" in cache_logs[-1][1]
+    assert "+reference video(" in cache_logs[-1][1]
+    assert "+reference audio(" in cache_logs[-1][1]
     assert "initial latent" not in cache_logs[-1][1]
 
     hit_status = {
@@ -717,6 +717,61 @@ def test_h3_conditioning_cache_round_trips_and_skips_lazy_inputs(
             latent["samples"].unbind(),
         )
     )
+
+
+def test_h3_conditioning_cache_reuses_across_media_statuses_and_keys_inputs(
+    monkeypatch,
+    tmp_path,
+):
+    module = _load_minimax_node(monkeypatch)
+    monkeypatch.setattr(
+        module.folder_paths,
+        "get_temp_directory",
+        lambda: str(tmp_path),
+    )
+    clip = _Clip()
+    vae = _Vae()
+    audio_vae = _AudioVae()
+    model = object()
+    tracks_info = {
+        "_easy_media_cache_status": {
+            "project_media": "首次加载",
+            "segment_media": "首次加载",
+            "task_output": "首次加载",
+        }
+    }
+    cache_inputs = {
+        "project_name": "demo",
+        "segment_index": 0,
+        "tracks_info": tracks_info,
+        "task_output_ready": "prompt",
+        "media_signature": "media-v1",
+        "mode": "reference",
+        "width": 1344,
+        "height": 768,
+        "length": 124,
+        "ref_image_size": "match",
+        "model": model,
+        "clip": clip,
+        "vae": vae,
+        "audio_vae": audio_vae,
+    }
+    module.EasyH3ConditioningCache.execute(
+        **cache_inputs,
+        conditioning=[(torch.ones(1), {})],
+        latent=_empty_h3_context_latent(),
+    )
+
+    assert module.EasyH3ConditioningCache.check_lazy_status(**cache_inputs) == []
+    assert module.EasyH3ConditioningCache.check_lazy_status(
+        **{**cache_inputs, "task_output_ready": "changed prompt"}
+    ) == ["conditioning", "latent"]
+    assert module.EasyH3ConditioningCache.check_lazy_status(
+        **{**cache_inputs, "width": 768}
+    ) == ["conditioning", "latent"]
+    assert module.EasyH3ConditioningCache.check_lazy_status(
+        **{**cache_inputs, "media_signature": "media-v2"}
+    ) == ["conditioning", "latent"]
 
 
 def test_h3_conditioning_cache_reencodes_when_model_changes(

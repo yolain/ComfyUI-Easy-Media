@@ -56,12 +56,12 @@ def test_prompt_enhancer_model_options_match_node_contract():
     module = _load_module()
 
     assert module.PROMPT_ENHANCER_MODELS == [
-        "h3-context-ir (海螺官方)",
-        "doubao-seed-2-0-pro-260215 (火山引擎)",
-        "glm-5v-turbo (智谱)",
+        "h3-context-ir (MiniMax official)",
+        "doubao-seed-2-0-pro-260215 (Volcengine)",
+        "glm-5v-turbo (Zhipu)",
         "bytedance/doubao-seed-2.0-pro (RunningHub)",
         "glm-5v-turbo (RunningHub)",
-        "llama.cpp (本地)",
+        "llama.cpp (local)",
     ]
 
 

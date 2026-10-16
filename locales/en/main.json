@@ -1,0 +1,11 @@
+{
+  "nodeCategories": {
+    "Media": "Media",
+    "TimelineEditor": "Timeline Editor",
+    "MultiTrackEditor": "Multi-Track Editor",
+    "Image": "Image",
+    "Video": "Video",
+    "Audio": "Audio",
+    "Logic": "Logic"
+  }
+}

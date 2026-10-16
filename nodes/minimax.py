@@ -38,6 +38,7 @@ from ..utils.h3_conditioning_cache import (
     get_staged_h3_conditioning_cache,
     h3_conditioning_cache_matches,
     h3_conditioning_cache_path,
+    h3_conditioning_input_signature,
     h3_encoder_signature,
     load_h3_conditioning_cache,
     prepare_h3_conditioning_cache_pool,
@@ -109,7 +110,7 @@ class EasyMinimaxPromptOverride(io.ComfyNode):
                         max=100,
                     ),
                     tooltip=(
-                        "One prompt per MiniMax H3 clip. Use @图片N/@音频N/@视频N "
+                        "One prompt per MiniMax H3 clip. Use @imageN/@audioN/@videoN "
                         "or <Picture N>/<Audio N>/<Video N> to reference media slots."
                     ),
                 ),
@@ -1246,7 +1247,7 @@ class EasyH3ProjectContextLatentLoad(io.ComfyNode):
 
 
 class EasyH3ConditioningCache(io.ComfyNode):
-    """Restore the first H3 conditioning pass when all media caches hit."""
+    """Restore a matching H3 conditioning pass without rerunning the text encoder."""
 
     @classmethod
     def define_schema(cls) -> io.Schema:
@@ -1263,6 +1264,27 @@ class EasyH3ConditioningCache(io.ComfyNode):
                 io.Int.Input("segment_index", min=0),
                 TYPE_TRACKS_INFO.Input("tracks_info"),
                 io.String.Input("task_output_ready", force_input=True),
+                io.String.Input("media_signature", optional=True),
+                io.Combo.Input(
+                    "mode",
+                    options=["reference", "multi_frames", "last_frame"],
+                    default="reference",
+                ),
+                io.Int.Input("width", default=1344, min=32, max=comfy_nodes.MAX_RESOLUTION, step=32),
+                io.Int.Input("height", default=768, min=32, max=comfy_nodes.MAX_RESOLUTION, step=32),
+                io.Int.Input("length", default=124, min=5, max=3600, step=17),
+                io.Int.Input(
+                    "locked_video_timing_frames",
+                    default=0,
+                    min=0,
+                    max=3600,
+                    optional=True,
+                ),
+                io.Combo.Input(
+                    "ref_image_size",
+                    options=["match", "max"],
+                    default="match",
+                ),
                 io.Model.Input("model"),
                 io.Clip.Input("clip"),
                 io.Vae.Input("vae"),
@@ -1286,30 +1308,48 @@ class EasyH3ConditioningCache(io.ComfyNode):
         model: Any,
         clip: Any,
         vae: Any,
+        media_signature: str | None = None,
+        mode: str = "reference",
+        width: int = 1344,
+        height: int = 768,
+        length: int = 124,
+        locked_video_timing_frames: int = 0,
+        ref_image_size: str = "match",
         audio_vae: Any | None = None,
         conditioning: Any | None = None,
         latent: dict[str, Any] | None = None,
     ) -> list[str]:
-        del task_output_ready
         cache_path = cls._cache_path(segment_index)
         signature = h3_encoder_signature(clip, vae, audio_vae, model)
-        all_media_caches_hit = cls._all_media_caches_hit(tracks_info)
+        input_signature = h3_conditioning_input_signature(
+            prompt=task_output_ready,
+            mode=mode,
+            width=width,
+            height=height,
+            length=length,
+            ref_image_size=ref_image_size,
+            locked_video_timing_frames=locked_video_timing_frames,
+            images=None,
+            audios=None,
+            videos=None,
+            media_signature=media_signature,
+        )
         scope_token, execution_id = cls._prepare_cache_pool(
             project_name,
             tracks_info,
             signature,
-            invalidate=not all_media_caches_hit,
+            invalidate=False,
         )
         staged_key = cls._staged_cache_key(
             cache_path,
             signature,
             scope_token,
             execution_id,
+            input_signature,
         )
         if (
             conditioning is None
             and latent is None
-            and all_media_caches_hit
             and scope_token is not None
         ):
             if get_staged_h3_conditioning_cache(staged_key) is not None:
@@ -1318,12 +1358,14 @@ class EasyH3ConditioningCache(io.ComfyNode):
                 cache_path,
                 signature,
                 scope_token,
+                input_signature,
             ):
                 try:
                     restored = load_h3_conditioning_cache(
                         cache_path,
                         signature,
                         scope_token,
+                        input_signature,
                     )
                 except (OSError, RuntimeError, TypeError, ValueError) as error:
                     cls._remove_cache_artifact(cache_path, error)
@@ -1347,31 +1389,49 @@ class EasyH3ConditioningCache(io.ComfyNode):
         model: Any,
         clip: Any,
         vae: Any,
+        media_signature: str | None = None,
+        mode: str = "reference",
+        width: int = 1344,
+        height: int = 768,
+        length: int = 124,
+        locked_video_timing_frames: int = 0,
+        ref_image_size: str = "match",
         audio_vae: Any | None = None,
         conditioning: Any | None = None,
         latent: dict[str, Any] | None = None,
     ) -> io.NodeOutput:
-        del task_output_ready
-
         cache_path = cls._cache_path(segment_index)
         signature = h3_encoder_signature(clip, vae, audio_vae, model)
-        all_media_caches_hit = cls._all_media_caches_hit(tracks_info)
+        input_signature = h3_conditioning_input_signature(
+            prompt=task_output_ready,
+            mode=mode,
+            width=width,
+            height=height,
+            length=length,
+            ref_image_size=ref_image_size,
+            locked_video_timing_frames=locked_video_timing_frames,
+            images=None,
+            audios=None,
+            videos=None,
+            media_signature=media_signature,
+        )
         scope_token, execution_id = cls._prepare_cache_pool(
             project_name,
             tracks_info,
             signature,
-            invalidate=not all_media_caches_hit,
+            invalidate=False,
         )
         staged_key = cls._staged_cache_key(
             cache_path,
             signature,
             scope_token,
             execution_id,
+            input_signature,
         )
         if conditioning is None and latent is None:
-            if not all_media_caches_hit or scope_token is None:
+            if scope_token is None:
                 raise RuntimeError(
-                    "H3 conditioning cache inputs were skipped without full media cache hits"
+                    "H3 conditioning cache inputs were skipped without a usable cache pool"
                 )
             restored = get_staged_h3_conditioning_cache(staged_key, remove=True)
             if restored is None:
@@ -1380,6 +1440,7 @@ class EasyH3ConditioningCache(io.ComfyNode):
                         cache_path,
                         signature,
                         scope_token,
+                        input_signature,
                     )
                 except (OSError, RuntimeError, TypeError, ValueError) as error:
                     cls._remove_cache_artifact(cache_path, error)
@@ -1390,7 +1451,7 @@ class EasyH3ConditioningCache(io.ComfyNode):
             touch_h3_conditioning_cache(cache_path)
             log_node_info(
                 "H3 Conditioning Cache",
-                f"segment={int(segment_index)} | Conditioning=命中恢复缓存",
+                f"segment={int(segment_index)} | Conditioning=cache hit",
             )
             return io.NodeOutput(*restored)
 
@@ -1401,7 +1462,7 @@ class EasyH3ConditioningCache(io.ComfyNode):
         if scope_token is None:
             log_node_info(
                 "H3 Conditioning Cache",
-                f"segment={int(segment_index)} | 缓存写入已跳过: temp缓存池不可用",
+                f"segment={int(segment_index)} | Cache write skipped: temp cache pool unavailable",
             )
             return io.NodeOutput(conditioning, latent)
         try:
@@ -1411,29 +1472,19 @@ class EasyH3ConditioningCache(io.ComfyNode):
                 cache_path,
                 signature,
                 scope_token,
+                input_signature,
             )
             log_node_info(
                 "H3 Conditioning Cache",
-                f"segment={int(segment_index)} | Conditioning=首次加载 | "
+                f"segment={int(segment_index)} | Conditioning=first load | "
                 f"{format_h3_conditioning_cache_stats(stats)}",
             )
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             log_node_info(
                 "H3 Conditioning Cache",
-                f"segment={int(segment_index)} | 缓存写入已跳过: {error}",
+                f"segment={int(segment_index)} | Cache write skipped: {error}",
             )
         return io.NodeOutput(conditioning, latent)
-
-    @staticmethod
-    def _all_media_caches_hit(tracks_info: Any) -> bool:
-        info = _first_input(tracks_info, {})
-        if not isinstance(info, dict):
-            return False
-        status = info.get("_easy_media_cache_status")
-        return isinstance(status, dict) and all(
-            status.get(name) == "命中恢复缓存"
-            for name in ("project_media", "segment_media", "task_output")
-        )
 
     @staticmethod
     def _cache_path(segment_index: int) -> Path:
@@ -1469,6 +1520,7 @@ class EasyH3ConditioningCache(io.ComfyNode):
         signature: str,
         scope_token: str | None,
         execution_id: str,
+        input_signature: str,
     ) -> str:
         return ":".join(
             (
@@ -1476,6 +1528,7 @@ class EasyH3ConditioningCache(io.ComfyNode):
                 str(signature),
                 str(scope_token),
                 str(execution_id),
+                str(input_signature),
             )
         )
 
@@ -1486,11 +1539,11 @@ class EasyH3ConditioningCache(io.ComfyNode):
         except OSError as unlink_error:
             log_node_info(
                 "H3 Conditioning Cache",
-                f"损坏缓存无法删除: {unlink_error}",
+                f"Corrupted cache could not be deleted: {unlink_error}",
             )
         log_node_info(
             "H3 Conditioning Cache",
-            f"缓存读取失败，已回退条件编码: {error}",
+            f"Cache read failed; falling back to conditioning encoding: {error}",
         )
 
     @staticmethod
@@ -1559,7 +1612,7 @@ class EasyH3SegmentSamplingStart(io.ComfyNode):
             segment_index,
             sampling_pass,
         )
-        # 获取 sampler_name
+        # Read sampler_name.
         sampler_name = getattr(sampler, "sampler_name", None) if sampler is not None else None
         log_node_info(
             "MultiTrack Project",

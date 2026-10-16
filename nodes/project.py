@@ -709,7 +709,7 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                     cached_task_info = cached_segment[0]
                     cached_task_info["_easy_media_cache_status"] = {
                         **project_static.get("_cache_status", {}),
-                        "segment_media": "命中恢复缓存",
+                        "segment_media": "restored from cache",
                     }
                     return io.NodeOutput(
                         project_static,
@@ -736,7 +736,7 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                 multitrack_runtime_cache(task_info, create=True)
                 task_info["_easy_media_cache_status"] = {
                     **project_static.get("_cache_status", {}),
-                    "segment_media": "首次加载",
+                    "segment_media": "first load",
                 }
                 if isinstance(segment_cache, dict):
                     segment_cache[segment_cache_key] = (
@@ -765,7 +765,7 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                     media_data = cached_media
                     locked = cached_media.get("full_locked_audio")
                     media_data["_cache_status"] = {
-                        "project_media": "命中恢复缓存",
+                        "project_media": "restored from cache",
                     }
                 else:
                     info = parse_tracks_info(tracks_info)
@@ -786,7 +786,7 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                         "full_locked_audio": locked,
                         "_segment_cache": {},
                         "_cache_status": {
-                            "project_media": "首次加载",
+                            "project_media": "first load",
                         },
                     }
                     if isinstance(runtime_cache, dict):
@@ -1603,10 +1603,21 @@ class EasyMultiTrackProject(io.ComfyNode):
                 segment_index=task_index,
                 tracks_info=task_tracks_info,
                 task_output_ready=task_output.out(1),
+                media_signature=task_output.out(9),
+                mode=generation_mode,
+                width=target_width if is_selflift else first_pass_width,
+                height=target_height if is_selflift else first_pass_height,
+                length=task_length,
+                ref_image_size=ref_image_size,
                 model=model,
                 clip=clip,
                 vae=vae,
                 audio_vae=audio_vae,
+                **(
+                    {"locked_video_timing_frames": conditioning_inputs["locked_video_timing_frames"]}
+                    if "locked_video_timing_frames" in conditioning_inputs
+                    else {}
+                ),
                 conditioning=encoded_conditioning.out(0),
                 latent=encoded_conditioning.out(1),
             )
