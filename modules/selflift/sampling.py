@@ -513,6 +513,9 @@ def progressive_sample_h3(
         device=comfy.model_management.intermediate_device(),
         dtype=comfy.model_management.intermediate_dtype(),
     )
+    # Keep only the returned copy; the source can otherwise pin GPU storage
+    # throughout the high-resolution stage when intermediates are offloaded.
+    del low_clean
     if low_noise_mask is not None:
         low_result["noise_mask"] = low_noise_mask
     else:
@@ -594,7 +597,10 @@ def progressive_sample_h3(
         nested,
     )
     resume_latent = fixed_samples
-    del next_streams
+    # Unpacked anchors are views of processed_anchor. Drop every temporary
+    # reference before high-resolution sampling; fixed_samples is the anchor
+    # that the sampler still needs for preserved regions.
+    del next_streams, anchor_streams, processed_anchor, packed_anchor
     transition_timer.mark("renoise")
     transition_timer.finish()
     log_memory("transition end / high_resolution start", model.load_device)

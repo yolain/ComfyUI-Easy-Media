@@ -3,8 +3,10 @@ from __future__ import annotations
 import importlib.util
 import sys
 import types
+import weakref
 from pathlib import Path
 
+import pytest
 import torch
 
 
@@ -243,3 +245,152 @@ def test_highres_tiling_patches_only_when_enabled(monkeypatch):
     assert calls == [
         (model, [(1, 24, 3, 4, 6), (1, 32, 2, 9)])
     ]
+
+
+@pytest.mark.parametrize("masked", [False, True])
+@pytest.mark.parametrize("intermediate_dtype", [torch.float32, torch.float64])
+def test_progressive_sample_releases_transition_copies_before_highres(
+    monkeypatch, masked, intermediate_dtype
+):
+    _install_nested_tensor(monkeypatch)
+    comfy = sys.modules["comfy"]
+    modules = {}
+    for name in ("model_management", "model_sampling", "sample", "samplers", "utils"):
+        module = types.ModuleType(f"comfy.{name}")
+        monkeypatch.setitem(sys.modules, f"comfy.{name}", module)
+        monkeypatch.setattr(comfy, name, module, raising=False)
+        modules[name] = module
+
+    def to(self, *args, **kwargs):
+        return _NestedTensor([tensor.to(*args, **kwargs) for tensor in self.unbind()])
+
+    monkeypatch.setattr(_NestedTensor, "to", to, raising=False)
+    manager = modules["model_management"]
+    manager.intermediate_device = lambda: torch.device("cpu")
+    # Float64 forces a separate CPU copy, like CUDA -> CPU offload; float32
+    # exercises the no-copy path where the returned output owns the tensor.
+    manager.intermediate_dtype = lambda: intermediate_dtype
+    transient_refs = []
+
+    class ConstSampling:
+        noise_scale = 1.0
+
+        def noise_scaling(self, sigma, noise, latent):
+            return sigma * noise + (1.0 - sigma) * latent
+
+    modules["model_sampling"].CONST = ConstSampling
+    model_sampling = ConstSampling()
+    latent_format = types.SimpleNamespace(
+        process_out=lambda tensor: tensor.clone(),
+        process_in=lambda tensor: tensor.clone(),
+    )
+
+    def process_latent_out(samples):
+        tensors = [tensor.clone() for tensor in samples.unbind()]
+        transient_refs.extend(weakref.ref(tensor) for tensor in tensors)
+        return _NestedTensor(tensors)
+
+    def process_latent_in(packed):
+        processed = packed.clone()
+        transient_refs.append(weakref.ref(processed))
+        return processed
+
+    model = types.SimpleNamespace(
+        load_device=torch.device("cpu"),
+        model_options={},
+        model=types.SimpleNamespace(
+            process_latent_out=process_latent_out,
+            process_latent_in=process_latent_in,
+        ),
+        get_model_object=lambda name: {
+            "model_sampling": model_sampling,
+            "latent_format": latent_format,
+        }[name],
+    )
+
+    def pack_latents(streams):
+        packed = torch.cat([tensor.reshape(tensor.shape[0], 1, -1) for tensor in streams], dim=-1)
+        transient_refs.append(weakref.ref(packed))
+        return packed, [tuple(tensor.shape) for tensor in streams]
+
+    def unpack_latents(packed, shapes):
+        offset = 0
+        for shape in shapes:
+            count = torch.Size(shape[1:]).numel()
+            yield packed[:, :, offset:offset + count].reshape(shape)
+            offset += count
+
+    modules["utils"].pack_latents = pack_latents
+    modules["utils"].unpack_latents = unpack_latents
+    modules["utils"].PROGRESS_BAR_ENABLED = False
+    modules["sample"].fix_empty_latent_channels = lambda model, samples, *args: samples
+    modules["sample"].prepare_noise = lambda samples, *args: (
+        _NestedTensor([torch.zeros_like(tensor) for tensor in samples.unbind()])
+        if getattr(samples, "is_nested", False) else torch.zeros_like(samples)
+    )
+    modules["samplers"].sampler_object = lambda name: object()
+    monkeypatch.setattr(sampling, "_validate_euler_sampler", lambda sampler: None)
+    monkeypatch.setattr(sampling, "_prepare_sampling_callback", lambda *args: lambda *args: None)
+    monkeypatch.setattr(sampling, "paired_lifts", lambda tensor, vae, size, *args, **kwargs: (
+        torch.nn.functional.interpolate(tensor, size=(tensor.shape[2], *size), mode="nearest"), None
+    ))
+
+    video = torch.full((1, 24, 3, 8, 10), 7.0)
+    audio = torch.full((1, 32, 2, 9), 5.0)
+    latent = {"samples": _NestedTensor((video, audio))}
+    if masked:
+        mask = torch.ones(1, 1, 3, 8, 10)
+        mask[:, :, 0] = 0.0
+        latent["noise_mask"] = _NestedTensor((mask, torch.ones(1, 1, 2, 9)))
+    calls = []
+
+    def sample(model, noise, positive, negative, cfg, device, sampler, sigmas, options, **kwargs):
+        calls.append(tuple(sigmas.tolist()))
+        if len(calls) == 1:
+            low_video, low_audio = kwargs["latent_image"].unbind()
+            clean = _NestedTensor((torch.full_like(low_video, 2.0), torch.full_like(low_audio, 3.0)))
+            state = _NestedTensor((torch.full_like(low_video, 4.0), torch.full_like(low_audio, 6.0)))
+            for step in range(len(sigmas) - 1):
+                kwargs["callback"](step, clean, state, len(sigmas) - 1)
+            return clean
+
+        # Weak references check actual tensor liveness, including the backing
+        # storage retained by unpacked anchor views, before the next forward.
+        assert len(transient_refs) == 4
+        if intermediate_dtype == torch.float64:
+            assert all(reference() is None for reference in transient_refs[:2])
+        else:
+            assert all(reference() is not None for reference in transient_refs[:2])
+        assert all(reference() is None for reference in transient_refs[2:])
+        assert kwargs["latent_image"] is latent["samples"]
+        assert kwargs["denoise_mask"] is latent.get("noise_mask")
+        restored = [
+            model_sampling.noise_scaling(sigmas[0], stream_noise, anchor)
+            for stream_noise, anchor in zip(noise.unbind(), kwargs["latent_image"].unbind())
+        ]
+        expected_video = torch.full_like(video, 1.0)
+        if masked:
+            expected_video[:, :, 0] = 3.5
+        torch.testing.assert_close(restored[0], expected_video)
+        torch.testing.assert_close(restored[1], torch.full_like(audio, 4.875))
+        output = _NestedTensor(restored)
+        kwargs["callback"](0, output, output, 1)
+        return output
+
+    modules["samplers"].sample = sample
+    result, low_result = sampling.progressive_sample_h3(
+        model, [], object(), latent, torch.tensor([1.0, 0.8, 0.5, 0.0]),
+        seed=0, transition_ratio=2 / 3, lowres_scale=0.5,
+    )
+
+    assert len(calls) == 2
+    assert result["samples"].unbind()[0].shape == video.shape
+    low_video, low_audio = low_result["samples"].unbind()
+    assert low_video.shape == (1, 24, 3, 4, 4)
+    assert low_video.dtype == intermediate_dtype
+    torch.testing.assert_close(low_video, torch.full_like(low_video, 2.0))
+    torch.testing.assert_close(low_audio, torch.full_like(low_audio, 3.0))
+    torch.testing.assert_close(video, torch.full_like(video, 7.0))
+    torch.testing.assert_close(audio, torch.full_like(audio, 5.0))
+    if masked:
+        assert low_result["noise_mask"].unbind()[0].shape == (1, 1, 3, 4, 4)
