@@ -369,6 +369,13 @@ def _load_minimax_node(monkeypatch):
     assert audio_gain_spec is not None and audio_gain_spec.loader is not None
     audio_gain_module = importlib.util.module_from_spec(audio_gain_spec)
     audio_gain_spec.loader.exec_module(audio_gain_module)
+    audio_remix_spec = importlib.util.spec_from_file_location(
+        "easy_media.utils.h3_audio_remix", root / "utils" / "h3_audio_remix.py"
+    )
+    assert audio_remix_spec is not None and audio_remix_spec.loader is not None
+    audio_remix_module = importlib.util.module_from_spec(audio_remix_spec)
+    audio_remix_spec.loader.exec_module(audio_remix_module)
+    monkeypatch.setitem(sys.modules, audio_remix_spec.name, audio_remix_module)
     audio_gain_module.audio_db_to_gain = utils_package.audio_db_to_gain
     audio_gain_module.audio_is_muted = utils_package.audio_is_muted
     audio_gain_module.audio_volume_db = utils_package.audio_volume_db
@@ -1863,6 +1870,23 @@ def test_multitrack_h3_project_does_not_log_execution_events_while_expanding(
     assert messages == [
         ("MultiTrack Project", "Found 1 segments; processing 1"),
     ]
+
+
+@pytest.mark.parametrize("audio_mask", [0.0, 0.5, 1.0])
+def test_h3_segment_sampling_start_wraps_only_soft_audio_masks(monkeypatch, audio_mask):
+    module = _load_minimax_node(monkeypatch)
+    video = torch.zeros(1, 24, 1, 1, 1)
+    audio = torch.zeros(1, 32, 2, 1)
+    latent = {
+        "samples": _NestedTensor((video, audio)),
+        "noise_mask": _NestedTensor((torch.ones_like(video), torch.full_like(audio, audio_mask))),
+    }
+    sampler = types.SimpleNamespace(sampler_function=lambda *args, **kwargs: None)
+    output = module.EasyH3SegmentSamplingStart.execute(
+        object(), object(), sampler, torch.tensor([1.0, 0.0]), latent, "demo", 0, "first"
+    )
+    assert (output.values[2] is sampler) is (audio_mask in {0.0, 1.0})
+    assert output.values[4] is latent
 
 
 def test_h3_segment_execution_markers_log_the_current_segment(monkeypatch):

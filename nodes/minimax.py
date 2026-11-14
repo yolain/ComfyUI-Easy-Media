@@ -24,6 +24,7 @@ from ..modules.motion_context.core import (
 )
 from ..modules.motion_context.drift_control_av import apply_context_swap_drift_control
 from ..utils import log_node_info, log_stage_time, synchronize_execution_device
+from ..utils.h3_audio_remix import wrap_h3_audio_remix_sampler
 from ..utils.h3_project import (
     choose_h3_generation,
     compact_h3_task_segments,
@@ -1566,6 +1567,7 @@ class EasyH3SegmentSamplingStart(io.ComfyNode):
             f"Sampling segment {segment_index} ({sampling_pass}): "
             f"sampler_name={sampler_name}, sigmas={sigmas}",
         )
+        sampler = wrap_h3_audio_remix_sampler(sampler, latent_image)
         return io.NodeOutput(noise, guider, sampler, sigmas, latent_image)
 
 
