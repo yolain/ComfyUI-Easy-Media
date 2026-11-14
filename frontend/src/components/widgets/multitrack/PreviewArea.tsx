@@ -50,7 +50,7 @@ import {
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
 import { DEFAULT_SUBTITLE_STYLE } from '@/lib/subtitle-recognition'
 import { invalidateMediaListCache } from '@/stores/media-list-store'
-import type { MultiTrackContinuityMode, MultiTrackRefImageSize, MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSubtitleStyle, MultiTrackTaskImage, MultiTrackTaskMode, MultiTrackUserPromptVariant, TrackData } from '@/types/multitrack'
+import type { MultiTrack, MultiTrackContinuityMode, MultiTrackRefImageSize, MultiTrackSegment, MultiTrackSegmentContent, MultiTrackSubtitleStyle, MultiTrackTaskImage, MultiTrackTaskMode, MultiTrackUserPromptVariant, TrackData } from '@/types/multitrack'
 import { PreviewFloatingToolbar } from './PreviewFloatingToolbar'
 import { PreviewAudioPlayback } from './PreviewAudioPlayback'
 import { PanoramaImagePreview } from '@/components/widgets/panorama/PanoramaImagePreview'
@@ -72,6 +72,7 @@ interface PreviewAreaProps {
   onSubtitleEditRequestHandled?: () => void
   onSelectSegment?: (segmentId: string) => void
   onGlobalSettingsChange: (patch: Partial<Pick<TrackData, 'muted' | 'volume_db' | 'frame_rate'>>) => void
+  onTrackAudioSettingsChange?: (trackId: string, patch: Partial<Pick<MultiTrack, 'audio_locked'>>) => void
   onSelectedSegmentContentChange: (patch: Partial<MultiTrackSegmentContent>) => void
   taskSegments?: MultiTrackSegment[]
   selectedTaskSegments?: MultiTrackSegment[]
@@ -245,6 +246,7 @@ export function PreviewArea({
   onSelectSegment,
   onGlobalSettingsChange,
   onSelectedSegmentContentChange,
+  onTrackAudioSettingsChange,
   taskSegments,
   selectedTaskSegments,
   onTrackSegmentsContentChange,
@@ -1489,6 +1491,10 @@ export function PreviewArea({
           ? selectedSegment.segment.content.muted === true
           : false}
         selectedMediaDuration={selectedMediaDuration}
+        selectedTrackAudioLocked={data.tracks.find((track) => track.id === selectedSegment?.trackId)?.audio_locked === true}
+        onSelectedTrackAudioSettingsChange={selectedSegment && onTrackAudioSettingsChange
+          ? (patch) => onTrackAudioSettingsChange(selectedSegment.trackId, patch)
+          : undefined}
         rightInset={selectedSubtitleStyle
           ? SUBTITLE_SETTINGS_PANEL_TOOLBAR_INSET
           : 12}

@@ -41,6 +41,8 @@
     "localModel": "Local model — no API account required"
   },
   "projectVideoCombine": {
+    "searchProjects": "Search projects…",
+    "noMatchingProjects": "No matching projects",
     "selectProject": "Select project",
     "deleteProject": "Delete project",
     "deleteProjectTitle": "Delete project?",
@@ -183,8 +185,10 @@
     "refImageSizeTooltip": "Match scales reference images to the generation area; Max keeps a larger reference for stronger identity fidelity but can be much slower.",
     "lockAudio": "Lock audio",
     "unlockAudio": "Unlock audio",
+    "volumeDb": "Volume (dB)",
+    "audioMuted": "Mute audio",
     "audioLockedMarker": "Audio track locked",
-    "audioLockTooltip": "(Only effective in MultiTrack Project) After locking audio, video generation will no longer regenerate the audio and will instead coordinate the video visuals with the original audio.",
+    "audioLockTooltip": "(Only effective in MultiTrack Project) Locking applies to the entire track and fully preserves the original audio.",
     "videoAudioLockTooltip": "(Only effective in MultiTrack Project) Locking makes video generation follow this video track's visual timeline. Video and audio track locks can be enabled together; when both are enabled, the audio track takes priority for audio locking and replacement.",
     "enableSpeakerReference": "Reuse as speaker audio",
     "disableSpeakerReference": "Stop reusing speaker audio",

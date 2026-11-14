@@ -103,7 +103,23 @@ function addActiveTaskTrack(data: TrackData): void {
 }
 
 describe('PreviewArea', () => {
+  it('routes floating audio lock changes to the selected track', () => {
+    const { data, selectedSegment } = trackData()
+    data.tracks[0].audio_locked = true
+    const onTrackAudioSettingsChange = vi.fn()
+    const onSelectedSegmentContentChange = vi.fn()
+    render(<PreviewArea data={data} selectedSegment={selectedSegment} currentTime={0} isPlaying={false} node={{ widgets: [] }}
+      onGlobalSettingsChange={vi.fn()} onSelectedSegmentContentChange={onSelectedSegmentContentChange}
+      onSelectedSegmentDurationChange={vi.fn()} onTrackAudioSettingsChange={onTrackAudioSettingsChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Audio settings' }))
+    expect(screen.getByRole('switch', { name: 'Lock audio' }).getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(screen.getByRole('switch', { name: 'Lock audio' }))
+    expect(onTrackAudioSettingsChange).toHaveBeenLastCalledWith('video-track', { audio_locked: false })
+    expect(onSelectedSegmentContentChange).not.toHaveBeenCalled()
+  })
+
   beforeEach(() => {
+    vi.stubGlobal('PointerEvent', MouseEvent)
     vi.useFakeTimers()
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
     vi.stubGlobal('ResizeObserver', class {

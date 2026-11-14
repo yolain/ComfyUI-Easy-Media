@@ -1451,6 +1451,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
             onSelectSegment={(segmentId) => handleSelectSegment(segmentId)}
             onGlobalSettingsChange={handleGlobalSettingsChange}
             onSelectedSegmentContentChange={handleSelectedSegmentContentChange}
+            onTrackAudioSettingsChange={handleTrackAudioSettingsChange}
             taskSegments={selectedTaskTrackSegments}
             selectedTaskSegments={hasOnlySelectedTaskSegments ? selectedTaskSegments : undefined}
             onTrackSegmentsContentChange={handleTrackSegmentsContentChange}

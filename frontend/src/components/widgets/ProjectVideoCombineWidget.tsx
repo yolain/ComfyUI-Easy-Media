@@ -3,7 +3,7 @@ import { Check, ChevronDown, Loader2, Maximize2, Minimize2, Pause, Play, Refresh
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ProjectPicker } from './projectVideoCombine/ProjectPicker'
 import { Slider } from '@/components/ui/slider'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useCanvasScale } from '@/hooks/use-canvas-scale'
@@ -798,10 +798,13 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
         <div className="flex h-full min-h-[520px] w-full flex-col overflow-hidden rounded-md border border-border bg-background text-foreground">
           <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-2">
             <div className="flex items-center gap-1">
-              <Select disabled={deletingFilePath !== null} value={data.project_name || 'default'} onOpenChange={(open) => { if (open) void loadProjects() }} onValueChange={(name) => void refreshProject(name)}>
-                <SelectTrigger className="h-7 w-32 text-xs" aria-label={t('projectVideoCombine.selectProject')}><SelectValue /></SelectTrigger>
-                <SelectContent>{projectOptions.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent>
-              </Select>
+              <ProjectPicker
+                disabled={deletingFilePath !== null}
+                value={data.project_name || 'default'}
+                projects={projectOptions}
+                onOpen={() => void loadProjects()}
+                onSelect={(name) => void refreshProject(name)}
+              />
               {tooltip(t('projectVideoCombine.deleteProject'), (
                 <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" disabled={isDeleting || isRefreshing || deletingFilePath !== null} aria-label={t('projectVideoCombine.deleteProject')} onClick={() => void deleteProject()}>
                   {isDeleting ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
