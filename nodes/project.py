@@ -12,7 +12,6 @@ from comfy_execution.graph_utils import ExecutionBlocker, GraphBuilder, is_link
 from comfy.utils import ProgressBar
 
 from ..utils import instrument_node_timing, log_node_info
-from ..utils.audio_gain import audio_remix_strength
 from ..utils.h3_presets import get_h3_preset_keys, load_h3_presets, select_h3_preset
 from ..utils.h3_project import (
     clear_h3_project_segments_from,
@@ -1423,10 +1422,6 @@ class EasyMultiTrackProject(io.ComfyNode):
             locked_audio_track = h3_locked_audio_track(entry, info)
             locked_video_track = h3_locked_video_track(entry, info)
             has_task_locked_audio = locked_audio_track is not None
-            task_audio_remix_strength = audio_remix_strength(locked_audio_track or {})
-            hard_lock_task_audio = (
-                has_task_locked_audio and task_audio_remix_strength == 1.0
-            )
             preserve_source_timing = not audio_only and (
                 has_task_locked_audio or locked_video_track is not None
             )
@@ -1684,7 +1679,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     latent=initial_latent,
                     audio_vae=audio_vae,
                     audio=task_locked_audio,
-                    remix_strength=task_audio_remix_strength,
+                    remix_strength=1.0,
                     short_audio_mode="silence",
                     prepend_frames=(
                         context_source_frames if has_context_continuity else 0
@@ -2034,7 +2029,7 @@ class EasyMultiTrackProject(io.ComfyNode):
 
                 report_segment_step(0.89)
                 saved_audio = output_audio
-                if hard_lock_task_audio:
+                if has_task_locked_audio:
                     saved_audio = graph.node(
                         "easy h3LockedAudioSelect",
                         id=f"locked_audio_select_{task_index}",
@@ -2096,7 +2091,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     output_audio = locked_audio_align.out(0)
 
                 saved_audio = output_audio
-                if hard_lock_task_audio:
+                if has_task_locked_audio:
                     saved_audio = graph.node(
                         "easy h3LockedAudioSelect",
                         id=f"locked_audio_select_{task_index}",

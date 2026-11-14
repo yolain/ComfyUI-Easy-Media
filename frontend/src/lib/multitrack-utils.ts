@@ -1382,10 +1382,6 @@ export interface MultiTrackPreviewResolutionInput {
   format?: string
 }
 
-export function clampMultiTrackAudioRemixStrength(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 1
-}
-
 export function setMultiTrackAudioTrackLock(
   data: TrackData,
   trackId: string,
@@ -1741,7 +1737,6 @@ export function normalizeTrackData(raw: LegacyTrackData): TrackData {
       muted: track.muted === true,
       solo: track.solo === true,
       volume_db: normalizedVolumeDb(track.volume_db),
-      audio_remix_strength: clampMultiTrackAudioRemixStrength(track.audio_remix_strength),
     }
     if (track.type !== 'segment') {
       if (track.type === 'task') {

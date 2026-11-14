@@ -42,16 +42,6 @@ import {
 } from '@/lib/multitrack-utils'
 
 describe('multitrack utilities', () => {
-  it.each([
-    [undefined, 1], [0, 0], [0.35, 0.35], [1, 1], [-1, 0], [2, 1], [Number.NaN, 1],
-  ])('preserves and validates track remix strength %s as %s', (value, expected) => {
-    const data = createDefaultTrackData()
-    data.tracks[1].audio_remix_strength = value
-    const normalized = normalizeTrackData(data)
-    expect(normalized.tracks[1].audio_remix_strength).toBe(expected)
-    expect(normalizeTrackData(JSON.parse(JSON.stringify(normalized))).tracks[1].audio_remix_strength).toBe(expected)
-  })
-
   it('merges consecutive selected task segments using the first segment with prompt or active images', () => {
     const data = createDefaultTrackData()
     const taskTrack = data.tracks[0]

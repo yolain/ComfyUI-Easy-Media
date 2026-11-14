@@ -111,7 +111,6 @@ export interface MultiTrack {
   volume_db?: number
   locked: boolean
   audio_locked?: boolean
-  audio_remix_strength?: number
   media_index?: number
   segments: MultiTrackSegment[]
 }

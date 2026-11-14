@@ -678,7 +678,7 @@ export function MultiTrackWidget({ value, onChange, app, node }: Readonly<ReactW
 
   function handleTrackAudioSettingsChange(
     trackId: string,
-    patch: Partial<Pick<MultiTrack, 'muted' | 'solo' | 'audio_locked' | 'audio_remix_strength'>>,
+    patch: Partial<Pick<MultiTrack, 'muted' | 'solo' | 'audio_locked'>>,
   ) {
     if ('audio_locked' in patch) {
       commitNormalizedTrackChange(

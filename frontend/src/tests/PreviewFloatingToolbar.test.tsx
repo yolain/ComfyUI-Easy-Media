@@ -35,16 +35,15 @@ describe('PreviewFloatingToolbar', () => {
 
     expect(onGlobalSettingsChange).toHaveBeenCalledWith({ muted: true })
     expect(screen.queryByRole('switch', { name: 'Lock audio' })).toBeNull()
-    expect(screen.queryByRole('spinbutton', { name: 'Remix strength' })).toBeNull()
   })
 
-  it('updates track locking and keeps remix strength controls in sync', () => {
+  it('updates track locking without changing clip audio settings', () => {
     const onTrackChange = vi.fn()
     const onContentChange = vi.fn()
     const props = {
       globalMuted: false, globalVolumeDb: 0, frameRate: 24,
       selectedMediaVolumeDb: 0, selectedMediaMuted: false, selectedMediaDuration: 3,
-      selectedTrackAudioLocked: false, selectedTrackRemixStrength: 1,
+      selectedTrackAudioLocked: false,
       onSelectedTrackAudioSettingsChange: onTrackChange,
       onGlobalSettingsChange: vi.fn(), onSelectedSegmentContentChange: onContentChange,
       onSelectedSegmentDurationChange: vi.fn(),
@@ -53,14 +52,8 @@ describe('PreviewFloatingToolbar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Audio settings' }))
     fireEvent.click(screen.getByRole('switch', { name: 'Lock audio' }))
     expect(onTrackChange).toHaveBeenLastCalledWith({ audio_locked: true })
-    fireEvent.change(screen.getByRole('spinbutton', { name: 'Remix strength' }), { target: { value: '0.35' } })
-    expect(onTrackChange).toHaveBeenLastCalledWith({ audio_remix_strength: 0.35 })
-    rerender(<PreviewFloatingToolbar {...props} selectedTrackAudioLocked selectedTrackRemixStrength={0.35} />)
+    rerender(<PreviewFloatingToolbar {...props} selectedTrackAudioLocked />)
     expect(screen.getByRole('switch', { name: 'Lock audio' }).getAttribute('aria-checked')).toBe('true')
-    const slider = screen.getByRole('slider', { name: 'Remix strength' })
-    expect(slider.getAttribute('aria-valuenow')).toBe('0.35')
-    fireEvent.keyDown(slider, { key: 'ArrowRight' })
-    expect(onTrackChange).toHaveBeenLastCalledWith({ audio_remix_strength: 0.36 })
     expect(onContentChange).not.toHaveBeenCalled()
   })
 

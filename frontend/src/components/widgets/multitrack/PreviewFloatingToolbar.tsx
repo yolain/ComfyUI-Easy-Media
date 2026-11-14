@@ -26,8 +26,7 @@ interface PreviewFloatingToolbarProps {
   selectedMediaMuted: boolean
   selectedMediaDuration: number | null
   selectedTrackAudioLocked?: boolean
-  selectedTrackRemixStrength?: number
-  onSelectedTrackAudioSettingsChange?: (patch: { audio_locked?: boolean; audio_remix_strength?: number }) => void
+  onSelectedTrackAudioSettingsChange?: (patch: { audio_locked?: boolean }) => void
   rightInset?: number | string
   onGlobalSettingsChange: (patch: Partial<Pick<TrackData, 'muted' | 'volume_db' | 'frame_rate'>>) => void
   onSelectedSegmentContentChange: (patch: Partial<MultiTrackSegmentContent>) => void
@@ -62,7 +61,6 @@ export function PreviewFloatingToolbar({
   selectedMediaMuted,
   selectedMediaDuration,
   selectedTrackAudioLocked = false,
-  selectedTrackRemixStrength = 1,
   onSelectedTrackAudioSettingsChange,
   rightInset = 12,
   onGlobalSettingsChange,
@@ -170,39 +168,13 @@ export function PreviewFloatingToolbar({
               </div>
             </SettingsRow>
             {hasSelectedMedia && <>
-              <SettingsRow label={t('multitrack.lockAudio')}>
+              <SettingsRow label={t('multitrack.lockAudio')} title={t('multitrack.audioLockTooltip')}>
                 <Switch
                   aria-label={t('multitrack.lockAudio')}
                   checked={selectedTrackAudioLocked}
                   disabled={!onSelectedTrackAudioSettingsChange}
                   onCheckedChange={(checked) => onSelectedTrackAudioSettingsChange?.({ audio_locked: checked })}
                 />
-              </SettingsRow>
-              <SettingsRow label={t('multitrack.audioRemixStrength')} title={t('multitrack.audioLockTooltip')}>
-                <div className="flex w-full min-w-0 items-center gap-2">
-                  <div className="min-w-0 flex-1">
-                    <Slider
-                      aria-label={t('multitrack.audioRemixStrength')}
-                      className="cursor-pointer"
-                      value={[selectedTrackRemixStrength]}
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      disabled={!onSelectedTrackAudioSettingsChange}
-                      onValueChange={(value) => onSelectedTrackAudioSettingsChange?.({ audio_remix_strength: value[0] ?? 1 })}
-                    />
-                  </div>
-                  <NumberInput
-                    aria-label={t('multitrack.audioRemixStrength')}
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    className="w-20 shrink-0 cursor-pointer"
-                    value={selectedTrackRemixStrength}
-                    disabled={!onSelectedTrackAudioSettingsChange}
-                    onChange={(value) => onSelectedTrackAudioSettingsChange?.({ audio_remix_strength: value })}
-                  />
-                </div>
               </SettingsRow>
             </>}
           </div>

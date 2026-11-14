@@ -72,7 +72,7 @@ interface PreviewAreaProps {
   onSubtitleEditRequestHandled?: () => void
   onSelectSegment?: (segmentId: string) => void
   onGlobalSettingsChange: (patch: Partial<Pick<TrackData, 'muted' | 'volume_db' | 'frame_rate'>>) => void
-  onTrackAudioSettingsChange?: (trackId: string, patch: Partial<Pick<MultiTrack, 'audio_locked' | 'audio_remix_strength'>>) => void
+  onTrackAudioSettingsChange?: (trackId: string, patch: Partial<Pick<MultiTrack, 'audio_locked'>>) => void
   onSelectedSegmentContentChange: (patch: Partial<MultiTrackSegmentContent>) => void
   taskSegments?: MultiTrackSegment[]
   selectedTaskSegments?: MultiTrackSegment[]
@@ -1492,7 +1492,6 @@ export function PreviewArea({
           : false}
         selectedMediaDuration={selectedMediaDuration}
         selectedTrackAudioLocked={data.tracks.find((track) => track.id === selectedSegment?.trackId)?.audio_locked === true}
-        selectedTrackRemixStrength={data.tracks.find((track) => track.id === selectedSegment?.trackId)?.audio_remix_strength ?? 1}
         onSelectedTrackAudioSettingsChange={selectedSegment && onTrackAudioSettingsChange
           ? (patch) => onTrackAudioSettingsChange(selectedSegment.trackId, patch)
           : undefined}
