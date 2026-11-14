@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Gauge, Volume2, VolumeX } from 'lucide-react'
-import { Checkbox } from '@/components/ui/checkbox'
+import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NumberInput } from '@/components/ui/number-input'
@@ -32,6 +32,15 @@ interface PreviewFloatingToolbarProps {
   onGlobalSettingsChange: (patch: Partial<Pick<TrackData, 'muted' | 'volume_db' | 'frame_rate'>>) => void
   onSelectedSegmentContentChange: (patch: Partial<MultiTrackSegmentContent>) => void
   onSelectedSegmentDurationChange: (duration: number) => void
+}
+
+function SettingsRow({ label, title, children }: { label: string; title?: string; children: ReactNode }) {
+  return (
+    <div className="flex min-h-7 items-start gap-3">
+      <span className="w-20 shrink-0 text-xs text-muted-foreground" title={title}>{label}</span>
+      <div className="flex min-w-0 flex-1 justify-end">{children}</div>
+    </div>
+  )
 }
 
 function nearestFrameRateIndex(frameRate: number): number {
@@ -128,23 +137,73 @@ export function PreviewFloatingToolbar({
         </PopoverTrigger>
         <PopoverContent className="w-80 space-y-3" align="end" side="left">
           <div className="text-sm font-medium">{audioLabel}</div>
-          <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-3 text-xs">
-            <span className="text-muted-foreground">{t('multitrack.audioMuted')}</span>
-            <Checkbox className="cursor-pointer" aria-label={t('multitrack.audioMuted')} checked={muted} onCheckedChange={(checked) => updateMuted(checked === true)} />
-            <span className="text-muted-foreground">{t('multitrack.volume')}</span>
-            <div className="flex min-w-0 items-center gap-2">
-              <Slider aria-label={t('multitrack.volume')} className="min-w-0 flex-1 cursor-pointer" value={[clampMultiTrackVolumeDb(effectiveVolumeDb)]} min={MULTITRACK_MIN_VOLUME_DB} max={MULTITRACK_MAX_VOLUME_DB} step={0.1} onValueChange={(value) => updateVolumeDb(value[0] ?? 0)} />
-              <NumberInput aria-label={t('multitrack.volume')} min={MULTITRACK_MIN_VOLUME_DB} max={MULTITRACK_MAX_VOLUME_DB} step={0.1} className="w-20 shrink-0 cursor-pointer" value={effectiveVolumeDb} onChange={updateVolumeDb} />
-              <span className="text-muted-foreground">dB</span>
-            </div>
-            {hasSelectedMedia && <>
-              <span className="text-muted-foreground">{t('multitrack.lockAudio')}</span>
-              <Checkbox className="cursor-pointer" aria-label={t('multitrack.lockAudio')} checked={selectedTrackAudioLocked} disabled={!onSelectedTrackAudioSettingsChange} onCheckedChange={(checked) => onSelectedTrackAudioSettingsChange?.({ audio_locked: checked === true })} />
-              <span className="text-muted-foreground" title={t('multitrack.audioLockTooltip')}>{t('multitrack.audioRemixStrength')}</span>
-              <div className="flex min-w-0 items-center gap-2">
-                <Slider aria-label={t('multitrack.audioRemixStrength')} className="min-w-0 flex-1 cursor-pointer" value={[selectedTrackRemixStrength]} min={0} max={1} step={0.01} disabled={!onSelectedTrackAudioSettingsChange} onValueChange={(value) => onSelectedTrackAudioSettingsChange?.({ audio_remix_strength: value[0] ?? 1 })} />
-                <NumberInput aria-label={t('multitrack.audioRemixStrength')} min={0} max={1} step={0.01} className="w-20 shrink-0 cursor-pointer" value={selectedTrackRemixStrength} disabled={!onSelectedTrackAudioSettingsChange} onChange={(value) => onSelectedTrackAudioSettingsChange?.({ audio_remix_strength: value })} />
+          <div className="flex flex-col gap-3">
+            <SettingsRow label={t('multitrack.audioMuted')}>
+              <Switch
+                aria-label={t('multitrack.audioMuted')}
+                checked={muted}
+                onCheckedChange={updateMuted}
+              />
+            </SettingsRow>
+            <SettingsRow label={t('multitrack.volumeDb')}>
+              <div className="flex w-full min-w-0 items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <Slider
+                    aria-label={t('multitrack.volumeDb')}
+                    className="cursor-pointer"
+                    value={[clampMultiTrackVolumeDb(effectiveVolumeDb)]}
+                    min={MULTITRACK_MIN_VOLUME_DB}
+                    max={MULTITRACK_MAX_VOLUME_DB}
+                    step={0.1}
+                    onValueChange={(value) => updateVolumeDb(value[0] ?? 0)}
+                  />
+                </div>
+                <NumberInput
+                  aria-label={t('multitrack.volumeDb')}
+                  min={MULTITRACK_MIN_VOLUME_DB}
+                  max={MULTITRACK_MAX_VOLUME_DB}
+                  step={0.1}
+                  className="w-20 shrink-0 cursor-pointer"
+                  value={effectiveVolumeDb}
+                  onChange={updateVolumeDb}
+                />
               </div>
+            </SettingsRow>
+            {hasSelectedMedia && <>
+              <SettingsRow label={t('multitrack.lockAudio')}>
+                <Switch
+                  aria-label={t('multitrack.lockAudio')}
+                  checked={selectedTrackAudioLocked}
+                  disabled={!onSelectedTrackAudioSettingsChange}
+                  onCheckedChange={(checked) => onSelectedTrackAudioSettingsChange?.({ audio_locked: checked })}
+                />
+              </SettingsRow>
+              <SettingsRow label={t('multitrack.audioRemixStrength')} title={t('multitrack.audioLockTooltip')}>
+                <div className="flex w-full min-w-0 items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <Slider
+                      aria-label={t('multitrack.audioRemixStrength')}
+                      className="cursor-pointer"
+                      value={[selectedTrackRemixStrength]}
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      disabled={!onSelectedTrackAudioSettingsChange}
+                      onValueChange={(value) => onSelectedTrackAudioSettingsChange?.({ audio_remix_strength: value[0] ?? 1 })}
+                    />
+                  </div>
+                  <NumberInput
+                    aria-label={t('multitrack.audioRemixStrength')}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    className="w-20 shrink-0 cursor-pointer"
+                    value={selectedTrackRemixStrength}
+                    disabled={!onSelectedTrackAudioSettingsChange}
+                    onChange={(value) => onSelectedTrackAudioSettingsChange?.({ audio_remix_strength: value })}
+                  />
+                </div>
+              </SettingsRow>
             </>}
           </div>
         </PopoverContent>
@@ -162,35 +221,36 @@ export function PreviewFloatingToolbar({
             <span className="text-[8px]">{t('multitrack.frameRate')}</span>
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-72 space-y-4" align="end" side="left">
-          <div className="grid gap-3 text-xs text-muted-foreground">
-            <div className="flex items-center justify-between">
-              <span>{t('multitrack.frameRate')}</span>
-              <span className="tabular-nums text-foreground">
-                {MULTITRACK_FRAME_RATE_OPTIONS[frameRateIndex] ?? MULTITRACK_DEFAULT_FRAME_RATE} {t('multitrack.fps')}
-              </span>
-            </div>
-            <Slider
-              aria-label={t('multitrack.frameRate')}
-              value={[frameRateIndex]}
-              min={0}
-              max={MULTITRACK_FRAME_RATE_OPTIONS.length - 1}
-              step={1}
-              ticks={MULTITRACK_FRAME_RATE_OPTIONS.map((fps, index) => ({
-                value: index,
-                label: String(fps),
-              }))}
-              onValueChange={(value) => updateFrameRateIndex(value[0] ?? frameRateIndex)}
-            />
+        <PopoverContent className="w-80 space-y-3" align="end" side="left">
+          <div className="flex flex-col gap-3">
+            <SettingsRow label={t('multitrack.frameRate')}>
+              <div className="w-full min-w-0 space-y-2">
+                <div className="text-right text-xs tabular-nums">
+                  {MULTITRACK_FRAME_RATE_OPTIONS[frameRateIndex] ?? MULTITRACK_DEFAULT_FRAME_RATE} {t('multitrack.fps')}
+                </div>
+                <Slider
+                  aria-label={t('multitrack.frameRate')}
+                  className="cursor-pointer"
+                  value={[frameRateIndex]}
+                  min={0}
+                  max={MULTITRACK_FRAME_RATE_OPTIONS.length - 1}
+                  step={1}
+                  ticks={MULTITRACK_FRAME_RATE_OPTIONS.map((fps, index) => ({
+                    value: index,
+                    label: String(fps),
+                  }))}
+                  onValueChange={(value) => updateFrameRateIndex(value[0] ?? frameRateIndex)}
+                />
+              </div>
+            </SettingsRow>
             {selectedMediaDuration !== null && (
-              <label className="grid gap-2 pt-2">
-                {t('multitrack.duration')}
+              <SettingsRow label={t('multitrack.duration')}>
                 <Input
                   aria-label={t('multitrack.duration')}
                   type="text"
                   inputMode="numeric"
                   placeholder="00:00:00"
-                  className="tabular-nums"
+                  className="h-7 w-28 text-right text-xs tabular-nums"
                   value={durationInput}
                   onChange={(event) => setDurationInput(event.currentTarget.value)}
                   onBlur={commitDuration}
@@ -200,7 +260,7 @@ export function PreviewFloatingToolbar({
                     commitDuration()
                   }}
                 />
-              </label>
+              </SettingsRow>
             )}
           </div>
         </PopoverContent>

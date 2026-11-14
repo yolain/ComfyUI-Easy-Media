@@ -185,6 +185,7 @@
     "refImageSizeTooltip": "匹配尺寸会按生成画面面积缩放参考图；最大尺寸会保留更大的参考图以提升主体一致性，但生成速度可能慢数倍。",
     "lockAudio": "锁定音频",
     "unlockAudio": "解除音频锁定",
+    "volumeDb": "音量 (dB)",
     "audioMuted": "音频静音",
     "audioRemixStrength": "混音强度",
     "audioLockedMarker": "音频轨道已锁定",

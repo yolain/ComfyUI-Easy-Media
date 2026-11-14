@@ -185,6 +185,7 @@
     "refImageSizeTooltip": "Match scales reference images to the generation area; Max keeps a larger reference for stronger identity fidelity but can be much slower.",
     "lockAudio": "Lock audio",
     "unlockAudio": "Unlock audio",
+    "volumeDb": "Volume (dB)",
     "audioMuted": "Mute audio",
     "audioRemixStrength": "Remix strength",
     "audioLockedMarker": "Audio track locked",
