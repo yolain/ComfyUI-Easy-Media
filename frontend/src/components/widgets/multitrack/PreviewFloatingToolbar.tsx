@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Gauge, Volume2, VolumeX } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NumberInput } from '@/components/ui/number-input'
@@ -24,6 +25,9 @@ interface PreviewFloatingToolbarProps {
   selectedMediaVolumeDb: number | null
   selectedMediaMuted: boolean
   selectedMediaDuration: number | null
+  selectedTrackAudioLocked?: boolean
+  selectedTrackRemixStrength?: number
+  onSelectedTrackAudioSettingsChange?: (patch: { audio_locked?: boolean; audio_remix_strength?: number }) => void
   rightInset?: number | string
   onGlobalSettingsChange: (patch: Partial<Pick<TrackData, 'muted' | 'volume_db' | 'frame_rate'>>) => void
   onSelectedSegmentContentChange: (patch: Partial<MultiTrackSegmentContent>) => void
@@ -48,6 +52,9 @@ export function PreviewFloatingToolbar({
   selectedMediaVolumeDb,
   selectedMediaMuted,
   selectedMediaDuration,
+  selectedTrackAudioLocked = false,
+  selectedTrackRemixStrength = 1,
+  onSelectedTrackAudioSettingsChange,
   rightInset = 12,
   onGlobalSettingsChange,
   onSelectedSegmentContentChange,
@@ -76,12 +83,12 @@ export function PreviewFloatingToolbar({
     onGlobalSettingsChange({ volume_db: nextVolumeDb })
   }
 
-  function toggleMute() {
+  function updateMuted(nextMuted: boolean) {
     if (hasSelectedMedia) {
-      onSelectedSegmentContentChange({ muted: !muted })
+      onSelectedSegmentContentChange({ muted: nextMuted })
       return
     }
-    onGlobalSettingsChange({ muted: !globalMuted })
+    onGlobalSettingsChange({ muted: nextMuted })
   }
 
   function updateFrameRateIndex(index: number) {
@@ -119,44 +126,27 @@ export function PreviewFloatingToolbar({
             <span className="text-[8px]">{audioLabel}</span>
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-56 space-y-3" align="end" side="left">
-          <div className="flex items-center justify-between gap-3 cursor-pointer">
-            <span className="text-sm font-medium">{audioLabel}</span>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              className="cursor-pointer"
-              aria-label={muted ? t('multitrack.unmutePreviewAudio') : t('multitrack.mutePreviewAudio')}
-              onClick={toggleMute}
-            >
-              {muted ? t('multitrack.unmute') : t('multitrack.mute')}
-            </Button>
+        <PopoverContent className="w-80 space-y-3" align="end" side="left">
+          <div className="text-sm font-medium">{audioLabel}</div>
+          <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-3 text-xs">
+            <span className="text-muted-foreground">{t('multitrack.audioMuted')}</span>
+            <Checkbox className="cursor-pointer" aria-label={t('multitrack.audioMuted')} checked={muted} onCheckedChange={(checked) => updateMuted(checked === true)} />
+            <span className="text-muted-foreground">{t('multitrack.volume')}</span>
+            <div className="flex min-w-0 items-center gap-2">
+              <Slider aria-label={t('multitrack.volume')} className="min-w-0 flex-1 cursor-pointer" value={[clampMultiTrackVolumeDb(effectiveVolumeDb)]} min={MULTITRACK_MIN_VOLUME_DB} max={MULTITRACK_MAX_VOLUME_DB} step={0.1} onValueChange={(value) => updateVolumeDb(value[0] ?? 0)} />
+              <NumberInput aria-label={t('multitrack.volume')} min={MULTITRACK_MIN_VOLUME_DB} max={MULTITRACK_MAX_VOLUME_DB} step={0.1} className="w-20 shrink-0 cursor-pointer" value={effectiveVolumeDb} onChange={updateVolumeDb} />
+              <span className="text-muted-foreground">dB</span>
+            </div>
+            {hasSelectedMedia && <>
+              <span className="text-muted-foreground">{t('multitrack.lockAudio')}</span>
+              <Checkbox className="cursor-pointer" aria-label={t('multitrack.lockAudio')} checked={selectedTrackAudioLocked} disabled={!onSelectedTrackAudioSettingsChange} onCheckedChange={(checked) => onSelectedTrackAudioSettingsChange?.({ audio_locked: checked === true })} />
+              <span className="text-muted-foreground" title={t('multitrack.audioLockTooltip')}>{t('multitrack.audioRemixStrength')}</span>
+              <div className="flex min-w-0 items-center gap-2">
+                <Slider aria-label={t('multitrack.audioRemixStrength')} className="min-w-0 flex-1 cursor-pointer" value={[selectedTrackRemixStrength]} min={0} max={1} step={0.01} disabled={!onSelectedTrackAudioSettingsChange} onValueChange={(value) => onSelectedTrackAudioSettingsChange?.({ audio_remix_strength: value[0] ?? 1 })} />
+                <NumberInput aria-label={t('multitrack.audioRemixStrength')} min={0} max={1} step={0.01} className="w-20 shrink-0 cursor-pointer" value={selectedTrackRemixStrength} disabled={!onSelectedTrackAudioSettingsChange} onChange={(value) => onSelectedTrackAudioSettingsChange?.({ audio_remix_strength: value })} />
+              </div>
+            </>}
           </div>
-          <div className="grid gap-2 text-xs text-muted-foreground">
-            <span className="flex items-center justify-between">
-              <span>{t('multitrack.volume')}</span>
-              <span className="tabular-nums text-foreground">{effectiveVolumeDb.toFixed(1)} dB</span>
-            </span>
-            <NumberInput
-              aria-label={t('multitrack.volume')}
-              min={MULTITRACK_MIN_VOLUME_DB}
-              max={MULTITRACK_MAX_VOLUME_DB}
-              step={0.1}
-              className="cursor-pointer"
-              value={effectiveVolumeDb}
-              onChange={updateVolumeDb}
-            />
-          </div>
-          <Slider
-            aria-label={t('multitrack.volume')}
-            className="cursor-pointer"
-            value={[clampMultiTrackVolumeDb(effectiveVolumeDb)]}
-            min={MULTITRACK_MIN_VOLUME_DB}
-            max={MULTITRACK_MAX_VOLUME_DB}
-            step={0.1}
-            onValueChange={(value) => updateVolumeDb(value[0] ?? 0)}
-          />
         </PopoverContent>
       </Popover>
       <div className="mx-3 h-px bg-border" />

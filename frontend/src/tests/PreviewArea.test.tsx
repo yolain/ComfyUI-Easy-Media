@@ -103,6 +103,25 @@ function addActiveTaskTrack(data: TrackData): void {
 }
 
 describe('PreviewArea', () => {
+  it('routes floating audio lock and strength changes to the selected track', () => {
+    const { data, selectedSegment } = trackData()
+    data.tracks[0].audio_locked = true
+    data.tracks[0].audio_remix_strength = 0.35
+    const onTrackAudioSettingsChange = vi.fn()
+    const onSelectedSegmentContentChange = vi.fn()
+    render(<PreviewArea data={data} selectedSegment={selectedSegment} currentTime={0} isPlaying={false} node={{ widgets: [] }}
+      onGlobalSettingsChange={vi.fn()} onSelectedSegmentContentChange={onSelectedSegmentContentChange}
+      onSelectedSegmentDurationChange={vi.fn()} onTrackAudioSettingsChange={onTrackAudioSettingsChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Audio settings' }))
+    expect(screen.getByRole('checkbox', { name: 'Lock audio' }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('slider', { name: 'Remix strength' }).getAttribute('aria-valuenow')).toBe('0.35')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Lock audio' }))
+    expect(onTrackAudioSettingsChange).toHaveBeenLastCalledWith('video-track', { audio_locked: false })
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Remix strength' }), { target: { value: '0.6' } })
+    expect(onTrackAudioSettingsChange).toHaveBeenLastCalledWith('video-track', { audio_remix_strength: 0.6 })
+    expect(onSelectedSegmentContentChange).not.toHaveBeenCalled()
+  })
+
   beforeEach(() => {
     vi.useFakeTimers()
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))

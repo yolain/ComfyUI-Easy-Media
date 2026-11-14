@@ -363,7 +363,12 @@ def _load_minimax_node(monkeypatch):
     monkeypatch.setitem(sys.modules, "comfy_api.latest", comfy_api_latest)
     monkeypatch.setitem(sys.modules, "folder_paths", folder_paths)
     monkeypatch.setitem(sys.modules, "easy_media.utils", utils_package)
-    audio_gain_module = types.ModuleType("easy_media.utils.audio_gain")
+    audio_gain_spec = importlib.util.spec_from_file_location(
+        "easy_media.utils.audio_gain", root / "utils" / "audio_gain.py"
+    )
+    assert audio_gain_spec is not None and audio_gain_spec.loader is not None
+    audio_gain_module = importlib.util.module_from_spec(audio_gain_spec)
+    audio_gain_spec.loader.exec_module(audio_gain_module)
     audio_gain_module.audio_db_to_gain = utils_package.audio_db_to_gain
     audio_gain_module.audio_is_muted = utils_package.audio_is_muted
     audio_gain_module.audio_volume_db = utils_package.audio_volume_db
@@ -2515,9 +2520,13 @@ def test_multitrack_h3_project_logs_steps_and_reports_progress(monkeypatch):
     )
 
 
-def test_multitrack_h3_project_locks_task_audio_before_sampling(monkeypatch):
+@pytest.mark.parametrize("strength", [None, 0.0, 0.35, 1.0])
+@pytest.mark.parametrize("audio_only", [False, True])
+def test_multitrack_h3_project_locks_task_audio_before_sampling(monkeypatch, strength, audio_only):
     module = _load_minimax_node(monkeypatch)
     inputs = _h3_project_inputs(sampling_mode=_h3_sampling_mode("single"))
+    if audio_only:
+        inputs["tracks_info"][0].update(width=32, height=32)
     task = inputs["tracks_info"][0]["tracks"][0]["segments"][0]
     inputs["tracks_info"][0]["tracks"].append({
         "id": "locked-audio-track",
@@ -2530,6 +2539,8 @@ def test_multitrack_h3_project_locks_task_audio_before_sampling(monkeypatch):
             "content": {"media_type": "audio"},
         }],
     })
+    if strength is not None:
+        inputs["tracks_info"][0]["tracks"][-1]["audio_remix_strength"] = strength
 
     result = module.EasyMultiTrackProject.execute(**inputs)
 
@@ -2552,10 +2563,12 @@ def test_multitrack_h3_project_locks_task_audio_before_sampling(monkeypatch):
 
     assert audio_lock["inputs"]["latent"] == [conditioning_cache_id, 1]
     assert audio_lock["inputs"]["audio"] == {"prepared_locked_audio": True}
-    assert audio_lock["inputs"]["remix_strength"] == 1.0
+    assert audio_lock["inputs"]["remix_strength"] == (1.0 if strength is None else strength)
     assert audio_lock["inputs"]["prepend_frames"] == 0
     assert audio_lock["inputs"]["frame_rate"] == 24.0
     assert sampling_start["inputs"]["latent_image"] == [lock_id, 0]
+    selectors = [node for node in nodes.values() if node["class_type"] == "easy h3LockedAudioSelect"]
+    assert bool(selectors) is (strength is None or strength == 1.0)
 
 
 

@@ -30,9 +30,37 @@ describe('PreviewFloatingToolbar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Audio settings' }))
     expect(screen.getAllByText('MainAudio').length).toBeGreaterThan(0)
-    fireEvent.click(screen.getByRole('button', { name: 'Mute preview audio' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Mute audio' }))
 
     expect(onGlobalSettingsChange).toHaveBeenCalledWith({ muted: true })
+    expect(screen.queryByRole('checkbox', { name: 'Lock audio' })).toBeNull()
+    expect(screen.queryByRole('spinbutton', { name: 'Remix strength' })).toBeNull()
+  })
+
+  it('updates track locking and keeps remix strength controls in sync', () => {
+    const onTrackChange = vi.fn()
+    const onContentChange = vi.fn()
+    const props = {
+      globalMuted: false, globalVolumeDb: 0, frameRate: 24,
+      selectedMediaVolumeDb: 0, selectedMediaMuted: false, selectedMediaDuration: 3,
+      selectedTrackAudioLocked: false, selectedTrackRemixStrength: 1,
+      onSelectedTrackAudioSettingsChange: onTrackChange,
+      onGlobalSettingsChange: vi.fn(), onSelectedSegmentContentChange: onContentChange,
+      onSelectedSegmentDurationChange: vi.fn(),
+    }
+    const { rerender } = render(<PreviewFloatingToolbar {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Audio settings' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Lock audio' }))
+    expect(onTrackChange).toHaveBeenLastCalledWith({ audio_locked: true })
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Remix strength' }), { target: { value: '0.35' } })
+    expect(onTrackChange).toHaveBeenLastCalledWith({ audio_remix_strength: 0.35 })
+    rerender(<PreviewFloatingToolbar {...props} selectedTrackAudioLocked selectedTrackRemixStrength={0.35} />)
+    expect(screen.getByRole('checkbox', { name: 'Lock audio' }).getAttribute('aria-checked')).toBe('true')
+    const slider = screen.getByRole('slider', { name: 'Remix strength' })
+    expect(slider.getAttribute('aria-valuenow')).toBe('0.35')
+    fireEvent.keyDown(slider, { key: 'ArrowRight' })
+    expect(onTrackChange).toHaveBeenLastCalledWith({ audio_remix_strength: 0.36 })
+    expect(onContentChange).not.toHaveBeenCalled()
   })
 
   it('keeps the selected video volume number input and slider in sync', () => {
@@ -57,7 +85,7 @@ describe('PreviewFloatingToolbar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Audio settings' }))
     expect(screen.getAllByText('Audio').length).toBeGreaterThan(0)
     const volumeInput = screen.getByRole('spinbutton', { name: 'Volume' })
-    const muteButton = screen.getByRole('button', { name: 'Mute preview audio' })
+    const muteButton = screen.getByRole('checkbox', { name: 'Mute audio' })
     expect(volumeInput.parentElement?.className).toContain('cursor-pointer')
     expect(muteButton.className).toContain('cursor-pointer')
     fireEvent.change(volumeInput, { target: { value: '2.5' } })
@@ -163,7 +191,7 @@ describe('PreviewFloatingToolbar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '音频设置' }))
     expect(screen.getAllByText('总音频').length).toBeGreaterThan(0)
-    expect(screen.getByRole('button', { name: '静音预览音频' })).not.toBeNull()
+    expect(screen.getByRole('checkbox', { name: '音频静音' })).not.toBeNull()
     expect(screen.getByRole('spinbutton', { name: '音量' })).not.toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '速度设置' }))
