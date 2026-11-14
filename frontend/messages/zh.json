@@ -41,6 +41,8 @@
     "localModel": "本地模型，无需 API 账户"
   },
   "projectVideoCombine": {
+    "searchProjects": "搜索项目…",
+    "noMatchingProjects": "没有匹配的项目",
     "selectProject": "选择项目",
     "deleteProject": "删除项目",
     "deleteProjectTitle": "删除项目？",

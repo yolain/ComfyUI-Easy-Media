@@ -41,6 +41,8 @@
     "localModel": "Local model — no API account required"
   },
   "projectVideoCombine": {
+    "searchProjects": "Search projects…",
+    "noMatchingProjects": "No matching projects",
     "selectProject": "Select project",
     "deleteProject": "Delete project",
     "deleteProjectTitle": "Delete project?",

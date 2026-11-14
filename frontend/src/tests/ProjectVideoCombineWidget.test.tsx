@@ -95,6 +95,30 @@ beforeEach(() => {
 })
 
 describe('ProjectVideoCombineWidget', () => {
+  it('searches a long project list and selects a matching project', async () => {
+    const { props, api } = widgetProps()
+    const names = Array.from({ length: 80 }, (_, index) => `project-${index}`)
+    api.fetchApi.mockImplementation(async (url: string) => ({
+      ok: true,
+      json: async () => url === '/easy-media/projects'
+        ? { projects: names }
+        : { ...projectData, project_name: 'project-79' },
+    }))
+    render(<ProjectVideoCombineWidget {...props} />)
+    fireEvent.click(screen.getByRole('combobox', { name: 'Select project' }))
+    await screen.findByRole('option', { name: 'project-79' })
+    const search = screen.getByRole('textbox', { name: 'Search projects…' })
+    fireEvent.change(search, { target: { value: 'PROJECT-79' } })
+    expect(screen.getAllByRole('option')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('option', { name: 'project-79' }))
+    await waitFor(() => expect(api.fetchApi).toHaveBeenCalledWith('/easy-media/project?project_name=project-79'))
+    expect(screen.queryByRole('listbox')).toBeNull()
+    await act(async () => fireEvent.click(screen.getByRole('combobox', { name: 'Select project' })))
+    expect(screen.getByRole('textbox', { name: 'Search projects…' })).toHaveProperty('value', '')
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search projects…' }), { target: { value: 'missing' } })
+    expect(screen.getByText('No matching projects')).not.toBeNull()
+  })
+
   function renderComparison() {
     let animationFrame: FrameRequestCallback | undefined
     vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {

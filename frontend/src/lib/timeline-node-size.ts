@@ -108,8 +108,8 @@ function beginWidgetResizeGuard(node: any) {
   } satisfies ResizeGuard
 }
 
-export function preserveTimelineEditorNodeSize(nodeType: any, nodeData: { name?: string }) {
-  if (!TIMELINE_NODE_NAME.has(nodeData.name || '')) return
+export function preserveTimelineEditorNodeSize(nodeType: any, nodeData: { name?: string }, initialSize?: NodeSize) {
+  if (!initialSize && !TIMELINE_NODE_NAME.has(nodeData.name || '')) return
 
   const originalOnNodeCreated = nodeType.prototype.onNodeCreated
   const originalOnConfigure = nodeType.prototype.onConfigure
@@ -120,7 +120,7 @@ export function preserveTimelineEditorNodeSize(nodeType: any, nodeData: { name?:
   nodeType.prototype.onNodeCreated = function () {
     originalOnNodeCreated?.call(this)
     const nodeName = nodeData.name || ''
-    const defaultSize = TIMELINE_WIDGET_DEFAULT_SIZES[nodeName]
+    const defaultSize = initialSize ?? TIMELINE_WIDGET_DEFAULT_SIZES[nodeName]
     if (!defaultSize) return
 
     this.size[0] = defaultSize[0]

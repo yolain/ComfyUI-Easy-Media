@@ -493,7 +493,6 @@ export function MultiTrackSegmentBlock({
                       : 'relative h-2.5 overflow-hidden rounded-sm'}
                     style={{ backgroundColor: presentation.backgroundColorStrong }}
                   >
-                    <div className="absolute inset-x-0 top-0 z-10 h-0.5 bg-warning" />
                     <AudioWaveform
                       content={{
                         source_type: segment.content.source_type ?? 'input',
