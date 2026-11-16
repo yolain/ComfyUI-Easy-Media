@@ -11,7 +11,7 @@ function Panel({ cancelInCapture = false, onCanvasWheel = () => {} }: {
   useVerticalWheelScroll(ref)
   return <div onWheelCapture={event => { if (cancelInCapture) event.preventDefault() }} onWheel={onCanvasWheel}>
     <div data-testid="toolbar" />
-    <div ref={ref} data-testid="sliders"><span data-testid="slider-content" /></div>
+    <div ref={ref} data-testid="sliders"><span role="slider" tabIndex={0} aria-label="Effect" data-testid="slider-content" /></div>
   </div>
 }
 function setDimensions(element: HTMLElement, scrollHeight = 1000, clientHeight = 200) {
@@ -20,6 +20,48 @@ function setDimensions(element: HTMLElement, scrollHeight = 1000, clientHeight =
 afterEach(cleanup)
 
 describe('vertical scrolling inside node widgets', () => {
+  it('runs before a host capture listener that truncates propagation while a slider is focused', () => {
+    const hostCapture = vi.fn((event: Event) => {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+    })
+    document.addEventListener('wheel', hostCapture, { capture:true, passive:false })
+    try {
+      render(<Panel />)
+      const sliders = screen.getByTestId('sliders')
+      const thumb = screen.getByRole('slider', {name:'Effect'})
+      setDimensions(sliders)
+      thumb.focus()
+      expect(document.activeElement).toBe(thumb)
+      fireEvent.wheel(thumb,{deltaY:120})
+      expect(sliders.scrollTop).toBe(120)
+      expect(document.activeElement).toBe(thumb)
+      expect(hostCapture).not.toHaveBeenCalled()
+    } finally {
+      document.removeEventListener('wheel', hostCapture, true)
+    }
+  })
+
+  it('does not hijack an outside wheel event just because its slider keeps focus', () => {
+    render(<Panel />)
+    const sliders = screen.getByTestId('sliders')
+    setDimensions(sliders)
+    screen.getByRole('slider',{name:'Effect'}).focus()
+    const outside = new WheelEvent('wheel',{deltaY:100,bubbles:true,cancelable:true})
+    fireEvent(screen.getByTestId('toolbar'),outside)
+    expect(outside.defaultPrevented).toBe(false)
+    expect(sliders.scrollTop).toBe(0)
+  })
+
+  it('routes wheel events only to the panel under the pointer when several nodes exist', () => {
+    render(<><Panel /><Panel /></>)
+    const [first,second] = screen.getAllByTestId('sliders')
+    setDimensions(first); setDimensions(second)
+    fireEvent.wheel(second,{deltaY:100})
+    expect(first.scrollTop).toBe(0)
+    expect(second.scrollTop).toBe(100)
+  })
+
   it('scrolls when nodeV2 has already cancelled the wheel default', () => {
     const canvasWheel = vi.fn()
     render(<Panel cancelInCapture onCanvasWheel={canvasWheel} />)
@@ -70,7 +112,10 @@ describe('vertical scrolling inside node widgets', () => {
     const sliders = screen.getByTestId('sliders')
     setDimensions(sliders)
     unmount()
+    // Reattach the detached DOM so a leaked window listener would receive it.
+    document.body.append(sliders)
     fireEvent.wheel(sliders,{deltaY:100})
     expect(sliders.scrollTop).toBe(0)
+    sliders.remove()
   })
 })

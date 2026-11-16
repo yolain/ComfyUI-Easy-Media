@@ -1,26 +1,30 @@
 import { useLayoutEffect, type RefObject } from 'react'
 
-/** Scroll inside DOM widgets even when the node canvas cancels native wheel scrolling. */
+/** Keep wheel scrolling local, before node canvas capture listeners can intercept it. */
 export function useVerticalWheelScroll(ref: RefObject<HTMLElement | null>): void {
   useLayoutEffect(() => {
     const element = ref.current
-    if (!element) return
+    const view = element?.ownerDocument.defaultView
+    if (!element || !view) return
 
     function handleWheel(event: WheelEvent) {
       if (!element || event.ctrlKey || event.metaKey || event.deltaY === 0) return
+      // Native event paths exclude portaled color pickers and other nodes. Focus
+      // alone must never redirect an outside wheel gesture into this panel.
+      if (!event.composedPath().includes(element)) return
       const limit = element.scrollHeight - element.clientHeight
       if (limit <= 0) return
 
-      // nodeV2 can prevent the default action in an ancestor's capture listener.
-      // Apply scrolling explicitly; cancelling here also avoids double scrolling
-      // in the legacy node renderer, where the native default still works.
+      // Run before document/node capture listeners. In particular, a focused
+      // slider must not let nodeV2 consume the gesture before it reaches us.
       event.preventDefault()
-      event.stopPropagation()
+      event.stopImmediatePropagation()
       const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? element.clientHeight : 1
       element.scrollTop = Math.max(0, Math.min(limit, element.scrollTop + event.deltaY * unit))
     }
 
-    element.addEventListener('wheel', handleWheel, { passive: false })
-    return () => element.removeEventListener('wheel', handleWheel)
+    const options = { capture: true, passive: false } as const
+    view.addEventListener('wheel', handleWheel, options)
+    return () => view.removeEventListener('wheel', handleWheel, options)
   }, [ref])
 }
