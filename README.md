@@ -45,6 +45,23 @@ By default, the Skill only generates JSON. When explicitly asked to run the work
 
 ## ✨ Features
 
+### Face Beauty
+
+Two nodes in `EasyUse/Image` share face reshaping, skin retouching, eye/teeth whitening, under-eye lift, lip tint and blush:
+
+- `easy faceBeautify`: embedded React editor with live browser preview, before/after comparison, a fixed toolbar and scrolling controls. Select a portrait directly, or use the connected IMAGE input; selecting a portrait switches the active source, and the cable button switches back to IMAGE.
+- `easy faceBeautifyStatic`: native numeric widgets with `#RRGGBB` lip/blush color fields. This is not an output node: connect its IMAGE output to a preview or save node. Its optional STRING `preset` socket accepts the editor's `preset_json`; only fields included in the preset override the native controls, and its IMAGE input is always used.
+
+Install the optional detector dependency in the Python environment running ComfyUI, then restart ComfyUI:
+
+```bash
+python -m pip install 'mediapipe>=0.10.20,<0.11'
+```
+
+The Face Landmarker model downloads automatically on first use to `ComfyUI/models/mediapipe/face_landmarker.task`; existing files are reused. The download icon retries installation. Both nodes output the processed IMAGE and effective preset JSON. Presets reference image files rather than embedding them.
+
+Detection handles one face per image; images without a detected face remain unchanged. Batches process every frame, while the editor previews the first frame. Preview resolution is capped at 1280 pixels on the longest side; final output retains the input resolution. There is no multi-face selection or temporal stabilization for video.
+
 ### 🎞️ (New) MultiTrack Project Pipeline
 
 ![pipeline](https://github.com/user-attachments/assets/0170ae6f-149e-41ba-9bdf-03ec31b0625e)

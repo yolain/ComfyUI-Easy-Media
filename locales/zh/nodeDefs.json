@@ -1626,5 +1626,92 @@
       "0": { "name": "正向条件" },
       "1": { "name": "潜空间" }
     }
+  },
+  "easy faceBeautify": {
+    "display_name": "面部美化",
+    "description": "嵌入式人像美化：瘦脸、五官调整、磨皮和肤色调节。可切换选图或连接的 IMAGE，每张图处理一张人脸；未检测到人脸时保留原图。",
+    "inputs": {
+      "preset": {
+        "name": "预设方案"
+      },
+      "image": {
+        "name": "图像"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "图像"
+      },
+      "1": {
+        "name": "预设 JSON"
+      }
+    }
+  },
+  "easy faceBeautifyStatic": {
+    "display_name": "面部美化（静态版）",
+    "description": "使用 ComfyUI 原生数值控件调节面部、眼唇和肤色。可选 STRING 预设插槽仅覆盖预设中包含的参数和颜色，始终使用连接的 IMAGE。需连接到预览或保存节点执行。",
+    "inputs": {
+      "image": {
+        "name": "图像"
+      },
+      "slim_face": {
+        "name": "瘦脸"
+      },
+      "chin": {
+        "name": "下巴长度"
+      },
+      "eyes": {
+        "name": "眼睛大小"
+      },
+      "nose": {
+        "name": "鼻部收窄"
+      },
+      "mouth": {
+        "name": "嘴部大小"
+      },
+      "eye_bright": {
+        "name": "眼睛与牙齿美白"
+      },
+      "under_eye": {
+        "name": "眼下提亮"
+      },
+      "lip_tint": {
+        "name": "唇色强度"
+      },
+      "blush": {
+        "name": "腮红强度"
+      },
+      "smooth": {
+        "name": "磨皮"
+      },
+      "whiten": {
+        "name": "美白"
+      },
+      "brightness": {
+        "name": "亮度"
+      },
+      "warmth": {
+        "name": "暖色"
+      },
+      "lip_color": {
+        "name": "唇色",
+        "tooltip": "十六进制颜色，格式为 #RRGGBB。"
+      },
+      "blush_color": {
+        "name": "腮红颜色",
+        "tooltip": "十六进制颜色，格式为 #RRGGBB。"
+      },
+      "preset": {
+        "name": "预设覆盖"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "图像"
+      },
+      "1": {
+        "name": "生效预设 JSON"
+      }
+    }
   }
 }

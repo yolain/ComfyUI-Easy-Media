@@ -785,3 +785,29 @@ async def handle_subtitle_speech(request: web.Request) -> web.Response:
     except Exception as error:
         traceback.print_exc()
         return web.json_response({"error": f"Subtitle speech generation failed: {error}"}, status=500)
+
+
+@PromptServer.instance.routes.post("/easy-media/face-beauty/prepare")
+async def prepare_face_beauty(request: web.Request) -> web.Response:
+    from .utils.face_beautify import load_beauty_source, detect_face, beauty_preview, parse_beauty_preset
+
+    try:
+        body = await request.json()
+        settings = parse_beauty_preset(body)
+        if not settings["source"]:
+            raise ValueError("Select an image first.")
+
+        def prepare() -> dict:
+            frame = load_beauty_source(settings["source"])[0]
+            return beauty_preview(frame, detect_face(frame))
+
+        # Async preparation and synchronous node execution use the same downloader.
+        await download_model("face-landmarker")
+        return web.json_response(await asyncio.to_thread(prepare))
+    except MissingEasyMediaModelError as error:
+        return web.json_response({"error": str(error), "model": model_payload(error.model)}, status=409)
+    except (ValueError, TypeError) as error:
+        return web.json_response({"error": str(error)}, status=400)
+    except Exception as error:
+        traceback.print_exc()
+        return web.json_response({"error": str(error)}, status=500)

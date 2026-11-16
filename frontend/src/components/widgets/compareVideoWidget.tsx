@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
@@ -83,6 +84,8 @@ export interface CompareVideoPayload {
 }
 
 interface CompareVideoInnerProps {
+  mediaType?: 'video' | 'image'
+  outputContent?: ReactNode
   app: ComfyApp
   node: CompareVideoNode
   settings: CompareVideoSettings
@@ -94,6 +97,8 @@ interface CompareVideoInnerProps {
 }
 
 export interface CompareVideoProps {
+  mediaType?: 'video' | 'image'
+  outputContent?: ReactNode
   app: ComfyApp
   sourceUrl: string
   outputUrl: string
@@ -399,8 +404,10 @@ export function CompareVideoWidget({ app, node, value, onChange }: Readonly<Reac
   )
 }
 
-/** Compare two externally selected videos without exposing the media pickers. */
+/** Compare external media, optionally using a live canvas for the processed image. */
 export const CompareVideo = memo(function CompareVideo({
+  mediaType = 'video',
+  outputContent,
   app,
   sourceUrl,
   outputUrl,
@@ -420,6 +427,8 @@ export const CompareVideo = memo(function CompareVideo({
     <LocaleContext.Provider value={locale}>
       <CompareVideoWidgetInner
         app={app}
+        mediaType={mediaType}
+        outputContent={outputContent}
         node={{}}
         settings={settings}
         onSettingsChange={(nextSettings) => setCompareMode(nextSettings.compare_mode ?? 'side-by-side')}
@@ -591,6 +600,8 @@ function CompareVideoMediaPicker({
 }
 
 function CompareVideoWidgetInner({
+  mediaType = 'video',
+  outputContent,
   app,
   node,
   settings,
@@ -992,7 +1003,17 @@ function CompareVideoWidgetInner({
             if (visibleMode === 'compare') setSplit(50)
           }}
         >
-          {sourceUrl ? (
+          {mediaType === 'image' && sourceUrl ? (
+            <img src={sourceUrl} alt={t('compareVideo.source')} draggable={false}
+              className={cn('absolute inset-0 h-full w-full object-contain', !hasSource && 'invisible', isSideBySide && 'right-auto w-1/2')} />
+          ) : null}
+          {mediaType === 'image' && outputUrl ? (
+            <div className={cn('absolute inset-0 h-full w-full', !hasOutput && 'invisible', isSideBySide && 'left-1/2 w-1/2')}
+              style={{ clipPath: isSideBySide ? undefined : `inset(0 0 0 ${displaySplit}%)` }}>
+              {outputContent ?? <img src={outputUrl} alt={t('compareVideo.output')} draggable={false} className="h-full w-full object-contain" />}
+            </div>
+          ) : null}
+          {mediaType === 'video' && sourceUrl ? (
             <video
               ref={sourceRef}
               className={cn(
@@ -1015,7 +1036,7 @@ function CompareVideoWidgetInner({
               onEnded={handleEnded}
             />
           ) : null}
-          {outputUrl ? (
+          {mediaType === 'video' && outputUrl ? (
             <video
               ref={outputRef}
               className={cn(
@@ -1104,7 +1125,7 @@ function CompareVideoWidgetInner({
           ) : null}
         </div>
 
-        <div
+        {mediaType === 'video' ? <div
           data-compare-video-toolbar
           className="@container/compare-video-controls pointer-events-none absolute inset-x-0 bottom-0 z-10 grid translate-y-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border-t border-border bg-background/90 px-1 opacity-0 shadow-sm backdrop-blur-sm transition-[opacity,transform] duration-300 ease-out @max-[420px]/compare-video-controls:grid-cols-[minmax(0,1fr)_auto] @max-[420px]/compare-video-controls:gap-x-1 @max-[420px]/compare-video-controls:gap-y-0 @max-[420px]/compare-video-controls:px-2 @max-[420px]/compare-video-controls:py-1 group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:opacity-100"
         >
@@ -1220,7 +1241,7 @@ function CompareVideoWidgetInner({
               </Tooltip>
             ) : null}
           </div>
-        </div>
+        </div> : null}
       </div>
     </TooltipProvider>
   )

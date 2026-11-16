@@ -530,3 +530,83 @@ def test_require_whisper_large_v3_excludes_encode_candidates(monkeypatch, tmp_pa
     )
 
     assert models.require_whisper_large_v3_model_path() == valid_match
+
+
+def test_ensure_face_model_downloads_once_and_reuses_local_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(models.folder_paths, "models_dir", str(tmp_path))
+    monkeypatch.setattr(models.aiohttp, "ClientSession", _FakeSession)
+    monkeypatch.delitem(sys.modules, "server", raising=False)
+    models._MODEL_DOWNLOAD_LOCKS.clear()
+    _FakeSession.request_count = 0
+
+    target = models.ensure_model_downloaded("face-landmarker")
+    assert target == tmp_path / "mediapipe" / "face_landmarker.task"
+    assert target.read_bytes() == b"checkpoint"
+    assert models.ensure_model_downloaded("face-landmarker") == target
+    assert _FakeSession.request_count == 1
+
+
+def test_node_and_preview_share_one_face_model_download(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    monkeypatch.setattr(models.folder_paths, "models_dir", str(tmp_path))
+    monkeypatch.setattr(models.aiohttp, "ClientSession", _FakeSession)
+    models._MODEL_DOWNLOAD_LOCKS.clear()
+    _FakeSession.request_count = 0
+
+    async def run_downloads():
+        monkeypatch.setitem(sys.modules, "server", SimpleNamespace(
+            PromptServer=SimpleNamespace(instance=SimpleNamespace(loop=asyncio.get_running_loop()))))
+        return await asyncio.gather(
+            asyncio.to_thread(models.ensure_model_downloaded, "face-landmarker"),
+            models.download_model("face-landmarker"),
+        )
+
+    first, second = asyncio.run(run_downloads())
+    assert first == second
+    assert first.read_bytes() == b"checkpoint"
+    assert _FakeSession.request_count == 1
+
+
+def test_auto_download_failure_is_reported_and_partial_file_is_removed(monkeypatch, tmp_path):
+    import pytest
+
+    class FailedResponse(_FakeResponse):
+        def raise_for_status(self):
+            raise RuntimeError("Download unavailable")
+
+    class FailedSession(_FakeSession):
+        def get(self, _url):
+            return FailedResponse()
+
+    monkeypatch.setattr(models.folder_paths, "models_dir", str(tmp_path))
+    monkeypatch.setattr(models.aiohttp, "ClientSession", FailedSession)
+    monkeypatch.delitem(sys.modules, "server", raising=False)
+    models._MODEL_DOWNLOAD_LOCKS.clear()
+    with pytest.raises(RuntimeError, match="Download unavailable"):
+        models.ensure_model_downloaded("face-landmarker")
+    assert not list((tmp_path / "mediapipe").iterdir())
+
+
+def test_auto_download_works_inside_comfy_execution_workers_event_loop(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    monkeypatch.setattr(models.folder_paths, "models_dir", str(tmp_path))
+    monkeypatch.setattr(models.aiohttp, "ClientSession", _FakeSession)
+    models._MODEL_DOWNLOAD_LOCKS.clear()
+    _FakeSession.request_count = 0
+
+    async def worker_execution():
+        # Synchronous V3 execute() runs inside the worker's asynchronous executor.
+        return models.ensure_model_downloaded("face-landmarker")
+
+    async def run_downloads():
+        monkeypatch.setitem(sys.modules, "server", SimpleNamespace(
+            PromptServer=SimpleNamespace(instance=SimpleNamespace(loop=asyncio.get_running_loop()))))
+        return await asyncio.wait_for(asyncio.gather(
+            asyncio.to_thread(lambda: asyncio.run(worker_execution())),
+            models.download_model("face-landmarker"),
+        ), timeout=5)
+
+    first, second = asyncio.run(run_downloads())
+    assert first == second
+    assert first.read_bytes() == b"checkpoint"
+    assert _FakeSession.request_count == 1

@@ -47,6 +47,23 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 ## ✨ 核心功能
 
+### 面部美化
+
+`EasyUse/Image` 分类提供两个节点，共用面部形变、磨皮、美白、眼睛与牙齿美白、眼下提亮、唇色和腮红处理：
+
+- `easy faceBeautify`：嵌入式 React 编辑器，支持浏览器实时预览、前后对比、固定按钮栏与滚动调节区。可直接选图或使用连接的 IMAGE；选图后切换为所选人像，点击连接图标可切回 IMAGE。
+- `easy faceBeautifyStatic`：原生数值控件，唇色与腮红使用 `#RRGGBB` 十六进制输入。它不是输出节点，需要连接预览或保存节点执行。可选 STRING `preset` 插槽可连接编辑器的 `preset_json`，仅覆盖预设中包含的参数与颜色，始终处理连接的 IMAGE。
+
+在运行 ComfyUI 的 Python 环境安装可选检测依赖，然后重启 ComfyUI：
+
+```bash
+python -m pip install 'mediapipe>=0.10.20,<0.11'
+```
+
+首次使用时自动下载 Face Landmarker 模型至 `ComfyUI/models/mediapipe/face_landmarker.task`，已有文件直接复用；下载图标可用于重试。两个节点均输出处理后的 IMAGE 和生效预设 JSON。预设保存图片文件引用，不包含图片本身。
+
+每张图片处理一张人脸，未检测到人脸时保留原图。批次逐帧处理，编辑器预览第一帧。预览最长边限制为 1280 像素，最终输出保留输入分辨率；暂不支持多人脸选择与视频时序稳定。
+
 ### 🎞️ (新)多轨项目流水线 MultiTrack Project Pipeline
 
 ![pipeline](https://github.com/user-attachments/assets/0170ae6f-149e-41ba-9bdf-03ec31b0625e)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import uuid
 from collections import deque
 from collections.abc import Mapping, Sequence
@@ -612,6 +613,11 @@ class EasyMediaModel:
 
 
 MODEL_REGISTRY: dict[str, EasyMediaModel] = {
+    "face-landmarker": EasyMediaModel(
+        name="face-landmarker", display_name="MediaPipe Face Landmarker",
+        category="mediapipe", filename="face_landmarker.task",
+        url="https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+    ),
     "omnishotcut": EasyMediaModel(
         name="omnishotcut",
         display_name="OmniShotCut",
@@ -700,6 +706,35 @@ def require_model_path(model_name: str) -> Path:
         return model.path
     notify_missing_model(model_name)
     raise MissingEasyMediaModelError(model)
+
+
+def ensure_model_downloaded(model_name: str) -> Path:
+    """Resolve a local model, downloading it through the shared downloader if absent.
+
+    Node execution runs in a worker thread. Schedule downloads on PromptServer's
+    event loop so node execution and HTTP requests share the same download lock.
+    Async callers must await download_model directly rather than block their loop.
+    """
+    model = get_model_info(model_name)
+    if model.path.is_file():
+        return model.path
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+
+    server_module = sys.modules.get("server")
+    instance = getattr(getattr(server_module, "PromptServer", None), "instance", None)
+    loop = getattr(instance, "loop", None)
+    if loop is not None and loop.is_running():
+        if running_loop is loop:
+            raise RuntimeError("Server event-loop callers must await download_model(model_name).")
+        # ComfyUI's execution worker may have its own running event loop. It is
+        # safe to wait here because downloads run on the separate server loop.
+        return asyncio.run_coroutine_threadsafe(download_model(model_name), loop).result()
+    if running_loop is not None:
+        raise RuntimeError("Async model loading must await download_model(model_name).")
+    return asyncio.run(download_model(model_name))
 
 
 async def download_model(model_name: str) -> Path:

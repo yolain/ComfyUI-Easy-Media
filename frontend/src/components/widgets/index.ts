@@ -7,3 +7,5 @@ export type { CompareVideoPayload } from './compareVideoWidget'
 export { PromptEnhancerAccountWidget } from './PromptEnhancerAccountBar'
 export { ProjectVideoCombineWidget } from './ProjectVideoCombineWidget'
 export { SamplingPreviewWidget } from './SamplingPreviewWidget'
+
+export { FaceBeautyWidget } from './FaceBeautyWidget'
