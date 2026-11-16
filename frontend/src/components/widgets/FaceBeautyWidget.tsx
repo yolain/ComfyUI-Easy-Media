@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { FolderOpen, RotateCcw, Braces, Download, Cable } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ColorPickerPopover } from '@/components/ui/color-picker'
@@ -12,6 +12,7 @@ import { CompareVideo } from '@/components/widgets/compareVideoWidget'
 import { LocaleContext, useT } from '@/lib/i18n'
 import { BEAUTY_PARAMETERS, NONNEGATIVE_BEAUTY_PARAMETERS, DEFAULT_BEAUTY_PRESET, normalizeBeautyPreset, type BeautyPreset } from '@/lib/face-beauty'
 import { mediaPathToViewUrl } from '@/lib/media-url'
+import { useVerticalWheelScroll } from '@/hooks/use-vertical-wheel-scroll'
 import { useFaceBeautyPreview } from '@/hooks/use-face-beauty-preview'
 import type { ReactWidgetProps } from '@/lib/create-react-widget'
 export function FaceBeautyWidget(props: ReactWidgetProps<BeautyPreset>) {
@@ -19,6 +20,8 @@ export function FaceBeautyWidget(props: ReactWidgetProps<BeautyPreset>) {
 }
 function FaceBeautyEditor({ value, onChange, node, app }: ReactWidgetProps<BeautyPreset>) {
   const t = useT()
+  const slidersRef = useRef<HTMLDivElement>(null)
+  useVerticalWheelScroll(slidersRef)
   let preset = DEFAULT_BEAUTY_PRESET
   let presetError = ''
   try { preset = normalizeBeautyPreset(value) }
@@ -62,7 +65,7 @@ function FaceBeautyEditor({ value, onChange, node, app }: ReactWidgetProps<Beaut
       {(error || presetError || jsonError) && <p role="alert" className="mb-3 break-words text-xs text-destructive">{error || presetError || jsonError}</p>}
       {preview && !preview.face_found && <p role="status" className="mb-3 text-xs text-muted-foreground">{t('faceBeauty.noFace')}</p>}
       </div>
-      <div data-face-beauty-sliders className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3">
+      <div ref={slidersRef} data-face-beauty-sliders data-capture-wheel="true" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3">
       {BEAUTY_PARAMETERS.map((key, index) => <div key={key} className="mb-5">
         {(index === 0 || index === 5 || index === 9) && <h3 className="mb-4 border-b border-border pb-2 text-sm font-medium">{t(index === 0 ? 'faceBeauty.reshape' : index === 5 ? 'faceBeauty.eyesLips' : 'faceBeauty.skin')}</h3>}
         <div className="mb-2 flex justify-between gap-2 text-xs"><span>{t(`faceBeauty.${key}`)}</span><span className="text-muted-foreground tabular-nums">{Math.round(preset.parameters[key] * 100)}</span></div>
