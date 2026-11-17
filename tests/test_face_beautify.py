@@ -220,7 +220,7 @@ def test_numeric_schema_uses_native_widgets_and_optional_preset_socket(monkeypat
     assert inputs['lip_color'].default == '#c4485f'
     assert inputs['blush_color'].default == '#ff9f80'
     assert 'lip_red' not in inputs
-    assert len(schema.inputs) == 23
+    assert len(schema.inputs) == 61
     # New controls follow the existing color widgets, preserving old workflows.
     assert [item.id for item in schema.inputs[:16]] == ['image', *beauty.LEGACY_BEAUTY_PARAMETERS, 'lip_color', 'blush_color']
     assert inputs['pointed_chin'].default == 0

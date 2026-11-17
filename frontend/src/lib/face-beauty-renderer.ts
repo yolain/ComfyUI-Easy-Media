@@ -17,8 +17,8 @@ uniform vec3 lipColor;
 uniform vec3 blushColor;
 uniform float aspect;
 uniform int count;
-uniform vec4 handles[${MAX_BEAUTY_HANDLES}];
-uniform vec3 changes[${MAX_BEAUTY_HANDLES}];
+uniform bool faceFound;
+uniform highp sampler2D warpData;
 uniform vec4 regions[4];
 uniform vec2 axis;
 uniform float blurRadius;
@@ -39,14 +39,19 @@ void main() {
   vec2 p = uv * vec2(1., aspect);
   for (int i=0; i<${MAX_BEAUTY_HANDLES}; i++) {
     if (i >= count) break;
-    if (handles[i].w == 0.) continue;
-    vec2 d = p - handles[i].xy;
-    float t = clamp(length(d) / handles[i].z, 0., 1.);
-    float fall = (1. - t*t*(3. - 2.*t)) * handles[i].w;
-    p = handles[i].xy + d * (1. - changes[i].z * fall) - changes[i].xy * fall;
+    vec4 change = texelFetch(warpData, ivec2(1, i), 0);
+    if (change.z == 0.) continue;
+    vec4 handle = texelFetch(warpData, ivec2(0, i), 0);
+    vec4 matrix = texelFetch(warpData, ivec2(2, i), 0);
+    vec2 d = p - handle.xy;
+    vec2 local = vec2(dot(d, axis), dot(d, vec2(-axis.y, axis.x)));
+    float t = clamp(length(local / handle.zw), 0., 1.);
+    float fall = (1. - t*t*(3. - 2.*t)) * change.z;
+    vec2 displacement = vec2(dot(matrix.xy, d), dot(matrix.zw, d));
+    p -= (displacement + change.xy) * fall;
   }
   vec4 src = sampleAt(p);
-  float skin = count > 0 ? 1. : 0.;
+  float skin = faceFound ? 1. : 0.;
   for (int i=0; i<4; i++) {
     vec2 d = p - regions[i].xy;
     vec2 local = vec2(dot(d, axis), dot(d, vec2(-axis.y, axis.x)));
@@ -54,7 +59,7 @@ void main() {
     skin *= i == 0 ? m : 1. - m;
   }
   vec3 col = src.rgb;
-  if (smoothing > 0. && count > 0) {
+  if (smoothing > 0. && faceFound) {
     vec3 blurred = vec3(0.);
     for (int x=-1; x<=1; x++) for (int y=-1; y<=1; y++) blurred += sampleAt(p + vec2(float(x), float(y)) * blurRadius).rgb / 9.;
     float edge = smoothstep(.030, .115, abs(dot(col - blurred, vec3(.299,.587,.114))));
@@ -63,7 +68,7 @@ void main() {
   col += (1. - col) * skin * whiten * .25;
   col += skin * brightness * .15;
   col += skin * warmth * .06 * vec3(1., .15, -1.);
-  if (count > 0) {
+  if (faceFound) {
     if (under_eye > 0.) {
       float mask = max(accentAt(p, accents[0]), accentAt(p, accents[1]));
       float amount = mask * under_eye * (1. - smoothstep(.55, .85, luma(col)));
@@ -132,9 +137,11 @@ export function createBeautyRenderer(canvas: HTMLCanvasElement, source: HTMLImag
   let buffer: WebGLBuffer | null = null
   let texture: WebGLTexture | null = null
   let featureTexture: WebGLTexture | null = null
+  let warpTexture: WebGLTexture | null = null
   const dispose = () => {
     if (texture) gl.deleteTexture(texture)
     if (featureTexture) gl.deleteTexture(featureTexture)
+    if (warpTexture) gl.deleteTexture(warpTexture)
     if (buffer) gl.deleteBuffer(buffer)
     if (program) gl.deleteProgram(program)
     shaders.forEach(shader => gl.deleteShader(shader))
@@ -180,27 +187,57 @@ export function createBeautyRenderer(canvas: HTMLCanvasElement, source: HTMLImag
     gl.activeTexture(gl.TEXTURE0)
     const uniform = (name: string) => gl.getUniformLocation(program!, name)
     gl.uniform1i(uniform('featureMask'), 1)
+    // Float texture storage avoids fragment-uniform limits as controls expand.
+    warpTexture = gl.createTexture()
+    if (!warpTexture) throw new Error('Unable to allocate face warp data')
+    gl.activeTexture(gl.TEXTURE2)
+    gl.bindTexture(gl.TEXTURE_2D, warpTexture)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+    const warpData = new Float32Array(MAX_BEAUTY_HANDLES * 12)
+    geometry.handles.forEach((handle, index) => {
+      const offset = index * 12
+      warpData.set([...handle.center, ...(handle.radii ?? [handle.radius, handle.radius])], offset)
+      warpData.set(handle.delta, offset + 4)
+      warpData.set(handle.matrix ?? [handle.scale, 0, 0, handle.scale], offset + 8)
+    })
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 3, MAX_BEAUTY_HANDLES, 0, gl.RGBA, gl.FLOAT, warpData)
+    gl.uniform1i(uniform('warpData'), 2)
+    gl.activeTexture(gl.TEXTURE0)
     const accents = new Float32Array(16)
     geometry.accents?.forEach((r, i) => accents.set([...r.center, ...r.radii], i * 4))
     gl.uniform4fv(uniform('accents[0]'), accents)
     gl.uniform1f(uniform('aspect'), canvas.height / canvas.width)
     gl.uniform1i(uniform('image'), 0)
-    gl.uniform1i(uniform('count'), geometry.handles.length)
+    gl.uniform1i(uniform('faceFound'), geometry.handles.length > 0 ? 1 : 0)
     const regions = new Float32Array(16)
     geometry.regions.forEach((r, i) => regions.set([...r.center, ...r.radii], i * 4))
     gl.uniform4fv(uniform('regions[0]'), regions)
     gl.uniform2fv(uniform('axis'), geometry.axis ?? [1, 0])
     gl.uniform1f(uniform('blurRadius'), geometry.blur ?? 0)
-    const changes = new Float32Array(MAX_BEAUTY_HANDLES * 3)
-    geometry.handles.forEach((h, i) => changes.set([...h.delta, h.scale], i * 3))
-    gl.uniform3fv(uniform('changes[0]'), changes)
+    const activeData = new Float32Array(warpData.length)
     return {
       draw(parameters: BeautyParameters, colors = DEFAULT_BEAUTY_COLORS) {
         if (gl.isContextLost()) throw new Error('Face Beauty GPU context was lost; reload the image')
         gl.useProgram(program)
-        const handles = new Float32Array(MAX_BEAUTY_HANDLES * 4)
-        geometry.handles.forEach((h, i) => handles.set([...h.center, h.radius, parameters[h.key]], i * 4))
-        gl.uniform4fv(uniform('handles[0]'), handles)
+        // Only sample active deformations per pixel, preserving their original order.
+        let activeCount = 0
+        geometry.handles.forEach((handle, index) => {
+          const strength = parameters[handle.key] ?? 0
+          if (!strength) return
+          activeData.set(warpData.subarray(index * 12, index * 12 + 12), activeCount * 12)
+          activeData[activeCount * 12 + 6] = strength
+          activeCount++
+        })
+        gl.uniform1i(uniform('count'), activeCount)
+        if (activeCount) {
+          gl.activeTexture(gl.TEXTURE2)
+          gl.bindTexture(gl.TEXTURE_2D, warpTexture)
+          gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 3, activeCount, gl.RGBA, gl.FLOAT, activeData.subarray(0, activeCount * 12))
+          gl.activeTexture(gl.TEXTURE0)
+        }
         for (const key of BEAUTY_PARAMETERS) {
           if (key === 'smooth') gl.uniform1f(uniform('smoothing'), parameters[key])
           else if (['whiten', 'brightness', 'warmth', 'eye_bright', 'under_eye', 'lip_tint', 'blush'].includes(key)) gl.uniform1f(uniform(key), parameters[key])

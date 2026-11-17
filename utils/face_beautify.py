@@ -29,7 +29,9 @@ PARAMETER_LIMITS = {
 LEGACY_BEAUTY_PARAMETERS = tuple(PARAMETER_LIMITS)
 FACE_DETAIL_PARAMETERS = ("small_face", "narrow_face", "temple_width", "cheekbone_width", "jaw_width", "pointed_chin")
 PARAMETER_LIMITS.update({name: (-1.0, 1.0) for name in FACE_DETAIL_PARAMETERS})
-MAX_BEAUTY_HANDLES = 32
+RESHAPE_PARAMETERS = ('middle_face', 'lower_face', 'face_contour_smooth', 'jawline', 'v_face', 'face_vertical', 'face_horizontal', 'face_rotation', 'eye_height', 'eye_width', 'eye_vertical', 'eye_distance', 'eye_tilt', 'lower_eyelid', 'iris_size', 'inner_corner', 'outer_corner', 'eye_tail', 'nose_size', 'nose_wings', 'nose_bridge', 'nose_vertical', 'nose_tip', 'nose_root', 'brow_thickness', 'brow_vertical', 'brow_tilt', 'brow_arch', 'brow_distance', 'brow_length', 'mouth_width', 'mouth_vertical', 'mouth_tilt', 'smile', 'm_lip', 'upper_lip', 'lower_lip', 'lip_thickness')
+PARAMETER_LIMITS.update({name: (-1.0, 1.0) for name in RESHAPE_PARAMETERS})
+MAX_BEAUTY_HANDLES = 128
 DEFAULT_BEAUTY_COLORS = {"lip": "#c4485f", "blush": "#ff9f80"}
 _DETECT_LOCK = threading.Lock()
 _DETECTOR: Any = None
@@ -218,6 +220,87 @@ def face_geometry(points: list[list[float]], aspect: float) -> dict:
     contour_width((93, 323), "cheekbone_width", 0.055, 0.30)
     contour_width((172, 397), "jaw_width", 0.060, 0.30)
     contour_width((148, 377), "pointed_chin", 0.035, 0.20)
+    def warp(key: str, center: np.ndarray, rx: float, ry: float | None = None,
+             move: np.ndarray | None = None, stretch: tuple[float, float] = (0, 0),
+             turn: float = 0) -> None:
+        """Face-aligned elliptical support with a local affine displacement."""
+        matrix = (np.outer(horizontal, horizontal) * stretch[0]
+                  + np.outer(vertical, vertical) * stretch[1]
+                  + np.array([[0, -turn], [turn, 0]]))
+        delta = np.zeros(2) if move is None else move
+        add(center, max(rx, 1e-5), key, *delta)
+        handles[-1].update(matrix=matrix.reshape(-1).tolist(),
+                           radii=[max(rx, 1e-5), max(rx if ry is None else ry, 1e-5)])
+
+    face_center = (p[10] + p[152]) / 2
+    face_height = max(float(np.linalg.norm(p[152] - p[10])), width * 0.8)
+    warp("face_vertical", face_center, width * .65, face_height * .65, move=vertical * width * .08)
+    warp("face_horizontal", face_center, width * .65, face_height * .65, move=horizontal * width * .08)
+    warp("face_rotation", face_center, width * .65, face_height * .65, turn=.12)
+    warp("middle_face", p[1], width * .35, face_height * .30, stretch=(0, .16))
+    warp("lower_face", (p[2] + p[152]) / 2, width * .47, face_height * .35, stretch=(0, .16))
+    contour_width((132, 361), "v_face", .045, .35)
+    warp("v_face", p[152], width * .24, move=vertical * width * .035)
+    for side in ((234, 93, 132, 172, 148, 152), (454, 323, 361, 397, 377, 152)):
+        for previous, index, following in zip(side, side[1:], side[2:]):
+            # Smooth deviations of the contour instead of applying another shrink.
+            delta = ((p[previous] + p[following]) / 2 - p[index]) * .25
+            warp("face_contour_smooth", p[index], width * .20, move=delta)
+    for index in (172, 397):
+        warp("jawline", p[index], width * .28, width * .16, move=-vertical * width * .04)
+
+    for outer, inner, upper, lower, iris, side in ((33, 133, 159, 145, 468, -1), (263, 362, 386, 374, 473, 1)):
+        center = (p[outer] + p[inner]) / 2
+        span = max(float(np.linalg.norm(p[outer] - p[inner])), width * .08)
+        rx, ry = span * .85, span * .52
+        warp("eye_height", center, rx, ry, stretch=(0, .32))
+        warp("eye_width", center, rx, ry, stretch=(.22, 0))
+        warp("eye_vertical", center, rx, ry, move=-vertical * width * .025)
+        warp("eye_distance", center, rx, ry, move=horizontal * side * width * .025)
+        warp("eye_tilt", center, rx, ry, turn=-side * .18)
+        warp("lower_eyelid", p[lower], span * .65, span * .27, move=vertical * width * .015)
+        warp("inner_corner", p[inner], span * .35, span * .30, move=-horizontal * side * width * .015)
+        warp("outer_corner", p[outer], span * .35, span * .30, move=horizontal * side * width * .015)
+        warp("eye_tail", p[outer], span * .40, span * .32, move=-vertical * width * .022)
+        if len(p) >= 478:
+            # MediaPipe exposes iris contours, not the pupil boundary. Bound the
+            # support by the eyelids so iris scaling does not resize the whole eye.
+            iris_radius = max(float(np.linalg.norm(p[iris + 1] - p[iris + 3])) / 2, 1e-5)
+            aperture = max(min(abs(float(np.dot(p[upper] - p[iris], vertical))),
+                               abs(float(np.dot(p[lower] - p[iris], vertical)))) * .95, 1e-5)
+            warp("iris_size", p[iris], iris_radius * 1.35, min(iris_radius * 1.35, aperture), stretch=(.22, .22))
+
+    warp("nose_size", p[1], width * .20, width * .26, stretch=(.18, .18))
+    for index, side in ((98, -1), (327, 1)):
+        warp("nose_wings", p[index], width * .10, width * .10, move=-horizontal * side * width * .025)
+    warp("nose_bridge", p[6], width * .12, width * .20, stretch=(-.25, 0))
+    warp("nose_vertical", p[1], width * .19, width * .25, move=-vertical * width * .035)
+    warp("nose_tip", p[1], width * .10, width * .10, stretch=(.25, .25))
+    warp("nose_root", p[168], width * .10, width * .14, stretch=(-.25, 0))
+
+    for outer, inner, peak, side in ((70, 107, 105, -1), (300, 336, 334, 1)):
+        center = (p[outer] + p[inner]) / 2
+        span = max(float(np.linalg.norm(p[outer] - p[inner])), width * .12)
+        rx, ry = span * .80, width * .075
+        warp("brow_thickness", center, rx, ry, stretch=(0, .35))
+        warp("brow_vertical", center, rx, ry, move=-vertical * width * .035)
+        warp("brow_tilt", center, rx, ry, turn=-side * .20)
+        warp("brow_arch", p[peak], span * .38, width * .07, move=-vertical * width * .025)
+        warp("brow_distance", center, rx, ry, move=horizontal * side * width * .03)
+        warp("brow_length", center, rx, ry, stretch=(.22, 0))
+
+    mouth_center = (p[61] + p[291]) / 2
+    mouth_span = max(float(np.linalg.norm(p[61] - p[291])), width * .12)
+    warp("mouth_width", mouth_center, mouth_span * .80, width * .13, stretch=(.25, 0))
+    warp("mouth_vertical", mouth_center, mouth_span * .80, width * .16, move=-vertical * width * .03)
+    warp("mouth_tilt", mouth_center, mouth_span * .80, width * .14, turn=.15)
+    for index in (61, 291):
+        warp("smile", p[index], mouth_span * .35, width * .10, move=-vertical * width * .025)
+    for index in (37, 267):
+        warp("m_lip", p[index], mouth_span * .23, width * .06, move=-vertical * width * .012)
+    warp("upper_lip", (p[0] + p[13]) / 2, mouth_span * .70, width * .065, move=-vertical * width * .012)
+    warp("lower_lip", (p[17] + p[14]) / 2, mouth_span * .70, width * .065, move=vertical * width * .014)
+    warp("lip_thickness", mouth_center, mouth_span * .75, width * .12, stretch=(0, .30))
     if len(handles) > MAX_BEAUTY_HANDLES:
         raise ValueError("Face beauty geometry exceeds the supported warp handle count.")
     # Ellipses are aligned to the face, with holes protecting eyes and lips.
@@ -286,10 +369,18 @@ def apply_face_beauty(image: torch.Tensor, parameters: dict, geometry: dict, col
                 continue
             center = torch.tensor(handle["center"], device=device, dtype=torch.float32)
             diff = coords - center
-            t = (torch.linalg.vector_norm(diff, dim=-1) / handle["radius"]).clamp(0, 1)
+            if "matrix" in handle:
+                local = torch.stack([(diff * axis).sum(-1), (diff * vertical).sum(-1)], -1)
+                radii = torch.tensor(handle["radii"], device=device, dtype=torch.float32)
+                t = torch.linalg.vector_norm(local / radii, dim=-1).clamp(0, 1)
+                matrix = torch.tensor(handle["matrix"], device=device, dtype=torch.float32).reshape(2, 2)
+                displacement = diff @ matrix.T
+            else:
+                t = (torch.linalg.vector_norm(diff, dim=-1) / handle["radius"]).clamp(0, 1)
+                displacement = diff * handle["scale"]
             fall = (1 - t * t * (3 - 2 * t)) * parameters[handle["key"]]
             delta = torch.tensor(handle["delta"], device=device, dtype=torch.float32)
-            coords = center + diff * (1 - handle["scale"] * fall[..., None]) - delta * fall[..., None]
+            coords = coords - (displacement + delta) * fall[..., None]
 
         def sample(offset_x: float = 0, offset_y: float = 0, texture: torch.Tensor | None = None) -> torch.Tensor:
             grid = (coords + torch.tensor([offset_x, offset_y], device=device, dtype=torch.float32)) / torch.tensor([1, aspect], device=device, dtype=torch.float32)

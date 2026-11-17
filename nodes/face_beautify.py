@@ -7,7 +7,7 @@ import torch
 from comfy_api.latest import io
 
 from ..utils.face_beautify import (
-    PARAMETER_LIMITS, LEGACY_BEAUTY_PARAMETERS, FACE_DETAIL_PARAMETERS, beautify_image_batch, beauty_preview, beauty_source_path,
+    PARAMETER_LIMITS, LEGACY_BEAUTY_PARAMETERS, FACE_DETAIL_PARAMETERS, RESHAPE_PARAMETERS, beautify_image_batch, beauty_preview, beauty_source_path,
     resolve_numeric_beauty_preset,
     load_beauty_source, parse_beauty_preset,
 )
@@ -77,7 +77,7 @@ class EasyFaceBeautifyStatic(io.ComfyNode):
                 # workflows retain the meaning of their serialized widget values.
                 *[io.Float.Input(name, default=0.0, min=-1.0, max=1.0, step=0.01,
                                  display_mode=io.NumberDisplay.number)
-                  for name in FACE_DETAIL_PARAMETERS],
+                  for name in (*FACE_DETAIL_PARAMETERS, *RESHAPE_PARAMETERS)],
                 io.String.Input("preset", optional=True, force_input=True,
                                 tooltip="Optional preset JSON from Face Beauty. Only included parameters and colors override the numeric controls."),
             ],
@@ -96,6 +96,19 @@ class EasyFaceBeautifyStatic(io.ComfyNode):
         preset: str | None = None,
         small_face: float = 0.0, narrow_face: float = 0.0, temple_width: float = 0.0,
         cheekbone_width: float = 0.0, jaw_width: float = 0.0, pointed_chin: float = 0.0,
+        middle_face: float = 0.0, lower_face: float = 0.0, face_contour_smooth: float = 0.0,
+        jawline: float = 0.0, v_face: float = 0.0, face_vertical: float = 0.0,
+        face_horizontal: float = 0.0, face_rotation: float = 0.0, eye_height: float = 0.0,
+        eye_width: float = 0.0, eye_vertical: float = 0.0, eye_distance: float = 0.0,
+        eye_tilt: float = 0.0, lower_eyelid: float = 0.0, iris_size: float = 0.0,
+        inner_corner: float = 0.0, outer_corner: float = 0.0, eye_tail: float = 0.0,
+        nose_size: float = 0.0, nose_wings: float = 0.0, nose_bridge: float = 0.0,
+        nose_vertical: float = 0.0, nose_tip: float = 0.0, nose_root: float = 0.0,
+        brow_thickness: float = 0.0, brow_vertical: float = 0.0, brow_tilt: float = 0.0,
+        brow_arch: float = 0.0, brow_distance: float = 0.0, brow_length: float = 0.0,
+        mouth_width: float = 0.0, mouth_vertical: float = 0.0, mouth_tilt: float = 0.0,
+        smile: float = 0.0, m_lip: float = 0.0, upper_lip: float = 0.0,
+        lower_lip: float = 0.0, lip_thickness: float = 0.0,
     ) -> io.NodeOutput:
         parameters = {
             "slim_face": slim_face, "chin": chin, "eyes": eyes, "nose": nose, "mouth": mouth,
@@ -104,6 +117,21 @@ class EasyFaceBeautifyStatic(io.ComfyNode):
             "small_face": small_face, "narrow_face": narrow_face, "temple_width": temple_width,
             "cheekbone_width": cheekbone_width, "jaw_width": jaw_width, "pointed_chin": pointed_chin,
         }
+        parameters.update({
+            "middle_face": middle_face, "lower_face": lower_face, "face_contour_smooth": face_contour_smooth,
+            "jawline": jawline, "v_face": v_face, "face_vertical": face_vertical,
+            "face_horizontal": face_horizontal, "face_rotation": face_rotation, "eye_height": eye_height,
+            "eye_width": eye_width, "eye_vertical": eye_vertical, "eye_distance": eye_distance,
+            "eye_tilt": eye_tilt, "lower_eyelid": lower_eyelid, "iris_size": iris_size,
+            "inner_corner": inner_corner, "outer_corner": outer_corner, "eye_tail": eye_tail,
+            "nose_size": nose_size, "nose_wings": nose_wings, "nose_bridge": nose_bridge,
+            "nose_vertical": nose_vertical, "nose_tip": nose_tip, "nose_root": nose_root,
+            "brow_thickness": brow_thickness, "brow_vertical": brow_vertical, "brow_tilt": brow_tilt,
+            "brow_arch": brow_arch, "brow_distance": brow_distance, "brow_length": brow_length,
+            "mouth_width": mouth_width, "mouth_vertical": mouth_vertical, "mouth_tilt": mouth_tilt,
+            "smile": smile, "m_lip": m_lip, "upper_lip": upper_lip,
+            "lower_lip": lower_lip, "lip_thickness": lip_thickness,
+        })
         colors = {"lip": lip_color, "blush": blush_color}
         settings = resolve_numeric_beauty_preset(parameters, colors, preset)
         result, _points = beautify_image_batch(image, settings)

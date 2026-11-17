@@ -76,7 +76,7 @@ describe('face beauty toolbar', () => {
     expect(sliders.contains(toolbar)).toBe(false)
     expect(sliders.classList.contains('overflow-y-auto')).toBe(true)
     expect(toolbar.classList.contains('shrink-0')).toBe(true)
-    fireEvent.click(screen.getByRole('button', { name: 'Eyes & lips' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Skin & makeup' }))
     expect(screen.getByRole('slider', { name: 'Eye & teeth whiten' }).getAttribute('aria-valuemin')).toBe('0')
     const select = screen.getByRole('button', { name: 'Select portrait' }) as HTMLButtonElement
     expect(select.disabled).toBe(false)
@@ -97,17 +97,18 @@ describe('face beauty toolbar', () => {
 
 
 describe('face beauty categories', () => {
-  it('shows exactly the eight face sliders and keeps category buttons outside scrolling content', () => {
+  it('shows face controls and keeps category buttons outside scrolling content', () => {
     const {container} = render(<FaceBeautyWidget app={app} value={DEFAULT_BEAUTY_PRESET} onChange={vi.fn()} node={{}} widget={{} as never} inputName="preset" />)
     expect(screen.getAllByRole('slider').map(slider=>slider.getAttribute('aria-label'))).toEqual([
       'Slim face','Small face','Narrow face','Temples','Cheekbones','Jaw','Chin length','Pointed chin',
+      'Contour smoothing','Jawline','V face','Face vertical position','Face horizontal position','Face rotation',
     ])
     const categories = screen.getByRole('group',{name:'Adjustment categories'})
     expect(container.querySelector('[data-face-beauty-sliders]')?.contains(categories)).toBe(false)
     expect(screen.queryByRole('slider',{name:'Small head'})).toBeNull()
     expect(screen.queryByRole('slider',{name:'Hairline'})).toBeNull()
     fireEvent.click(screen.getByRole('button',{name:'Eyes'}))
-    expect(screen.getAllByRole('slider')).toHaveLength(1)
+    expect(screen.getAllByRole('slider')).toHaveLength(11)
     expect(screen.getByRole('slider',{name:'Eye size'})).toBeDefined()
   })
   it('switches categories without losing preset values', () => {
@@ -120,7 +121,7 @@ describe('face beauty categories', () => {
     expect(changed.parameters.small_face).toBe(.01)
     rerender(<FaceBeautyWidget {...props} value={changed} />)
     fireEvent.click(screen.getByRole('button',{name:'Nose'}))
-    expect(screen.getAllByRole('slider')).toHaveLength(1)
+    expect(screen.getAllByRole('slider')).toHaveLength(7)
     fireEvent.click(screen.getByRole('button',{name:'Face'}))
     expect(screen.getByRole('slider',{name:'Small face'}).getAttribute('aria-valuenow')).toBe('0.01')
   })

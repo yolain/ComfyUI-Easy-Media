@@ -63,10 +63,10 @@ function FaceBeautyEditor({ value, onChange, node, app }: ReactWidgetProps<Beaut
         <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-6 w-6" aria-label={t('faceBeauty.json')} onClick={() => { setJson(JSON.stringify(preset, null, 2)); setJsonError(''); setJsonOpen(true) }}><Braces className="size-3" /></Button></TooltipTrigger><TooltipContent>{t('faceBeauty.json')}</TooltipContent></Tooltip>
       </div>
       <div data-face-beauty-categories role="group" aria-label={t('faceBeauty.categories')}
-        className="grid shrink-0 grid-cols-3 gap-1 border-b border-border p-2">
+        className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border px-2 py-1.5">
         {BEAUTY_GROUPS.map(item => <Button key={item.id} type="button" size="sm"
           variant={activeGroup === item.id ? 'secondary' : 'ghost'} aria-pressed={activeGroup === item.id}
-          className="h-7 min-w-0 px-1 text-xs" onClick={() => {
+          className="h-6 shrink-0 rounded-full px-2 py-0 text-xs" onClick={() => {
             setActiveGroup(item.id)
             if (slidersRef.current) slidersRef.current.scrollTop = 0
           }}>{t(`faceBeauty.${item.label}`)}</Button>)}
