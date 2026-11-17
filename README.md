@@ -51,57 +51,20 @@ By default, the Skill only generates JSON. When explicitly asked to run the work
 
 ![faceBeautify](https://github.com/user-attachments/assets/fd448328-b604-4b61-9fb0-afe50f86c62a)
 
-Face Beauty provides local portrait reshaping, skin retouching and makeup adjustments. Find both nodes in `EasyUse/Image`; they share the same processing and preset format.
+Portrait reshaping, skin retouching and makeup adjustments in `EasyUse/Image`, with controls for the face, proportions, eyes, nose, brows and mouth.
 
-#### Nodes
+- **`easy faceBeautify`**: select a portrait or connect an IMAGE, adjust sliders with live preview, and compare before/after results.
+- **`easy faceBeautifyStatic`**: native numeric controls with hexadecimal lip/blush colors. Connect its IMAGE output to a preview or save node to execute it.
 
-| Node | Description |
-|------|-------------|
-| **Face Beauty (`easy faceBeautify`)** | Embedded editor with live browser preview and before/after comparison. Select a portrait directly or connect an IMAGE input. Compact category tags and the toolbar stay fixed while the sliders scroll. |
-| **Face Beauty (Static) (`easy faceBeautifyStatic`)** | Native ComfyUI numeric controls for workflow connections and automation. Requires an IMAGE input; lip and blush colors use `#RRGGBB` hexadecimal fields. This is not an output node: connect its IMAGE output to a preview or save node to execute it. |
+Both output the processed IMAGE and `preset_json`. Connect this JSON to the static node's optional `preset` input to reuse adjustments on another image.
 
-#### Adjustments
-
-All reshaping sliders control both sides together, without separate left/right controls.
-
-| Category | Controls |
-|----------|----------|
-| **Face** | Slim/small/narrow face, temples, cheekbones, jaw, chin length, pointed chin, contour smoothing, jawline, V face, and overall vertical/horizontal position and rotation |
-| **Proportions** | Midface and lower-face length |
-| **Eyes** | Size, height, width, vertical position, spacing, tilt, lower eyelid, iris size, inner/outer corners and eye-tail lift |
-| **Nose** | Narrowing, size, wings, bridge width, vertical position, tip size and root width |
-| **Brows** | Thickness, vertical position, tilt, arch, spacing and length |
-| **Mouth** | Size, width, vertical position, tilt, smile, M lips, upper/lower lip fullness and lip thickness |
-| **Skin & makeup** | Smoothing, whitening, brightness, warmth, eye/teeth whitening, under-eye lift, lip tint and blush, with lip/blush color pickers |
-
-#### Usage and Presets
-
-1. **Load a portrait:** select one in the editor to preview it directly. For a connected IMAGE, run the node once to load its preview. Selecting a portrait switches to that source; the cable button switches back to the connected IMAGE.
-2. **Adjust and compare:** click a category tag and drag its sliders to preview changes locally. Use the comparison view to inspect the result; the reset button clears adjustments and colors.
-3. **Output or reuse:** run the workflow to output the processed IMAGE at the input resolution. Both nodes also output `preset_json`, a STRING containing the effective preset. The JSON button lets you view or edit the interactive node's preset.
-
-Connect `preset_json` to the static node's optional STRING `preset` input to reuse settings on another image. Only parameters and colors present in the preset override its numeric controls; the static node always processes its own IMAGE input. Presets store parameters, colors and image-file references, rather than embedding image data.
-
-#### Dependency and Model
-
-Install the optional detector dependency in the Python environment running ComfyUI, then restart ComfyUI:
+Install the optional dependency in ComfyUI's Python environment and restart ComfyUI; the Face Landmarker model downloads automatically on first use:
 
 ```bash
 python -m pip install 'mediapipe>=0.10.20,<0.11'
 ```
 
-The Face Landmarker model downloads automatically when detection is first needed, through the built-in Easy-Media model manager. Existing files are reused; the download icon can download or retry it manually.
-
-| Model | Local Path |
-|-------|------------|
-| **MediaPipe Face Landmarker** | `ComfyUI/models/mediapipe/face_landmarker.task` |
-
-#### Processing Scope
-
-- One detected face per image; images without a detected face remain unchanged.
-- IMAGE batches process every frame, while the editor previews the first. Preview resolution is capped at 1280 pixels on the longest side; final output retains the input resolution.
-- Reshaping uses local 2D deformations. Small-head, hairline, skull-height, automatic symmetry and 3D nose/lip presets are not included. Iris scaling does not isolate the pupil.
-- Video batches have no temporal stabilization or multi-face selection.
+One face per image; no detected face leaves the image unchanged. IMAGE batches process every frame at the input resolution, while the editor previews the first. Video processing has no temporal stabilization.
 
 ### 🎞️ MultiTrack Project Pipeline
 
