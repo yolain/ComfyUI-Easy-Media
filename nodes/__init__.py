@@ -10,3 +10,4 @@ from .video import *
 from .rtx_vsr import *
 from .subtitle import *
 from .wan import *
+from .face_beautify import *

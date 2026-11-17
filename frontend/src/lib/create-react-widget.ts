@@ -47,6 +47,8 @@ export interface ReactWidgetOptions {
   height?: number
   /** Keep this widget sized to its LiteGraph node despite legacy width writes. */
   keepResponsiveWidthInLiteGraph?: boolean
+  /** Release React effects and GPU resources when this node is removed. */
+  disposeOnNodeRemoved?: boolean
   /** Extra options merged into DOMWidgetOptions passed to addDOMWidget */
   domWidgetOptions?: Omit<DOMWidgetOptions<string>, 'getValue' | 'setValue'>
 }
@@ -164,6 +166,14 @@ export function createReactWidget<T extends object | string = object>(
     widget.serializeValue = () => currentValue
     root = createRoot(container)
     render()
+    if (options.disposeOnNodeRemoved) {
+      const originalOnRemoved = node.onRemoved
+      node.onRemoved = function (...args: unknown[]) {
+        root?.unmount()
+        root = null
+        return originalOnRemoved?.apply(this, args)
+      }
+    }
 
     return { widget }
   }

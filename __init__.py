@@ -70,6 +70,8 @@ class EasyMediaExtension(ComfyExtension):
             RecognizeSubtitle,
             AddSubtitleToVideo,
             # Image
+            EasyFaceBeautify,
+            EasyFaceBeautifyStatic,
             MakeRefsCompositeBySam3,
             ImageIndexesToIntList,
             # Audio

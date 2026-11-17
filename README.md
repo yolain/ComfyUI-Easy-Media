@@ -45,7 +45,28 @@ By default, the Skill only generates JSON. When explicitly asked to run the work
 
 ## ✨ Features
 
-### 🎞️ (New) MultiTrack Project Pipeline
+<a id="face-beauty"></a>
+
+### 🪄 (New) Face Beauty
+
+![faceBeautify](https://github.com/user-attachments/assets/fd448328-b604-4b61-9fb0-afe50f86c62a)
+
+Portrait reshaping, skin retouching and makeup adjustments in `EasyUse/Image`, with controls for the face, proportions, eyes, nose, brows and mouth.
+
+- **`easy faceBeautify`**: select a portrait or connect an IMAGE, adjust sliders with live preview, and compare before/after results.
+- **`easy faceBeautifyStatic`**: native numeric controls with hexadecimal lip/blush colors. Connect its IMAGE output to a preview or save node to execute it.
+
+Both output the processed IMAGE and `preset_json`. Connect this JSON to the static node's optional `preset` input to reuse adjustments on another image.
+
+Install the optional dependency in ComfyUI's Python environment and restart ComfyUI; the Face Landmarker model downloads automatically on first use:
+
+```bash
+python -m pip install 'mediapipe>=0.10.20,<0.11'
+```
+
+One face per image; no detected face leaves the image unchanged. IMAGE batches process every frame at the input resolution, while the editor previews the first. Video processing has no temporal stabilization.
+
+### 🎞️ MultiTrack Project Pipeline
 
 ![pipeline](https://github.com/user-attachments/assets/0170ae6f-149e-41ba-9bdf-03ec31b0625e)
 

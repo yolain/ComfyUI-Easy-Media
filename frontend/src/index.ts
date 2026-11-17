@@ -1,3 +1,5 @@
+import { DEFAULT_BEAUTY_PRESET, type BeautyPreset } from '@/lib/face-beauty'
+import { preserveFaceBeautyNodeSize } from '@/lib/face-beauty-node-size'
 import { addInlineStyles } from "@/lib/add-stylesheet";
 import { installWidgetTheme } from '@/lib/widget-theme'
 import { getEasyMediaSyncPlayMenuItems, installEasyMediaSyncPlay } from "@/lib/sync-play";
@@ -25,7 +27,7 @@ declare global {
 
 const [
   { createReactWidget },
-  { TimelineWidget, MultiTrackWidget, MultiImagesLoaderWidget, CompareVideoWidget, PromptEnhancerAccountWidget, ProjectVideoCombineWidget },
+  { FaceBeautyWidget, TimelineWidget, MultiTrackWidget, MultiImagesLoaderWidget, CompareVideoWidget, PromptEnhancerAccountWidget, ProjectVideoCombineWidget },
   { createDefaultTimelineData },
   { createDefaultTrackData },
 ] = await Promise.all([
@@ -58,6 +60,7 @@ comfyApp.registerExtension({
   },
 
   beforeRegisterNodeDef(nodeType, nodeData) {
+    preserveFaceBeautyNodeSize(nodeType, nodeData)
     preserveTimelineEditorNodeSize(nodeType, nodeData)
     preserveMultiImagesLoaderNodeSize(nodeType, nodeData)
     preserveCompareVideoNodeSize(nodeType, nodeData)
@@ -74,6 +77,12 @@ comfyApp.registerExtension({
 
   getCustomWidgets() {
     return {
+      EASY_FACE_BEAUTY: createReactWidget<BeautyPreset>(FaceBeautyWidget, {
+        defaultValue: JSON.stringify(DEFAULT_BEAUTY_PRESET),
+        disposeOnNodeRemoved: true,
+        keepResponsiveWidthInLiteGraph: true,
+        domWidgetOptions: { getMinHeight: () => 360, hideOnZoom: false, serialize: true },
+      }),
       TIMELINE: createReactWidget<TimelineData>(TimelineWidget, {
         defaultValue: DEFAULT_TIMELINE_VALUE,
         keepResponsiveWidthInLiteGraph: true,

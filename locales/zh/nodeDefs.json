@@ -1626,5 +1626,136 @@
       "0": { "name": "正向条件" },
       "1": { "name": "潜空间" }
     }
+  },
+  "easy faceBeautify": {
+    "display_name": "面部美化",
+    "description": "嵌入式人像美化：瘦脸、五官调整、磨皮和肤色调节。可切换选图或连接的 IMAGE，每张图处理一张人脸；未检测到人脸时保留原图。",
+    "inputs": {
+      "preset": {
+        "name": "预设方案"
+      },
+      "image": {
+        "name": "图像"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "图像"
+      },
+      "1": {
+        "name": "预设 JSON"
+      }
+    }
+  },
+  "easy faceBeautifyStatic": {
+    "display_name": "面部美化（静态版）",
+    "description": "使用 ComfyUI 原生数值控件调节面部、眼唇和肤色。可选 STRING 预设插槽仅覆盖预设中包含的参数和颜色，始终使用连接的 IMAGE。需连接到预览或保存节点执行。",
+    "inputs": {
+      "image": {
+        "name": "图像"
+      },
+      "slim_face": {
+        "name": "瘦脸"
+      },
+      "chin": {
+        "name": "下巴长短"
+      },
+      "eyes": {
+        "name": "眼睛大小"
+      },
+      "nose": {
+        "name": "鼻部收窄"
+      },
+      "mouth": {
+        "name": "嘴部大小"
+      },
+      "eye_bright": {
+        "name": "眼睛与牙齿美白"
+      },
+      "under_eye": {
+        "name": "眼下提亮"
+      },
+      "lip_tint": {
+        "name": "唇色强度"
+      },
+      "blush": {
+        "name": "腮红强度"
+      },
+      "smooth": {
+        "name": "磨皮"
+      },
+      "whiten": {
+        "name": "美白"
+      },
+      "brightness": {
+        "name": "亮度"
+      },
+      "warmth": {
+        "name": "暖色"
+      },
+      "lip_color": {
+        "name": "唇色",
+        "tooltip": "十六进制颜色，格式为 #RRGGBB。"
+      },
+      "blush_color": {
+        "name": "腮红颜色",
+        "tooltip": "十六进制颜色，格式为 #RRGGBB。"
+      },
+      "middle_face": {"name": "中庭长短"},
+      "lower_face": {"name": "下庭长短"},
+      "face_contour_smooth": {"name": "流畅脸"},
+      "jawline": {"name": "下颌线"},
+      "v_face": {"name": "V脸"},
+      "face_vertical": {"name": "面部上下"},
+      "face_horizontal": {"name": "面部左右"},
+      "face_rotation": {"name": "面部旋转"},
+      "eye_height": {"name": "眼高"},
+      "eye_width": {"name": "眼宽"},
+      "eye_vertical": {"name": "眼睛位置"},
+      "eye_distance": {"name": "眼距"},
+      "eye_tilt": {"name": "眼睛倾斜"},
+      "lower_eyelid": {"name": "眼睑下至"},
+      "iris_size": {"name": "虹膜大小"},
+      "inner_corner": {"name": "内眼角"},
+      "outer_corner": {"name": "外眼角"},
+      "eye_tail": {"name": "眼尾上扬"},
+      "nose_size": {"name": "鼻子大小"},
+      "nose_wings": {"name": "鼻翼"},
+      "nose_bridge": {"name": "鼻梁宽度"},
+      "nose_vertical": {"name": "鼻子位置"},
+      "nose_tip": {"name": "鼻尖大小"},
+      "nose_root": {"name": "山根宽度"},
+      "brow_thickness": {"name": "眉毛粗细"},
+      "brow_vertical": {"name": "眉毛位置"},
+      "brow_tilt": {"name": "眉毛倾斜"},
+      "brow_arch": {"name": "眉峰"},
+      "brow_distance": {"name": "眉间距"},
+      "brow_length": {"name": "眉毛长短"},
+      "mouth_width": {"name": "嘴巴宽度"},
+      "mouth_vertical": {"name": "嘴巴位置"},
+      "mouth_tilt": {"name": "嘴巴倾斜"},
+      "smile": {"name": "微笑"},
+      "m_lip": {"name": "M唇"},
+      "upper_lip": {"name": "丰上唇"},
+      "lower_lip": {"name": "丰下唇"},
+      "lip_thickness": {"name": "嘴唇厚度"},
+      "small_face": {"name": "小脸", "tooltip": "正值缩小或内收，负值放大或外扩。"},
+      "narrow_face": {"name": "窄脸", "tooltip": "正值缩小或内收，负值放大或外扩。"},
+      "temple_width": {"name": "太阳穴", "tooltip": "正值缩小或内收，负值放大或外扩。"},
+      "cheekbone_width": {"name": "颧骨", "tooltip": "正值缩小或内收，负值放大或外扩。"},
+      "jaw_width": {"name": "下颌", "tooltip": "正值缩小或内收，负值放大或外扩。"},
+      "pointed_chin": {"name": "尖下巴", "tooltip": "正值缩小或内收，负值放大或外扩。"},
+      "preset": {
+        "name": "预设覆盖"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "图像"
+      },
+      "1": {
+        "name": "生效预设 JSON"
+      }
+    }
   }
 }

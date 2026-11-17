@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createReactWidget, type ReactWidgetProps } from '@/lib/create-react-widget'
 import type { DOMWidgetOptions } from '@comfyorg/comfyui-frontend-types'
 
+const { unmountMock } = vi.hoisted(() => ({ unmountMock: vi.fn() }))
+
 vi.mock('react-dom/client', () => ({
   createRoot: () => ({
     render: vi.fn(),
-    unmount: vi.fn(),
+    unmount: unmountMock,
   }),
 }))
 
@@ -217,4 +219,19 @@ describe('createReactWidget', () => {
     widget.width = 280
     expect(widget.width).toBe(280)
   })
+  it('releases React effects on removal when GPU widgets request disposal', () => {
+    unmountMock.mockClear()
+    const original = vi.fn()
+    const node = {
+      onRemoved: original,
+      size: [960, 640],
+      setDirtyCanvas: vi.fn(),
+      addDOMWidget: vi.fn(() => ({ options: {} })),
+    }
+    createReactWidget<string>(() => null, { disposeOnNodeRemoved: true })(node, 'preset', {} as never, {} as never)
+    node.onRemoved()
+    expect(unmountMock).toHaveBeenCalledOnce()
+    expect(original).toHaveBeenCalledOnce()
+  })
+
 })

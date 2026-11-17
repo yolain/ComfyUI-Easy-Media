@@ -47,7 +47,28 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 
 ## ✨ 核心功能
 
-### 🎞️ (新)多轨项目流水线 MultiTrack Project Pipeline
+<a id="face-beauty"></a>
+
+### 🪄 (New) 面部美化 Face Beauty
+
+![faceBeautify](https://github.com/user-attachments/assets/fd448328-b604-4b61-9fb0-afe50f86c62a)
+
+位于 `EasyUse/Image` 分类，支持面部、比例、眼睛、鼻子、眉毛和嘴巴重塑，以及肤质与妆容调节。
+
+- **`easy faceBeautify`**：选图或连接 IMAGE，通过滑块实时预览，并对比处理前后的效果。
+- **`easy faceBeautifyStatic`**：原生数值控件，唇色与腮红使用十六进制颜色；需将 IMAGE 输出接到预览或保存节点执行。
+
+两个节点均输出处理后的 IMAGE 和 `preset_json`。将 JSON 接入静态版的可选 `preset` 插槽，即可复用调节设置处理其他图片。
+
+在 ComfyUI 的 Python 环境安装可选依赖并重启，首次使用时会自动下载 Face Landmarker 模型：
+
+```bash
+python -m pip install 'mediapipe>=0.10.20,<0.11'
+```
+
+每张图片处理一张人脸，未检测到人脸时保留原图。IMAGE 批次逐帧处理并保留输入分辨率，编辑器预览第一帧；视频处理暂不支持时序稳定。
+
+### 🎞️ 多轨项目流水线 MultiTrack Project Pipeline
 
 ![pipeline](https://github.com/user-attachments/assets/0170ae6f-149e-41ba-9bdf-03ec31b0625e)
 
