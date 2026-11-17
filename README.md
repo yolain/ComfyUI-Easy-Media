@@ -52,6 +52,8 @@ Two nodes in `EasyUse/Image` share face reshaping, skin retouching, eye/teeth wh
 - `easy faceBeautify`: embedded React editor with live browser preview, before/after comparison, a fixed toolbar and scrolling controls. Select a portrait directly, or use the connected IMAGE input; selecting a portrait switches the active source, and the cable button switches back to IMAGE.
 - `easy faceBeautifyStatic`: native numeric widgets with `#RRGGBB` lip/blush color fields. This is not an output node: connect its IMAGE output to a preview or save node. Its optional STRING `preset` socket accepts the editor's `preset_json`; only fields included in the preset override the native controls, and its IMAGE input is always used.
 
+The Face category provides eight sliders: slim face, small face, narrow face, temples, cheekbones, jaw, chin length and pointed chin. The category bar stays fixed while its controls scroll.
+
 Install the optional detector dependency in the Python environment running ComfyUI, then restart ComfyUI:
 
 ```bash

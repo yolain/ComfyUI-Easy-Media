@@ -1,4 +1,4 @@
-import { BEAUTY_PARAMETERS, DEFAULT_BEAUTY_COLORS, type BeautyGeometry, type BeautyParameters } from '@/lib/face-beauty'
+import { MAX_BEAUTY_HANDLES, BEAUTY_PARAMETERS, DEFAULT_BEAUTY_COLORS, type BeautyGeometry, type BeautyParameters } from '@/lib/face-beauty'
 
 const VERTEX = `#version 300 es
 in vec2 position;
@@ -17,8 +17,8 @@ uniform vec3 lipColor;
 uniform vec3 blushColor;
 uniform float aspect;
 uniform int count;
-uniform vec4 handles[7];
-uniform vec3 changes[7];
+uniform vec4 handles[${MAX_BEAUTY_HANDLES}];
+uniform vec3 changes[${MAX_BEAUTY_HANDLES}];
 uniform vec4 regions[4];
 uniform vec2 axis;
 uniform float blurRadius;
@@ -37,8 +37,9 @@ float accentAt(vec2 p, vec4 region) {
 }
 void main() {
   vec2 p = uv * vec2(1., aspect);
-  for (int i=0; i<7; i++) {
+  for (int i=0; i<${MAX_BEAUTY_HANDLES}; i++) {
     if (i >= count) break;
+    if (handles[i].w == 0.) continue;
     vec2 d = p - handles[i].xy;
     float t = clamp(length(d) / handles[i].z, 0., 1.);
     float fall = (1. - t*t*(3. - 2.*t)) * handles[i].w;
@@ -121,6 +122,7 @@ function createFeatureMask(width: number, height: number, geometry: BeautyGeomet
 
 /** GPU preview; the Python renderer uses the same metric, handles and sampling. */
 export function createBeautyRenderer(canvas: HTMLCanvasElement, source: HTMLImageElement, geometry: BeautyGeometry) {
+  if (geometry.handles.length > MAX_BEAUTY_HANDLES) throw new Error('Too many face beauty warp handles')
   const gl = canvas.getContext('webgl2', { preserveDrawingBuffer: true, alpha: false })
   if (!gl) throw new Error('Face Beauty requires WebGL2')
   canvas.width = source.naturalWidth
@@ -189,14 +191,14 @@ export function createBeautyRenderer(canvas: HTMLCanvasElement, source: HTMLImag
     gl.uniform4fv(uniform('regions[0]'), regions)
     gl.uniform2fv(uniform('axis'), geometry.axis ?? [1, 0])
     gl.uniform1f(uniform('blurRadius'), geometry.blur ?? 0)
-    const changes = new Float32Array(21)
+    const changes = new Float32Array(MAX_BEAUTY_HANDLES * 3)
     geometry.handles.forEach((h, i) => changes.set([...h.delta, h.scale], i * 3))
     gl.uniform3fv(uniform('changes[0]'), changes)
     return {
       draw(parameters: BeautyParameters, colors = DEFAULT_BEAUTY_COLORS) {
         if (gl.isContextLost()) throw new Error('Face Beauty GPU context was lost; reload the image')
         gl.useProgram(program)
-        const handles = new Float32Array(28)
+        const handles = new Float32Array(MAX_BEAUTY_HANDLES * 4)
         geometry.handles.forEach((h, i) => handles.set([...h.center, h.radius, parameters[h.key]], i * 4))
         gl.uniform4fv(uniform('handles[0]'), handles)
         for (const key of BEAUTY_PARAMETERS) {

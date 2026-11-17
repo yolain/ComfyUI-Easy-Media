@@ -220,7 +220,10 @@ def test_numeric_schema_uses_native_widgets_and_optional_preset_socket(monkeypat
     assert inputs['lip_color'].default == '#c4485f'
     assert inputs['blush_color'].default == '#ff9f80'
     assert 'lip_red' not in inputs
-    assert len(schema.inputs) == 17
+    assert len(schema.inputs) == 23
+    # New controls follow the existing color widgets, preserving old workflows.
+    assert [item.id for item in schema.inputs[:16]] == ['image', *beauty.LEGACY_BEAUTY_PARAMETERS, 'lip_color', 'blush_color']
+    assert inputs['pointed_chin'].default == 0
 
 
 def test_numeric_neutral_node_returns_image_without_detection_or_ui(monkeypatch):
@@ -285,3 +288,46 @@ def test_static_hex_validation_and_empty_preset(monkeypatch):
     assert json.loads(result.args[1])['colors']['lip'] == '#c4485f'
 
     assert json.loads(result.args[1])['colors']['blush'] == '#aa8877'
+
+
+def contour_landmarks():
+    points = [[.5,.5] for _ in range(478)]
+    values = {234:(.25,.45),454:(.75,.45),127:(.28,.25),356:(.72,.25),93:(.23,.42),323:(.77,.42),
+              172:(.30,.65),397:(.70,.65),152:(.5,.83),148:(.42,.78),377:(.58,.78),10:(.5,.15),
+              33:(.33,.38),133:(.44,.38),362:(.56,.38),263:(.67,.38),1:(.5,.5),61:(.42,.65),291:(.58,.65)}
+    for index,point in values.items():
+        points[index] = list(point)
+    return points
+
+
+@pytest.mark.parametrize('key', ['slim_face','small_face','narrow_face','temple_width','cheekbone_width','jaw_width','chin','pointed_chin'])
+def test_each_face_control_warps_locally_and_reverses_direction(key):
+    points = contour_landmarks()
+    geo = beauty.face_geometry(points,1)
+    y,x = torch.meshgrid(torch.linspace(0,1,128),torch.linspace(0,1,128),indexing='ij')
+    image = torch.stack([x,y,(x+y)/2],-1)
+    positive = beauty.parse_beauty_preset(json.dumps({'parameters':{key:.6}}))['parameters']
+    negative = beauty.parse_beauty_preset(json.dumps({'parameters':{key:-.6}}))['parameters']
+    out_positive = beauty.apply_face_beauty(image,positive,geo)
+    out_negative = beauty.apply_face_beauty(image,negative,geo)
+    assert (out_positive-image).abs().max() > .003
+    assert (out_negative-image).abs().max() > .003
+    assert torch.allclose(out_positive[0],image[0],atol=1e-6)
+    # Opposite strengths produce opposite displacement on a linear coordinate image.
+    forward = out_positive-image
+    backward = out_negative-image
+    assert (forward*backward).sum() < 0
+    assert len(geo['handles']) <= beauty.MAX_BEAUTY_HANDLES
+
+
+def test_detailed_face_defaults_and_static_preset_override(monkeypatch):
+    node = load_node(monkeypatch)
+    monkeypatch.setattr(beauty,'detect_face',lambda _: contour_landmarks())
+    image = torch.rand(1,64,64,3)
+    old = beauty.parse_beauty_preset('{"parameters":{"slim_face":0.2}}')
+    assert all(old['parameters'][key]==0 for key in beauty.FACE_DETAIL_PARAMETERS)
+    preset = json.dumps({'parameters':{'small_face':.4,'temple_width':-.2}})
+    result = node.EasyFaceBeautifyStatic.execute(image,small_face=.1,jaw_width=.3,preset=preset)
+    actual = json.loads(result.args[1])['parameters']
+    assert actual['small_face']==.4 and actual['temple_width']==-.2 and actual['jaw_width']==.3
+    assert torch.isfinite(result.args[0]).all()

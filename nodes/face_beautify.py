@@ -7,7 +7,7 @@ import torch
 from comfy_api.latest import io
 
 from ..utils.face_beautify import (
-    PARAMETER_LIMITS, beautify_image_batch, beauty_preview, beauty_source_path,
+    PARAMETER_LIMITS, LEGACY_BEAUTY_PARAMETERS, FACE_DETAIL_PARAMETERS, beautify_image_batch, beauty_preview, beauty_source_path,
     resolve_numeric_beauty_preset,
     load_beauty_source, parse_beauty_preset,
 )
@@ -68,11 +68,16 @@ class EasyFaceBeautifyStatic(io.ComfyNode):
                          "parameters and colors. The IMAGE input is always used. Connect the result to a preview or save node."),
             inputs=[
                 io.Image.Input("image"),
-                *[io.Float.Input(name, default=0.0, min=low, max=high, step=0.01,
+                *[io.Float.Input(name, default=0.0, min=PARAMETER_LIMITS[name][0], max=PARAMETER_LIMITS[name][1], step=0.01,
                                  display_mode=io.NumberDisplay.number)
-                  for name, (low, high) in PARAMETER_LIMITS.items()],
+                  for name in LEGACY_BEAUTY_PARAMETERS],
                 io.String.Input("lip_color", default="#c4485f", tooltip="Lip color in #RRGGBB hexadecimal format."),
                 io.String.Input("blush_color", default="#ff9f80", tooltip="Blush color in #RRGGBB hexadecimal format."),
+                # Append detailed controls after the legacy color fields so old
+                # workflows retain the meaning of their serialized widget values.
+                *[io.Float.Input(name, default=0.0, min=-1.0, max=1.0, step=0.01,
+                                 display_mode=io.NumberDisplay.number)
+                  for name in FACE_DETAIL_PARAMETERS],
                 io.String.Input("preset", optional=True, force_input=True,
                                 tooltip="Optional preset JSON from Face Beauty. Only included parameters and colors override the numeric controls."),
             ],
@@ -89,11 +94,15 @@ class EasyFaceBeautifyStatic(io.ComfyNode):
         smooth: float = 0.0, whiten: float = 0.0, brightness: float = 0.0, warmth: float = 0.0,
         lip_color: str = "#c4485f", blush_color: str = "#ff9f80",
         preset: str | None = None,
+        small_face: float = 0.0, narrow_face: float = 0.0, temple_width: float = 0.0,
+        cheekbone_width: float = 0.0, jaw_width: float = 0.0, pointed_chin: float = 0.0,
     ) -> io.NodeOutput:
         parameters = {
             "slim_face": slim_face, "chin": chin, "eyes": eyes, "nose": nose, "mouth": mouth,
             "eye_bright": eye_bright, "under_eye": under_eye, "lip_tint": lip_tint, "blush": blush,
             "smooth": smooth, "whiten": whiten, "brightness": brightness, "warmth": warmth,
+            "small_face": small_face, "narrow_face": narrow_face, "temple_width": temple_width,
+            "cheekbone_width": cheekbone_width, "jaw_width": jaw_width, "pointed_chin": pointed_chin,
         }
         colors = {"lip": lip_color, "blush": blush_color}
         settings = resolve_numeric_beauty_preset(parameters, colors, preset)

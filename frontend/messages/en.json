@@ -465,6 +465,18 @@
     "addLocal": "Add local file"
   },
   "faceBeauty": {
+    "categories": "Adjustment categories",
+    "face": "Face",
+    "eyesGroup": "Eyes",
+    "noseGroup": "Nose",
+    "mouthGroup": "Mouth",
+    "small_face": "Small face",
+    "narrow_face": "Narrow face",
+    "temple_width": "Temples",
+    "cheekbone_width": "Cheekbones",
+    "jaw_width": "Jaw",
+    "pointed_chin": "Pointed chin",
+
     "eyesLips": "Eyes & lips",
     "eye_bright": "Eye & teeth whiten",
     "under_eye": "Under-eye lift",
@@ -481,7 +493,6 @@
     "empty": "Select a portrait or connect an IMAGE input.",
     "runInput": "Run the node once to load the connected IMAGE preview.",
     "loading": "Preparing face landmarks…",
-    "hint": "Single-face editor. Drag sliders to preview locally; queue to output the full-resolution image.",
     "localOnly": "Choose an image from inputs, outputs or history.",
     "downloadModel": "Download face model",
     "noFace": "No face detected. The original image will be preserved.",

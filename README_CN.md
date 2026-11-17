@@ -54,6 +54,8 @@ git clone https://github.com/yolain/ComfyUI-Easy-Media.git
 - `easy faceBeautify`：嵌入式 React 编辑器，支持浏览器实时预览、前后对比、固定按钮栏与滚动调节区。可直接选图或使用连接的 IMAGE；选图后切换为所选人像，点击连接图标可切回 IMAGE。
 - `easy faceBeautifyStatic`：原生数值控件，唇色与腮红使用 `#RRGGBB` 十六进制输入。它不是输出节点，需要连接预览或保存节点执行。可选 STRING `preset` 插槽可连接编辑器的 `preset_json`，仅覆盖预设中包含的参数与颜色，始终处理连接的 IMAGE。
 
+面部分类提供瘦脸、小脸、窄脸、太阳穴、颧骨、下颌、下巴长短与尖下巴 8 个滑块；分类栏固定，点击切换调节项。
+
 在运行 ComfyUI 的 Python 环境安装可选检测依赖，然后重启 ComfyUI：
 
 ```bash

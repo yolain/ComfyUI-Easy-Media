@@ -70,12 +70,13 @@ describe('face beauty toolbar', () => {
   it('keeps portrait selection available with an IMAGE connection and switches the processing source', () => {
     const onChange = vi.fn()
     render(<FaceBeautyWidget app={app} value={DEFAULT_BEAUTY_PRESET} onChange={onChange} node={{}} widget={{} as never} inputName="preset" />)
-    expect(screen.getAllByRole('heading').map(heading => heading.textContent)).toEqual(['Face & features', 'Eyes & lips', 'Skin & tone'])
+    expect(screen.getAllByRole('heading').map(heading => heading.textContent)).toEqual(['Face'])
     const toolbar = document.querySelector('[data-face-beauty-toolbar]')!
     const sliders = document.querySelector('[data-face-beauty-sliders]')!
     expect(sliders.contains(toolbar)).toBe(false)
     expect(sliders.classList.contains('overflow-y-auto')).toBe(true)
     expect(toolbar.classList.contains('shrink-0')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Eyes & lips' }))
     expect(screen.getByRole('slider', { name: 'Eye & teeth whiten' }).getAttribute('aria-valuemin')).toBe('0')
     const select = screen.getByRole('button', { name: 'Select portrait' }) as HTMLButtonElement
     expect(select.disabled).toBe(false)
@@ -91,5 +92,36 @@ describe('face beauty toolbar', () => {
     fireEvent.click(select)
     fireEvent.click(screen.getByRole('button', { name: 'Choose test portrait' }))
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ source_mode: 'picker', source: { source_type: 'input', file_path: 'portrait.png' } }))
+  })
+})
+
+
+describe('face beauty categories', () => {
+  it('shows exactly the eight face sliders and keeps category buttons outside scrolling content', () => {
+    const {container} = render(<FaceBeautyWidget app={app} value={DEFAULT_BEAUTY_PRESET} onChange={vi.fn()} node={{}} widget={{} as never} inputName="preset" />)
+    expect(screen.getAllByRole('slider').map(slider=>slider.getAttribute('aria-label'))).toEqual([
+      'Slim face','Small face','Narrow face','Temples','Cheekbones','Jaw','Chin length','Pointed chin',
+    ])
+    const categories = screen.getByRole('group',{name:'Adjustment categories'})
+    expect(container.querySelector('[data-face-beauty-sliders]')?.contains(categories)).toBe(false)
+    expect(screen.queryByRole('slider',{name:'Small head'})).toBeNull()
+    expect(screen.queryByRole('slider',{name:'Hairline'})).toBeNull()
+    fireEvent.click(screen.getByRole('button',{name:'Eyes'}))
+    expect(screen.getAllByRole('slider')).toHaveLength(1)
+    expect(screen.getByRole('slider',{name:'Eye size'})).toBeDefined()
+  })
+  it('switches categories without losing preset values', () => {
+    const onChange = vi.fn()
+    const props = {app,onChange,node:{},widget:{} as never,inputName:'preset'}
+    const {rerender} = render(<FaceBeautyWidget {...props} value={DEFAULT_BEAUTY_PRESET} />)
+    const slider = screen.getByRole('slider',{name:'Small face'})
+    fireEvent.keyDown(slider,{key:'ArrowRight'})
+    const changed = onChange.mock.calls.at(-1)![0]
+    expect(changed.parameters.small_face).toBe(.01)
+    rerender(<FaceBeautyWidget {...props} value={changed} />)
+    fireEvent.click(screen.getByRole('button',{name:'Nose'}))
+    expect(screen.getAllByRole('slider')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button',{name:'Face'}))
+    expect(screen.getByRole('slider',{name:'Small face'}).getAttribute('aria-valuenow')).toBe('0.01')
   })
 })

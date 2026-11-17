@@ -10,7 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
 import { CompareVideo } from '@/components/widgets/compareVideoWidget'
 import { LocaleContext, useT } from '@/lib/i18n'
-import { BEAUTY_PARAMETERS, NONNEGATIVE_BEAUTY_PARAMETERS, DEFAULT_BEAUTY_PRESET, normalizeBeautyPreset, type BeautyPreset } from '@/lib/face-beauty'
+import { BEAUTY_GROUPS, NONNEGATIVE_BEAUTY_PARAMETERS, DEFAULT_BEAUTY_PRESET, normalizeBeautyPreset, type BeautyPreset } from '@/lib/face-beauty'
 import { mediaPathToViewUrl } from '@/lib/media-url'
 import { useVerticalWheelScroll } from '@/hooks/use-vertical-wheel-scroll'
 import { useFaceBeautyPreview } from '@/hooks/use-face-beauty-preview'
@@ -27,6 +27,8 @@ function FaceBeautyEditor({ value, onChange, node, app }: ReactWidgetProps<Beaut
   try { preset = normalizeBeautyPreset(value) }
   catch (cause) { presetError = cause instanceof Error ? cause.message : String(cause) }
   const { preview, error, loading, canvasRef, connected, hasImageConnection, downloadModel } = useFaceBeautyPreview(node, preset)
+  const [activeGroup, setActiveGroup] = useState<typeof BEAUTY_GROUPS[number]['id']>('face')
+  const group = BEAUTY_GROUPS.find(item => item.id === activeGroup) ?? BEAUTY_GROUPS[0]
   const [pickerOpen, setPickerOpen] = useState(false)
   const [jsonOpen, setJsonOpen] = useState(false)
   const [json, setJson] = useState('')
@@ -60,14 +62,22 @@ function FaceBeautyEditor({ value, onChange, node, app }: ReactWidgetProps<Beaut
         <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-6 w-6" aria-label={t('faceBeauty.reset')} onClick={() => onChange({ ...preset, parameters: { ...DEFAULT_BEAUTY_PRESET.parameters }, colors: { ...DEFAULT_BEAUTY_PRESET.colors } })}><RotateCcw className="size-3" /></Button></TooltipTrigger><TooltipContent>{t('faceBeauty.reset')}</TooltipContent></Tooltip>
         <Tooltip><TooltipTrigger asChild><Button size="icon" variant="ghost" className="h-6 w-6" aria-label={t('faceBeauty.json')} onClick={() => { setJson(JSON.stringify(preset, null, 2)); setJsonError(''); setJsonOpen(true) }}><Braces className="size-3" /></Button></TooltipTrigger><TooltipContent>{t('faceBeauty.json')}</TooltipContent></Tooltip>
       </div>
+      <div data-face-beauty-categories role="group" aria-label={t('faceBeauty.categories')}
+        className="grid shrink-0 grid-cols-3 gap-1 border-b border-border p-2">
+        {BEAUTY_GROUPS.map(item => <Button key={item.id} type="button" size="sm"
+          variant={activeGroup === item.id ? 'secondary' : 'ghost'} aria-pressed={activeGroup === item.id}
+          className="h-7 min-w-0 px-1 text-xs" onClick={() => {
+            setActiveGroup(item.id)
+            if (slidersRef.current) slidersRef.current.scrollTop = 0
+          }}>{t(`faceBeauty.${item.label}`)}</Button>)}
+      </div>
       <div data-face-beauty-status className="shrink-0 px-3 pt-3">
-      {!connected && <p className="mb-3 text-xs text-muted-foreground">{t('faceBeauty.hint')}</p>}
       {(error || presetError || jsonError) && <p role="alert" className="mb-3 break-words text-xs text-destructive">{error || presetError || jsonError}</p>}
       {preview && !preview.face_found && <p role="status" className="mb-3 text-xs text-muted-foreground">{t('faceBeauty.noFace')}</p>}
       </div>
       <div ref={slidersRef} data-face-beauty-sliders data-capture-wheel="true" className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-3">
-      {BEAUTY_PARAMETERS.map((key, index) => <div key={key} className="mb-5">
-        {(index === 0 || index === 5 || index === 9) && <h3 className="mb-4 border-b border-border pb-2 text-sm font-medium">{t(index === 0 ? 'faceBeauty.reshape' : index === 5 ? 'faceBeauty.eyesLips' : 'faceBeauty.skin')}</h3>}
+      <h3 className="mb-3 text-sm font-medium">{t(`faceBeauty.${group.label}`)}</h3>
+      {group.parameters.map(key => <div key={key} className="mb-5">
         <div className="mb-2 flex justify-between gap-2 text-xs"><span>{t(`faceBeauty.${key}`)}</span><span className="text-muted-foreground tabular-nums">{Math.round(preset.parameters[key] * 100)}</span></div>
         <Slider aria-label={t(`faceBeauty.${key}`)} value={[preset.parameters[key]]} min={NONNEGATIVE_BEAUTY_PARAMETERS.has(key) ? 0 : -1} max={1} step={0.01}
           disabled={Boolean(presetError)} onValueChange={([next]) => onChange({ ...preset, parameters: { ...preset.parameters, [key]: next ?? 0 } })} />

@@ -1658,7 +1658,7 @@
         "name": "瘦脸"
       },
       "chin": {
-        "name": "下巴长度"
+        "name": "下巴长短"
       },
       "eyes": {
         "name": "眼睛大小"
@@ -1701,6 +1701,12 @@
         "name": "腮红颜色",
         "tooltip": "十六进制颜色，格式为 #RRGGBB。"
       },
+      "small_face": {"name": "小脸", "tooltip": "正值缩小或内收，负值放大或外扩。"},
+      "narrow_face": {"name": "窄脸", "tooltip": "正值缩小或内收，负值放大或外扩。"},
+      "temple_width": {"name": "太阳穴", "tooltip": "正值缩小或内收，负值放大或外扩。"},
+      "cheekbone_width": {"name": "颧骨", "tooltip": "正值缩小或内收，负值放大或外扩。"},
+      "jaw_width": {"name": "下颌", "tooltip": "正值缩小或内收，负值放大或外扩。"},
+      "pointed_chin": {"name": "尖下巴", "tooltip": "正值缩小或内收，负值放大或外扩。"},
       "preset": {
         "name": "预设覆盖"
       }

@@ -1,4 +1,13 @@
-export const BEAUTY_PARAMETERS = ['slim_face', 'chin', 'eyes', 'nose', 'mouth', 'eye_bright', 'under_eye', 'lip_tint', 'blush', 'smooth', 'whiten', 'brightness', 'warmth'] as const
+export const BEAUTY_PARAMETERS = ['slim_face', 'chin', 'eyes', 'nose', 'mouth', 'eye_bright', 'under_eye', 'lip_tint', 'blush', 'smooth', 'whiten', 'brightness', 'warmth', 'small_face', 'narrow_face', 'temple_width', 'cheekbone_width', 'jaw_width', 'pointed_chin'] as const
+export const MAX_BEAUTY_HANDLES = 32
+export const BEAUTY_GROUPS = [
+  { id: 'face', label: 'face', parameters: ['slim_face', 'small_face', 'narrow_face', 'temple_width', 'cheekbone_width', 'jaw_width', 'chin', 'pointed_chin'] },
+  { id: 'eyes', label: 'eyesGroup', parameters: ['eyes'] },
+  { id: 'nose', label: 'noseGroup', parameters: ['nose'] },
+  { id: 'mouth', label: 'mouthGroup', parameters: ['mouth'] },
+  { id: 'makeup', label: 'eyesLips', parameters: ['eye_bright', 'under_eye', 'lip_tint', 'blush'] },
+  { id: 'skin', label: 'skin', parameters: ['smooth', 'whiten', 'brightness', 'warmth'] },
+] as const satisfies readonly { id: string; label: string; parameters: readonly BeautyParameter[] }[]
 export const NONNEGATIVE_BEAUTY_PARAMETERS = new Set<string>(['eye_bright', 'under_eye', 'lip_tint', 'blush', 'smooth', 'whiten'])
 export const DEFAULT_BEAUTY_COLORS = { lip: '#c4485f', blush: '#ff9f80' }
 export type BeautyParameter = typeof BEAUTY_PARAMETERS[number]
@@ -16,7 +25,7 @@ export interface BeautyGeometry {
 export interface BeautyPreview { source?: BeautySource | null; input_connected?: boolean; filename: string; type: 'temp'; geometry: BeautyGeometry; face_found: boolean }
 export const DEFAULT_BEAUTY_PRESET: BeautyPreset = {
   version: 1, source: null, colors: { ...DEFAULT_BEAUTY_COLORS },
-  parameters: { slim_face: 0, chin: 0, eyes: 0, nose: 0, mouth: 0, eye_bright: 0, under_eye: 0, lip_tint: 0, blush: 0, smooth: 0, whiten: 0, brightness: 0, warmth: 0 },
+  parameters: { slim_face: 0, chin: 0, eyes: 0, nose: 0, mouth: 0, eye_bright: 0, under_eye: 0, lip_tint: 0, blush: 0, smooth: 0, whiten: 0, brightness: 0, warmth: 0, small_face: 0, narrow_face: 0, temple_width: 0, cheekbone_width: 0, jaw_width: 0, pointed_chin: 0 },
 }
 export function normalizeBeautyPreset(value: unknown): BeautyPreset {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid face beauty preset')

@@ -26,6 +26,10 @@ PARAMETER_LIMITS = {
     "smooth": (0.0, 1.0), "whiten": (0.0, 1.0),
     "brightness": (-1.0, 1.0), "warmth": (-1.0, 1.0),
 }
+LEGACY_BEAUTY_PARAMETERS = tuple(PARAMETER_LIMITS)
+FACE_DETAIL_PARAMETERS = ("small_face", "narrow_face", "temple_width", "cheekbone_width", "jaw_width", "pointed_chin")
+PARAMETER_LIMITS.update({name: (-1.0, 1.0) for name in FACE_DETAIL_PARAMETERS})
+MAX_BEAUTY_HANDLES = 32
 DEFAULT_BEAUTY_COLORS = {"lip": "#c4485f", "blush": "#ff9f80"}
 _DETECT_LOCK = threading.Lock()
 _DETECTOR: Any = None
@@ -197,6 +201,25 @@ def face_geometry(points: list[list[float]], aspect: float) -> dict:
         add((p[a] + p[b]) / 2, width * 0.24, "eyes", scale=0.22)
     add(p[1], width * 0.24, "nose", scale=-0.18)
     add((p[61] + p[291]) / 2, width * 0.27, "mouth", scale=0.18)
+    # New controls act on different contour segments. Central features are not
+    # globally scaled; paired translation handles avoid changing chin length
+    # when narrowing its tip. Signed values allow the reverse correction too.
+    for index in (127, 234, 172, 152, 397, 454, 356, 10):
+        add(p[index], width * 0.32, "small_face", *((mid - p[index]) * 0.07))
+
+    def contour_width(indices: tuple[int, int], key: str, amount: float, radius: float) -> None:
+        for index in indices:
+            projection = float(np.dot(p[index] - mid, horizontal))
+            direction = -1.0 if projection > 0 else 1.0
+            add(p[index], width * radius, key, *(horizontal * direction * width * amount))
+
+    contour_width((234, 454), "narrow_face", 0.065, 0.62)
+    contour_width((127, 356), "temple_width", 0.045, 0.25)
+    contour_width((93, 323), "cheekbone_width", 0.055, 0.30)
+    contour_width((172, 397), "jaw_width", 0.060, 0.30)
+    contour_width((148, 377), "pointed_chin", 0.035, 0.20)
+    if len(handles) > MAX_BEAUTY_HANDLES:
+        raise ValueError("Face beauty geometry exceeds the supported warp handle count.")
     # Ellipses are aligned to the face, with holes protecting eyes and lips.
     regions = []
     for center, radii in (
@@ -259,6 +282,8 @@ def apply_face_beauty(image: torch.Tensor, parameters: dict, geometry: dict, col
                                 (torch.arange(width, device=device, dtype=torch.float32) + 0.5) / width, indexing="ij")
         coords = torch.stack([xx, yy], dim=-1)
         for handle in geometry["handles"]:
+            if not parameters[handle["key"]]:
+                continue
             center = torch.tensor(handle["center"], device=device, dtype=torch.float32)
             diff = coords - center
             t = (torch.linalg.vector_norm(diff, dim=-1) / handle["radius"]).clamp(0, 1)
