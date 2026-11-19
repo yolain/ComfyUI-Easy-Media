@@ -4860,8 +4860,62 @@ def test_multitrack_task_output_filters_at_signs_from_prompt_outputs():
     assert prompt_builder_stub.calls[-1][2]["custom_system_prompt"] == "Keep resource references"
 
 
-def test_multitrack_task_output_prompt_relay_joins_task_fragments_inside_marker_ranges():
+@pytest.mark.parametrize(
+    "video_start, mute_mods, source, expected",
+    [
+        (12, False, "<Video 1> <Video 2> <Picture 2>", "<Video 3> <Video 4> <Picture 2>"),
+        (0, False, "<Video 1> <Picture 2>", "<Video 1> <Picture 2>"),
+        (None, False, "<Video 2> <Picture 1>", "<Video 2> <Picture 1>"),
+        (None, False, "<Picture 1> <Picture 2> <Picture 10>", "<Video 1> <Picture 1> <Picture 9>"),
+        (12, False, "<Picture 1> <Picture 2> <Audio 1>", "<Video 1> <Picture 1> <Audio 1>"),
+        (12, True, "<Video 1> <Picture 2>", "<Video 1> <Picture 2>"),
+    ],
+)
+def test_multitrack_task_output_rewrites_refmod_prompt_tags(
+    monkeypatch, video_start, mute_mods, source, expected,
+):
     module = _load_basic_module()
+
+    class Loader:
+        def load(self, mod_1):
+            return ([(mod_1, 1.0)], "")
+
+    monkeypatch.setitem(module.comfy_nodes.NODE_CLASS_MAPPINGS, "MiniMaxH3RefModsLoader", Loader)
+    task_content = {
+        "task_mode": "ref",
+        "user_prompt": "prompt A",
+        "user_prompt_b": source,
+        "user_prompt_variant": "b",
+        "mods": [
+            {"file_path": "a.safetensors", "muted": mute_mods},
+            {"file_path": "b.safetensors", "muted": mute_mods},
+            {"file_path": "disabled.safetensors", "muted": True},
+        ],
+    }
+    tracks = [{"type": "task", "segments": [
+        {"start_frame": 12, "end_frame": 24, "content": task_content},
+    ]}]
+    videos = []
+    if video_start is not None:
+        tracks.append({"type": "video", "media_index": 0, "segments": [
+            {"start_frame": video_start, "end_frame": video_start + 12, "content": {"media_type": "video"}},
+        ]})
+        videos.append(_FakeVideo(_VideoComponents(torch.zeros(24, 2, 2, 3), None, Fraction(24))))
+    info = {"format": "MiniMax", "frame_rate": 24, "tracks": tracks}
+
+    result = module.MultiTrackTaskOutput.execute(info, video=videos, prompt_format="default")
+
+    assert result.values[1] == expected
+    assert task_content["user_prompt_b"] == source
+    assert result.values[9] == ([] if mute_mods else [("a", 1.0), ("b", 1.0)])
+
+
+def test_multitrack_task_output_prompt_relay_joins_task_fragments_inside_marker_ranges(monkeypatch):
+    module = _load_basic_module()
+    monkeypatch.setattr(
+        module.RefModLoadCache, "load",
+        lambda self, names: [(name, 1.0) for name in names],
+    )
     tracks_info = {
         "total_length": 12,
         "frame_rate": 24,
@@ -4871,7 +4925,14 @@ def test_multitrack_task_output_prompt_relay_joins_task_fragments_inside_marker_
         ],
         "tracks": [{"type": "task", "segments": [
             {"start_frame": 0, "end_frame": 4, "content": {"user_prompt": "first"}},
-            {"start_frame": 4, "end_frame": 8, "content": {"user_prompt": "second"}},
+            {
+                "start_frame": 4,
+                "end_frame": 8,
+                "content": {
+                    "user_prompt": "second <Picture 1> <Picture 2>",
+                    "mods": [{"file_path": "subject.safetensors"}],
+                },
+            },
             {"start_frame": 8, "end_frame": 12, "content": {"user_prompt": "third"}},
         ]}],
     }
@@ -4883,8 +4944,8 @@ def test_multitrack_task_output_prompt_relay_joins_task_fragments_inside_marker_
         [tracks_info], [], [], [], [1], ["promptRelay"],
     )
 
-    assert first.values[1] == "first [0-4] | second [4-6]"
-    assert second.values[1] == "second [6-8] | third [8-12]"
+    assert first.values[1] == "first [0-4] | second <Video 1> <Picture 1> [4-6]"
+    assert second.values[1] == "second <Video 1> <Picture 1> [6-8] | third [8-12]"
 
 
 def test_prompt_builder_supports_t2v_and_i2v_tasks():
@@ -5096,8 +5157,9 @@ def test_multitrack_prompt_enhance_to_project_updates_each_task_in_time_order(
                         "content": {
                             "user_prompt_variant": "b",
                             "user_prompt": "unused-a",
-                            "user_prompt_b": "later @prompt",
+                            "user_prompt_b": "later @prompt <Video 1>",
                             "task_mode": "ref",
+                            "mods": [{"file_path": "subject.safetensors"}],
                         },
                     },
                     {
@@ -5151,7 +5213,7 @@ def test_multitrack_prompt_enhance_to_project_updates_each_task_in_time_order(
     )
     assert [call["user_prompt"] for call in calls] == [
         ["earlier prompt"],
-        ["later prompt"],
+        ["later prompt <Video 1>"],
     ]
     assert [call["type"] for call in calls] == [["i2v"], ["rv2v"]]
     prompt_builder_calls = sys.modules["easy_media.utils.prompt_builder"].calls

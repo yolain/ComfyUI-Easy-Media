@@ -70,7 +70,12 @@ from ..utils import (
     write_srt_file,
 )
 from ..utils.prompt_builder import build_llm_prompt, build_prompt_request
-from ..utils.refmods import RefModLoadCache, task_refmod_names, track_refmod_fingerprint
+from ..utils.refmods import (
+    RefModLoadCache,
+    rewrite_refmod_prompt,
+    task_refmod_names,
+    track_refmod_fingerprint,
+)
 from ..utils.multitrack import (
     _as_list_input,
     _embedded_multitrack_media,
@@ -2767,6 +2772,9 @@ def _format_marker_task_prompt_relay(
     tasks: list[dict],
     start_frame: int,
     end_frame: int,
+    *,
+    mod_count: int,
+    has_reference_video: bool,
 ) -> str:
     formatted: list[str] = []
     for task in tasks:
@@ -2779,6 +2787,7 @@ def _format_marker_task_prompt_relay(
             continue
         prompt = _selected_multitrack_user_prompt(content).strip()
         if prompt:
+            prompt = rewrite_refmod_prompt(prompt, mod_count, has_video=has_reference_video)
             formatted.append(_format_multitrack_prompt_relay(prompt, task_start, task_end, 0))
     return " | ".join(formatted)
 
@@ -3388,7 +3397,13 @@ class MultiTrackTaskOutput(io.ComfyNode):
             media_progress.update_absolute(2)
 
         task_type = _multitrack_task_type(task, len(selected_images), has_video)
-        prompt = _selected_multitrack_user_prompt(content)
+        mod_count = len(refmod_names)
+        has_reference_video = any(item is not None for item in selected_video)
+        prompt = rewrite_refmod_prompt(
+            _selected_multitrack_user_prompt(content),
+            mod_count,
+            has_video=has_reference_video,
+        )
         system_prompt, api_prompt, json_mode = build_prompt_request(
             task_type,
             prompt,
@@ -3410,6 +3425,8 @@ class MultiTrackTaskOutput(io.ComfyNode):
                     _multitrack_task_segments(info),
                     start_frame,
                     end_frame,
+                    mod_count=mod_count,
+                    has_reference_video=has_reference_video,
                 )
             else:
                 user_prompt = _format_multitrack_prompt_relay(
@@ -4152,13 +4169,8 @@ class MultiTrackPromptEnhanceToProject(io.ComfyNode):
         segment_progress = ProgressBar(len(tasks)) if len(tasks) > 1 else None
         if segment_progress is not None:
             segment_progress.update_absolute(0, len(tasks))
-        task_media_info = info
-        if info.get("task_markers"):
-            # This node updates task segments rather than marker-defined task ranges.
-            # Ignore markers while reusing MultiTrackTaskOutput's media resolver so
-            # task_index remains aligned with the sorted segment list above.
-            task_media_info = dict(info)
-            task_media_info["task_markers"] = []
+        # The enhancer writes prompts back to the timeline in editor numbering.
+        task_media_info = {**info, "task_markers": [], "_refmod_context": {"names": []}}
         for task_index in range(len(tasks)):
             task_output = MultiTrackTaskOutput.execute(
                 tracks_info=task_media_info,

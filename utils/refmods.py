@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 from threading import Lock
@@ -14,6 +15,8 @@ REFMOD_OUTPUT_INDEX = 9
 _MODEL_SUFFIX = ".safetensors"
 _PREVIEW_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 _EXCLUDED_DIRS = {"graph_presets", ".git", "__pycache__"}
+_VIDEO_TAG = re.compile(r"<Video\s*([1-9][0-9]*)\s*>", re.IGNORECASE)
+_PICTURE_TAG = re.compile(r"<Picture\s*([1-9][0-9]*)\s*>", re.IGNORECASE)
 
 
 def _relative_path(value: str) -> PurePosixPath:
@@ -145,6 +148,25 @@ def track_refmod_fingerprint(info: dict) -> tuple[Any, ...]:
     if fingerprint is None:
         return ()
     return fingerprint(**{f"mod_{index}": name for index, name in enumerate(names, start=1)})
+
+
+def rewrite_refmod_prompt(prompt: str, mod_count: int, *, has_video: bool) -> str:
+    """Map the editor's reference labels to the task output when RefMods are active."""
+    if not mod_count:
+        return prompt
+    if _VIDEO_TAG.search(prompt):
+        if not has_video:
+            return prompt
+        return _VIDEO_TAG.sub(
+            lambda match: f"<Video {int(match[1]) + mod_count}>",
+            prompt,
+        )
+
+    def replace_picture(match: re.Match[str]) -> str:
+        index = int(match[1])
+        return "<Video 1>" if index == 1 else f"<Picture {index - 1}>"
+
+    return _PICTURE_TAG.sub(replace_picture, prompt)
 
 
 class RefModLoadCache:
