@@ -70,6 +70,7 @@ from ..utils import (
     write_srt_file,
 )
 from ..utils.prompt_builder import build_llm_prompt, build_prompt_request
+from ..utils.refmods import RefModLoadCache, task_refmod_names, track_refmod_fingerprint
 from ..utils.multitrack import (
     _as_list_input,
     _embedded_multitrack_media,
@@ -1892,6 +1893,18 @@ class MultiTrackEditor(io.ComfyNode):
         )
 
     @classmethod
+    def fingerprint_inputs(
+        cls,
+        track_data: list[str | dict] | str | dict | None = None,
+        prompt_override: object = None,
+        **kwargs: object,
+    ) -> tuple[object, ...]:
+        if prompt_override_has_value(_unwrap_singleton_container(prompt_override)):
+            return ()
+        # ComfyUI's cache looks at linked inputs through their ancestors.
+        return track_refmod_fingerprint(_parse_track_data(_unwrap_singleton_container(track_data)))
+
+    @classmethod
     def check_lazy_status(
         cls,
         resolution: str | dict,
@@ -2828,8 +2841,17 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 io.Video.Output("VIDEO", is_output_list=True),
                 io.String.Output("IMAGE_INDEXES"),
                 io.Audio.Output("LOCKED_AUDIO"),
+                io.Custom(io_type="H3_REF_MODS").Output("mods"),
             ],
         )
+
+    @classmethod
+    def fingerprint_inputs(
+        cls,
+        tracks_info: list | dict | str | None = None,
+        **kwargs: object,
+    ) -> tuple[object, ...]:
+        return track_refmod_fingerprint(_parse_track_data(_unwrap_singleton_container(tracks_info)))
 
     @classmethod
     def execute(
@@ -2862,6 +2884,15 @@ class MultiTrackTaskOutput(io.ComfyNode):
         output_full_timeline = requested_index == -1
         index = max(0, requested_index)
         selected_prompt_format = str(_unwrap_list_scalar(prompt_format, "default"))
+        task_entries = _multitrack_task_entries(info)
+        task_entry_index = min(index, len(task_entries) - 1) if task_entries else -1
+        task_entry = task_entries[task_entry_index] if task_entry_index >= 0 else {}
+        project_refs = info.get("_refmod_context")
+        refmod_names = (
+            project_refs["names"]
+            if isinstance(project_refs, dict)
+            else task_refmod_names(info, task_entry, full_timeline=output_full_timeline)
+        )
         # Share ffmpeg-extracted audio across tracks inside the same execute
         # call so a video referenced by many locked audio/video tracks (or by
         # multiple iterations of the timeline loop below) decodes once.
@@ -2877,6 +2908,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
             and not image_items
             and not audio_items
             and not video_items
+            and not refmod_names
         )
         cached_task_output = (
             runtime_cache.get(task_cache_key)
@@ -2908,9 +2940,6 @@ class MultiTrackTaskOutput(io.ComfyNode):
             )
 
         tracks = info.get("tracks", [])
-        task_entries = _multitrack_task_entries(info)
-        task_entry_index = min(index, len(task_entries) - 1) if task_entries else -1
-        task_entry = task_entries[task_entry_index] if task_entry_index >= 0 else {}
         task = task_entry.get("task", {}) if isinstance(task_entry, dict) else {}
         content = task.get("content", {}) if isinstance(task.get("content", {}), dict) else {}
         start_frame = max(0, int(task_entry.get("start_frame", task.get("start_frame", 0))))
@@ -3398,6 +3427,8 @@ class MultiTrackTaskOutput(io.ComfyNode):
         output_system_prompt = (
             "" if selected_prompt_format in {"default", "promptRelay"} else chat_system_prompt
         )
+        refmod_cache = project_refs.get("cache") if isinstance(project_refs, dict) else None
+        mods = (refmod_cache or RefModLoadCache()).load(refmod_names) if refmod_names else []
         output = io.NodeOutput(
             output_system_prompt,
             user_prompt,
@@ -3408,6 +3439,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
             (selected_video or [None]) if is_minimax else selected_video,
             image_indexes,
             locked_audio,
+            mods,
         )
         if can_restore_runtime:
             runtime_cache[task_cache_key] = output

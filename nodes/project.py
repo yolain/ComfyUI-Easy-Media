@@ -43,6 +43,12 @@ from ..utils.project_memory import (
     SEGMENT_META,
     install_project_memory_cleanup,
 )
+from ..utils.refmods import (
+    REFMOD_OUTPUT_INDEX,
+    RefModLoadCache,
+    task_refmod_names,
+    track_refmod_fingerprint,
+)
 from ..utils.multitrack import (
     MULTITRACK_RUNTIME_CACHE_KEY,
     multitrack_runtime_cache,
@@ -463,7 +469,7 @@ class EasyH3SamplingPreviewSampler(io.ComfyNode):
         return io.Schema(
             node_id="easy h3SamplingPreviewSampler",
             display_name="H3 Sampling Preview Sampler",
-            category="EasyUse/H3/dev",
+            category="EasyUse/Minimax/dev",
             inputs=[
                 io.Noise.Input("noise"),
                 io.Guider.Input("guider"),
@@ -619,7 +625,7 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
         return io.Schema(
             node_id="easy h3ProjectStaticPrepare",
             display_name="H3 Project Static Prepare",
-            category="EasyUse/H3/dev",
+            category="EasyUse/Minimax/dev",
             is_dev_only=True,
             enable_expand=True,
             inputs=[
@@ -646,6 +652,7 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                 io.Boolean.Input("run_second_pass", default=False, optional=True),
                 io.Boolean.Input("has_context_second_pass", default=False, optional=True),
                 io.Boolean.Input("turbo_hint", default=False, optional=True),
+                io.AnyType.Input("refmod_context", optional=True),
             ],
             outputs=[
                 TYPE_H3_PROJECT_STATIC_DATA.Output("PROJECT_STATIC"),
@@ -682,6 +689,7 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
         run_second_pass: bool = False,
         has_context_second_pass: bool = False,
         turbo_hint: bool = False,
+        refmod_context: dict[str, Any] | None = None,
     ) -> io.NodeOutput:
         del previous
         try:
@@ -711,6 +719,8 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                         **project_static.get("_cache_status", {}),
                         "segment_media": "命中恢复缓存",
                     }
+                    if refmod_context is not None:
+                        cached_task_info = {**cached_task_info, "_refmod_context": refmod_context}
                     return io.NodeOutput(
                         project_static,
                         cached_task_info,
@@ -743,6 +753,8 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
                         task_info,
                         task_locked_audio,
                     )
+                if refmod_context is not None:
+                    task_info = {**task_info, "_refmod_context": refmod_context}
                 return io.NodeOutput(
                     project_static, task_info, None, None, None, None, None,
                     None, task_locked_audio,
@@ -1035,6 +1047,16 @@ class EasyMultiTrackProject(io.ComfyNode):
         )
 
     @classmethod
+    def fingerprint_inputs(
+        cls,
+        tracks_info: list | tuple | dict | str | None = None,
+        **kwargs: Any,
+    ) -> tuple[Any, ...]:
+        if _first_input(tracks_info) is None:
+            return ()
+        return track_refmod_fingerprint(parse_tracks_info(tracks_info))
+
+    @classmethod
     def execute(cls, **kwargs: Any) -> io.NodeOutput:
         node_name = "MultiTrack Project"
         progress_total = 100
@@ -1275,6 +1297,21 @@ class EasyMultiTrackProject(io.ComfyNode):
                     f"Resuming segment {first_selected_index} from its first-pass checkpoint",
                 )
 
+        if first_pass_only and has_second_pass:
+            selected_entries = selected_entries[:1]
+        segment_refmods = {
+            task_index: task_refmod_names(info, entry)
+            for task_index, entry in selected_entries
+        }
+        active_refmods = any(
+            segment_refmods[task_index]
+            for task_index, entry in selected_entries
+            if not is_passthrough and not h3_task_is_passthrough(entry)
+        )
+        if active_refmods and not _h3_node_mapping("MiniMaxH3RefModApply"):
+            raise RuntimeError("Install ComfyUI-MiniMaxH3Mod to apply multitrack RefMods.")
+        refmod_cache = RefModLoadCache() if active_refmods else None
+
         if project_save == "override" and segment_count == -1:
             clear_h3_project_segments_from(
                 safe_project_name,
@@ -1287,8 +1324,6 @@ class EasyMultiTrackProject(io.ComfyNode):
             )
             report_step(19)
 
-        if first_pass_only and has_second_pass:
-            selected_entries = selected_entries[:1]
         log_node_info(
             node_name,
             f"Found {len(all_entries)} segments; processing {len(selected_entries)}",
@@ -1419,6 +1454,11 @@ class EasyMultiTrackProject(io.ComfyNode):
             task = entry.get("task", {})
             content = task.get("content", {}) if isinstance(task, dict) else {}
             task_is_passthrough = is_passthrough or h3_task_is_passthrough(entry)
+            refmod_names = [] if task_is_passthrough else segment_refmods[task_index]
+            refmod_context = (
+                {"names": refmod_names, "cache": refmod_cache}
+                if segment_refmods[task_index] else None
+            )
             locked_audio_track = h3_locked_audio_track(entry, info)
             locked_video_track = h3_locked_video_track(entry, info)
             has_task_locked_audio = locked_audio_track is not None
@@ -1450,6 +1490,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     task_index=task_index,
                     task_duration_frames=task_duration_frames, fps=fps,
                     generation_mode="reference" if task_is_passthrough else generation_mode,
+                    **({"refmod_context": refmod_context} if refmod_context is not None else {}),
                     **(
                         {"previous": previous_artifact}
                         if previous_artifact is not None
@@ -1478,6 +1519,8 @@ class EasyMultiTrackProject(io.ComfyNode):
                     task_shared_video if generation_mode == "reference" or task_is_passthrough else [],
                     task_entry=entry,
                 )
+                if refmod_context is not None:
+                    task_tracks_info["_refmod_context"] = refmod_context
                 task_output = graph.node(
                     "easy multiTrackTaskOutput", id=f"task_{task_index}",
                     tracks_info=task_tracks_info,
@@ -1611,6 +1654,13 @@ class EasyMultiTrackProject(io.ComfyNode):
                 latent=encoded_conditioning.out(1),
             )
             base_positive = second_pass_positive = conditioning.out(0)
+            if refmod_names:
+                base_positive = second_pass_positive = graph.node(
+                    "MiniMaxH3RefModApply",
+                    id=f"refmods_{task_index}",
+                    conditioning=base_positive,
+                    mods=task_output.out(REFMOD_OUTPUT_INDEX),
+                ).out(0)
             # Reference conditioning has no canvas-sized keyframes. Its text and
             # media embeddings can be shared by both sampling resolutions.
             if run_second_pass and generation_mode != "reference" and (
@@ -1627,6 +1677,13 @@ class EasyMultiTrackProject(io.ComfyNode):
                     id=f"second_pass_conditioning_{task_index}",
                     **second_inputs,
                 ).out(0)
+                if refmod_names:
+                    second_pass_positive = graph.node(
+                        "MiniMaxH3RefModApply",
+                        id=f"second_pass_refmods_{task_index}",
+                        conditioning=second_pass_positive,
+                        mods=task_output.out(REFMOD_OUTPUT_INDEX),
+                    ).out(0)
             initial_latent = conditioning.out(1)
             positive = base_positive
 

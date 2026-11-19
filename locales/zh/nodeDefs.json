@@ -871,7 +871,8 @@
       "4": { "name": "图像" },
       "5": { "name": "音频" },
       "6": { "name": "视频" },
-      "7": { "name": "图像索引" }
+      "7": { "name": "图像索引" },
+      "9": { "name": "模组" }
     }
   },
   "easy multiTrackPromptEnhancer": {
@@ -1522,6 +1523,31 @@
       }
     },
     "outputs": { "0": { "name": "潜空间" } }
+  },
+  "easy MiniMaxH3MediaToRefs": {
+    "display_name": "媒体列表转 H3 RefMod 引用",
+    "description": "按先图像后视频的顺序打包引用，连接到 Create H3 RefMod 的 refs_bundle 输入。",
+    "inputs": {
+      "images": { "name": "图像列表" },
+      "videos": { "name": "视频列表", "tooltip": "每段视频的画面帧作为一项引用。" }
+    },
+    "outputs": {
+      "0": { "name": "引用列表" }
+    }
+  },
+  "easy MiniMaxSaveH3RefMods": {
+    "display_name": "保存 H3 RefMods 与缩略图",
+    "description": "保存独立的 H3 RefMod 文件和可选缩略图，或只接入图像来更新现有模型的缩略图。",
+    "inputs": {
+      "mods": { "name": "RefMods" },
+      "filename_prefix": { "name": "文件名 / 前缀", "tooltip": "接入 RefMods 时用作导出前缀，未接入时填写现有模型的文件名。" },
+      "subfolder": { "name": "子目录" },
+      "thumbnail": { "name": "缩略图", "tooltip": "用同一张图像作为每个独立 RefMod 的预览。" }
+    },
+    "outputs": {
+      "0": { "name": "RefMods" },
+      "1": { "name": "保存路径" }
+    }
   },
   "easy minimaxPromptOverride": {
     "display_name": "MiniMax 提示词覆盖",

@@ -90,6 +90,26 @@ describe('multitrack utilities', () => {
     expect(mergeSelectedTaskSegments(data.tracks, new Set(['first', 'last']))).toBeNull()
   })
 
+  it.each(['', 'Keep the original prompt'])('keeps a later segment’s mods when the first prompt is %j', (userPrompt) => {
+    const { tracks } = createDefaultTrackData()
+    const taskTrack = tracks[0]
+    const mods = [{ id: 'subject', file_path: 'subject.safetensors', muted: true }]
+    taskTrack.segments = [
+      {
+        id: 'first', start_frame: 0, end_frame: 24, color: taskTrack.color,
+        content: { media_type: 'none', user_prompt: userPrompt },
+      },
+      {
+        id: 'second', start_frame: 24, end_frame: 48, color: taskTrack.color,
+        content: { media_type: 'none', mods },
+      },
+    ]
+
+    const result = mergeSelectedTaskSegments(tracks, new Set(['first', 'second']))
+
+    expect(result?.tracks[0].segments[0].content).toMatchObject({ user_prompt: userPrompt, mods })
+  })
+
   it('keeps video and audio locks independent while allowing one per type', () => {
     const data = createDefaultTrackData()
     const audioTrack = (id: string, audioLocked: boolean) => ({

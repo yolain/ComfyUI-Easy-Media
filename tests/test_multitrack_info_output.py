@@ -228,7 +228,7 @@ def _load_basic_module():
     nodes_package = types.ModuleType("easy_media.nodes")
     nodes_package.__path__ = []
     utils_module = types.ModuleType("easy_media.utils")
-    utils_module.__path__ = []
+    utils_module.__path__ = [str(Path(__file__).parents[1] / "utils")]
     utils_module.unload_comfyui_models = lambda: None
     utils_module.FFMPEG_RESIZE_METHODS = frozenset({
         "stretch", "resize", "pad", "pad (white)", "crop",
@@ -752,6 +752,71 @@ def test_multitrack_editor_includes_selected_dimensions_in_tracks_info():
     tracks_info = result.values[0]
     assert tracks_info["width"] == 1280
     assert tracks_info["height"] == 720
+
+
+def test_multitrack_refmod_fingerprint_tracks_file_versions(monkeypatch, tmp_path):
+    module = _load_basic_module()
+    model = tmp_path / "subject.safetensors"
+    model.write_bytes(b"version 1")
+
+    class Loader:
+        @classmethod
+        def IS_CHANGED(cls, mod_1):
+            assert mod_1 == "subject"
+            stat = model.stat()
+            return ((stat.st_size, stat.st_mtime_ns),)
+
+    monkeypatch.setitem(module.comfy_nodes.NODE_CLASS_MAPPINGS, "MiniMaxH3RefModsLoader", Loader)
+    info = {
+        "tracks": [{"type": "task", "segments": [
+            {"content": {"mods": [{"file_path": model.name}]}},
+        ]}],
+    }
+    editor = module.MultiTrackEditor
+    output = module.MultiTrackTaskOutput
+    before = editor.fingerprint_inputs(track_data=[json.dumps(info)])
+    assert output.fingerprint_inputs(tracks_info=[info]) == before
+    assert output.fingerprint_inputs(tracks_info=(None,)) == ()
+    assert editor.fingerprint_inputs(track_data=[info], prompt_override=["new prompt"]) == ()
+
+    model.write_bytes(b"second version")
+    after = editor.fingerprint_inputs(track_data=[info])
+    assert after != before
+    assert output.fingerprint_inputs(tracks_info=[info]) == after
+
+
+def test_multitrack_task_output_uses_separate_mod_limits_for_timeline_segments(monkeypatch):
+    module = _load_basic_module()
+    loads = []
+
+    class Loader:
+        def load(self, mod_1):
+            loads.append(mod_1)
+            return ([(mod_1, 1.0)], "")
+
+    monkeypatch.setitem(module.comfy_nodes.NODE_CLASS_MAPPINGS, "MiniMaxH3RefModsLoader", Loader)
+    names = [f"mod-{index}" for index in range(13)]
+    groups = [names[:9], names[7:]]
+    info = {
+        "format": "MiniMax", "width": 64, "height": 64, "frame_rate": 24, "total_length": 48,
+        "tracks": [{"type": "task", "segments": [
+            {
+                "start_frame": index * 24,
+                "end_frame": (index + 1) * 24,
+                "content": {"mods": [{"file_path": f"{name}.safetensors"} for name in group]},
+            }
+            for index, group in enumerate(groups)
+        ]}],
+    }
+    task_output = module.MultiTrackTaskOutput
+    assert task_output.execute(info, task_index=0, prompt_format="default").values[9] == [
+        (name, 1.0) for name in names[:8]
+    ]
+    loads.clear()
+    assert task_output.execute(info, task_index=-1, prompt_format="default").values[9] == [
+        (name, 1.0) for name in names
+    ]
+    assert loads == names
 
 
 def test_multitrack_editor_calculates_megapixel_dimensions_on_the_format_grid():
@@ -2758,6 +2823,7 @@ def test_multitrack_task_output_schema_and_task_media_selection():
         "SYSTEM_PROMPT", "USER_PROMPT", "TYPE", "LENGTH", "IMAGES", "AUDIO", "VIDEO",
         "IMAGE_INDEXES",
         "LOCKED_AUDIO",
+        "mods",
     ]
 
     images = [torch.zeros(1, 2, 2, 3), torch.ones(1, 2, 2, 3), torch.full((1, 2, 2, 3), 2.0)]
@@ -2804,12 +2870,14 @@ def test_multitrack_task_output_schema_and_task_media_selection():
         selected_video,
         image_indexes,
         locked_audio,
+        mods,
     ) = result.values
     assert system_prompt == ""
     assert user_prompt == "make it move"
     assert task_type == "rv2v"
     assert length == 5
     assert locked_audio is None
+    assert mods == []
     assert selected_images == [images[1], images[2]]
     assert selected_audio[0]["waveform"].flatten().tolist() == list(range(4, 12))
     assert selected_video == [video_track]
@@ -6316,8 +6384,9 @@ def test_multi_images_loader_resizes_ordered_image_list(monkeypatch):
         {"source_type": "input", "file_path": "second.png"},
     ]}
     result = module.MultiImagesLoader.execute(
-        {"resolution": "width x height (longest)", "resize_to_pixel": 120, "resize_method": "crop"},
-        json.dumps(image_data),
+        resolution={"resolution": "width x height (longest)", "resize_to_pixel": 120, "resize_method": "crop"},
+        max_limit=-1,
+        image_data=json.dumps(image_data),
     )
 
     assert calls == [(120, 60, "crop"), (60, 120, "crop")]
@@ -6329,6 +6398,8 @@ def test_multi_images_loader_resizes_ordered_image_list(monkeypatch):
 def test_multi_images_loader_rejects_more_than_25_images():
     module = _load_basic_module()
     with pytest.raises(ValueError, match="at most 25"):
-        module.MultiImagesLoader.execute("width x height (auto)", {
-            "images": [{"source_type": "input", "file_path": "x.png"}] * 26,
-        })
+        module.MultiImagesLoader.execute(
+            resolution="width x height (auto)",
+            max_limit=-1,
+            image_data={"images": [{"source_type": "input", "file_path": "x.png"}] * 26},
+        )

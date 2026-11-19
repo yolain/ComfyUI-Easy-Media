@@ -12,6 +12,7 @@ import type {
 } from '@/types/multitrack'
 import { uuid } from './uuid'
 import { activeTaskImages, synchronizeSharedTaskImages } from './task-image-utils'
+import { synchronizeSharedTaskMods, taskMods } from './task-mod-utils'
 
 export const MULTITRACK_DEFAULT_FRAME_RATE = 24
 export const MULTITRACK_DEFAULT_TOTAL_LENGTH = 120
@@ -153,11 +154,17 @@ export function mergeSelectedTaskSegments(
     getSelectedTaskUserPrompt(segment.content).trim().length > 0
     || activeTaskImages(segment.content.images).length > 0
   )) ?? firstSegment
+  const modSource = taskMods(contentSource).length
+    ? contentSource
+    : selectedSegments.find((segment) => taskMods(segment).length > 0)
   const mergedSegment: MultiTrackSegment = {
     ...firstSegment,
     start_frame: firstSegment.start_frame,
     end_frame: selectedSegments[selectedSegments.length - 1].end_frame,
-    content: { ...contentSource.content },
+    content: {
+      ...contentSource.content,
+      ...(modSource ? { mods: taskMods(modSource) } : {}),
+    },
   }
   const mergedIds = new Set(selectedSegments.map((segment) => segment.id))
   const nextSegments = orderedSegments.flatMap((segment) => {
@@ -1791,8 +1798,8 @@ export function normalizeTrackData(raw: LegacyTrackData): TrackData {
     return { ...track, name: `${typeName} ${index}` }
   })
   const normalizedAudioLocks = normalizeMultiTrackAudioLocks(namedTracks)
-  const normalizedSharedImages = synchronizeSharedTaskImages(normalizedAudioLocks)
-  const totalLength = normalizeTotalLength(normalizedSharedImages, frameRate)
+  const normalizedSharedAssets = synchronizeSharedTaskMods(synchronizeSharedTaskImages(normalizedAudioLocks))
+  const totalLength = normalizeTotalLength(normalizedSharedAssets, frameRate)
   const taskMarkers = normalizeTaskMarkers(raw.task_markers, totalLength)
 
   return {
@@ -1803,7 +1810,7 @@ export function normalizeTrackData(raw: LegacyTrackData): TrackData {
     total_length: totalLength,
     task_markers: taskMarkers,
     task_overview: raw.task_overview === true,
-    tracks: normalizedSharedImages,
+    tracks: normalizedSharedAssets,
   }
 }
 

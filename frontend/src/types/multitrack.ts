@@ -35,6 +35,14 @@ export interface MultiTrackTaskImage {
   muted?: boolean
 }
 
+export interface MultiTrackTaskMod {
+  id: string
+  file_path: string
+  shared_reference?: boolean
+  shared_reference_copy?: boolean
+  muted?: boolean
+}
+
 export interface MultiTrackSegmentContent {
   media_type: MultiTrackMediaType
   source_type?: MultiTrackSourceType
@@ -52,6 +60,7 @@ export interface MultiTrackSegmentContent {
   continuity_mode?: MultiTrackContinuityMode
   ref_image_size?: MultiTrackRefImageSize
   images?: MultiTrackTaskImage[]
+  mods?: MultiTrackTaskMod[]
   duration?: number
   volume_db?: number
   muted?: boolean

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PreviewArea } from '@/components/widgets/multitrack/PreviewArea'
 import type { SelectedMultiTrackSegment } from '@/lib/multitrack-utils'
@@ -9,9 +9,12 @@ vi.mock('@/lib/video-utils', () => ({
 }))
 
 vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
-  MediaSelector: ({ onChange }: { onChange: (value: string, source?: 'input' | 'output' | 'local') => void }) => (
-    <button type="button" onClick={() => onChange('picked.png', 'input')}>
-      mock select image
+  MediaSelector: ({ mediaType, onChange }: {
+    mediaType?: string
+    onChange: (value: string, source?: 'input' | 'output' | 'local') => void
+  }) => (
+    <button type="button" onClick={() => mediaType === 'mod' ? onChange('people/subject.safetensors') : onChange('picked.png', 'input')}>
+      {mediaType === 'mod' ? 'mock select mod' : 'mock select image'}
     </button>
   ),
 }))
@@ -1153,7 +1156,7 @@ describe('PreviewArea', () => {
       />,
     )
 
-    fireEvent.click(screen.getByTestId('task-preview-add-image'))
+    fireEvent.click(within(screen.getByTestId('task-preview-add-image')).getByRole('button', { name: 'Add Image' }))
     fireEvent.click(await screen.findByRole('button', { name: 'mock select image' }))
 
     expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
@@ -1203,7 +1206,12 @@ describe('PreviewArea', () => {
     )
 
     expect(screen.getByTestId('task-preview-images').className).toContain('flex-wrap')
-    fireEvent.click(screen.getByTestId('task-preview-empty-add-image'))
+    const addCard = screen.getByTestId('task-preview-empty-add-image')
+    expect(addCard.className).toContain('text-image-tile-foreground')
+    const addSlot = within(addCard)
+    expect(addSlot.getByText('Add reference').className).toContain('text-muted-foreground')
+    expect(addSlot.getByRole('button', { name: 'Add Mod' })).toBeTruthy()
+    fireEvent.click(addSlot.getByRole('button', { name: 'Add Image' }))
     fireEvent.click(await screen.findByRole('button', { name: 'mock select image' }))
 
     expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
@@ -1211,6 +1219,54 @@ describe('PreviewArea', () => {
       patch: {
         images: [
           expect.objectContaining({ source_type: 'input', file_path: 'picked.png', file_name: 'picked.png' }),
+        ],
+      },
+    }])
+  })
+
+  it('adds mods to the playhead task without selecting a segment', async () => {
+    vi.useRealTimers()
+    const { data } = trackData()
+    addActiveTaskTrack(data)
+    const task = data.tracks[0].segments[1]
+    task.content.mods = [{ id: 'existing', file_path: 'existing.safetensors' }]
+    const onTrackSegmentsContentChange = vi.fn()
+
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={36}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    const referenceList = screen.getByTestId('task-preview-images')
+    const addItem = screen.getByTestId('task-preview-add-image')
+    expect(addItem.className).toContain('text-image-tile-foreground')
+    expect(referenceList.firstElementChild).toBe(screen.getByTestId('task-mod-existing'))
+    expect(screen.getByTestId('task-mod-index-existing').textContent).toBe('mod1')
+    expect(referenceList.lastElementChild).toBe(addItem)
+    const muteMod = within(screen.getByTestId('task-mod-existing')).getByRole('button', { name: 'Disable mod' })
+    const muteImage = screen.getByTestId('task-preview-image-muted-first')
+    expect(muteMod.textContent).toBe('M')
+    expect(muteMod.className).toBe(muteImage.className)
+    expect(muteMod.getAttribute('style')).toBe(muteImage.getAttribute('style'))
+    expect(within(addItem).getByRole('button', { name: 'Add Image' })).toBeTruthy()
+    fireEvent.click(within(addItem).getByRole('button', { name: 'Add Mod' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'mock select mod' }))
+
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
+      segmentId: task.id,
+      patch: {
+        mods: [
+          { id: 'existing', file_path: 'existing.safetensors' },
+          expect.objectContaining({ file_path: 'people/subject.safetensors' }),
         ],
       },
     }])
