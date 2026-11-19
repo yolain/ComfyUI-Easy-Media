@@ -616,6 +616,64 @@ describe('TaskSegmentEditor', () => {
     })
   })
 
+  it('opens mod replacement with one click even when the segment is at capacity', () => {
+    const segment = taskSegment()
+    const firstMod = { id: 'original', file_path: 'folder/original.safetensors', muted: true }
+    const mods = [firstMod, ...Array.from({ length: 7 }, (_, index) => ({
+      id: String(index), file_path: `mod-${index}.safetensors`,
+    }))]
+    segment.content.mods = mods
+    const onContentChange = vi.fn()
+    const { rerender } = render(<TaskSegmentEditor segment={segment} onContentChange={onContentChange} />)
+    fireEvent.error(screen.getByAltText('original'))
+
+    const replaceButton = screen.getByRole('button', { name: 'Replace mod original' })
+    fireEvent.click(replaceButton, { detail: 1 })
+
+    const selector = screen.getByTestId('media-selector-mock')
+    expect(selector.dataset.value).toBe(firstMod.file_path)
+    expect(selector.dataset.mediaType).toBe('mod')
+    expect(selector.dataset.multiple).not.toBe('true')
+    expect(selector.dataset.limit).toBe('1')
+    fireEvent.click(screen.getByRole('button', { name: 'choose replacement' }))
+
+    const nextMods = [{ ...firstMod, file_path: 'people/subject.safetensors' }, ...mods.slice(1)]
+    expect(onContentChange).toHaveBeenCalledWith({ mods: nextMods })
+    rerender(<TaskSegmentEditor segment={{ ...segment, content: { ...segment.content, mods: nextMods } }} onContentChange={onContentChange} />)
+    expect(screen.getByAltText('subject').getAttribute('src')).toContain('subject.safetensors')
+  })
+
+  it.each([false, true])('updates shared copies together or reports a duplicate (conflict: %s)', (conflict) => {
+    const segment = taskSegment()
+    const second = secondTaskSegment()
+    const original = { id: 'original', file_path: 'folder/original.safetensors', shared_reference: true }
+    const sharedCopy = { ...original, id: 'copy', shared_reference_copy: true, muted: true }
+    segment.content.mods = [original]
+    second.content.mods = [
+      sharedCopy,
+      ...(conflict ? [{ id: 'other', file_path: 'people/subject.safetensors' }] : []),
+    ]
+    const onTrackSegmentsContentChange = vi.fn()
+    render(<TaskSegmentEditor
+      segment={segment}
+      trackSegments={[segment, second]}
+      onContentChange={vi.fn()}
+      onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace mod original' }), { detail: 1 })
+    fireEvent.click(screen.getByRole('button', { name: 'choose replacement' }))
+    if (conflict) {
+      expect(onTrackSegmentsContentChange).not.toHaveBeenCalled()
+      expect(screen.getByRole('alert').textContent).toContain('already in an affected segment')
+    } else {
+      expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([
+        { segmentId: segment.id, patch: { mods: [{ ...original, file_path: 'people/subject.safetensors' }] } },
+        { segmentId: second.id, patch: { mods: [{ ...sharedCopy, file_path: 'people/subject.safetensors' }] } },
+      ])
+    }
+  })
+
   it('shows the mod name if the preview is missing and keeps mod actions separate', () => {
     const segment = taskSegment()
     const mod = { id: 'subject', file_path: 'people/subject.safetensors' }
@@ -632,7 +690,7 @@ describe('TaskSegmentEditor', () => {
     )
 
     fireEvent.error(screen.getByAltText('subject'))
-    expect(screen.getByText('subject')).toBeTruthy()
+    expect(screen.getByText('subject').className).toContain('line-clamp-2')
     const modIndex = screen.getByTestId('task-mod-index-subject')
     expect(modIndex.className).toContain('bg-refmod')
     expect(modIndex.className.replace('bg-refmod text-refmod-foreground', 'bg-black/50 text-white'))
@@ -654,6 +712,7 @@ describe('TaskSegmentEditor', () => {
     ])
     fireEvent.click(screen.getByRole('button', { name: 'Disable mod' }))
     expect(onContentChange).toHaveBeenLastCalledWith({ mods: [{ ...mod, muted: true }] })
+    expect(screen.queryByTestId('media-selector-mock')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Preview mod' }))
     expect(screen.getByRole('dialog', { name: 'subject' })).toBeTruthy()
     fireEvent.keyDown(screen.getByRole('dialog', { name: 'subject' }), { key: 'Escape' })

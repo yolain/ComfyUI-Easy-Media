@@ -1,5 +1,8 @@
 import { useState } from 'react'
+import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
+import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useT } from '@/lib/i18n'
 import { taskModName, taskModPreviewUrl } from '@/lib/task-mod-utils'
 import { cn } from '@/lib/utils'
@@ -17,14 +20,20 @@ interface TaskRefModCardProps {
   onShare: () => void
   onMute: () => void
   onDelete: () => void
+  onReselect: (path: string) => boolean
 }
 
-export function TaskRefModCard({ mod, index, canShare, className, layout, controlMetrics, onShare, onMute, onDelete }: Readonly<TaskRefModCardProps>) {
+export function TaskRefModCard({
+  mod, index, canShare, className, layout, controlMetrics, onShare, onMute, onDelete, onReselect,
+}: Readonly<TaskRefModCardProps>) {
   const t = useT()
-  const [hasPreview, setHasPreview] = useState(true)
+  const [failedPreviewUrl, setFailedPreviewUrl] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [selectorOpen, setSelectorOpen] = useState(false)
+  const [replacementConflict, setReplacementConflict] = useState(false)
   const name = taskModName(mod.file_path)
   const previewUrl = taskModPreviewUrl(mod.file_path)
+  const hasPreview = failedPreviewUrl !== previewUrl
   const shareLabel = t(mod.shared_reference ? 'multitrack.unshareMod' : 'multitrack.shareMod')
   const muteLabel = t(mod.muted ? 'multitrack.enableMod' : 'multitrack.disableMod')
 
@@ -38,18 +47,56 @@ export function TaskRefModCard({ mod, index, canShare, className, layout, contro
         className,
       )}
     >
-      {hasPreview ? (
-        <img
-          src={previewUrl}
-          alt={name}
-          loading="lazy"
-          className="h-full w-full object-cover"
-          onError={() => setHasPreview(false)}
-        />
-      ) : (
-        <span className="max-w-full truncate px-2 text-xs text-foreground" title={name}>{name}</span>
-      )}
-      <TaskReferenceIndex kind="mod" index={index} testId={`task-mod-index-${mod.id}`} />
+      <Popover open={selectorOpen} onOpenChange={(open) => {
+        setSelectorOpen(open)
+        if (!open) setReplacementConflict(false)
+      }}>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            className="absolute inset-0 size-full cursor-pointer rounded-none p-0 text-foreground hover:bg-transparent hover:text-foreground focus-visible:ring-inset"
+            aria-label={t('multitrack.reselectMod', { name })}
+          >
+            {hasPreview ? (
+              <img
+                key={previewUrl}
+                src={previewUrl}
+                alt={name}
+                loading="lazy"
+                draggable={false}
+                className="h-full w-full object-cover"
+                onError={() => setFailedPreviewUrl(previewUrl)}
+              />
+            ) : (
+              <span className="line-clamp-2 max-w-full wrap-anywhere px-2 text-center text-xs leading-tight font-normal whitespace-normal" title={name}>
+                {name}
+              </span>
+            )}
+            <TaskReferenceIndex kind="mod" index={index} testId={`task-mod-index-${mod.id}`} />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-0" align="end">
+          <MediaSelector
+            value={mod.file_path}
+            mediaType="mod"
+            maxSelectionCount={1}
+            onChange={(path) => {
+              if (!onReselect(path)) {
+                setReplacementConflict(true)
+                return
+              }
+              setReplacementConflict(false)
+              setSelectorOpen(false)
+            }}
+          />
+          {replacementConflict && (
+            <p role="alert" className="px-2 py-1.5 text-xs text-destructive">
+              {t('multitrack.reselectModAlreadyAdded')}
+            </p>
+          )}
+        </PopoverContent>
+      </Popover>
       {layout === 'editor' && (
         <div
           aria-hidden="true"

@@ -160,6 +160,8 @@
     "addReference": "添加参考",
     "addReferenceImage": "添加图像",
     "addMod": "添加模组",
+    "reselectMod": "更换模组 {name}",
+    "reselectModAlreadyAdded": "选中的模组已存在于需要更新的片段中。",
     "shareMod": "共用模组",
     "unshareMod": "取消共用模组",
     "enableMod": "启用模组",

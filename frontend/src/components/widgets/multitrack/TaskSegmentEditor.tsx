@@ -21,7 +21,6 @@ import {
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { MediaSelector } from '@/components/widgets/mediaSelector/MediaSelector'
-import type { MediaTab } from '@/components/widgets/mediaSelector/MediaSelector'
 import { useT } from '@/lib/i18n'
 import { mediaContentToViewUrl } from '@/lib/media-url'
 import { getSegmentTrackPresentation } from '@/lib/multitrack-segment-style'
@@ -47,7 +46,11 @@ import {
   createTaskImage,
   activeTaskImages,
   canEnableSharedTaskImage,
+  imageSelectorTab,
+  imageSelectorValue,
   MAX_TASK_IMAGES,
+  replaceSharedTaskImage,
+  selectedImageSource,
   sharedTaskImageUpdates,
   splitSelectedTaskMedia,
   taskImageIdentity,
@@ -56,7 +59,10 @@ import {
   taskImagesFromContent,
   uploadTaskImageFile,
 } from '@/lib/task-image-utils'
-import { appendTaskMods, canShareTaskMod, MAX_TASK_MODS, sharedTaskModUpdates, taskMods } from '@/lib/task-mod-utils'
+import {
+  appendTaskMods, canShareTaskMod, MAX_TASK_MODS, replaceTaskMod, sharedTaskModUpdates, taskMods,
+  type TaskModUpdate,
+} from '@/lib/task-mod-utils'
 import { invalidateMediaListCache } from '@/stores/media-list-store'
 import type {
   MultiTrack,
@@ -64,7 +70,6 @@ import type {
   MultiTrackRefImageSize,
   MultiTrackSegment,
   MultiTrackSegmentContent,
-  MultiTrackSourceType,
   MultiTrackTaskImage,
   MultiTrackTaskMod,
   MultiTrackTaskMode,
@@ -149,30 +154,6 @@ function moveImage(images: MultiTrackTaskImage[], sourceId: string, targetId: st
 
 function imageDisplayName(image: MultiTrackTaskImage): string {
   return image.file_name ?? image.file_path ?? image.local_path ?? image.url ?? image.slot_name ?? image.id
-}
-
-function imageSelectorValue(image: MultiTrackTaskImage | undefined): string {
-  if (!image) return ''
-  if (image.slot_name) return `__slot__:${image.slot_name}`
-  return image.file_path ?? image.local_path ?? image.url ?? ''
-}
-
-function imageSelectorTab(image: MultiTrackTaskImage | undefined): MediaTab {
-  if (image?.source_type === 'output') return 'outputs'
-  if (image?.source_type === 'local') return 'local'
-  if (image?.source_type === 'url') return 'url'
-  if (image?.source_type === 'slot') return 'slot'
-  return 'inputs'
-}
-
-function selectedImageSource(
-  filePath: string,
-  source?: 'input' | 'output' | 'local',
-): MultiTrackSourceType {
-  if (source) return source
-  if (filePath.startsWith('__slot__:')) return 'slot'
-  if (filePath.startsWith('http://') || filePath.startsWith('https://')) return 'url'
-  return 'input'
 }
 
 function hasVideoInRange(segment: MultiTrackSegment, videoSegments: MultiTrackSegment[]): boolean {
@@ -469,24 +450,8 @@ export function TaskSegmentEditor({
     if (reselectImageId) {
       const replacement = { ...nextImages[0], id: reselectImageId }
       if (reselectImage?.shared_reference === true && onTrackSegmentsContentChange) {
-        const oldIdentity = taskImageIdentity(reselectImage)
-        const unsharedUpdates = new Map(
-          sharedTaskImageUpdates(editableSegments, reselectImage, false)
-            .map((update) => [update.segmentId, update.images]),
-        )
-        const replacementSourceSegments = editableSegments.map((item) => ({
-          ...item,
-          content: {
-            ...item.content,
-            images: item.id === segment.id
-              ? [replacement, ...(unsharedUpdates.get(item.id) ?? []).filter((image) => (
-                  taskImageIdentity(image) !== oldIdentity
-                ))]
-              : unsharedUpdates.get(item.id) ?? taskImages(item),
-          },
-        }))
         onTrackSegmentsContentChange(
-          sharedTaskImageUpdates(replacementSourceSegments, replacement, true).map((update) => ({
+          replaceSharedTaskImage(editableSegments, segment.id, reselectImage, replacement).map((update) => ({
             segmentId: update.segmentId,
             patch: { images: update.images },
           })),
@@ -625,15 +590,19 @@ export function TaskSegmentEditor({
     setMediaSelectorOpen(false)
   }
 
+  function applyTaskModUpdates(updates: TaskModUpdate[]) {
+    if (!updates.length) return
+    if (onTrackSegmentsContentChange) {
+      onTrackSegmentsContentChange(updates.map(({ segmentId, mods }) => ({ segmentId, patch: { mods } })))
+    } else {
+      const current = updates.find((update) => update.segmentId === segment.id)
+      if (current) onContentChange({ mods: current.mods })
+    }
+  }
+
   function handleSharedModChange(mod: MultiTrackTaskMod, enabled: boolean, remove = false) {
     if (enabled && !canShareTaskMod(editableSegments, mod)) return
-    const updates = sharedTaskModUpdates(editableSegments, mod, enabled, remove ? segment.id : undefined)
-      .map((update) => ({ segmentId: update.segmentId, patch: { mods: update.mods } }))
-    if (onTrackSegmentsContentChange) onTrackSegmentsContentChange(updates)
-    else {
-      const current = updates.find((update) => update.segmentId === segment.id)
-      if (current) onContentChange(current.patch)
-    }
+    applyTaskModUpdates(sharedTaskModUpdates(editableSegments, mod, enabled, remove ? segment.id : undefined))
   }
 
   function openReferencePicker(type: TaskReferencePicker) {
@@ -826,12 +795,18 @@ export function TaskSegmentEditor({
                   >
                   {mods.map((mod, index) => (
                     <TaskRefModCard
-                      key={mod.id}
+                      key={`${segment.id}:${mod.id}`}
                       mod={mod}
                       index={index + 1}
                       layout="editor"
                       controlMetrics={referenceControlMetrics(mod.shared_reference)}
                       canShare={mod.shared_reference === true || canShareTaskMod(editableSegments, mod)}
+                      onReselect={(path) => {
+                        const updates = replaceTaskMod(editableSegments, segment.id, mod, path)
+                        if (!updates) return false
+                        applyTaskModUpdates(updates)
+                        return true
+                      }}
                       onShare={() => handleSharedModChange(mod, mod.shared_reference !== true)}
                       onMute={() => onContentChange({
                         mods: mods.map((item) => item.id === mod.id ? { ...item, muted: !item.muted } : item),

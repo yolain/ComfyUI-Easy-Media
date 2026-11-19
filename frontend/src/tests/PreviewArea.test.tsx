@@ -9,11 +9,20 @@ vi.mock('@/lib/video-utils', () => ({
 }))
 
 vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
-  MediaSelector: ({ mediaType, onChange }: {
+  MediaSelector: ({ mediaType, onChange, value, defaultTab, allowMultipleSelection }: {
     mediaType?: string
+    value: string
+    defaultTab?: string
+    allowMultipleSelection?: boolean
     onChange: (value: string, source?: 'input' | 'output' | 'local') => void
   }) => (
-    <button type="button" onClick={() => mediaType === 'mod' ? onChange('people/subject.safetensors') : onChange('picked.png', 'input')}>
+    <button
+      type="button"
+      data-value={value}
+      data-tab={defaultTab}
+      data-multiple={String(allowMultipleSelection === true)}
+      onClick={() => mediaType === 'mod' ? onChange('people/subject.safetensors') : onChange('picked.png', 'input')}
+    >
       {mediaType === 'mod' ? 'mock select mod' : 'mock select image'}
     </button>
   ),
@@ -894,6 +903,10 @@ describe('PreviewArea', () => {
     expect(imageArea.className).toContain('w-20')
     expect(imageArea.parentElement?.className).toContain('w-fit')
     expect(screen.getByTestId('multitrack-video-stage').parentElement?.className).toContain('h-full')
+    const addSlot = within(screen.getByTestId('task-preview-add-image'))
+    expect(addSlot.queryByText('Add reference')).toBeNull()
+    expect(addSlot.getByRole('button', { name: 'Add Image' })).toBeTruthy()
+    expect(addSlot.getByRole('button', { name: 'Add Mod' })).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'Enlarge task images' }))
 
@@ -1025,6 +1038,42 @@ describe('PreviewArea', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Back to preview' }))
     expect(screen.getByTestId('task-preview-images')).not.toBeNull()
     expect(onTrackSegmentsContentChange).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])('opens single-image replacement from the preview (with video: %s)', async (withVideo) => {
+    vi.useRealTimers()
+    const { data } = trackData()
+    if (withVideo) data.tracks[0].segments[0].end_frame = 48
+    addActiveTaskTrack(data)
+    const task = data.tracks[0].segments[1]
+    const images = task.content.images ?? []
+    images[0].source_type = 'output'
+    const onTrackSegmentsContentChange = vi.fn()
+    render(
+      <PreviewArea
+        data={data}
+        currentTime={36}
+        selectedSegment={null}
+        isPlaying={false}
+        node={{ widgets: [] }}
+        onGlobalSettingsChange={vi.fn()}
+        onSelectedSegmentContentChange={vi.fn()}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+        onSelectedSegmentDurationChange={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'first.png' }), { detail: 1 })
+    const selector = await screen.findByRole('button', { name: 'mock select image' })
+    expect(selector.dataset.value).toBe('tasks/first.png')
+    expect(selector.dataset.tab).toBe('outputs')
+    expect(selector.dataset.multiple).toBe('false')
+    fireEvent.click(selector)
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([{
+      segmentId: task.id,
+      patch: { images: [expect.objectContaining({ id: 'first', file_path: 'picked.png' }), images[1]] },
+    }])
+    expect(screen.queryByRole('button', { name: 'mock select image' })).toBeNull()
   })
 
   it('deletes an active task image from the global preview', () => {
@@ -1224,7 +1273,7 @@ describe('PreviewArea', () => {
     }])
   })
 
-  it('adds mods to the playhead task without selecting a segment', async () => {
+  it('adds and replaces mods on the playhead task without selecting a segment', async () => {
     vi.useRealTimers()
     const { data } = trackData()
     addActiveTaskTrack(data)
@@ -1257,6 +1306,12 @@ describe('PreviewArea', () => {
     expect(muteMod.textContent).toBe('M')
     expect(muteMod.className).toBe(muteImage.className)
     expect(muteMod.getAttribute('style')).toBe(muteImage.getAttribute('style'))
+    const modControls = screen.getByTestId('task-mod-actions-existing')
+    for (const button of within(modControls).getAllByRole('button')) {
+      expect(button.className).toContain('rounded-sm')
+      expect(button.getAttribute('style')).toContain('width: 18px')
+      expect(button.getAttribute('style')).toContain('height: 18px')
+    }
     expect(within(addItem).getByRole('button', { name: 'Add Image' })).toBeTruthy()
     fireEvent.click(within(addItem).getByRole('button', { name: 'Add Mod' }))
     fireEvent.click(await screen.findByRole('button', { name: 'mock select mod' }))
@@ -1269,6 +1324,13 @@ describe('PreviewArea', () => {
           expect.objectContaining({ file_path: 'people/subject.safetensors' }),
         ],
       },
+    }])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace mod existing' }), { detail: 1 })
+    fireEvent.click(await screen.findByRole('button', { name: 'mock select mod' }))
+    expect(onTrackSegmentsContentChange).toHaveBeenLastCalledWith([{
+      segmentId: task.id,
+      patch: { mods: [{ id: 'existing', file_path: 'people/subject.safetensors' }] },
     }])
   })
 

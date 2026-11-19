@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TaskMarkerIcon } from '@/components/ui/custom-lucide-icon'
 import { Input } from '@/components/ui/input'
-import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -39,7 +39,11 @@ import {
 import {
   createTaskImage,
   canEnableSharedTaskImage,
+  imageSelectorTab,
+  imageSelectorValue,
   MAX_TASK_IMAGES,
+  replaceSharedTaskImage,
+  selectedImageSource,
   sharedTaskImageUpdates,
   splitSelectedTaskMedia,
   taskImageIdentity,
@@ -47,7 +51,10 @@ import {
   taskImagesFromContent,
   uploadTaskImageFile,
 } from '@/lib/task-image-utils'
-import { appendTaskMods, canShareTaskMod, MAX_TASK_MODS, sharedTaskModUpdates, taskMods } from '@/lib/task-mod-utils'
+import {
+  appendTaskMods, canShareTaskMod, MAX_TASK_MODS, replaceTaskMod, sharedTaskModUpdates, taskMods,
+  type TaskModUpdate,
+} from '@/lib/task-mod-utils'
 import { loadBrowserVideoMetadata } from '@/lib/video-utils'
 import { DEFAULT_SUBTITLE_STYLE } from '@/lib/subtitle-recognition'
 import { invalidateMediaListCache } from '@/stores/media-list-store'
@@ -267,6 +274,7 @@ export function PreviewArea({
     () => setExpandedTaskImageTarget(null),
   )
   const [activeTaskPreviewImageId, setActiveTaskPreviewImageId] = useState<string | null>(null)
+  const [reselectTaskImageId, setReselectTaskImageId] = useState<string | null>(null)
   const [previewLayoutMode, setPreviewLayoutMode] = useState<PreviewLayoutMode>('balanced')
   const [activeTaskPicker, setActiveTaskPicker] = useState<TaskReferencePicker | null>(null)
   const [activeTaskImageDragOver, setActiveTaskImageDragOver] = useState(false)
@@ -280,7 +288,7 @@ export function PreviewArea({
   const resolutionInput = useMultiTrackResolutionInput(node)
   const imageSlotItems = useMemo(
     () => computeSlotItems(node, app, 'image'),
-    [node, app, activeTaskPicker],
+    [node, app, activeTaskPicker, reselectTaskImageId],
   )
   const videoSegments = useMemo(() => (
     data.tracks
@@ -388,6 +396,7 @@ export function PreviewArea({
 
   useEffect(() => {
     setActiveTaskPicker(null)
+    setReselectTaskImageId(null)
   }, [activeTaskImages?.segmentId])
 
   useEffect(() => {
@@ -548,7 +557,7 @@ export function PreviewArea({
     const remainingSlots = MAX_TASK_IMAGES - activeTaskImages.allImages.length
     if (remainingSlots <= 0) return
     const selectedPaths = splitSelectedTaskMedia(filePath).slice(0, remainingSlots)
-    const sourceType = source ?? (filePath.startsWith('http://') || filePath.startsWith('https://') ? 'url' : 'input')
+    const sourceType = selectedImageSource(filePath, source)
     const nextImages = selectedPaths.map((path) => createTaskImage(path, sourceType))
     if (nextImages.length === 0) return
     onTrackSegmentsContentChange?.([{
@@ -556,6 +565,22 @@ export function PreviewArea({
       patch: { images: [...activeTaskImages.allImages, ...nextImages] },
     }])
     setActiveTaskPicker(null)
+  }
+
+  function handleActiveTaskImageReplacement(
+    image: MultiTrackTaskImage,
+    value: string,
+    source?: 'input' | 'output' | 'local',
+  ) {
+    const [path] = splitSelectedTaskMedia(value)
+    if (!path || !activeTaskImages) return
+    const { segmentId, allImages } = activeTaskImages
+    const replacement = { ...createTaskImage(path, selectedImageSource(path, source)), id: image.id }
+    const updates = image.shared_reference
+      ? replaceSharedTaskImage(taskSegments?.length ? taskSegments : previewTaskSegments, segmentId, image, replacement)
+      : [{ segmentId, images: allImages.map((item) => item.id === image.id ? replacement : item) }]
+    onTrackSegmentsContentChange?.(updates.map(({ segmentId, images }) => ({ segmentId, patch: { images } })))
+    setReselectTaskImageId(null)
   }
 
   function handleTaskPromptInput(text: string) {
@@ -650,10 +675,12 @@ export function PreviewArea({
 
   function updateActiveTaskMods(mods: MultiTrackTaskMod[]) {
     if (!activeTaskImages) return
-    onTrackSegmentsContentChange?.([{
-      segmentId: activeTaskImages.segmentId,
-      patch: { mods },
-    }])
+    applyTaskModUpdates([{ segmentId: activeTaskImages.segmentId, mods }])
+  }
+
+  function applyTaskModUpdates(updates: TaskModUpdate[]) {
+    if (!updates.length) return
+    onTrackSegmentsContentChange?.(updates.map(({ segmentId, mods }) => ({ segmentId, patch: { mods } })))
   }
 
   function handleActiveTaskSelectedMods(value: string) {
@@ -667,23 +694,26 @@ export function PreviewArea({
     if (!activeTaskImages) return
     if (enabled && !canShareTaskMod(previewTaskSegments, mod)) return
     const updates = sharedTaskModUpdates(previewTaskSegments, mod, enabled, remove ? activeTaskImages.segmentId : undefined)
-    onTrackSegmentsContentChange?.(updates.map((update) => ({
-      segmentId: update.segmentId,
-      patch: { mods: update.mods },
-    })))
+    applyTaskModUpdates(updates)
   }
 
   function renderActiveTaskMods(className: string, layout: 'flow' | 'split') {
     if (!activeTaskImages) return null
-    const { mods } = activeTaskImages
+    const { mods, segmentId } = activeTaskImages
     return mods.map((mod, index) => (
       <TaskRefModCard
-        key={mod.id}
+        key={`${segmentId}:${mod.id}`}
         mod={mod}
         index={index + 1}
         className={className}
         layout={layout}
         canShare={mod.shared_reference === true || canShareTaskMod(previewTaskSegments, mod)}
+        onReselect={(path) => {
+          const updates = replaceTaskMod(previewTaskSegments, segmentId, mod, path)
+          if (!updates) return false
+          applyTaskModUpdates(updates)
+          return true
+        }}
         onShare={() => handleActiveTaskModSharedChange(mod, mod.shared_reference !== true)}
         onMute={() => updateActiveTaskMods(
           mods.map((item) => item.id === mod.id ? { ...item, muted: !item.muted } : item),
@@ -719,6 +749,7 @@ export function PreviewArea({
               modCount={modCount}
               openPicker={activeTaskPicker}
               onPick={setActiveTaskPicker}
+              showHeading={selectedSegment !== null || !activeVideo}
             />
           </div>
         </PopoverAnchor>
@@ -768,7 +799,7 @@ export function PreviewArea({
         : 'border-border'
     return (
       <div
-        key={image.id}
+        key={`${activeTaskImages.segmentId}:${image.id}`}
         data-testid={`task-preview-image-${image.id}`}
         className={`group/task-image relative shrink-0 cursor-pointer overflow-hidden rounded-sm border bg-black ${borderClass} ${className}`}
         draggable
@@ -781,25 +812,45 @@ export function PreviewArea({
         onDragOver={(event) => event.preventDefault()}
         onDrop={() => handleActiveTaskImageReorderDrop(image.id)}
       >
-        <Button
-          type="button"
-          variant="ghost"
-          className={layout === 'flow' && url
-            ? 'h-full w-auto max-w-full rounded-none p-0 hover:bg-transparent'
-            : 'h-full w-full rounded-none p-0 hover:bg-transparent'}
-          aria-label={imageName}
-          onClick={() => setActiveTaskPreviewImageId(image.id)}
-        >
-          {renderActiveTaskImagePreview(
-            image,
-            url,
-            imageName,
-            imageIndex,
-            layout === 'flow' && url
-              ? `h-full w-auto max-w-full object-contain transition-opacity ${image.muted === true ? 'opacity-40' : ''}`
-              : `h-full w-full object-contain transition-opacity ${image.muted === true ? 'opacity-40' : ''}`,
-          )}
-        </Button>
+        <Popover open={reselectTaskImageId === image.id} onOpenChange={(open) => {
+          if (open) {
+            setReselectTaskImageId(image.id)
+            setActiveTaskPreviewImageId(image.id)
+          } else {
+            setReselectTaskImageId((current) => current === image.id ? null : current)
+          }
+        }}>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              className={layout === 'flow' && url
+                ? 'h-full w-auto max-w-full rounded-none p-0 hover:bg-transparent'
+                : 'h-full w-full rounded-none p-0 hover:bg-transparent'}
+              aria-label={imageName}
+            >
+              {renderActiveTaskImagePreview(
+                image,
+                url,
+                imageName,
+                imageIndex,
+                layout === 'flow' && url
+                  ? `h-full w-auto max-w-full object-contain transition-opacity ${image.muted === true ? 'opacity-40' : ''}`
+                  : `h-full w-full object-contain transition-opacity ${image.muted === true ? 'opacity-40' : ''}`,
+              )}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="end">
+            <MediaSelector
+              value={imageSelectorValue(image)}
+              mediaType="image"
+              defaultTab={imageSelectorTab(image)}
+              maxSelectionCount={1}
+              slotItems={imageSlotItems}
+              onChange={(path, source) => handleActiveTaskImageReplacement(image, path, source)}
+            />
+          </PopoverContent>
+        </Popover>
         {showControls ? renderActiveTaskImageControls(image, imageName, layout === 'flow' ? 'flow' : 'split', Boolean(url)) : null}
       </div>
     )

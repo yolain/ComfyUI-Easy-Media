@@ -3,6 +3,11 @@ import type { MultiTrack, MultiTrackSegment, MultiTrackTaskMod } from '@/types/m
 
 export const MAX_TASK_MODS = 8
 
+export interface TaskModUpdate {
+  segmentId: string
+  mods: MultiTrackTaskMod[]
+}
+
 export function taskMods(segment: MultiTrackSegment): MultiTrackTaskMod[] {
   return Array.isArray(segment.content.mods) ? segment.content.mods : []
 }
@@ -14,6 +19,32 @@ export function appendTaskMods(mods: MultiTrackTaskMod[], paths: string[]): Mult
     .slice(0, Math.max(0, MAX_TASK_MODS - mods.length))
     .map((file_path) => ({ id: uuid(), file_path }))
   return selected.length ? [...mods, ...selected] : mods
+}
+
+export function replaceTaskMod(
+  segments: MultiTrackSegment[],
+  segmentId: string,
+  mod: MultiTrackTaskMod,
+  path: string,
+): TaskModUpdate[] | null {
+  if (path === mod.file_path) return []
+
+  const updates: TaskModUpdate[] = []
+  for (const segment of segments) {
+    const mods = taskMods(segment)
+    const target = segment.id === segmentId
+      ? mods.find((item) => item.id === mod.id)
+      : mod.shared_reference
+        ? mods.find((item) => item.shared_reference && item.file_path === mod.file_path)
+        : undefined
+    if (!target) continue
+    if (mods.some((item) => item.file_path === path)) return null
+    updates.push({
+      segmentId: segment.id,
+      mods: mods.map((item) => item === target ? { ...item, file_path: path } : item),
+    })
+  }
+  return updates
 }
 
 export function taskModName(path: string): string {
@@ -47,7 +78,7 @@ export function sharedTaskModUpdates(
   mod: MultiTrackTaskMod,
   enabled: boolean,
   removeFromSegmentId?: string,
-): Array<{ segmentId: string; mods: MultiTrackTaskMod[] }> {
+): TaskModUpdate[] {
   return segments.map((segment) => {
     const mods = taskMods(segment)
     if (enabled) {

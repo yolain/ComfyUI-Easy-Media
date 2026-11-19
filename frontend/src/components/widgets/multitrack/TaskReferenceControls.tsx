@@ -38,7 +38,7 @@ export function TaskReferenceControls({
 }: Readonly<TaskReferenceControlsProps>) {
   const inEditor = layout === 'editor'
   const { buttonSize, iconSize, muteFontSize } = metrics ?? {
-    buttonSize: shared ? 16 : 18,
+    buttonSize: 18,
     iconSize: 16,
     muteFontSize: 14,
   }
@@ -47,7 +47,7 @@ export function TaskReferenceControls({
   const controls = [
     {
       key: 'share', action: share, content: <Share2 style={iconStyle} />,
-      className: cn(!inEditor && 'rounded-none', shared ? 'text-highlight' : 'text-muted-foreground'),
+      className: shared ? 'text-highlight' : 'text-muted-foreground',
       disabled: !canShare, pressed: shared,
     },
     {
@@ -61,7 +61,7 @@ export function TaskReferenceControls({
     },
     {
       key: 'delete', action: remove, content: <DeleteIcon style={iconStyle} />,
-      className: cn(!inEditor && 'rounded-none', 'text-destructive hover:text-destructive'),
+      className: 'text-destructive hover:text-destructive',
     },
   ]
 
@@ -82,7 +82,11 @@ export function TaskReferenceControls({
                 size="icon"
                 variant={pressed ? 'secondary' : 'ghost'}
                 data-testid={action.testId}
-                className={cn('h-auto w-auto cursor-pointer bg-background/70 hover:bg-background/90', className)}
+                className={cn(
+                  'h-auto w-auto cursor-pointer bg-background/70 hover:bg-background/90',
+                  !inEditor && 'rounded-sm',
+                  className,
+                )}
                 style={{ width: buttonSize, height: buttonSize, fontSize }}
                 aria-label={action.label}
                 aria-pressed={pressed}

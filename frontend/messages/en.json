@@ -160,6 +160,8 @@
     "addReference": "Add reference",
     "addReferenceImage": "Add Image",
     "addMod": "Add Mod",
+    "reselectMod": "Replace mod {name}",
+    "reselectModAlreadyAdded": "That mod is already in an affected segment.",
     "shareMod": "Share mod across tasks",
     "unshareMod": "Stop sharing mod",
     "enableMod": "Enable mod",
