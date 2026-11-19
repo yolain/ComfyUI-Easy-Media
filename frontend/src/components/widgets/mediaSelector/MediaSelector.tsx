@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils'
 import { useT } from '@/lib/i18n'
 import { $error } from '@/lib/comfy-api'
 import { uploadInputMediaFile } from '@/lib/media-upload'
+import { taskModName } from '@/lib/task-mod-utils'
 import { useDelayedIntersection } from '@/hooks/use-delayed-intersection'
 import type { SlotItem } from '@/lib/timeline-utils'
 import {
@@ -93,6 +94,10 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function displayFileName(name: string, mediaType: MediaType): string {
+  return mediaType === 'mod' ? taskModName(name) : name
 }
 
 function getFileIcon(name: string, mediaType: MediaType) {
@@ -237,7 +242,7 @@ function FileThumbnail({
       )}
     >
       {showImage ? (
-        <LazyImage src={file.url} alt={file.name} className="w-full h-full object-cover" />
+        <LazyImage src={file.url} alt={displayFileName(file.name, mediaType)} className="w-full h-full object-cover" />
       ) : showVideo ? (
         <LazyVideo src={file.url} className="w-full h-full object-cover" />
       ) : (
@@ -471,6 +476,7 @@ function RemoteFileList({
   }
 
   function renderGridFile(file: MediaFileEntry, selected: boolean) {
+    const name = displayFileName(file.name, mediaType)
     const sourceType = fileSourceType(file)
     const selectionDisabled = multipleSelection && !selected && selectedValues.size >= selectionLimit
     return (
@@ -499,14 +505,14 @@ function RemoteFileList({
           <Checkbox
             checked={selected}
             disabled={selectionDisabled}
-            aria-label={t('mediaSelector.selectFile', { name: file.name })}
+            aria-label={t('mediaSelector.selectFile', { name })}
             className="absolute right-1 top-1 z-10 bg-background/80"
             onClick={(event) => event.stopPropagation()}
             onCheckedChange={() => onToggleSelection(file.path, sourceType === 'temp' ? 'output' : sourceType)}
           />
         )}
-        <span className="text-[10px] truncate leading-tight max-w-full" title={file.name}>
-          {file.name}
+        <span className="text-[10px] truncate leading-tight max-w-full" title={name}>
+          {name}
         </span>
         <span className="text-[10px] text-muted-foreground truncate leading-tight max-w-full">
           {formatMediaInfo(file, mediaType)}
@@ -516,6 +522,7 @@ function RemoteFileList({
   }
 
   function renderListFile(file: MediaFileEntry, selected: boolean) {
+    const name = displayFileName(file.name, mediaType)
     const Icon = getFileIcon(file.name, mediaType)
     const showThumb = (mediaType === 'mod' || isImageFile(file.name, mediaType)) && !!file.url
     const showVideoThumb = !showThumb && isVideoFile(file.name, mediaType) && !!file.url
@@ -549,14 +556,14 @@ function RemoteFileList({
           <Checkbox
             checked={selected}
             disabled={selectionDisabled}
-            aria-label={t('mediaSelector.selectFile', { name: file.name })}
+            aria-label={t('mediaSelector.selectFile', { name })}
             onClick={(event) => event.stopPropagation()}
             onCheckedChange={() => onToggleSelection(file.path, sourceType === 'temp' ? 'output' : sourceType)}
           />
         )}
         {showThumb && (
           <div className="w-4 h-4 rounded overflow-hidden shrink-0 bg-muted">
-            <LazyImage src={file.url} alt={file.name} className="w-full h-full object-cover" />
+            <LazyImage src={file.url} alt={name} className="w-full h-full object-cover" />
           </div>
         )}
         {showVideoThumb && (
@@ -572,8 +579,8 @@ function RemoteFileList({
         {!showThumb && !showVideoThumb && !showAudioIcon && (
           <Icon className="w-4 h-4 text-muted-foreground shrink-0" />
         )}
-        <span className="flex-1 text-xs truncate min-w-0" title={file.name}>
-          {file.name}
+        <span className="flex-1 text-xs truncate min-w-0" title={name}>
+          {name}
         </span>
         <span className="text-[10px] text-muted-foreground shrink-0">
           {formatMediaInfo(file, mediaType)}
