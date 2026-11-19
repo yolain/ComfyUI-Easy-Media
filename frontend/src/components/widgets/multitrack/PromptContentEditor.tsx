@@ -101,7 +101,7 @@ function applyChipColor(chip: HTMLElement, color: string) {
 
 function replacementReferenceToken(currentToken: string, resource: PromptReferenceResource): string {
   const type = resource.type === 'image' ? 'Picture' : resource.type === 'audio' ? 'Audio' : 'Video'
-  if (/^<(?:Picture|Image|Audio|Video)\s+\d+>$/i.test(currentToken)) {
+  if (currentToken.startsWith('<')) {
     return `<${type} ${resource.index}>`
   }
   if (/^@(?:Picture|Image|Audio|Video)\s*\d+$/i.test(currentToken)) {
@@ -112,7 +112,7 @@ function replacementReferenceToken(currentToken: string, resource: PromptReferen
 
 function normalizedReference(token: string): { type: PromptReferenceType; index: number } | null {
   const match = token.match(/^@?(图片|音频|视频|Picture|Image|Audio|Video)\s*(\d+)>?$/i)
-    ?? token.match(/^<(Picture|Audio|Video)\s+(\d+)>$/i)
+    ?? token.match(/^<(Picture|Image|Audio|Video)\s+(\d+)>$/i)
   if (!match) return null
   const rawType = match[1].toLowerCase()
   const type: PromptReferenceType = rawType === '图片' || rawType === 'picture' || rawType === 'image'
@@ -561,7 +561,7 @@ export function PromptContentEditor({
       return
     }
     const beforeCaret = valueText.slice(0, offset)
-    const match = beforeCaret.match(/@([^\s@|<>]*)$/)
+    const match = beforeCaret.match(/[@<]([^\s@|<>]*)$/)
     if (!match) {
       setMention(null)
       return

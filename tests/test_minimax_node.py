@@ -849,6 +849,17 @@ def test_h3_conditioning_cache_round_trips_and_skips_lazy_inputs(
             latent["samples"].unbind(),
         )
     )
+    assert module.EasyH3ConditioningCache.check_lazy_status(
+        project_name="demo",
+        segment_index=0,
+        tracks_info=hit_status,
+        task_output_ready="<Video 1>",
+        model=model,
+        clip=clip,
+        vae=vae,
+        audio_vae=audio_vae,
+    ) == ["conditioning", "latent"]
+    assert len(load_calls) == 1
 
 
 def test_h3_conditioning_cache_reencodes_when_model_changes(
@@ -2628,8 +2639,13 @@ def test_multitrack_h3_project_shares_refmod_loads_and_wires_apply(monkeypatch):
             loads.append(mod_1)
             return ([(mod_1, 1.0)], "")
 
+    class Apply:
+        @classmethod
+        def execute(cls, conditioning, mods):
+            return conditioning, mods
+
     module.comfy_nodes.NODE_CLASS_MAPPINGS.update(
-        MiniMaxH3RefModApply=object,
+        MiniMaxH3RefModApply=Apply,
         MiniMaxH3RefModsLoader=Loader,
     )
     inputs = _h3_project_inputs(sampling_mode=_h3_sampling_mode("single"))
@@ -2646,6 +2662,7 @@ def test_multitrack_h3_project_shares_refmod_loads_and_wires_apply(monkeypatch):
     for graph_node in result.expand.values():
         if graph_node["class_type"] != "MiniMaxH3RefModApply":
             continue
+        assert "easy_media_timing" in graph_node["_meta"]
         apply_inputs = graph_node["inputs"]
         task_id, slot = apply_inputs["mods"]
         assert slot == 9
@@ -2659,6 +2676,7 @@ def test_multitrack_h3_project_shares_refmod_loads_and_wires_apply(monkeypatch):
     assert contexts[0]["cache"] is contexts[1]["cache"]
     for context in contexts:
         assert context["names"] == ["actors/shared"]
+        assert context["use_track_video"] is False
         assert context["cache"].load(context["names"]) == [("actors/shared", 1.0)]
     assert loads == ["actors/shared"]
 

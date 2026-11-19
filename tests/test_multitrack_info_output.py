@@ -2970,6 +2970,45 @@ def test_multitrack_task_output_restores_project_runtime_media_cache():
     assert tracks_info["_easy_media_cache_status"]["task_output"] == "命中恢复缓存"
 
 
+def test_multitrack_task_output_restores_media_without_reusing_previous_run_refmods(monkeypatch):
+    module = _load_basic_module()
+    loads = []
+
+    class Loader:
+        def load(self, mod_1):
+            loads.append(object())
+            return ([(loads[-1], 1.0)], "")
+
+    monkeypatch.setitem(module.comfy_nodes.NODE_CLASS_MAPPINGS, "MiniMaxH3RefModsLoader", Loader)
+    runtime_cache = {}
+    cache_status = {}
+    info = {
+        "format": "MiniMax",
+        "_easy_media_runtime_cache": runtime_cache,
+        "_easy_media_cache_status": cache_status,
+        "_preloaded_media": {"images": [], "audio": [], "video": []},
+        "_refmod_context": {"names": ["subject"], "cache": module.RefModLoadCache()},
+        "tracks": [{"type": "task", "segments": [{
+            "start_frame": 0, "end_frame": 24,
+            "content": {"user_prompt": "@图片1"},
+        }]}],
+    }
+
+    first = module.MultiTrackTaskOutput.execute(info, prompt_format="default")
+    second = module.MultiTrackTaskOutput.execute(info, prompt_format="default")
+    assert len(loads) == 1
+    assert first[1] == second[1] == "<Video 1>"
+    assert first[9] == second[9] == [(loads[0], 1.0)]
+    assert cache_status["task_output"] == "命中恢复缓存"
+    assert next(iter(runtime_cache.values()))[9] == []
+
+    info["_refmod_context"] = {"names": ["subject"], "cache": module.RefModLoadCache()}
+    fresh_run = module.MultiTrackTaskOutput.execute(info, prompt_format="default")
+    assert len(loads) == 2
+    assert fresh_run[9] == [(loads[1], 1.0)]
+    assert cache_status["task_output"] == "命中恢复缓存"
+
+
 def test_multitrack_task_output_uses_selected_user_prompt_variant():
     module = _load_basic_module()
     tracks_info = {
@@ -4863,11 +4902,13 @@ def test_multitrack_task_output_filters_at_signs_from_prompt_outputs():
 @pytest.mark.parametrize(
     "video_start, mute_mods, source, expected",
     [
-        (12, False, "<Video 1> <Video 2> <Picture 2>", "<Video 3> <Video 4> <Picture 2>"),
-        (0, False, "<Video 1> <Picture 2>", "<Video 1> <Picture 2>"),
-        (None, False, "<Video 2> <Picture 1>", "<Video 2> <Picture 1>"),
-        (None, False, "<Picture 1> <Picture 2> <Picture 10>", "<Video 1> <Picture 1> <Picture 9>"),
-        (12, False, "<Picture 1> <Picture 2> <Audio 1>", "<Video 1> <Picture 1> <Audio 1>"),
+        (12, False, "<Video 1> <Video 2> <Picture 2>", "<Video 3> <Video 4> <Video 2>"),
+        (0, False, "<Video 1> <Picture 2>", "<Video 1> <Video 2>"),
+        (None, False, "<Video 2> <Picture 1>", "<Video 2> <Video 1>"),
+        (None, False, "<Picture 1> <Picture 2> <Picture 10>", "<Video 1> <Video 2> <Picture 8>"),
+        (None, False, "@图片1 @Picture 2 <Image 3>", "<Video 1> <Video 2> <Picture 1>"),
+        (12, False, "@视频1 <Picture 2>", "<Video 3> <Video 2>"),
+        (12, False, "<Picture 1> <Picture 2> <Audio 1>", "<Video 1> <Video 2> <Audio 1>"),
         (12, True, "<Video 1> <Picture 2>", "<Video 1> <Picture 2>"),
     ],
 )
@@ -5145,6 +5186,7 @@ def test_multitrack_prompt_enhance_to_project_updates_each_task_in_time_order(
         "format": "MiniMax",
         "media_loading": "eager",
         "eager_media_types": ["image", "video"],
+        "_easy_media_runtime_cache": {"previous_prompt": True},
         "media": {"images": [image], "audio": [None], "video": [video]},
         "tracks": [
             {
@@ -5200,6 +5242,7 @@ def test_multitrack_prompt_enhance_to_project_updates_each_task_in_time_order(
     )
 
     updated_info, prompts = output.values
+    assert "_easy_media_runtime_cache" not in updated_info
     updated_tasks = module._multitrack_task_segments(updated_info)
     assert prompts == ["enhanced-1", "enhanced-2"]
     assert updated_tasks[0]["content"]["user_prompt"] == "enhanced-1"

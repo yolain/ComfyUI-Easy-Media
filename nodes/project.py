@@ -279,6 +279,7 @@ def _timed_h3_project_graph(
         "VAEEncodeAudio",
         "VAEDecode",
         "VAEDecodeAudio",
+        "MiniMaxH3RefModApply",
     }
     persistent_media_types = {
         "easy h3ProjectStaticPrepare",
@@ -1456,7 +1457,11 @@ class EasyMultiTrackProject(io.ComfyNode):
             task_is_passthrough = is_passthrough or h3_task_is_passthrough(entry)
             refmod_names = [] if task_is_passthrough else segment_refmods[task_index]
             refmod_context = (
-                {"names": refmod_names, "cache": refmod_cache}
+                {
+                    "names": refmod_names,
+                    "cache": refmod_cache,
+                    "use_track_video": generation_mode == "reference",
+                }
                 if segment_refmods[task_index] else None
             )
             locked_audio_track = h3_locked_audio_track(entry, info)

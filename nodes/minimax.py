@@ -39,6 +39,7 @@ from ..utils.h3_conditioning_cache import (
     get_staged_h3_conditioning_cache,
     h3_conditioning_cache_matches,
     h3_conditioning_cache_path,
+    h3_conditioning_entry_signature,
     h3_encoder_signature,
     load_h3_conditioning_cache,
     prepare_h3_conditioning_cache_pool,
@@ -1405,16 +1406,16 @@ class EasyH3ConditioningCache(io.ComfyNode):
         conditioning: Any | None = None,
         latent: dict[str, Any] | None = None,
     ) -> list[str]:
-        del task_output_ready
         cache_path = cls._cache_path(segment_index)
-        signature = h3_encoder_signature(clip, vae, audio_vae, model)
+        encoder_signature = h3_encoder_signature(clip, vae, audio_vae, model)
         all_media_caches_hit = cls._all_media_caches_hit(tracks_info)
         scope_token, execution_id = cls._prepare_cache_pool(
             project_name,
             tracks_info,
-            signature,
+            encoder_signature,
             invalidate=not all_media_caches_hit,
         )
+        signature = h3_conditioning_entry_signature(encoder_signature, task_output_ready)
         staged_key = cls._staged_cache_key(
             cache_path,
             signature,
@@ -1466,17 +1467,16 @@ class EasyH3ConditioningCache(io.ComfyNode):
         conditioning: Any | None = None,
         latent: dict[str, Any] | None = None,
     ) -> io.NodeOutput:
-        del task_output_ready
-
         cache_path = cls._cache_path(segment_index)
-        signature = h3_encoder_signature(clip, vae, audio_vae, model)
+        encoder_signature = h3_encoder_signature(clip, vae, audio_vae, model)
         all_media_caches_hit = cls._all_media_caches_hit(tracks_info)
         scope_token, execution_id = cls._prepare_cache_pool(
             project_name,
             tracks_info,
-            signature,
+            encoder_signature,
             invalidate=not all_media_caches_hit,
         )
+        signature = h3_conditioning_entry_signature(encoder_signature, task_output_ready)
         staged_key = cls._staged_cache_key(
             cache_path,
             signature,

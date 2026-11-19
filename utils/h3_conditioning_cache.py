@@ -62,6 +62,12 @@ def h3_encoder_signature(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def h3_conditioning_entry_signature(encoder_signature: str, prompt: str) -> str:
+    """Key a segment's conditioning to the exact text sent to the encoder."""
+    prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    return f"{encoder_signature}:{prompt_hash}"
+
+
 def h3_conditioning_cache_path(cache_dir: Path, segment_index: int) -> Path:
     """Return the single conditioning cache artifact for one project segment."""
     if int(segment_index) < 0:

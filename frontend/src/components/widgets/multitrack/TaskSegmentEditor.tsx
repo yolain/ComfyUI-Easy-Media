@@ -60,7 +60,7 @@ import {
   uploadTaskImageFile,
 } from '@/lib/task-image-utils'
 import {
-  appendTaskMods, canShareTaskMod, MAX_TASK_MODS, replaceTaskMod, sharedTaskModUpdates, taskMods,
+  appendTaskMods, canShareTaskMod, MAX_TASK_MODS, replaceTaskMod, sharedTaskModUpdates, taskModName, taskMods,
   type TaskModUpdate,
 } from '@/lib/task-mod-utils'
 import { invalidateMediaListCache } from '@/stores/media-list-store'
@@ -242,6 +242,7 @@ export function TaskSegmentEditor({
   const [durationInput, setDurationInput] = useState(formattedDuration)
   const images = taskImages(segment)
   const mods = taskMods(segment)
+  const activeModCount = mods.filter((mod) => mod.muted !== true).length
   const slotItems = useMemo(
     () => computeSlotItems(node, app, 'image'),
     [node, app, mediaSelectorOpen],
@@ -278,22 +279,39 @@ export function TaskSegmentEditor({
       )).join('|')
     : segment.content.system_prompt || systemPromptDefault
   const promptResources = useMemo<PromptReferenceResource[]>(() => {
-    const imageResources = activeTaskImages(images).map((image, index) => ({
-      id: `image:${image.id}`,
-      type: 'image' as const,
-      index: index + 1,
-      label: t('multitrack.referencePicture', { n: index + 1 }),
-      detail: imageDisplayName(image),
-      token: `@${t('multitrack.referencePicture', { n: index + 1 })}`,
-      color: getSegmentTrackPresentation('task').backgroundColor,
-      thumbnailUrl: mediaContentToViewUrl({
-        source_type: image.source_type ?? 'input',
-        file_path: image.file_path,
-        local_path: image.local_path,
-        url: image.url,
-        slot_name: image.slot_name,
-      }) ?? undefined,
-    }))
+    const modResources = mods.filter((mod) => mod.muted !== true).map((mod, index) => {
+      const resourceIndex = index + 1
+      const label = t('multitrack.referencePicture', { n: resourceIndex })
+      return {
+        id: `mod:${mod.id}`,
+        type: 'image' as const,
+        index: resourceIndex,
+        label,
+        detail: taskModName(mod.file_path),
+        token: `@${label}`,
+        color: 'var(--refmod)',
+      }
+    })
+    const imageResources = activeTaskImages(images).map((image, index) => {
+      const resourceIndex = modResources.length + index + 1
+      const label = t('multitrack.referencePicture', { n: resourceIndex })
+      return {
+        id: `image:${image.id}`,
+        type: 'image' as const,
+        index: resourceIndex,
+        label,
+        detail: imageDisplayName(image),
+        token: `@${label}`,
+        color: getSegmentTrackPresentation('task').backgroundColor,
+        thumbnailUrl: mediaContentToViewUrl({
+          source_type: image.source_type ?? 'input',
+          file_path: image.file_path,
+          local_path: image.local_path,
+          url: image.url,
+          slot_name: image.slot_name,
+        }) ?? undefined,
+      }
+    })
     const videoTracks = mediaTracks.filter((track) => (
       track.type === 'video'
       && track.segments.some((item) => item.content.media_type === 'video')
@@ -344,8 +362,8 @@ export function TaskSegmentEditor({
           ?? getSegmentTrackPresentation('video').backgroundColor,
       }
     })
-    return [...imageResources, ...videoAudioResources, ...audioResources, ...videoResources]
-  }, [images, mediaTracks, t])
+    return [...modResources, ...imageResources, ...videoAudioResources, ...audioResources, ...videoResources]
+  }, [images, mediaTracks, mods, t])
 
   useEffect(() => {
     setDurationInput(formattedDuration)
@@ -827,7 +845,9 @@ export function TaskSegmentEditor({
                     })
                     const canShareImage = image.shared_reference === true
                       || canEnableSharedTaskImage(editableSegments, image)
-                    const imageReferenceIndex = taskImageReferenceIndex(images, image.id, imageIndexOffset)
+                    const imageReferenceIndex = taskImageReferenceIndex(
+                      images, image.id, activeModCount ? activeModCount + 1 : imageIndexOffset,
+                    )
                     return (
                       <div
                         key={image.id}

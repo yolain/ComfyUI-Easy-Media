@@ -16,7 +16,11 @@ _MODEL_SUFFIX = ".safetensors"
 _PREVIEW_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 _EXCLUDED_DIRS = {"graph_presets", ".git", "__pycache__"}
 _VIDEO_TAG = re.compile(r"<Video\s*([1-9][0-9]*)\s*>", re.IGNORECASE)
-_PICTURE_TAG = re.compile(r"<Picture\s*([1-9][0-9]*)\s*>", re.IGNORECASE)
+_PICTURE_TAG = re.compile(r"<(?:Picture|Image)\s*([1-9][0-9]*)\s*>", re.IGNORECASE)
+_EDITOR_REFERENCE = re.compile(
+    r"@(?P<kind>图片|图像|视频|Picture|Image|Video)\s*(?P<index>[1-9][0-9]*)",
+    re.IGNORECASE,
+)
 
 
 def _relative_path(value: str) -> PurePosixPath:
@@ -154,17 +158,21 @@ def rewrite_refmod_prompt(prompt: str, mod_count: int, *, has_video: bool) -> st
     """Map the editor's reference labels to the task output when RefMods are active."""
     if not mod_count:
         return prompt
-    if _VIDEO_TAG.search(prompt):
-        if not has_video:
-            return prompt
-        return _VIDEO_TAG.sub(
+
+    def format_editor_reference(match: re.Match[str]) -> str:
+        kind = "Video" if match["kind"].lower() in {"video", "视频"} else "Picture"
+        return f"<{kind} {match['index']}>"
+
+    prompt = _EDITOR_REFERENCE.sub(format_editor_reference, prompt)
+    if has_video:
+        prompt = _VIDEO_TAG.sub(
             lambda match: f"<Video {int(match[1]) + mod_count}>",
             prompt,
         )
 
     def replace_picture(match: re.Match[str]) -> str:
         index = int(match[1])
-        return "<Video 1>" if index == 1 else f"<Picture {index - 1}>"
+        return f"<Video {index}>" if index <= mod_count else f"<Picture {index - mod_count}>"
 
     return _PICTURE_TAG.sub(replace_picture, prompt)
 

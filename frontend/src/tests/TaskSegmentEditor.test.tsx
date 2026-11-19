@@ -1061,6 +1061,44 @@ describe('TaskSegmentEditor', () => {
     expect((chip as HTMLElement | null)?.style.color).toBe('var(--multitrack-task-bg)')
   })
 
+  it.each(['@', '<'])('lists mods before all nine images in the %s reference menu', (trigger) => {
+    const segment = taskSegment()
+    segment.content.mods = [
+      { id: 'disabled', file_path: 'disabled.safetensors', muted: true },
+      { id: 'subject', file_path: 'people/subject.safetensors' },
+      { id: 'scene', file_path: 'scene.safetensors' },
+    ]
+    segment.content.images = Array.from({ length: 9 }, (_, index) => ({
+      id: `image-${index + 1}`,
+      file_path: `image-${index + 1}.png`,
+    }))
+    const onContentChange = vi.fn()
+    render(<TaskSegmentEditor segment={segment} format="MiniMax" onContentChange={onContentChange} />)
+
+    const prompt = screen.getByRole('textbox', { name: 'Prompt' })
+    inputEditable(prompt, trigger)
+    const choice = screen.getByRole('option', { name: 'Picture 1 subject' })
+    expect(screen.getByRole('option', { name: 'Picture 2 scene' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'Picture 3 image-1.png' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'Picture 11 image-9.png' })).toBeTruthy()
+    expect(screen.getAllByRole('option')).toHaveLength(11)
+    expect(screen.getByTestId('task-image-index-image-1').textContent).toBe('3')
+    expect(screen.getByRole('button', { name: 'Add Image' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: 'Add Mod' }).hasAttribute('disabled')).toBe(false)
+
+    fireEvent.click(choice)
+    const token = trigger === '<' ? '<Picture 1>' : '@Picture 1'
+    expect(onContentChange).toHaveBeenLastCalledWith({ user_prompt: token })
+    const chip = prompt.querySelector<HTMLElement>(`[data-prompt-reference-token="${token}"]`)!
+    expect(chip.style.color).toBe('var(--refmod)')
+    expect(chip.title).toBe('subject')
+    fireEvent.click(chip)
+    fireEvent.click(screen.getByRole('option', { name: 'Picture 2 scene' }))
+    expect(onContentChange).toHaveBeenLastCalledWith({
+      user_prompt: trigger === '<' ? '<Picture 2>' : '@Picture 2',
+    })
+  })
+
   it('shows the interactive MiniMax placeholder only for an empty prompt', () => {
     const onContentChange = vi.fn()
     const segment = taskSegment()
