@@ -15,6 +15,8 @@ REFMOD_OUTPUT_INDEX = 9
 _MODEL_SUFFIX = ".safetensors"
 _PREVIEW_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 _EXCLUDED_DIRS = {"graph_presets", ".git", "__pycache__"}
+_PROMPT_FIELDS = ("user_prompt", "user_prompt_b", "text")
+_PROMPT_SOURCES_KEY = "_refmod_prompt_sources"
 _VIDEO_TAG = re.compile(r"<Video\s*([1-9][0-9]*)\s*>", re.IGNORECASE)
 _PICTURE_TAG = re.compile(r"<(?:Picture|Image)\s*([1-9][0-9]*)\s*>", re.IGNORECASE)
 _EDITOR_REFERENCE = re.compile(
@@ -107,6 +109,28 @@ def _task_segments(info: dict) -> Iterator[dict]:
                     yield segment
 
 
+def _shared_refmod_names(segments: list[dict]) -> dict[str, None]:
+    return dict.fromkeys(
+        name for segment in segments for item in _items(segment["content"])
+        if item.get("shared_reference") is True and (name := _name(item))
+    )
+
+
+def _active_refmod_names(content: dict, shared: dict[str, None]) -> list[str]:
+    local = {name: item for item in _items(content) if (name := _name(item))}
+    return [
+        name for name in dict.fromkeys([*shared, *local])
+        if local.get(name, {}).get("muted") is not True
+    ][:MAX_TASK_REFMODS]
+
+
+def task_refmod_counts(info: dict) -> Iterator[tuple[dict, int]]:
+    segments = list(_task_segments(info))
+    shared = _shared_refmod_names(segments)
+    for segment in segments:
+        yield segment, len(_active_refmod_names(segment["content"], shared))
+
+
 def task_refmod_names(
     info: dict,
     entry: dict,
@@ -125,18 +149,10 @@ def task_refmod_names(
         ]
     else:
         contents = [content] if isinstance(content, dict) else []
-    shared = dict.fromkeys(
-        name for segment in segments for item in _items(segment["content"])
-        if item.get("shared_reference") is True and (name := _name(item))
-    )
+    shared = _shared_refmod_names(segments)
     names: dict[str, None] = {}
     for selected in contents:
-        local = {name: item for item in _items(selected) if (name := _name(item))}
-        active = [
-            name for name in dict.fromkeys([*shared, *local])
-            if local.get(name, {}).get("muted") is not True
-        ]
-        names.update(dict.fromkeys(active[:MAX_TASK_REFMODS]))
+        names.update(dict.fromkeys(_active_refmod_names(selected, shared)))
     return list(names) if full_timeline else list(names)[:MAX_TASK_REFMODS]
 
 
@@ -175,6 +191,35 @@ def rewrite_refmod_prompt(prompt: str, mod_count: int, *, has_video: bool) -> st
         return f"<Video {index}>" if index <= mod_count else f"<Picture {index - mod_count}>"
 
     return _PICTURE_TAG.sub(replace_picture, prompt)
+
+
+def refmod_prompt_source(content: dict, field: str) -> str:
+    """Recover editor numbering if this field still contains the published rewrite."""
+    prompt = str(content.get(field) or "")
+    sources = content.get(_PROMPT_SOURCES_KEY)
+    source = sources.get(field) if isinstance(sources, dict) else None
+    if isinstance(source, dict) and source.get("rewritten") == prompt:
+        original = source.get("original")
+        if isinstance(original, str):
+            return original
+    return prompt
+
+
+def rewrite_task_refmod_prompts(content: dict, mod_count: int, *, has_video: bool) -> None:
+    """Publish both prompt variants in TRACKS_INFO and retain source numbering."""
+    sources: dict[str, dict[str, str]] = {}
+    for field in _PROMPT_FIELDS:
+        if not isinstance(content.get(field), str):
+            continue
+        original = refmod_prompt_source(content, field)
+        rewritten = rewrite_refmod_prompt(original, mod_count, has_video=has_video)
+        content[field] = rewritten
+        if rewritten != original:
+            sources[field] = {"original": original, "rewritten": rewritten}
+    if sources:
+        content[_PROMPT_SOURCES_KEY] = sources
+    else:
+        content.pop(_PROMPT_SOURCES_KEY, None)
 
 
 class RefModLoadCache:

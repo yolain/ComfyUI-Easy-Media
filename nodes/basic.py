@@ -73,7 +73,10 @@ from ..utils.prompt_builder import build_llm_prompt, build_prompt_request
 from ..utils.refmods import (
     REFMOD_OUTPUT_INDEX,
     RefModLoadCache,
+    refmod_prompt_source,
     rewrite_refmod_prompt,
+    rewrite_task_refmod_prompts,
+    task_refmod_counts,
     task_refmod_names,
     track_refmod_fingerprint,
 )
@@ -1985,6 +1988,7 @@ class MultiTrackEditor(io.ComfyNode):
             format,
             materialize_media=materialize_media,
         )
+        _rewrite_tracks_info_refmod_prompts(tracks_info)
 
         return io.NodeOutput(tracks_info, images_out, audio_out, video_out)
 
@@ -2696,6 +2700,56 @@ def _ranges_overlap(start: int, end: int, segment: dict) -> bool:
     return int(segment.get("start_frame", 0)) < end and int(segment.get("end_frame", 0)) > start
 
 
+def _rewrite_tracks_info_refmod_prompts(info: dict) -> None:
+    tasks = sorted(
+        task_refmod_counts(info),
+        key=lambda entry: _multitrack_frame_value(entry[0].get("start_frame")),
+    )
+    if not any(count for _, count in tasks):
+        return
+    video_tracks = [
+        track for track in info.get("tracks", [])
+        if isinstance(track, dict) and track.get("type") == "video"
+    ]
+    # For deferred tracks, use the timeline metadata without decoding the clips.
+    video_items = (
+        None if _multitrack_media_is_deferred(info, "video")
+        else _embedded_multitrack_media(info, "video")
+    )
+
+    def track_has_video(track: dict, start: int, end: int | None) -> bool:
+        shared = _shared_reference_segment(track)
+        if shared is not None:
+            media_index = _shared_reference_output_index(shared)
+        else:
+            media_end = _track_media_end_frame(track, start, end)
+            if media_end is None or media_end <= start:
+                return False
+            media_index = _track_output_index(track)
+        return video_items is None or (
+            media_index is not None
+            and 0 <= media_index < len(video_items)
+            and video_items[media_index] is not None
+        )
+
+    for index, (task, mod_count) in enumerate(tasks):
+        if not mod_count:
+            continue
+        start = max(0, _multitrack_frame_value(task.get("start_frame")))
+        if info.get("format") == "MiniMax":
+            end = (
+                _multitrack_frame_value(tasks[index + 1][0].get("start_frame"))
+                if index + 1 < len(tasks) else None
+            )
+        else:
+            end = _multitrack_frame_value(task.get("end_frame"))
+        rewrite_task_refmod_prompts(
+            task["content"],
+            mod_count,
+            has_video=any(track_has_video(track, start, end) for track in video_tracks),
+        )
+
+
 def _multitrack_task_type(task: dict, image_count: int, has_video: bool) -> str:
     content = task.get("content", {})
     explicit_task_type = content.get("task_type") if isinstance(content, dict) else None
@@ -2768,7 +2822,9 @@ def _selected_multitrack_user_prompt(
     mod_count: int = 0,
     has_reference_video: bool = False,
 ) -> str:
-    prompt = _multitrack_prompt_value(content)
+    # TRACKS_INFO is usable on its own. Task Output can still adjust the source
+    # numbering for a marker range or for the video media it actually resolved.
+    prompt = _multitrack_prompt_value(content, use_source=True)
     return rewrite_refmod_prompt(prompt, mod_count, has_video=has_reference_video).replace("@", "")
 
 
@@ -4015,11 +4071,13 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
         )
 
 
-def _multitrack_prompt_value(content: dict) -> str:
-    """Return the currently selected prompt variant without normalizing its text."""
+def _multitrack_prompt_value(content: dict, *, use_source: bool = False) -> str:
+    """Return the selected prompt variant, optionally in editor numbering."""
     if str(content.get("user_prompt_variant", "a")).lower() == "b":
-        return str(content.get("user_prompt_b") or "")
-    return str(content.get("user_prompt") or content.get("text") or "")
+        field = "user_prompt_b"
+    else:
+        field = "user_prompt" if content.get("user_prompt") else "text"
+    return refmod_prompt_source(content, field) if use_source else str(content.get(field) or "")
 
 
 def _apply_multitrack_enhanced_prompts(info: dict, prompts: list[str]) -> dict:
@@ -4043,6 +4101,7 @@ def _apply_multitrack_enhanced_prompts(info: dict, prompts: list[str]) -> dict:
             else "user_prompt"
         )
         content[prompt_key] = str(prompt)
+    _rewrite_tracks_info_refmod_prompts(output_info)
     return output_info
 
 

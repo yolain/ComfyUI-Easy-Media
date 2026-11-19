@@ -754,6 +754,76 @@ def test_multitrack_editor_includes_selected_dimensions_in_tracks_info():
     assert tracks_info["height"] == 720
 
 
+@pytest.mark.parametrize("video_mode", ["none", "eager", "deferred"])
+def test_multitrack_editor_publishes_refmod_prompts_in_tracks_info(monkeypatch, video_mode):
+    module = _load_basic_module()
+
+    class Loader:
+        def load(self, mod_1):
+            return ([(mod_1, 1.0)], "")
+
+    monkeypatch.setitem(module.comfy_nodes.NODE_CLASS_MAPPINGS, "MiniMaxH3RefModsLoader", Loader)
+    content = {
+        "task_mode": "ref",
+        "user_prompt": "@图片1 <Picture 3>",
+        "user_prompt_b": "<Picture 2> <Video 1>",
+        "user_prompt_variant": "b",
+        "mods": [
+            {"file_path": "first.safetensors"},
+            {"file_path": "second.safetensors"},
+            {"file_path": "disabled.safetensors", "muted": True},
+        ],
+    }
+    tracks = [{"type": "task", "segments": [
+        {"start_frame": 0, "end_frame": 24, "content": content},
+        {"start_frame": 24, "end_frame": 48, "content": {"text": "<Picture 1>"}},
+    ]}]
+    inputs = {}
+    video_reads = []
+    with_video = video_mode != "none"
+    if with_video:
+        video = _FakeVideo(_VideoComponents(torch.zeros(24, 2, 2, 3), None, Fraction(24)))
+        monkeypatch.setattr(module, "_resize_multitrack_video", lambda source, *args: source)
+        monkeypatch.setattr(module, "_merge_video_track", lambda segments, *args, **kwargs: segments[0][1])
+        if video_mode == "eager":
+            source = {"source_type": "slot", "slot_name": "video1"}
+            inputs["video"] = [[video]]
+        else:
+            source = {"source_type": "input", "file_path": "reference.mp4"}
+
+            def resolve_video(item, slots):
+                video_reads.append(item["file_path"])
+                return video
+
+            monkeypatch.setattr(module, "_resolve_multitrack_video", resolve_video)
+        tracks.append({"type": "video", "segments": [{
+            "start_frame": 0, "end_frame": 24,
+            "content": {"media_type": "video", **source},
+        }]})
+
+    info = module.MultiTrackEditor.execute(
+        {"resolution": "1280 x 720 (16:9)"}, "MiniMax", {"tracks": tracks}, **inputs,
+    )[0]
+    first, second = (segment["content"] for segment in info["tracks"][0]["segments"])
+    assert first["user_prompt"] == "<Video 1> <Picture 1>"
+    expected_b = "<Video 2> <Video 3>" if with_video else "<Video 2> <Video 1>"
+    assert first["user_prompt_b"] == expected_b
+    assert second["text"] == "<Picture 1>"
+    assert content["user_prompt"] == "@图片1 <Picture 3>"
+    assert content["user_prompt_b"] == "<Picture 2> <Video 1>"
+    assert video_reads == []
+
+    output = module.MultiTrackTaskOutput.execute(info, task_index=0, prompt_format="default")
+    assert output[1] == expected_b
+    if video_mode == "deferred":
+        assert video_reads == ["reference.mp4"]
+    if with_video:
+        # The project may render this segment without the video track.
+        info["_refmod_context"] = {"names": ["first", "second"], "use_track_video": False}
+        output = module.MultiTrackTaskOutput.execute(info, task_index=0, prompt_format="default")
+        assert output[1] == "<Video 2> <Video 1>"
+
+
 def test_multitrack_refmod_fingerprint_tracks_file_versions(monkeypatch, tmp_path):
     module = _load_basic_module()
     model = tmp_path / "subject.safetensors"
