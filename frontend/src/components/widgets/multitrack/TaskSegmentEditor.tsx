@@ -60,7 +60,8 @@ import {
   uploadTaskImageFile,
 } from '@/lib/task-image-utils'
 import {
-  appendTaskMods, canShareTaskMod, MAX_TASK_MODS, replaceTaskMod, sharedTaskModUpdates, taskModName, taskMods,
+  appendTaskMods, canShareTaskMod, MAX_TASK_MODS, replaceTaskMod, sharedTaskModUpdates,
+  taskModName, taskModPreviewUrl, taskMods,
   type TaskModUpdate,
 } from '@/lib/task-mod-utils'
 import { invalidateMediaListCache } from '@/stores/media-list-store'
@@ -290,6 +291,7 @@ export function TaskSegmentEditor({
         detail: taskModName(mod.file_path),
         token: `@${label}`,
         color: 'var(--refmod)',
+        thumbnailUrl: taskModPreviewUrl(mod.file_path),
       }
     })
     const imageResources = activeTaskImages(images).map((image, index) => {

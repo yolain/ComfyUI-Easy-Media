@@ -324,6 +324,33 @@ function selectedPromptText(editor: HTMLElement): string | null {
   return serializePromptContent(range.cloneContents())
 }
 
+function createReferenceChipIcon(type: PromptReferenceType): HTMLElement {
+  const icon = document.createElement('span')
+  icon.className = 'prompt-reference-icon inline-flex h-4 w-4 shrink-0 items-center justify-center'
+  icon.dataset.referenceIcon = type
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('fill', 'none')
+  svg.setAttribute('stroke', 'currentColor')
+  svg.setAttribute('stroke-width', '2')
+  svg.setAttribute('stroke-linecap', 'round')
+  svg.setAttribute('stroke-linejoin', 'round')
+  svg.setAttribute('aria-hidden', 'true')
+  svg.classList.add('lucide', 'h-4', 'w-4')
+  const paths = type === 'audio'
+    ? ['M2 10v3', 'M6 6v11', 'M10 3v18', 'M14 8v7', 'M18 5v13', 'M22 10v3']
+    : type === 'video'
+      ? ['m16 13 5.223-3.482a.5.5 0 0 1 .777.416v8.132a.5.5 0 0 1-.777.416L16 15', 'M2 6h14v12H2z', 'm2 6 3-4', 'm7 6 3-4', 'm12 6 3-4']
+      : ['M14.5 4h-9A2.5 2.5 0 0 0 3 6.5v11A2.5 2.5 0 0 0 5.5 20h13a2.5 2.5 0 0 0 2.5-2.5v-8', 'm3 16 5-5c.928-.893 2.072-.893 3 0l4 4', 'm14 14 1-1c.928-.893 2.072-.893 3 0l3 3', 'M14 7h.01']
+  paths.forEach((pathData) => {
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    path.setAttribute('d', pathData)
+    svg.append(path)
+  })
+  icon.append(svg)
+  return icon
+}
+
 function appendReferenceChip(
   container: HTMLElement,
   token: string,
@@ -337,39 +364,17 @@ function appendReferenceChip(
   chip.className = `${PROMPT_CHIP_CLASS} cursor-pointer`
   applyChipColor(chip, parsed ? referenceColor(parsed, resource) : 'var(--muted-foreground)')
 
+  const type = resource?.type ?? parsed?.type ?? 'image'
   if (resource?.type === 'image' && resource.thumbnailUrl) {
     const image = document.createElement('img')
-    image.src = resource.thumbnailUrl
     image.alt = ''
     image.draggable = false
     image.className = 'h-4 w-4 shrink-0 rounded-sm object-cover align-middle'
+    image.addEventListener('error', () => image.replaceWith(createReferenceChipIcon(type)), { once: true })
+    image.src = resource.thumbnailUrl
     chip.append(image)
   } else {
-    const icon = document.createElement('span')
-    icon.className = 'prompt-reference-icon inline-flex h-4 w-4 shrink-0 items-center justify-center'
-    icon.dataset.referenceIcon = resource?.type ?? parsed?.type ?? 'image'
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-    svg.setAttribute('viewBox', '0 0 24 24')
-    svg.setAttribute('fill', 'none')
-    svg.setAttribute('stroke', 'currentColor')
-    svg.setAttribute('stroke-width', '2')
-    svg.setAttribute('stroke-linecap', 'round')
-    svg.setAttribute('stroke-linejoin', 'round')
-    svg.setAttribute('aria-hidden', 'true')
-    svg.classList.add('lucide', 'h-4', 'w-4')
-    const type = resource?.type ?? parsed?.type ?? 'image'
-    const paths = type === 'audio'
-      ? ['M2 10v3', 'M6 6v11', 'M10 3v18', 'M14 8v7', 'M18 5v13', 'M22 10v3']
-      : type === 'video'
-        ? ['m16 13 5.223-3.482a.5.5 0 0 1 .777.416v8.132a.5.5 0 0 1-.777.416L16 15', 'M2 6h14v12H2z', 'm2 6 3-4', 'm7 6 3-4', 'm12 6 3-4']
-        : ['M14.5 4h-9A2.5 2.5 0 0 0 3 6.5v11A2.5 2.5 0 0 0 5.5 20h13a2.5 2.5 0 0 0 2.5-2.5v-8', 'm3 16 5-5c.928-.893 2.072-.893 3 0l4 4', 'm14 14 1-1c.928-.893 2.072-.893 3 0l3 3', 'M14 7h.01']
-    paths.forEach((pathData) => {
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-      path.setAttribute('d', pathData)
-      svg.append(path)
-    })
-    icon.append(svg)
-    chip.append(icon)
+    chip.append(createReferenceChipIcon(type))
   }
 
   const label = document.createElement('span')
@@ -498,6 +503,25 @@ function ReferenceIcon({ type }: Readonly<{ type: PromptReferenceType }>) {
   if (type === 'audio') return <AudioLines className="h-4 w-4" />
   if (type === 'video') return <Clapperboard className="h-4 w-4" />
   return <ImageIcon className="h-4 w-4" />
+}
+
+function ReferenceOptionPreview({ type, thumbnailUrl }: Readonly<Pick<PromptReferenceResource, 'type' | 'thumbnailUrl'>>) {
+  const [failed, setFailed] = useState(false)
+  if (type === 'image' && thumbnailUrl && !failed) {
+    return (
+      <img
+        src={thumbnailUrl}
+        alt=""
+        className="h-8 w-8 shrink-0 rounded-sm object-cover"
+        onError={() => setFailed(true)}
+      />
+    )
+  }
+  return (
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-sm bg-muted">
+      <ReferenceIcon type={type} />
+    </span>
+  )
 }
 
 export function PromptContentEditor({
@@ -860,17 +884,11 @@ export function PromptContentEditor({
                 onPointerMove={() => setMention((current) => current ? { ...current, activeIndex: index } : current)}
                 onClick={() => chooseResource(resource)}
               >
-                {resource.type === 'image' && resource.thumbnailUrl ? (
-                  <img
-                    src={resource.thumbnailUrl}
-                    alt=""
-                    className="h-8 w-8 shrink-0 rounded-sm object-cover"
-                  />
-                ) : (
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-sm bg-muted">
-                    <ReferenceIcon type={resource.type} />
-                  </span>
-                )}
+                <ReferenceOptionPreview
+                  key={resource.thumbnailUrl}
+                  type={resource.type}
+                  thumbnailUrl={resource.thumbnailUrl}
+                />
                 <span className="min-w-0">
                   <span className="block truncate text-[11px] font-semibold" style={{ color: resource.color }}>
                     {resource.label}

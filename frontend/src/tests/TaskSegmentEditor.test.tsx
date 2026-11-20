@@ -1061,8 +1061,9 @@ describe('TaskSegmentEditor', () => {
     expect((chip as HTMLElement | null)?.style.color).toBe('var(--multitrack-task-bg)')
   })
 
-  it.each(['@', '<'])('lists mods before all nine images in the %s reference menu', (trigger) => {
+  it.each(['@', '<', 'button'])('shows mod thumbnails before all nine images in the %s reference menu', (trigger) => {
     const segment = taskSegment()
+    segment.content.user_prompt = ''
     segment.content.mods = [
       { id: 'disabled', file_path: 'disabled.safetensors', muted: true },
       { id: 'subject', file_path: 'people/subject.safetensors' },
@@ -1076,9 +1077,18 @@ describe('TaskSegmentEditor', () => {
     render(<TaskSegmentEditor segment={segment} format="MiniMax" onContentChange={onContentChange} />)
 
     const prompt = screen.getByRole('textbox', { name: 'Prompt' })
-    inputEditable(prompt, trigger)
+    if (trigger === 'button') {
+      fireEvent.click(screen.getByRole('button', { name: 'Open reference resources' }))
+    } else {
+      inputEditable(prompt, trigger)
+    }
     const choice = screen.getByRole('option', { name: 'Picture 1 subject' })
-    expect(screen.getByRole('option', { name: 'Picture 2 scene' })).toBeTruthy()
+    const thumbnailUrl = '/easy-media/refmods/preview?path=people%2Fsubject.safetensors'
+    expect(choice.querySelector('img')?.getAttribute('src')).toBe(thumbnailUrl)
+    const missingPreview = screen.getByRole('option', { name: 'Picture 2 scene' })
+    fireEvent.error(missingPreview.querySelector('img')!)
+    expect(missingPreview.querySelector('img')).toBeNull()
+    expect(missingPreview.querySelector('svg')).not.toBeNull()
     expect(screen.getByRole('option', { name: 'Picture 3 image-1.png' })).toBeTruthy()
     expect(screen.getByRole('option', { name: 'Picture 11 image-9.png' })).toBeTruthy()
     expect(screen.getAllByRole('option')).toHaveLength(11)
@@ -1092,11 +1102,14 @@ describe('TaskSegmentEditor', () => {
     const chip = prompt.querySelector<HTMLElement>(`[data-prompt-reference-token="${token}"]`)!
     expect(chip.style.color).toBe('var(--refmod)')
     expect(chip.title).toBe('subject')
+    expect(chip.querySelector('img')?.getAttribute('src')).toBe(thumbnailUrl)
     fireEvent.click(chip)
     fireEvent.click(screen.getByRole('option', { name: 'Picture 2 scene' }))
-    expect(onContentChange).toHaveBeenLastCalledWith({
-      user_prompt: trigger === '<' ? '<Picture 2>' : '@Picture 2',
-    })
+    const replacementToken = trigger === '<' ? '<Picture 2>' : '@Picture 2'
+    const replacement = prompt.querySelector(`[data-prompt-reference-token="${replacementToken}"]`)!
+    fireEvent.error(replacement.querySelector('img')!)
+    expect(replacement.querySelector('[data-reference-icon="image"]')).not.toBeNull()
+    expect(onContentChange).toHaveBeenLastCalledWith({ user_prompt: replacementToken })
   })
 
   it('shows the interactive MiniMax placeholder only for an empty prompt', () => {
