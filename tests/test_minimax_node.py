@@ -600,7 +600,7 @@ def test_media_to_h3_refmod_refs_outputs_one_bundle_with_images_first(monkeypatc
 
     refs, = node.execute(images=[first, batch], videos=videos).values
 
-    assert schema.category == "EasyUse/Minimax/refmod"
+    assert schema.category == "EasyUse/MiniMax/refmod"
     assert schema.is_input_list is True
     assert [(port.name, port.kwargs["optional"]) for port in schema.inputs] == [
         ("images", True),
@@ -2613,6 +2613,7 @@ def test_h3_sampling_preview_sampler_exposes_optional_tiling(monkeypatch):
     schema = module._project_module.EasyH3SamplingPreviewSampler.define_schema()
     inputs = {port.name: port for port in schema.inputs}
 
+    assert schema.category == "EasyUse/MiniMax/dev"
     assert inputs["enabled_tiling"].kwargs["default"] is False
     assert inputs["enabled_tiling"].kwargs["optional"] is True
     assert inputs["tile_count"].kwargs["default"] == 2

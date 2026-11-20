@@ -63,6 +63,8 @@ if TYPE_CHECKING:
 
 
 CATEGORY_MINIMAX = "EasyUse/MiniMax"
+CATEGORY_MINIMAX_DEV = f"{CATEGORY_MINIMAX}/dev"
+CATEGORY_MINIMAX_REFMOD = f"{CATEGORY_MINIMAX}/refmod"
 CANVAS_MULTIPLE = 32
 BASE_SHORT_EDGE = 768
 MAX_PIXELS = 768 * 1344
@@ -85,7 +87,7 @@ class EasyMiniMaxH3MediaToRefs(io.ComfyNode):
         return io.Schema(
             node_id="easy MiniMaxH3MediaToRefs",
             display_name="Media to H3 RefMod Refs",
-            category="EasyUse/Minimax/refmod",
+            category=CATEGORY_MINIMAX_REFMOD,
             description=(
                 "Pack images and videos for the refs_bundle input of Create H3 RefMod. "
                 "Images come first. Each video's frames form one reference."
@@ -122,7 +124,7 @@ class EasyMiniMaxSaveH3RefMods(io.ComfyNode):
         return io.Schema(
             node_id="easy MiniMaxSaveH3RefMods",
             display_name="Save H3 RefMods",
-            category="EasyUse/Minimax/refmod",
+            category=CATEGORY_MINIMAX_REFMOD,
             description=(
                 "Save standalone H3 RefMods with an optional preview, or connect only a "
                 "thumbnail to update an existing RefMod."
@@ -1244,7 +1246,7 @@ class EasyH3MotionContextLatentTrim(io.ComfyNode):
         return io.Schema(
             node_id="easy h3MotionContextLatentTrim",
             display_name="H3 Motion Context Latent Trim",
-            category="EasyUse/Minimax/dev",
+            category=CATEGORY_MINIMAX_DEV,
             description=(
                 "Internal H3 context-tail copier used to release full-resolution "
                 "segment latents before the next segment starts."
@@ -1305,7 +1307,7 @@ class EasyH3ProjectContextLatentLoad(io.ComfyNode):
         return io.Schema(
             node_id="easy h3ProjectContextLatentLoad",
             display_name="H3 Project Context Latent Load",
-            category="EasyUse/MiniMax",
+            category=CATEGORY_MINIMAX,
             description="Internal H3 project context latent loader.",
             inputs=[
                 io.String.Input("project_name"),
@@ -1369,7 +1371,7 @@ class EasyH3ConditioningCache(io.ComfyNode):
         return io.Schema(
             node_id="easy h3ConditioningCache",
             display_name="H3 Conditioning Cache",
-            category="EasyUse/Minimax/dev",
+            category=CATEGORY_MINIMAX_DEV,
             description=(
                 "Internal MiniMax H3 temp cache retaining five recent segments."
             ),
@@ -1631,7 +1633,7 @@ class EasyH3SegmentSamplingStart(io.ComfyNode):
         return io.Schema(
             node_id="easy h3SegmentSamplingStart",
             display_name="H3 Segment Sampling Start",
-            category="EasyUse/Minimax/dev",
+            category=CATEGORY_MINIMAX_DEV,
             inputs=[
                 io.Noise.Input("noise"),
                 io.Guider.Input("guider"),
@@ -2178,7 +2180,7 @@ class EasyH3SegmentSaveEnd(io.ComfyNode):
         return io.Schema(
             node_id="easy h3SegmentSaveEnd",
             display_name="H3 Segment Save End",
-            category="EasyUse/Minimax/dev",
+            category=CATEGORY_MINIMAX_DEV,
             inputs=[
                 io.String.Input("video_path"),
                 io.String.Input("project_name"),
@@ -2208,7 +2210,7 @@ class EasyH3AudioContextLatent(io.ComfyNode):
         return io.Schema(
             node_id="easy h3AudioContextLatent",
             display_name="H3 Audio Context Latent",
-            category="EasyUse/Minimax/dev",
+            category=CATEGORY_MINIMAX_DEV,
             inputs=[
                 io.Latent.Input("audio_latent"),
                 io.Int.Input("output_frames", min=1),
@@ -2238,7 +2240,7 @@ class EasyH3PassthroughVideo(io.ComfyNode):
         return io.Schema(
             node_id="easy h3PassthroughVideo",
             display_name="H3 Passthrough Video",
-            category="EasyUse/Minimax/dev",
+            category=CATEGORY_MINIMAX_DEV,
             is_dev_only=True,
             is_input_list=True,
             inputs=[
@@ -2291,7 +2293,7 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
         return io.Schema(
             node_id="easy h3ContextMediaTrim",
             display_name="H3 Context Media Trim",
-            category="EasyUse/Minimax/dev",
+            category=CATEGORY_MINIMAX_DEV,
             description=(
                 "Internal exact-duration trim for context-linked H3 project clips."
             ),
@@ -2403,7 +2405,7 @@ class EasyH3LockedAudioDurationAlign(io.ComfyNode):
         return io.Schema(
             node_id="easy h3LockedAudioDurationAlign",
             display_name="H3 Locked Audio Duration Align",
-            category="EasyUse/Minimax/dev",
+            category=CATEGORY_MINIMAX_DEV,
             description=(
                 "Internal sub-frame duration correction for locked H3 audio."
             ),
@@ -2494,7 +2496,7 @@ class EasyH3LockedAudioSelect(io.ComfyNode):
         return io.Schema(
             node_id="easy h3LockedAudioSelect",
             display_name="H3 Locked Audio Select",
-            category="EasyUse/Minimax/dev",
+            category=CATEGORY_MINIMAX_DEV,
             description=(
                 "Internal selector that ignores missing locked audio while "
                 "preserving video timeline timing."
@@ -2543,7 +2545,7 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         return io.Schema(
             node_id="easy h3ProjectArtifact",
             display_name="H3 Project Artifact",
-            category="EasyUse/Minimax/dev",
+            category=CATEGORY_MINIMAX_DEV,
             description="Internal H3 project artifact writer.",
             inputs=[
                 io.String.Input("project_name"),

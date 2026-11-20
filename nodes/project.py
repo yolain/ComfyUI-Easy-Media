@@ -54,6 +54,8 @@ from ..utils.multitrack import (
     multitrack_runtime_cache,
 )
 
+from .minimax import CATEGORY_MINIMAX_DEV
+
 
 TYPE_FAST_MODEL_LOADER = io.Custom(io_type="FAST_MODEL_LOADER")
 TYPE_TRACKS_INFO = io.Custom(io_type="TRACKS_INFO")
@@ -470,7 +472,7 @@ class EasyH3SamplingPreviewSampler(io.ComfyNode):
         return io.Schema(
             node_id="easy h3SamplingPreviewSampler",
             display_name="H3 Sampling Preview Sampler",
-            category="EasyUse/Minimax/dev",
+            category=CATEGORY_MINIMAX_DEV,
             inputs=[
                 io.Noise.Input("noise"),
                 io.Guider.Input("guider"),
@@ -630,7 +632,7 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
         return io.Schema(
             node_id="easy h3ProjectStaticPrepare",
             display_name="H3 Project Static Prepare",
-            category="EasyUse/Minimax/dev",
+            category=CATEGORY_MINIMAX_DEV,
             is_dev_only=True,
             enable_expand=True,
             inputs=[
