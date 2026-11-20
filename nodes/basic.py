@@ -70,7 +70,18 @@ from ..utils import (
     write_srt_file,
 )
 from ..utils.prompt_builder import build_llm_prompt, build_prompt_request
+from ..utils.refmods import (
+    REFMOD_OUTPUT_INDEX,
+    RefModLoadCache,
+    refmod_prompt_source,
+    rewrite_refmod_prompt,
+    rewrite_task_refmod_prompts,
+    task_refmod_counts,
+    task_refmod_names,
+    track_refmod_fingerprint,
+)
 from ..utils.multitrack import (
+    MULTITRACK_RUNTIME_CACHE_KEY,
     _as_list_input,
     _embedded_multitrack_media,
     _index_slot_audio,
@@ -1892,6 +1903,18 @@ class MultiTrackEditor(io.ComfyNode):
         )
 
     @classmethod
+    def fingerprint_inputs(
+        cls,
+        track_data: list[str | dict] | str | dict | None = None,
+        prompt_override: object = None,
+        **kwargs: object,
+    ) -> tuple[object, ...]:
+        if prompt_override_has_value(_unwrap_singleton_container(prompt_override)):
+            return ()
+        # ComfyUI's cache looks at linked inputs through their ancestors.
+        return track_refmod_fingerprint(_parse_track_data(_unwrap_singleton_container(track_data)))
+
+    @classmethod
     def check_lazy_status(
         cls,
         resolution: str | dict,
@@ -1965,6 +1988,7 @@ class MultiTrackEditor(io.ComfyNode):
             format,
             materialize_media=materialize_media,
         )
+        _rewrite_tracks_info_refmod_prompts(tracks_info)
 
         return io.NodeOutput(tracks_info, images_out, audio_out, video_out)
 
@@ -2676,6 +2700,56 @@ def _ranges_overlap(start: int, end: int, segment: dict) -> bool:
     return int(segment.get("start_frame", 0)) < end and int(segment.get("end_frame", 0)) > start
 
 
+def _rewrite_tracks_info_refmod_prompts(info: dict) -> None:
+    tasks = sorted(
+        task_refmod_counts(info),
+        key=lambda entry: _multitrack_frame_value(entry[0].get("start_frame")),
+    )
+    if not any(count for _, count in tasks):
+        return
+    video_tracks = [
+        track for track in info.get("tracks", [])
+        if isinstance(track, dict) and track.get("type") == "video"
+    ]
+    # For deferred tracks, use the timeline metadata without decoding the clips.
+    video_items = (
+        None if _multitrack_media_is_deferred(info, "video")
+        else _embedded_multitrack_media(info, "video")
+    )
+
+    def track_has_video(track: dict, start: int, end: int | None) -> bool:
+        shared = _shared_reference_segment(track)
+        if shared is not None:
+            media_index = _shared_reference_output_index(shared)
+        else:
+            media_end = _track_media_end_frame(track, start, end)
+            if media_end is None or media_end <= start:
+                return False
+            media_index = _track_output_index(track)
+        return video_items is None or (
+            media_index is not None
+            and 0 <= media_index < len(video_items)
+            and video_items[media_index] is not None
+        )
+
+    for index, (task, mod_count) in enumerate(tasks):
+        if not mod_count:
+            continue
+        start = max(0, _multitrack_frame_value(task.get("start_frame")))
+        if info.get("format") == "MiniMax":
+            end = (
+                _multitrack_frame_value(tasks[index + 1][0].get("start_frame"))
+                if index + 1 < len(tasks) else None
+            )
+        else:
+            end = _multitrack_frame_value(task.get("end_frame"))
+        rewrite_task_refmod_prompts(
+            task["content"],
+            mod_count,
+            has_video=any(track_has_video(track, start, end) for track in video_tracks),
+        )
+
+
 def _multitrack_task_type(task: dict, image_count: int, has_video: bool) -> str:
     content = task.get("content", {})
     explicit_task_type = content.get("task_type") if isinstance(content, dict) else None
@@ -2742,18 +2816,25 @@ def _format_multitrack_prompt_relay(
     return " | ".join(formatted)
 
 
-def _selected_multitrack_user_prompt(content: dict) -> str:
-    if str(content.get("user_prompt_variant", "a")).lower() == "b":
-        prompt = str(content.get("user_prompt_b") or "")
-    else:
-        prompt = str(content.get("user_prompt") or content.get("text") or "")
-    return prompt.replace("@", "")
+def _selected_multitrack_user_prompt(
+    content: dict,
+    *,
+    mod_count: int = 0,
+    has_reference_video: bool = False,
+) -> str:
+    # TRACKS_INFO is usable on its own. Task Output can still adjust the source
+    # numbering for a marker range or for the video media it actually resolved.
+    prompt = _multitrack_prompt_value(content, use_source=True)
+    return rewrite_refmod_prompt(prompt, mod_count, has_video=has_reference_video).replace("@", "")
 
 
 def _format_marker_task_prompt_relay(
     tasks: list[dict],
     start_frame: int,
     end_frame: int,
+    *,
+    mod_count: int,
+    has_reference_video: bool,
 ) -> str:
     formatted: list[str] = []
     for task in tasks:
@@ -2764,7 +2845,9 @@ def _format_marker_task_prompt_relay(
         content = task.get("content", {})
         if not isinstance(content, dict):
             continue
-        prompt = _selected_multitrack_user_prompt(content).strip()
+        prompt = _selected_multitrack_user_prompt(
+            content, mod_count=mod_count, has_reference_video=has_reference_video,
+        ).strip()
         if prompt:
             formatted.append(_format_multitrack_prompt_relay(prompt, task_start, task_end, 0))
     return " | ".join(formatted)
@@ -2828,8 +2911,17 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 io.Video.Output("VIDEO", is_output_list=True),
                 io.String.Output("IMAGE_INDEXES"),
                 io.Audio.Output("LOCKED_AUDIO"),
+                io.Custom(io_type="H3_REF_MODS").Output("mods"),
             ],
         )
+
+    @classmethod
+    def fingerprint_inputs(
+        cls,
+        tracks_info: list | dict | str | None = None,
+        **kwargs: object,
+    ) -> tuple[object, ...]:
+        return track_refmod_fingerprint(_parse_track_data(_unwrap_singleton_container(tracks_info)))
 
     @classmethod
     def execute(
@@ -2862,6 +2954,18 @@ class MultiTrackTaskOutput(io.ComfyNode):
         output_full_timeline = requested_index == -1
         index = max(0, requested_index)
         selected_prompt_format = str(_unwrap_list_scalar(prompt_format, "default"))
+        task_entries = _multitrack_task_entries(info)
+        task_entry_index = min(index, len(task_entries) - 1) if task_entries else -1
+        task_entry = task_entries[task_entry_index] if task_entry_index >= 0 else {}
+        project_refs = info.get("_refmod_context")
+        refmod_names = (
+            project_refs["names"]
+            if isinstance(project_refs, dict)
+            else task_refmod_names(info, task_entry, full_timeline=output_full_timeline)
+        )
+        refmod_uses_track_video = (
+            not isinstance(project_refs, dict) or project_refs.get("use_track_video", True)
+        )
         # Share ffmpeg-extracted audio across tracks inside the same execute
         # call so a video referenced by many locked audio/video tracks (or by
         # multiple iterations of the timeline loop below) decodes once.
@@ -2870,6 +2974,8 @@ class MultiTrackTaskOutput(io.ComfyNode):
             "multitrack_task_output",
             requested_index,
             selected_prompt_format,
+            tuple(refmod_names),
+            refmod_uses_track_video,
         )
         can_restore_runtime = (
             isinstance(runtime_cache, dict)
@@ -2883,6 +2989,8 @@ class MultiTrackTaskOutput(io.ComfyNode):
             if can_restore_runtime
             else None
         )
+        refmod_cache = project_refs.get("cache") if isinstance(project_refs, dict) else None
+        mods = (refmod_cache or RefModLoadCache()).load(refmod_names) if refmod_names else []
         if isinstance(cached_task_output, io.NodeOutput):
             cache_status = info.get("_easy_media_cache_status", {})
             if isinstance(cache_status, dict):
@@ -2894,7 +3002,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
                 f"分段媒体={cache_status.get('segment_media', '未知')} | "
                 "TaskOutput=命中恢复缓存",
             )
-            return cached_task_output
+            return io.NodeOutput(*cached_task_output[:REFMOD_OUTPUT_INDEX], mods) if mods else cached_task_output
         if "_preloaded_media" in info:
             cache_status = info.get("_easy_media_cache_status", {})
             if isinstance(cache_status, dict):
@@ -2908,9 +3016,6 @@ class MultiTrackTaskOutput(io.ComfyNode):
             )
 
         tracks = info.get("tracks", [])
-        task_entries = _multitrack_task_entries(info)
-        task_entry_index = min(index, len(task_entries) - 1) if task_entries else -1
-        task_entry = task_entries[task_entry_index] if task_entry_index >= 0 else {}
         task = task_entry.get("task", {}) if isinstance(task_entry, dict) else {}
         content = task.get("content", {}) if isinstance(task.get("content", {}), dict) else {}
         start_frame = max(0, int(task_entry.get("start_frame", task.get("start_frame", 0))))
@@ -3359,7 +3464,11 @@ class MultiTrackTaskOutput(io.ComfyNode):
             media_progress.update_absolute(2)
 
         task_type = _multitrack_task_type(task, len(selected_images), has_video)
-        prompt = _selected_multitrack_user_prompt(content)
+        mod_count = len(refmod_names)
+        has_reference_video = refmod_uses_track_video and any(item is not None for item in selected_video)
+        prompt = _selected_multitrack_user_prompt(
+            content, mod_count=mod_count, has_reference_video=has_reference_video,
+        )
         system_prompt, api_prompt, json_mode = build_prompt_request(
             task_type,
             prompt,
@@ -3381,6 +3490,8 @@ class MultiTrackTaskOutput(io.ComfyNode):
                     _multitrack_task_segments(info),
                     start_frame,
                     end_frame,
+                    mod_count=mod_count,
+                    has_reference_video=has_reference_video,
                 )
             else:
                 user_prompt = _format_multitrack_prompt_relay(
@@ -3398,7 +3509,7 @@ class MultiTrackTaskOutput(io.ComfyNode):
         output_system_prompt = (
             "" if selected_prompt_format in {"default", "promptRelay"} else chat_system_prompt
         )
-        output = io.NodeOutput(
+        outputs = (
             output_system_prompt,
             user_prompt,
             task_type,
@@ -3409,8 +3520,10 @@ class MultiTrackTaskOutput(io.ComfyNode):
             image_indexes,
             locked_audio,
         )
+        output = io.NodeOutput(*outputs, mods)
         if can_restore_runtime:
-            runtime_cache[task_cache_key] = output
+            # The segment media cache can outlive the per-run RefMod cache.
+            runtime_cache[task_cache_key] = io.NodeOutput(*outputs, []) if mods else output
         return output
 
 
@@ -3958,16 +4071,19 @@ class MultiTrackPromptEnhancer(io.ComfyNode):
         )
 
 
-def _multitrack_prompt_value(content: dict) -> str:
-    """Return the currently selected prompt variant without normalizing its text."""
+def _multitrack_prompt_value(content: dict, *, use_source: bool = False) -> str:
+    """Return the selected prompt variant, optionally in editor numbering."""
     if str(content.get("user_prompt_variant", "a")).lower() == "b":
-        return str(content.get("user_prompt_b") or "")
-    return str(content.get("user_prompt") or content.get("text") or "")
+        field = "user_prompt_b"
+    else:
+        field = "user_prompt" if content.get("user_prompt") else "text"
+    return refmod_prompt_source(content, field) if use_source else str(content.get(field) or "")
 
 
 def _apply_multitrack_enhanced_prompts(info: dict, prompts: list[str]) -> dict:
     """Copy track metadata and replace each task segment's selected prompt."""
     output_info = dict(info)
+    output_info.pop(MULTITRACK_RUNTIME_CACHE_KEY, None)
     output_info["tracks"] = deepcopy(info.get("tracks", []))
     task_segments = _multitrack_task_segments(output_info)
     if len(task_segments) != len(prompts):
@@ -3985,6 +4101,7 @@ def _apply_multitrack_enhanced_prompts(info: dict, prompts: list[str]) -> dict:
             else "user_prompt"
         )
         content[prompt_key] = str(prompt)
+    _rewrite_tracks_info_refmod_prompts(output_info)
     return output_info
 
 
@@ -4120,13 +4237,8 @@ class MultiTrackPromptEnhanceToProject(io.ComfyNode):
         segment_progress = ProgressBar(len(tasks)) if len(tasks) > 1 else None
         if segment_progress is not None:
             segment_progress.update_absolute(0, len(tasks))
-        task_media_info = info
-        if info.get("task_markers"):
-            # This node updates task segments rather than marker-defined task ranges.
-            # Ignore markers while reusing MultiTrackTaskOutput's media resolver so
-            # task_index remains aligned with the sorted segment list above.
-            task_media_info = dict(info)
-            task_media_info["task_markers"] = []
+        # The enhancer writes prompts back to the timeline in editor numbering.
+        task_media_info = {**info, "task_markers": [], "_refmod_context": {"names": []}}
         for task_index in range(len(tasks)):
             task_output = MultiTrackTaskOutput.execute(
                 tracks_info=task_media_info,

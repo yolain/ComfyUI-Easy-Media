@@ -1,6 +1,7 @@
 import importlib.util
 from io import BytesIO
 import json
+import os
 import sys
 import types
 from fractions import Fraction
@@ -9,6 +10,12 @@ from pathlib import Path
 import pytest
 import torch
 import torch.nn.functional as F
+from PIL import Image
+
+
+@pytest.fixture(autouse=True)
+def _isolate_minimax_project_output(tmp_path, monkeypatch):
+    monkeypatch.setenv("EASY_MEDIA_TEST_PROJECT_OUTPUT", str(tmp_path))
 
 
 class _Port:
@@ -274,7 +281,7 @@ def _load_minimax_node(monkeypatch):
     )
     folder_paths = types.ModuleType("folder_paths")
     folder_paths.get_filename_list = lambda category: []
-    folder_paths.get_output_directory = lambda: "/tmp"
+    folder_paths.get_output_directory = lambda: os.environ["EASY_MEDIA_TEST_PROJECT_OUTPUT"]
     folder_paths.get_temp_directory = lambda: "/tmp"
     server = types.ModuleType("server")
     server.PromptServer = types.SimpleNamespace(
@@ -574,6 +581,131 @@ def test_module_loads_without_native_minimax_nodes(monkeypatch):
     assert module is not None
 
 
+def test_media_to_h3_refmod_refs_outputs_one_bundle_with_images_first(monkeypatch):
+    node = _load_minimax_node(monkeypatch).EasyMiniMaxH3MediaToRefs
+    schema = node.define_schema()
+    first = torch.zeros(1, 8, 16, 3)
+    batch = torch.stack((torch.ones(16, 8, 3), torch.full((16, 8, 3), 0.5)))
+    first_clip_frames = torch.zeros(4, 16, 8, 3)
+    second_clip_frames = torch.ones(7, 8, 16, 3)
+
+    videos = [
+        types.SimpleNamespace(
+            get_components=lambda: types.SimpleNamespace(images=first_clip_frames)
+        ),
+        types.SimpleNamespace(
+            get_components=lambda: types.SimpleNamespace(images=second_clip_frames)
+        ),
+    ]
+
+    refs, = node.execute(images=[first, batch], videos=videos).values
+
+    assert schema.category == "EasyUse/Minimax/refmod"
+    assert schema.is_input_list is True
+    assert [(port.name, port.kwargs["optional"]) for port in schema.inputs] == [
+        ("images", True),
+        ("videos", True),
+    ]
+    assert schema.outputs[0].kwargs.get("is_output_list", False) is False
+    assert len(refs) == 5
+    assert torch.equal(refs[0], first)
+    assert torch.equal(refs[1], batch[0:1])
+    assert torch.equal(refs[2], batch[1:2])
+    assert refs[3] is first_clip_frames
+    assert refs[4] is second_clip_frames
+    assert len(node.execute(images=[first]).values[0]) == 1
+    video_refs, = node.execute(videos=videos).values
+    assert len(video_refs) == 2
+    assert video_refs[0] is first_clip_frames
+    assert video_refs[1] is second_clip_frames
+    assert node.execute().values == ([],)
+
+
+def test_save_h3_refmods_preserves_upstream_results_and_writes_thumbnail(monkeypatch, tmp_path):
+    module = _load_minimax_node(monkeypatch)
+    node = module.EasyMiniMaxSaveH3RefMods
+    mods = [(object(), 0.6)]
+    saved_mods = [(object(), 0.6)]
+    path = tmp_path / "subject.v1.safetensors"
+
+    class Saver:
+        def save(self, refs, filename_prefix, subfolder):
+            assert refs == mods
+            assert (filename_prefix, subfolder) == ("demo_", "people")
+            return {"result": (saved_mods, str(path)), "ui": {"text": [str(path)]}}
+
+    module.comfy_nodes.NODE_CLASS_MAPPINGS["MiniMaxH3RefModSave"] = Saver
+    schema = node.define_schema()
+    assert schema.is_output_node
+    assert schema.is_input_list
+    assert [port.name for port in schema.inputs] == [
+        "mods", "filename_prefix", "subfolder", "thumbnail",
+    ]
+    assert schema.inputs[0].kwargs["optional"] is True
+    assert [port.name for port in schema.outputs] == ["mods", "saved_paths"]
+
+    output = node.execute([mods], ["demo_"], ["people"], thumbnail=[torch.ones(1, 300, 600, 3)])
+
+    assert output.values == (saved_mods, str(path))
+    assert output.kwargs["ui"] == {"text": [str(path)]}
+    with Image.open(tmp_path / "subject.v1.png") as thumbnail:
+        assert thumbnail.size == (512, 256)
+        assert thumbnail.getpixel((0, 0)) == (255, 255, 255)
+    assert not (tmp_path / "subject.v1.preview.png").exists()
+
+
+def test_h3_refmod_thumbnail_without_mods_requires_existing_model(monkeypatch, tmp_path):
+    module = _load_minimax_node(monkeypatch)
+    node = module.EasyMiniMaxSaveH3RefMods
+
+    class Saver:
+        def save(self, *args, **kwargs):
+            pytest.fail("Thumbnail-only mode must not call the model saver")
+
+    def find_mod_path(name):
+        stem = tmp_path / name
+        if not Path(f"{stem}.safetensors").is_file():
+            raise FileNotFoundError(f"RefMod '{name}' not found")
+        return str(stem)
+
+    upstream = types.ModuleType("refmod_upstream_test")
+    upstream._find_mod_path = find_mod_path
+    Saver.__module__ = upstream.__name__
+    monkeypatch.setitem(sys.modules, upstream.__name__, upstream)
+    module.comfy_nodes.NODE_CLASS_MAPPINGS["MiniMaxH3RefModSave"] = Saver
+    folder = tmp_path / "people"
+    folder.mkdir()
+    existing = folder / "demo_subject.safetensors"
+    existing.write_bytes(b"original model")
+    thumbnail = torch.zeros(1, 3, 4, 3)
+
+    with pytest.raises(ValueError, match="Connect a thumbnail image"):
+        node.execute()
+    with pytest.raises(ValueError, match="existing RefMod filename"):
+        node.execute(thumbnail=thumbnail)
+    with pytest.raises(ValueError, match="one nonempty IMAGE"):
+        node.execute(filename_prefix="demo_subject", thumbnail=torch.zeros(2, 3, 4, 3))
+    with pytest.raises(ValueError, match="one nonempty IMAGE"):
+        node.execute(
+            filename_prefix=["demo_subject"], subfolder=["people"], thumbnail=[thumbnail, thumbnail],
+        )
+    assert not (folder / "demo_subject.png").exists()
+    with pytest.raises(FileNotFoundError, match="missing/absent"):
+        node.execute(filename_prefix="absent", subfolder="missing", thumbnail=thumbnail)
+    assert not (tmp_path / "missing").exists()
+
+    output = node.execute(
+        filename_prefix="demo_subject.safetensors", subfolder="people", thumbnail=thumbnail,
+    )
+
+    preview = folder / "demo_subject.png"
+    assert output.values == ([], str(preview))
+    assert output.kwargs["ui"] == {"text": [str(preview)]}
+    assert preview.is_file()
+    assert list(folder.glob("*.safetensors")) == [existing]
+    assert existing.read_bytes() == b"original model"
+
+
 def test_h3_conditioning_cache_round_trips_and_skips_lazy_inputs(
     monkeypatch,
     tmp_path,
@@ -717,6 +849,17 @@ def test_h3_conditioning_cache_round_trips_and_skips_lazy_inputs(
             latent["samples"].unbind(),
         )
     )
+    assert module.EasyH3ConditioningCache.check_lazy_status(
+        project_name="demo",
+        segment_index=0,
+        tracks_info=hit_status,
+        task_output_ready="<Video 1>",
+        model=model,
+        clip=clip,
+        vae=vae,
+        audio_vae=audio_vae,
+    ) == ["conditioning", "latent"]
+    assert len(load_calls) == 1
 
 
 def test_h3_conditioning_cache_reencodes_when_model_changes(
@@ -2487,6 +2630,57 @@ def test_multitrack_h3_project_reads_ref_image_size_from_each_segment(monkeypatc
     assert conditioning["ref_image_size"] == "max"
 
 
+def test_multitrack_h3_project_shares_refmod_loads_and_wires_apply(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    loads = []
+
+    class Loader:
+        def load(self, mod_1):
+            loads.append(mod_1)
+            return ([(mod_1, 1.0)], "")
+
+    class Apply:
+        @classmethod
+        def execute(cls, conditioning, mods):
+            return conditioning, mods
+
+    module.comfy_nodes.NODE_CLASS_MAPPINGS.update(
+        MiniMaxH3RefModApply=Apply,
+        MiniMaxH3RefModsLoader=Loader,
+    )
+    inputs = _h3_project_inputs(sampling_mode=_h3_sampling_mode("single"))
+    segments = inputs["tracks_info"][0]["tracks"][0]["segments"]
+    segments[0]["content"]["mods"] = [
+        {"file_path": "actors/shared.safetensors", "shared_reference": True},
+        {"file_path": "ignored.safetensors", "muted": True},
+    ]
+    segments.append({"start_frame": 120, "end_frame": 240, "content": {"task_mode": "default"}})
+
+    result = module.EasyMultiTrackProject.execute(**inputs)
+    assert loads == []
+    contexts = []
+    for graph_node in result.expand.values():
+        if graph_node["class_type"] != "MiniMaxH3RefModApply":
+            continue
+        assert "easy_media_timing" in graph_node["_meta"]
+        apply_inputs = graph_node["inputs"]
+        task_id, slot = apply_inputs["mods"]
+        assert slot == 9
+        task = result.expand[task_id]
+        assert task["class_type"] == "easy multiTrackTaskOutput"
+        contexts.append(task["inputs"]["tracks_info"]["_refmod_context"])
+        cache = result.expand[apply_inputs["conditioning"][0]]
+        assert result.expand[cache["inputs"]["conditioning"][0]]["class_type"] == "easy minimaxH3ToVideo"
+
+    assert len(contexts) == 2
+    assert contexts[0]["cache"] is contexts[1]["cache"]
+    for context in contexts:
+        assert context["names"] == ["actors/shared"]
+        assert context["use_track_video"] is False
+        assert context["cache"].load(context["names"]) == [("actors/shared", 1.0)]
+    assert loads == ["actors/shared"]
+
+
 def test_multitrack_h3_project_logs_steps_and_reports_progress(monkeypatch):
     module = _load_minimax_node(monkeypatch)
     assert module is not None
@@ -3220,7 +3414,7 @@ def test_multitrack_project_clears_remaining_old_segments_only_for_unlimited_ove
             segment_count=[-1],
         )
     )
-    assert clear_calls == [("default", 0, "/tmp")]
+    assert clear_calls == [("default", 0, module.folder_paths.get_output_directory())]
 
     clear_calls.clear()
     module.EasyMultiTrackProject.execute(

@@ -87,6 +87,32 @@ export function sharedTaskImageUpdates(
   })
 }
 
+export function replaceSharedTaskImage(
+  segments: MultiTrackSegment[],
+  segmentId: string,
+  image: MultiTrackTaskImage,
+  replacement: MultiTrackTaskImage,
+) {
+  const oldIdentity = taskImageIdentity(image)
+  const unsharedUpdates = new Map(
+    sharedTaskImageUpdates(segments, image, false)
+      .map(({ segmentId, images }) => [segmentId, images]),
+  )
+  const updatedSegments = segments.map((segment) => {
+    const images = unsharedUpdates.get(segment.id) ?? taskImagesFromContent(segment.content.images)
+    return {
+      ...segment,
+      content: {
+        ...segment.content,
+        images: segment.id === segmentId
+          ? [replacement, ...images.filter((item) => taskImageIdentity(item) !== oldIdentity)]
+          : images,
+      },
+    }
+  })
+  return sharedTaskImageUpdates(updatedSegments, replacement, true)
+}
+
 export function synchronizeSharedTaskImages(tracks: MultiTrack[]): MultiTrack[] {
   const taskSegments = tracks
     .filter((track) => track.type === 'task')
@@ -144,6 +170,30 @@ export function createTaskImage(filePath: string, source: MultiTrackSourceType):
     slot_name: slotName,
     file_name: fileName,
   }
+}
+
+export function imageSelectorValue(image: MultiTrackTaskImage | undefined): string {
+  if (!image) return ''
+  if (image.slot_name) return `__slot__:${image.slot_name}`
+  return image.file_path ?? image.local_path ?? image.url ?? ''
+}
+
+export function imageSelectorTab(image: MultiTrackTaskImage | undefined) {
+  if (image?.source_type === 'output') return 'outputs'
+  if (image?.source_type === 'local') return 'local'
+  if (image?.source_type === 'url') return 'url'
+  if (image?.source_type === 'slot') return 'slot'
+  return 'inputs'
+}
+
+export function selectedImageSource(
+  filePath: string,
+  source?: 'input' | 'output' | 'local',
+): MultiTrackSourceType {
+  if (source) return source
+  if (filePath.startsWith('__slot__:')) return 'slot'
+  if (filePath.startsWith('http://') || filePath.startsWith('https://')) return 'url'
+  return 'input'
 }
 
 export function splitSelectedTaskMedia(value: string): string[] {

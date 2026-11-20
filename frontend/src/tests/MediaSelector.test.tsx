@@ -73,6 +73,35 @@ describe('MediaSelector', () => {
     expect(screen.getByText('1.0 KB')).toBeTruthy()
   })
 
+  it('browses RefMod subdirectories with thumbnails and without media source tabs', async () => {
+    const onChange = vi.fn()
+    const url = '/easy-media/refmods/preview?path=people%2Fsubject.safetensors'
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ items: [{ type: 'dir', name: 'people', path: 'people' }] }),
+    } as Response).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        items: [{ type: 'file', name: 'subject.safetensors', path: 'people/subject.safetensors', url, size: 10, mtime: 1 }],
+      }),
+    } as Response)
+    render(<MediaSelector mediaType="mod" value="" onChange={onChange} allowMultipleSelection />)
+
+    expect(screen.queryByRole('tablist')).toBeNull()
+    expect(screen.getByPlaceholderText('mediaSelector.searchPlaceholder')).toBeTruthy()
+    fireEvent.click(await screen.findByTitle('people'))
+    expect(fetch).toHaveBeenLastCalledWith('/easy-media/media/list?source=checkpoints&type=mod&subfolder=people')
+    expect((await screen.findByTitle('subject')).textContent).toBe('subject')
+    await waitFor(() => expect(screen.getByAltText('subject').getAttribute('src')).toBe(url))
+
+    fireEvent.click(screen.getByTitle('mediaSelector.viewList'))
+    expect(screen.queryByTitle('subject.safetensors')).toBeNull()
+    const file = screen.getByTitle('subject')
+    expect(file.textContent).toBe('subject')
+    fireEvent.click(file)
+    expect(onChange).toHaveBeenCalledWith('people/subject.safetensors')
+  })
+
   it('offers connected video slots and labels them as video', () => {
     const onChange = vi.fn()
     render(

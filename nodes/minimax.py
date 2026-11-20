@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import math
 import time
+from importlib import import_module
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import folder_paths
 import nodes as comfy_nodes
@@ -38,6 +39,7 @@ from ..utils.h3_conditioning_cache import (
     get_staged_h3_conditioning_cache,
     h3_conditioning_cache_matches,
     h3_conditioning_cache_path,
+    h3_conditioning_entry_signature,
     h3_encoder_signature,
     load_h3_conditioning_cache,
     prepare_h3_conditioning_cache_pool,
@@ -46,13 +48,18 @@ from ..utils.h3_conditioning_cache import (
     touch_h3_conditioning_cache,
 )
 from ..utils.minimax import (
+    encode_refmod_thumbnail,
     expand_image_inputs,
     flatten_media_inputs,
     h3_phase_aligned_video_suffix,
     remove_output_files_by_prefix,
+    save_refmod_thumbnail,
 )
 from ..utils.prompt_override import build_minimax_prompt_override_json
 from ..utils.video import stage_passthrough_video_media
+
+if TYPE_CHECKING:
+    from comfy_api.latest import Input
 
 
 CATEGORY_MINIMAX = "EasyUse/MiniMax"
@@ -67,7 +74,116 @@ MAX_REF_VIDEOS = 3
 MAX_REF_AUDIOS = 3
 REFERENCE_BRIDGE_NODE_ID = "easy MiniMaxH3ReferenceToVideoBridge"
 TYPE_TRACKS_INFO = io.Custom(io_type="TRACKS_INFO")
+TYPE_H3_REF_LIST = io.Custom(io_type="H3_REF_LIST")
+TYPE_H3_REF_MODS = io.Custom(io_type="H3_REF_MODS")
 MULTITRACK_PROJECT_REFRESH_EVENT = "easy_multitrack_project_refresh"
+
+
+class EasyMiniMaxH3MediaToRefs(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy MiniMaxH3MediaToRefs",
+            display_name="Media to H3 RefMod Refs",
+            category="EasyUse/Minimax/refmod",
+            description=(
+                "Pack images and videos for the refs_bundle input of Create H3 RefMod. "
+                "Images come first. Each video's frames form one reference."
+            ),
+            is_input_list=True,
+            inputs=[
+                io.Image.Input("images", optional=True),
+                io.Video.Input("videos", optional=True),
+            ],
+            outputs=[TYPE_H3_REF_LIST.Output("refs")],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        images: list[torch.Tensor] | None = None,
+        videos: list[Input.Video] | None = None,
+    ) -> io.NodeOutput:
+        refs = expand_image_inputs(images)
+        for index, video in enumerate(flatten_media_inputs(videos), start=1):
+            try:
+                frames = video.get_components().images
+            except Exception as error:
+                raise RuntimeError(
+                    f"Unable to read frames from reference video {index}."
+                ) from error
+            refs.append(frames)
+        return io.NodeOutput(refs)
+
+
+class EasyMiniMaxSaveH3RefMods(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy MiniMaxSaveH3RefMods",
+            display_name="Save H3 RefMods",
+            category="EasyUse/Minimax/refmod",
+            description=(
+                "Save standalone H3 RefMods with an optional preview, or connect only a "
+                "thumbnail to update an existing RefMod."
+            ),
+            is_output_node=True,
+            is_input_list=True,
+            inputs=[
+                TYPE_H3_REF_MODS.Input("mods", optional=True),
+                io.String.Input(
+                    "filename_prefix",
+                    default="",
+                    tooltip="Export prefix when mods is connected, or the existing RefMod filename.",
+                ),
+                io.String.Input("subfolder", default=""),
+                io.Image.Input(
+                    "thumbnail",
+                    optional=True,
+                    tooltip="One image used as the model preview for each distinct RefMod.",
+                ),
+            ],
+            outputs=[
+                TYPE_H3_REF_MODS.Output("mods"),
+                io.String.Output("saved_paths"),
+            ],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        mods: list[list[tuple[Any, float]]] | list[tuple[Any, float]] | None = None,
+        filename_prefix: list[str] | str = "",
+        subfolder: list[str] | str = "",
+        thumbnail: list[torch.Tensor] | torch.Tensor | None = None,
+    ) -> io.NodeOutput:
+        images = flatten_media_inputs(thumbnail)
+        if len(images) > 1:
+            raise ValueError("The RefMod thumbnail input must contain one nonempty IMAGE.")
+        png = encode_refmod_thumbnail(images[0]) if images else None
+        if any(isinstance(value, list) and len(value) > 1 for value in (filename_prefix, subfolder)):
+            raise ValueError("Use a single filename_prefix and subfolder for each RefMod save.")
+        prefix = _first_input(filename_prefix, "")
+        directory = _first_input(subfolder, "")
+        saver = comfy_nodes.NODE_CLASS_MAPPINGS.get("MiniMaxH3RefModSave")
+        if saver is None:
+            raise RuntimeError("Install ComfyUI-MiniMaxH3Mod to use Save H3 RefMods with Thumbnail.")
+        if mods is None:
+            if png is None:
+                raise ValueError("Connect a thumbnail image when mods is not connected.")
+            name = prefix.strip().removesuffix(".safetensors")
+            if not name:
+                raise ValueError("Enter the existing RefMod filename in filename_prefix.")
+            relative_name = "/".join(part for part in (directory.strip(), name) if part)
+            mod_path = import_module(saver.__module__)._find_mod_path(relative_name)
+            path = save_refmod_thumbnail(f"{mod_path}.safetensors", png)
+            return io.NodeOutput([], path, ui={"text": [path]})
+
+        saved = saver().save(flatten_media_inputs(mods), filename_prefix=prefix, subfolder=directory)
+        if png is not None:
+            for path in saved["ui"]["text"]:
+                save_refmod_thumbnail(path, png)
+        return io.NodeOutput(*saved["result"], ui=saved["ui"])
 
 
 class EasyMinimaxPromptOverride(io.ComfyNode):
@@ -1128,7 +1244,7 @@ class EasyH3MotionContextLatentTrim(io.ComfyNode):
         return io.Schema(
             node_id="easy h3MotionContextLatentTrim",
             display_name="H3 Motion Context Latent Trim",
-            category="EasyUse/H3/dev",
+            category="EasyUse/Minimax/dev",
             description=(
                 "Internal H3 context-tail copier used to release full-resolution "
                 "segment latents before the next segment starts."
@@ -1253,7 +1369,7 @@ class EasyH3ConditioningCache(io.ComfyNode):
         return io.Schema(
             node_id="easy h3ConditioningCache",
             display_name="H3 Conditioning Cache",
-            category="EasyUse/H3/dev",
+            category="EasyUse/Minimax/dev",
             description=(
                 "Internal MiniMax H3 temp cache retaining five recent segments."
             ),
@@ -1290,16 +1406,16 @@ class EasyH3ConditioningCache(io.ComfyNode):
         conditioning: Any | None = None,
         latent: dict[str, Any] | None = None,
     ) -> list[str]:
-        del task_output_ready
         cache_path = cls._cache_path(segment_index)
-        signature = h3_encoder_signature(clip, vae, audio_vae, model)
+        encoder_signature = h3_encoder_signature(clip, vae, audio_vae, model)
         all_media_caches_hit = cls._all_media_caches_hit(tracks_info)
         scope_token, execution_id = cls._prepare_cache_pool(
             project_name,
             tracks_info,
-            signature,
+            encoder_signature,
             invalidate=not all_media_caches_hit,
         )
+        signature = h3_conditioning_entry_signature(encoder_signature, task_output_ready)
         staged_key = cls._staged_cache_key(
             cache_path,
             signature,
@@ -1351,17 +1467,16 @@ class EasyH3ConditioningCache(io.ComfyNode):
         conditioning: Any | None = None,
         latent: dict[str, Any] | None = None,
     ) -> io.NodeOutput:
-        del task_output_ready
-
         cache_path = cls._cache_path(segment_index)
-        signature = h3_encoder_signature(clip, vae, audio_vae, model)
+        encoder_signature = h3_encoder_signature(clip, vae, audio_vae, model)
         all_media_caches_hit = cls._all_media_caches_hit(tracks_info)
         scope_token, execution_id = cls._prepare_cache_pool(
             project_name,
             tracks_info,
-            signature,
+            encoder_signature,
             invalidate=not all_media_caches_hit,
         )
+        signature = h3_conditioning_entry_signature(encoder_signature, task_output_ready)
         staged_key = cls._staged_cache_key(
             cache_path,
             signature,
@@ -1516,7 +1631,7 @@ class EasyH3SegmentSamplingStart(io.ComfyNode):
         return io.Schema(
             node_id="easy h3SegmentSamplingStart",
             display_name="H3 Segment Sampling Start",
-            category="EasyUse/H3/dev",
+            category="EasyUse/Minimax/dev",
             inputs=[
                 io.Noise.Input("noise"),
                 io.Guider.Input("guider"),
@@ -2062,7 +2177,7 @@ class EasyH3SegmentSaveEnd(io.ComfyNode):
         return io.Schema(
             node_id="easy h3SegmentSaveEnd",
             display_name="H3 Segment Save End",
-            category="EasyUse/H3/dev",
+            category="EasyUse/Minimax/dev",
             inputs=[
                 io.String.Input("video_path"),
                 io.String.Input("project_name"),
@@ -2092,7 +2207,7 @@ class EasyH3AudioContextLatent(io.ComfyNode):
         return io.Schema(
             node_id="easy h3AudioContextLatent",
             display_name="H3 Audio Context Latent",
-            category="EasyUse/H3/dev",
+            category="EasyUse/Minimax/dev",
             inputs=[
                 io.Latent.Input("audio_latent"),
                 io.Int.Input("output_frames", min=1),
@@ -2122,7 +2237,7 @@ class EasyH3PassthroughVideo(io.ComfyNode):
         return io.Schema(
             node_id="easy h3PassthroughVideo",
             display_name="H3 Passthrough Video",
-            category="EasyUse/H3/dev",
+            category="EasyUse/Minimax/dev",
             is_dev_only=True,
             is_input_list=True,
             inputs=[
@@ -2175,7 +2290,7 @@ class EasyH3ContextMediaTrim(io.ComfyNode):
         return io.Schema(
             node_id="easy h3ContextMediaTrim",
             display_name="H3 Context Media Trim",
-            category="EasyUse/H3/dev",
+            category="EasyUse/Minimax/dev",
             description=(
                 "Internal exact-duration trim for context-linked H3 project clips."
             ),
@@ -2287,7 +2402,7 @@ class EasyH3LockedAudioDurationAlign(io.ComfyNode):
         return io.Schema(
             node_id="easy h3LockedAudioDurationAlign",
             display_name="H3 Locked Audio Duration Align",
-            category="EasyUse/H3/dev",
+            category="EasyUse/Minimax/dev",
             description=(
                 "Internal sub-frame duration correction for locked H3 audio."
             ),
@@ -2378,7 +2493,7 @@ class EasyH3LockedAudioSelect(io.ComfyNode):
         return io.Schema(
             node_id="easy h3LockedAudioSelect",
             display_name="H3 Locked Audio Select",
-            category="EasyUse/H3/dev",
+            category="EasyUse/Minimax/dev",
             description=(
                 "Internal selector that ignores missing locked audio while "
                 "preserving video timeline timing."
@@ -2427,7 +2542,7 @@ class EasyH3ProjectArtifact(io.ComfyNode):
         return io.Schema(
             node_id="easy h3ProjectArtifact",
             display_name="H3 Project Artifact",
-            category="EasyUse/H3/dev",
+            category="EasyUse/Minimax/dev",
             description="Internal H3 project artifact writer.",
             inputs=[
                 io.String.Input("project_name"),

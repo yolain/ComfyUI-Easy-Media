@@ -9,6 +9,7 @@ import type { MultiTrack, MultiTrackSegment } from '@/types/multitrack'
 vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
   MediaSelector: (props: {
     value: string
+    mediaType?: string
     allowMultipleSelection?: boolean
     maxSelectionCount?: number
     slotItems?: Array<{ value: string }>
@@ -17,11 +18,12 @@ vi.mock('@/components/widgets/mediaSelector/MediaSelector', () => ({
     <div
       data-testid="media-selector-mock"
       data-value={props.value}
+      data-media-type={props.mediaType}
       data-multiple={String(props.allowMultipleSelection)}
       data-limit={String(props.maxSelectionCount)}
       data-slot-items={props.slotItems?.map((item) => item.value).join(',') ?? ''}
     >
-      <button type="button" onClick={() => props.onChange('replacement.png', 'input')}>
+      <button type="button" onClick={() => props.onChange(props.mediaType === 'mod' ? 'people/subject.safetensors' : 'replacement.png', 'input')}>
         choose replacement
       </button>
     </div>
@@ -569,12 +571,153 @@ describe('TaskSegmentEditor', () => {
   it('passes the remaining image capacity to the add-image selector', () => {
     render(<TaskSegmentEditor segment={taskSegment()} onContentChange={vi.fn()} />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Select image' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add Image' }))
 
     const selector = screen.getByTestId('media-selector-mock')
     expect(selector.dataset.value).toBe('')
     expect(selector.dataset.multiple).toBe('true')
     expect(selector.dataset.limit).toBe('7')
+  })
+
+  it('lists mods before images and keeps their add limits independent', () => {
+    const base = taskSegment()
+    const image = base.content.images![0]
+    const segment = {
+      ...base,
+      content: {
+        ...base.content,
+        images: Array.from({ length: 9 }, (_, index) => ({ ...image, id: String(index) })),
+        mods: Array.from({ length: 7 }, (_, index) => ({
+          id: String(index), file_path: `folder/mod-${index}.safetensors`,
+        })),
+      },
+    }
+    const onContentChange = vi.fn()
+    render(<TaskSegmentEditor segment={segment} onContentChange={onContentChange} />)
+
+    const grid = screen.getByTestId('task-image-grid')
+    expect(grid.firstElementChild).toBe(screen.getByTestId('task-mod-0'))
+    expect(screen.getByTestId('task-mod-index-0').textContent).toBe('mod1')
+    expect(screen.getByTestId('task-mod-index-1').textContent).toBe('mod2')
+    const addItem = screen.getByTestId('task-reference-add-item')
+    expect(grid.lastElementChild).toBe(addItem)
+    expect(addItem.className).toContain('aspect-square')
+    expect(addItem.contains(screen.getByRole('button', { name: 'Add Image' }))).toBe(true)
+    expect(addItem.contains(screen.getByRole('button', { name: 'Add Mod' }))).toBe(true)
+    expect(screen.getByRole('button', { name: 'Add Image' }).hasAttribute('disabled')).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Add Mod' }))
+
+    const selector = screen.getByTestId('media-selector-mock')
+    expect(selector.dataset.mediaType).toBe('mod')
+    expect(selector.dataset.limit).toBe('1')
+    fireEvent.click(screen.getByRole('button', { name: 'choose replacement' }))
+    expect(onContentChange).toHaveBeenCalledWith({
+      mods: [...segment.content.mods, expect.objectContaining({ file_path: 'people/subject.safetensors' })],
+    })
+  })
+
+  it('opens mod replacement with one click even when the segment is at capacity', () => {
+    const segment = taskSegment()
+    const firstMod = { id: 'original', file_path: 'folder/original.safetensors', muted: true }
+    const mods = [firstMod, ...Array.from({ length: 7 }, (_, index) => ({
+      id: String(index), file_path: `mod-${index}.safetensors`,
+    }))]
+    segment.content.mods = mods
+    const onContentChange = vi.fn()
+    const { rerender } = render(<TaskSegmentEditor segment={segment} onContentChange={onContentChange} />)
+    fireEvent.error(screen.getByAltText('original'))
+
+    const replaceButton = screen.getByRole('button', { name: 'Replace mod original' })
+    fireEvent.click(replaceButton, { detail: 1 })
+
+    const selector = screen.getByTestId('media-selector-mock')
+    expect(selector.dataset.value).toBe(firstMod.file_path)
+    expect(selector.dataset.mediaType).toBe('mod')
+    expect(selector.dataset.multiple).not.toBe('true')
+    expect(selector.dataset.limit).toBe('1')
+    fireEvent.click(screen.getByRole('button', { name: 'choose replacement' }))
+
+    const nextMods = [{ ...firstMod, file_path: 'people/subject.safetensors' }, ...mods.slice(1)]
+    expect(onContentChange).toHaveBeenCalledWith({ mods: nextMods })
+    rerender(<TaskSegmentEditor segment={{ ...segment, content: { ...segment.content, mods: nextMods } }} onContentChange={onContentChange} />)
+    expect(screen.getByAltText('subject').getAttribute('src')).toContain('subject.safetensors')
+  })
+
+  it.each([false, true])('updates shared copies together or reports a duplicate (conflict: %s)', (conflict) => {
+    const segment = taskSegment()
+    const second = secondTaskSegment()
+    const original = { id: 'original', file_path: 'folder/original.safetensors', shared_reference: true }
+    const sharedCopy = { ...original, id: 'copy', shared_reference_copy: true, muted: true }
+    segment.content.mods = [original]
+    second.content.mods = [
+      sharedCopy,
+      ...(conflict ? [{ id: 'other', file_path: 'people/subject.safetensors' }] : []),
+    ]
+    const onTrackSegmentsContentChange = vi.fn()
+    render(<TaskSegmentEditor
+      segment={segment}
+      trackSegments={[segment, second]}
+      onContentChange={vi.fn()}
+      onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace mod original' }), { detail: 1 })
+    fireEvent.click(screen.getByRole('button', { name: 'choose replacement' }))
+    if (conflict) {
+      expect(onTrackSegmentsContentChange).not.toHaveBeenCalled()
+      expect(screen.getByRole('alert').textContent).toContain('already in an affected segment')
+    } else {
+      expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([
+        { segmentId: segment.id, patch: { mods: [{ ...original, file_path: 'people/subject.safetensors' }] } },
+        { segmentId: second.id, patch: { mods: [{ ...sharedCopy, file_path: 'people/subject.safetensors' }] } },
+      ])
+    }
+  })
+
+  it('shows the mod name if the preview is missing and keeps mod actions separate', () => {
+    const segment = taskSegment()
+    const mod = { id: 'subject', file_path: 'people/subject.safetensors' }
+    segment.content.mods = [mod]
+    const onContentChange = vi.fn()
+    const onTrackSegmentsContentChange = vi.fn()
+    render(
+      <TaskSegmentEditor
+        segment={segment}
+        trackSegments={[segment, secondTaskSegment()]}
+        onContentChange={onContentChange}
+        onTrackSegmentsContentChange={onTrackSegmentsContentChange}
+      />,
+    )
+
+    fireEvent.error(screen.getByAltText('subject'))
+    expect(screen.getByText('subject').className).toContain('line-clamp-2')
+    const modIndex = screen.getByTestId('task-mod-index-subject')
+    expect(modIndex.className).toContain('bg-refmod')
+    expect(modIndex.className.replace('bg-refmod text-refmod-foreground', 'bg-black/50 text-white'))
+      .toBe(screen.getByTestId('task-image-index-a').className)
+    const imageActions = screen.getByTestId('task-image-actions-a')
+    const modActions = screen.getByTestId('task-mod-actions-subject')
+    expect(modActions.className).toBe(imageActions.className)
+    const modButtons = Array.from(modActions.querySelectorAll('button'))
+    const imageButtons = Array.from(imageActions.querySelectorAll('button'))
+    expect(modButtons.map((button) => button.getAttribute('style')))
+      .toEqual(imageButtons.map((button) => button.getAttribute('style')))
+    expect(modButtons[1].textContent).toBe('M')
+    fireEvent.click(screen.getByRole('button', { name: 'Share mod across tasks' }))
+    expect(onTrackSegmentsContentChange).toHaveBeenCalledWith([
+      { segmentId: segment.id, patch: { mods: [{ ...mod, shared_reference: true }] } },
+      { segmentId: 'task-segment-2', patch: { mods: [expect.objectContaining({
+        file_path: mod.file_path, shared_reference: true, shared_reference_copy: true,
+      })] } },
+    ])
+    fireEvent.click(screen.getByRole('button', { name: 'Disable mod' }))
+    expect(onContentChange).toHaveBeenLastCalledWith({ mods: [{ ...mod, muted: true }] })
+    expect(screen.queryByTestId('media-selector-mock')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Preview mod' }))
+    expect(screen.getByRole('dialog', { name: 'subject' })).toBeTruthy()
+    fireEvent.keyDown(screen.getByRole('dialog', { name: 'subject' }), { key: 'Escape' })
+    fireEvent.click(screen.getByRole('button', { name: 'Delete mod' }))
+    expect(onContentChange).toHaveBeenLastCalledWith({ mods: [] })
   })
 
   it('supports one-based image item numbering', () => {
@@ -740,11 +883,11 @@ describe('TaskSegmentEditor', () => {
     const grid = screen.getByTestId('task-image-grid')
     expect(dropZone.closest('.task-segment-editor')).not.toBeNull()
     expect(dropZone.className).toContain('w-full')
-    expect(grid.className).toContain('grid-cols-2')
+    expect(grid.dataset.maxColumns).toBe('2')
     expect(screen.getByTestId('task-image-a').className).toContain('w-full')
     expect(screen.getByTestId('task-image-a').className).toContain('self-start')
-    expect(screen.getByRole('button', { name: 'Select image' }).className).toContain('w-full')
-    expect(screen.getByRole('button', { name: 'Select image' }).className).toContain('self-start')
+    expect(screen.getByRole('button', { name: 'Add Image' }).className).toContain('w-full')
+    expect(screen.getByRole('button', { name: 'Add Image' }).className).toContain('justify-start')
     expect(screen.getByTestId('task-prompt-panel').className).toContain('min-w-0')
     const separator = screen.getByRole('separator', { name: 'Resize image and prompt panels' })
     fireEvent.pointerDown(separator, { button: 0, clientX: 320 })
@@ -834,10 +977,10 @@ describe('TaskSegmentEditor', () => {
     const firstImage = screen.getByTestId('task-image-a')
     const secondImage = screen.getByTestId('task-image-b')
 
-    expect(grid.className).toContain('grid-cols-2')
+    expect(grid.dataset.maxColumns).toBe('2')
     expect(screen.queryByTestId('task-image-focus-preview')).toBeNull()
     fireEvent.mouseEnter(secondImage)
-    expect(grid.className).toContain('grid-cols-2')
+    expect(grid.dataset.maxColumns).toBe('2')
     expect(screen.queryByTestId('task-image-focus-preview')).toBeNull()
     expect(secondImage.className).toContain('relative')
     expect(secondImage.className).toContain('cursor-pointer')
@@ -845,13 +988,13 @@ describe('TaskSegmentEditor', () => {
     expect(firstImage.className).not.toContain('opacity-0')
 
     fireEvent.mouseLeave(grid)
-    expect(grid.className).toContain('grid-cols-2')
+    expect(grid.dataset.maxColumns).toBe('2')
     expect(screen.queryByTestId('task-image-focus-preview')).toBeNull()
     expect(secondImage.className).toContain('relative')
     expect(secondImage.className).not.toContain('opacity-0')
   })
 
-  it('uses a three-column image grid once four or more task images are present', () => {
+  it('allows up to three columns once four or more task images are present', () => {
     const segment = taskSegment()
     segment.content.images = [
       ...(segment.content.images ?? []),
@@ -861,7 +1004,7 @@ describe('TaskSegmentEditor', () => {
 
     render(<TaskSegmentEditor segment={segment} onContentChange={vi.fn()} />)
 
-    expect(screen.getByTestId('task-image-grid').className).toContain('grid-cols-3')
+    expect(screen.getByTestId('task-image-grid').dataset.maxColumns).toBe('3')
   })
 
   it('uses locale messages for task mode and prompt labels', () => {
@@ -916,6 +1059,57 @@ describe('TaskSegmentEditor', () => {
     const chip = prompt.querySelector('[data-prompt-reference-token="@Picture 1"]')
     expect(chip?.querySelector('img')?.getAttribute('src')).toContain('a.png')
     expect((chip as HTMLElement | null)?.style.color).toBe('var(--multitrack-task-bg)')
+  })
+
+  it.each(['@', '<', 'button'])('shows mod thumbnails before all nine images in the %s reference menu', (trigger) => {
+    const segment = taskSegment()
+    segment.content.user_prompt = ''
+    segment.content.mods = [
+      { id: 'disabled', file_path: 'disabled.safetensors', muted: true },
+      { id: 'subject', file_path: 'people/subject.safetensors' },
+      { id: 'scene', file_path: 'scene.safetensors' },
+    ]
+    segment.content.images = Array.from({ length: 9 }, (_, index) => ({
+      id: `image-${index + 1}`,
+      file_path: `image-${index + 1}.png`,
+    }))
+    const onContentChange = vi.fn()
+    render(<TaskSegmentEditor segment={segment} format="MiniMax" onContentChange={onContentChange} />)
+
+    const prompt = screen.getByRole('textbox', { name: 'Prompt' })
+    if (trigger === 'button') {
+      fireEvent.click(screen.getByRole('button', { name: 'Open reference resources' }))
+    } else {
+      inputEditable(prompt, trigger)
+    }
+    const choice = screen.getByRole('option', { name: 'Picture 1 subject' })
+    const thumbnailUrl = '/easy-media/refmods/preview?path=people%2Fsubject.safetensors'
+    expect(choice.querySelector('img')?.getAttribute('src')).toBe(thumbnailUrl)
+    const missingPreview = screen.getByRole('option', { name: 'Picture 2 scene' })
+    fireEvent.error(missingPreview.querySelector('img')!)
+    expect(missingPreview.querySelector('img')).toBeNull()
+    expect(missingPreview.querySelector('svg')).not.toBeNull()
+    expect(screen.getByRole('option', { name: 'Picture 3 image-1.png' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'Picture 11 image-9.png' })).toBeTruthy()
+    expect(screen.getAllByRole('option')).toHaveLength(11)
+    expect(screen.getByTestId('task-image-index-image-1').textContent).toBe('3')
+    expect(screen.getByRole('button', { name: 'Add Image' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: 'Add Mod' }).hasAttribute('disabled')).toBe(false)
+
+    fireEvent.click(choice)
+    const token = trigger === '<' ? '<Picture 1>' : '@Picture 1'
+    expect(onContentChange).toHaveBeenLastCalledWith({ user_prompt: token })
+    const chip = prompt.querySelector<HTMLElement>(`[data-prompt-reference-token="${token}"]`)!
+    expect(chip.style.color).toBe('var(--refmod)')
+    expect(chip.title).toBe('subject')
+    expect(chip.querySelector('img')?.getAttribute('src')).toBe(thumbnailUrl)
+    fireEvent.click(chip)
+    fireEvent.click(screen.getByRole('option', { name: 'Picture 2 scene' }))
+    const replacementToken = trigger === '<' ? '<Picture 2>' : '@Picture 2'
+    const replacement = prompt.querySelector(`[data-prompt-reference-token="${replacementToken}"]`)!
+    fireEvent.error(replacement.querySelector('img')!)
+    expect(replacement.querySelector('[data-reference-icon="image"]')).not.toBeNull()
+    expect(onContentChange).toHaveBeenLastCalledWith({ user_prompt: replacementToken })
   })
 
   it('shows the interactive MiniMax placeholder only for an empty prompt', () => {
@@ -1579,7 +1773,7 @@ describe('TaskSegmentEditor', () => {
     expect(onDurationChange).toHaveBeenCalledTimes(1)
   })
 
-  it('uses responsive preview editor sizing without rendering the empty image picker as a button element', () => {
+  it('shows both add actions in the empty reference panel', () => {
     const emptyImageSegment = {
       ...taskSegment(),
       content: {
@@ -1590,7 +1784,10 @@ describe('TaskSegmentEditor', () => {
     render(<TaskSegmentEditor segment={emptyImageSegment} onContentChange={vi.fn()} />)
 
     expect(screen.getByTestId('task-image-drop-zone').className).toContain('w-full')
-    expect(screen.getByRole('button', { name: 'Task image drop zone' }).tagName).not.toBe('BUTTON')
+    expect(screen.getByText('Add reference')).toBeTruthy()
+    expect(screen.queryByText('Click to choose, or drag files here.')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Add Image' })).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Add Mod' })).not.toBeNull()
     expect(screen.getByRole('textbox', { name: 'Prompt' }).className).toContain('text-[10px]')
   })
 
@@ -1625,7 +1822,7 @@ describe('TaskSegmentEditor', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Task image drop zone' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Add Image' }))
     expect(screen.getByTestId('media-selector-mock').getAttribute('data-slot-items'))
       .toBe('__slot__:image')
   })

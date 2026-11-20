@@ -5,8 +5,8 @@ Endpoints
 ---------
 GET /easy-media/media/list
     Query params:
-        source    – "inputs" | "outputs" | "local"
-        type      – "all" | "image" | "audio" | "video"  (default: "all")
+        source    – "inputs" | "outputs" | "local" | "checkpoints"
+        type      – "all" | "image" | "audio" | "video" | "mod" (default: "all")
         path      – required when source == "local", absolute root folder path
         subfolder – optional relative subfolder to list (default: root)
 
@@ -36,6 +36,7 @@ from aiohttp import web
 import folder_paths
 
 from .utils.prompt_builder import get_system_prompt_options
+from .utils.refmods import list_refmods, refmod_thumbnail
 from .utils.llm_api import load_api_key_from_config
 from .utils.h3_project import (
     delete_h3_project,
@@ -206,7 +207,12 @@ async def handle_media_list(request: web.Request) -> web.Response:
 
     allowed = allowed_extensions(media_type)
 
-    if source == "inputs":
+    if source == "checkpoints" and media_type == "mod":
+        try:
+            items = await asyncio.to_thread(list_refmods, subfolder)
+        except ValueError as error:
+            return web.json_response({"error": str(error)}, status=400)
+    elif source == "inputs":
         base = Path(folder_paths.get_input_directory())
         items = list_dir_shallow(base, subfolder, "inputs", allowed)
     elif source == "outputs":
@@ -238,6 +244,17 @@ async def handle_media_list(request: web.Request) -> web.Response:
         content_type="application/json",
         text=json.dumps({"items": items}),
     )
+
+
+@PromptServer.instance.routes.get("/easy-media/refmods/preview")
+async def handle_refmod_preview(request: web.Request) -> web.StreamResponse:
+    try:
+        thumbnail = await asyncio.to_thread(refmod_thumbnail, request.rel_url.query.get("path", ""))
+    except ValueError as error:
+        return web.json_response({"error": str(error)}, status=400)
+    if thumbnail is None:
+        raise web.HTTPNotFound()
+    return web.FileResponse(thumbnail, headers={"Cache-Control": "no-cache"})
 
 
 @PromptServer.instance.routes.get("/easy-media/media/recent")

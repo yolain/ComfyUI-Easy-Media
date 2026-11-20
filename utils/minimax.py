@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import math
+from io import BytesIO
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 import torch
+from PIL import Image
 
 
 H3_VAE_FRAME_CHUNK = 17
@@ -163,3 +166,41 @@ def expand_image_inputs(value: Any) -> list[torch.Tensor]:
             )
         images.extend(batch.split(1, dim=0))
     return images
+
+
+def encode_refmod_thumbnail(image: torch.Tensor) -> bytes:
+    """Encode one ComfyUI image as a PNG with a longest edge of at most 512 px."""
+    if (
+        image.ndim != 4
+        or image.shape[0] != 1
+        or min(image.shape[1:3]) < 1
+        or image.shape[3] not in (1, 3, 4)
+    ):
+        raise ValueError("The RefMod thumbnail input must contain one nonempty IMAGE.")
+    pixels = image[0].detach().cpu().float().clamp(0, 1).mul(255).round().to(torch.uint8)
+    if pixels.shape[-1] == 1:
+        pixels = pixels.squeeze(-1)
+    picture = Image.fromarray(pixels.numpy())
+    picture.thumbnail((512, 512), Image.Resampling.LANCZOS)
+    with BytesIO() as buffer:
+        picture.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+
+def save_refmod_thumbnail(model_path: str, png: bytes) -> str:
+    """Atomically write a model preview alongside its safetensors file."""
+    destination = Path(model_path).with_suffix(".png")
+    temporary: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            dir=destination.parent, prefix=".refmod-preview-", suffix=".tmp", delete=False
+        ) as file:
+            temporary = Path(file.name)
+            file.write(png)
+        temporary.replace(destination)
+    except OSError as error:
+        raise OSError(f"Unable to save RefMod thumbnail at {destination}: {error}") from error
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return str(destination)

@@ -228,7 +228,7 @@ def _load_basic_module():
     nodes_package = types.ModuleType("easy_media.nodes")
     nodes_package.__path__ = []
     utils_module = types.ModuleType("easy_media.utils")
-    utils_module.__path__ = []
+    utils_module.__path__ = [str(Path(__file__).parents[1] / "utils")]
     utils_module.unload_comfyui_models = lambda: None
     utils_module.FFMPEG_RESIZE_METHODS = frozenset({
         "stretch", "resize", "pad", "pad (white)", "crop",
@@ -752,6 +752,141 @@ def test_multitrack_editor_includes_selected_dimensions_in_tracks_info():
     tracks_info = result.values[0]
     assert tracks_info["width"] == 1280
     assert tracks_info["height"] == 720
+
+
+@pytest.mark.parametrize("video_mode", ["none", "eager", "deferred"])
+def test_multitrack_editor_publishes_refmod_prompts_in_tracks_info(monkeypatch, video_mode):
+    module = _load_basic_module()
+
+    class Loader:
+        def load(self, mod_1):
+            return ([(mod_1, 1.0)], "")
+
+    monkeypatch.setitem(module.comfy_nodes.NODE_CLASS_MAPPINGS, "MiniMaxH3RefModsLoader", Loader)
+    content = {
+        "task_mode": "ref",
+        "user_prompt": "@图片1 <Picture 3>",
+        "user_prompt_b": "<Picture 2> <Video 1>",
+        "user_prompt_variant": "b",
+        "mods": [
+            {"file_path": "first.safetensors"},
+            {"file_path": "second.safetensors"},
+            {"file_path": "disabled.safetensors", "muted": True},
+        ],
+    }
+    tracks = [{"type": "task", "segments": [
+        {"start_frame": 0, "end_frame": 24, "content": content},
+        {"start_frame": 24, "end_frame": 48, "content": {"text": "<Picture 1>"}},
+    ]}]
+    inputs = {}
+    video_reads = []
+    with_video = video_mode != "none"
+    if with_video:
+        video = _FakeVideo(_VideoComponents(torch.zeros(24, 2, 2, 3), None, Fraction(24)))
+        monkeypatch.setattr(module, "_resize_multitrack_video", lambda source, *args: source)
+        monkeypatch.setattr(module, "_merge_video_track", lambda segments, *args, **kwargs: segments[0][1])
+        if video_mode == "eager":
+            source = {"source_type": "slot", "slot_name": "video1"}
+            inputs["video"] = [[video]]
+        else:
+            source = {"source_type": "input", "file_path": "reference.mp4"}
+
+            def resolve_video(item, slots):
+                video_reads.append(item["file_path"])
+                return video
+
+            monkeypatch.setattr(module, "_resolve_multitrack_video", resolve_video)
+        tracks.append({"type": "video", "segments": [{
+            "start_frame": 0, "end_frame": 24,
+            "content": {"media_type": "video", **source},
+        }]})
+
+    info = module.MultiTrackEditor.execute(
+        {"resolution": "1280 x 720 (16:9)"}, "MiniMax", {"tracks": tracks}, **inputs,
+    )[0]
+    first, second = (segment["content"] for segment in info["tracks"][0]["segments"])
+    assert first["user_prompt"] == "<Video 1> <Picture 1>"
+    expected_b = "<Video 2> <Video 3>" if with_video else "<Video 2> <Video 1>"
+    assert first["user_prompt_b"] == expected_b
+    assert second["text"] == "<Picture 1>"
+    assert content["user_prompt"] == "@图片1 <Picture 3>"
+    assert content["user_prompt_b"] == "<Picture 2> <Video 1>"
+    assert video_reads == []
+
+    output = module.MultiTrackTaskOutput.execute(info, task_index=0, prompt_format="default")
+    assert output[1] == expected_b
+    if video_mode == "deferred":
+        assert video_reads == ["reference.mp4"]
+    if with_video:
+        # The project may render this segment without the video track.
+        info["_refmod_context"] = {"names": ["first", "second"], "use_track_video": False}
+        output = module.MultiTrackTaskOutput.execute(info, task_index=0, prompt_format="default")
+        assert output[1] == "<Video 2> <Video 1>"
+
+
+def test_multitrack_refmod_fingerprint_tracks_file_versions(monkeypatch, tmp_path):
+    module = _load_basic_module()
+    model = tmp_path / "subject.safetensors"
+    model.write_bytes(b"version 1")
+
+    class Loader:
+        @classmethod
+        def IS_CHANGED(cls, mod_1):
+            assert mod_1 == "subject"
+            stat = model.stat()
+            return ((stat.st_size, stat.st_mtime_ns),)
+
+    monkeypatch.setitem(module.comfy_nodes.NODE_CLASS_MAPPINGS, "MiniMaxH3RefModsLoader", Loader)
+    info = {
+        "tracks": [{"type": "task", "segments": [
+            {"content": {"mods": [{"file_path": model.name}]}},
+        ]}],
+    }
+    editor = module.MultiTrackEditor
+    output = module.MultiTrackTaskOutput
+    before = editor.fingerprint_inputs(track_data=[json.dumps(info)])
+    assert output.fingerprint_inputs(tracks_info=[info]) == before
+    assert output.fingerprint_inputs(tracks_info=(None,)) == ()
+    assert editor.fingerprint_inputs(track_data=[info], prompt_override=["new prompt"]) == ()
+
+    model.write_bytes(b"second version")
+    after = editor.fingerprint_inputs(track_data=[info])
+    assert after != before
+    assert output.fingerprint_inputs(tracks_info=[info]) == after
+
+
+def test_multitrack_task_output_uses_separate_mod_limits_for_timeline_segments(monkeypatch):
+    module = _load_basic_module()
+    loads = []
+
+    class Loader:
+        def load(self, mod_1):
+            loads.append(mod_1)
+            return ([(mod_1, 1.0)], "")
+
+    monkeypatch.setitem(module.comfy_nodes.NODE_CLASS_MAPPINGS, "MiniMaxH3RefModsLoader", Loader)
+    names = [f"mod-{index}" for index in range(13)]
+    groups = [names[:9], names[7:]]
+    info = {
+        "format": "MiniMax", "width": 64, "height": 64, "frame_rate": 24, "total_length": 48,
+        "tracks": [{"type": "task", "segments": [
+            {
+                "start_frame": index * 24,
+                "end_frame": (index + 1) * 24,
+                "content": {"mods": [{"file_path": f"{name}.safetensors"} for name in group]},
+            }
+            for index, group in enumerate(groups)
+        ]}],
+    }
+    task_output = module.MultiTrackTaskOutput
+    assert task_output.execute(info, task_index=0, prompt_format="default").values[9] == [
+        (name, 1.0) for name in names[:8]
+    ]
+    loads.clear()
+    assert task_output.execute(info, task_index=-1, prompt_format="default").values[9] == [
+        (name, 1.0) for name in names
+    ]
+    assert loads == names
 
 
 def test_multitrack_editor_calculates_megapixel_dimensions_on_the_format_grid():
@@ -2758,6 +2893,7 @@ def test_multitrack_task_output_schema_and_task_media_selection():
         "SYSTEM_PROMPT", "USER_PROMPT", "TYPE", "LENGTH", "IMAGES", "AUDIO", "VIDEO",
         "IMAGE_INDEXES",
         "LOCKED_AUDIO",
+        "mods",
     ]
 
     images = [torch.zeros(1, 2, 2, 3), torch.ones(1, 2, 2, 3), torch.full((1, 2, 2, 3), 2.0)]
@@ -2804,12 +2940,14 @@ def test_multitrack_task_output_schema_and_task_media_selection():
         selected_video,
         image_indexes,
         locked_audio,
+        mods,
     ) = result.values
     assert system_prompt == ""
     assert user_prompt == "make it move"
     assert task_type == "rv2v"
     assert length == 5
     assert locked_audio is None
+    assert mods == []
     assert selected_images == [images[1], images[2]]
     assert selected_audio[0]["waveform"].flatten().tolist() == list(range(4, 12))
     assert selected_video == [video_track]
@@ -2900,6 +3038,45 @@ def test_multitrack_task_output_restores_project_runtime_media_cache():
 
     assert second is first
     assert tracks_info["_easy_media_cache_status"]["task_output"] == "命中恢复缓存"
+
+
+def test_multitrack_task_output_restores_media_without_reusing_previous_run_refmods(monkeypatch):
+    module = _load_basic_module()
+    loads = []
+
+    class Loader:
+        def load(self, mod_1):
+            loads.append(object())
+            return ([(loads[-1], 1.0)], "")
+
+    monkeypatch.setitem(module.comfy_nodes.NODE_CLASS_MAPPINGS, "MiniMaxH3RefModsLoader", Loader)
+    runtime_cache = {}
+    cache_status = {}
+    info = {
+        "format": "MiniMax",
+        "_easy_media_runtime_cache": runtime_cache,
+        "_easy_media_cache_status": cache_status,
+        "_preloaded_media": {"images": [], "audio": [], "video": []},
+        "_refmod_context": {"names": ["subject"], "cache": module.RefModLoadCache()},
+        "tracks": [{"type": "task", "segments": [{
+            "start_frame": 0, "end_frame": 24,
+            "content": {"user_prompt": "@图片1"},
+        }]}],
+    }
+
+    first = module.MultiTrackTaskOutput.execute(info, prompt_format="default")
+    second = module.MultiTrackTaskOutput.execute(info, prompt_format="default")
+    assert len(loads) == 1
+    assert first[1] == second[1] == "<Video 1>"
+    assert first[9] == second[9] == [(loads[0], 1.0)]
+    assert cache_status["task_output"] == "命中恢复缓存"
+    assert next(iter(runtime_cache.values()))[9] == []
+
+    info["_refmod_context"] = {"names": ["subject"], "cache": module.RefModLoadCache()}
+    fresh_run = module.MultiTrackTaskOutput.execute(info, prompt_format="default")
+    assert len(loads) == 2
+    assert fresh_run[9] == [(loads[1], 1.0)]
+    assert cache_status["task_output"] == "命中恢复缓存"
 
 
 def test_multitrack_task_output_uses_selected_user_prompt_variant():
@@ -4792,8 +4969,64 @@ def test_multitrack_task_output_filters_at_signs_from_prompt_outputs():
     assert prompt_builder_stub.calls[-1][2]["custom_system_prompt"] == "Keep resource references"
 
 
-def test_multitrack_task_output_prompt_relay_joins_task_fragments_inside_marker_ranges():
+@pytest.mark.parametrize(
+    "video_start, mute_mods, source, expected",
+    [
+        (12, False, "<Video 1> <Video 2> <Picture 2>", "<Video 3> <Video 4> <Video 2>"),
+        (0, False, "<Video 1> <Picture 2>", "<Video 1> <Video 2>"),
+        (None, False, "<Video 2> <Picture 1>", "<Video 2> <Video 1>"),
+        (None, False, "<Picture 1> <Picture 2> <Picture 10>", "<Video 1> <Video 2> <Picture 8>"),
+        (None, False, "@图片1 @Picture 2 <Image 3>", "<Video 1> <Video 2> <Picture 1>"),
+        (12, False, "@视频1 <Picture 2>", "<Video 3> <Video 2>"),
+        (12, False, "<Picture 1> <Picture 2> <Audio 1>", "<Video 1> <Video 2> <Audio 1>"),
+        (12, True, "<Video 1> <Picture 2>", "<Video 1> <Picture 2>"),
+    ],
+)
+def test_multitrack_task_output_rewrites_refmod_prompt_tags(
+    monkeypatch, video_start, mute_mods, source, expected,
+):
     module = _load_basic_module()
+
+    class Loader:
+        def load(self, mod_1):
+            return ([(mod_1, 1.0)], "")
+
+    monkeypatch.setitem(module.comfy_nodes.NODE_CLASS_MAPPINGS, "MiniMaxH3RefModsLoader", Loader)
+    task_content = {
+        "task_mode": "ref",
+        "user_prompt": "prompt A",
+        "user_prompt_b": source,
+        "user_prompt_variant": "b",
+        "mods": [
+            {"file_path": "a.safetensors", "muted": mute_mods},
+            {"file_path": "b.safetensors", "muted": mute_mods},
+            {"file_path": "disabled.safetensors", "muted": True},
+        ],
+    }
+    tracks = [{"type": "task", "segments": [
+        {"start_frame": 12, "end_frame": 24, "content": task_content},
+    ]}]
+    videos = []
+    if video_start is not None:
+        tracks.append({"type": "video", "media_index": 0, "segments": [
+            {"start_frame": video_start, "end_frame": video_start + 12, "content": {"media_type": "video"}},
+        ]})
+        videos.append(_FakeVideo(_VideoComponents(torch.zeros(24, 2, 2, 3), None, Fraction(24))))
+    info = {"format": "MiniMax", "frame_rate": 24, "tracks": tracks}
+
+    result = module.MultiTrackTaskOutput.execute(info, video=videos, prompt_format="default")
+
+    assert result.values[1] == expected
+    assert task_content["user_prompt_b"] == source
+    assert result.values[9] == ([] if mute_mods else [("a", 1.0), ("b", 1.0)])
+
+
+def test_multitrack_task_output_prompt_relay_joins_task_fragments_inside_marker_ranges(monkeypatch):
+    module = _load_basic_module()
+    monkeypatch.setattr(
+        module.RefModLoadCache, "load",
+        lambda self, names: [(name, 1.0) for name in names],
+    )
     tracks_info = {
         "total_length": 12,
         "frame_rate": 24,
@@ -4803,7 +5036,14 @@ def test_multitrack_task_output_prompt_relay_joins_task_fragments_inside_marker_
         ],
         "tracks": [{"type": "task", "segments": [
             {"start_frame": 0, "end_frame": 4, "content": {"user_prompt": "first"}},
-            {"start_frame": 4, "end_frame": 8, "content": {"user_prompt": "second"}},
+            {
+                "start_frame": 4,
+                "end_frame": 8,
+                "content": {
+                    "user_prompt": "second <Picture 1> <Picture 2>",
+                    "mods": [{"file_path": "subject.safetensors"}],
+                },
+            },
             {"start_frame": 8, "end_frame": 12, "content": {"user_prompt": "third"}},
         ]}],
     }
@@ -4815,8 +5055,8 @@ def test_multitrack_task_output_prompt_relay_joins_task_fragments_inside_marker_
         [tracks_info], [], [], [], [1], ["promptRelay"],
     )
 
-    assert first.values[1] == "first [0-4] | second [4-6]"
-    assert second.values[1] == "second [6-8] | third [8-12]"
+    assert first.values[1] == "first [0-4] | second <Video 1> <Picture 1> [4-6]"
+    assert second.values[1] == "second <Video 1> <Picture 1> [6-8] | third [8-12]"
 
 
 def test_prompt_builder_supports_t2v_and_i2v_tasks():
@@ -5016,6 +5256,7 @@ def test_multitrack_prompt_enhance_to_project_updates_each_task_in_time_order(
         "format": "MiniMax",
         "media_loading": "eager",
         "eager_media_types": ["image", "video"],
+        "_easy_media_runtime_cache": {"previous_prompt": True},
         "media": {"images": [image], "audio": [None], "video": [video]},
         "tracks": [
             {
@@ -5028,8 +5269,9 @@ def test_multitrack_prompt_enhance_to_project_updates_each_task_in_time_order(
                         "content": {
                             "user_prompt_variant": "b",
                             "user_prompt": "unused-a",
-                            "user_prompt_b": "later @prompt",
+                            "user_prompt_b": "later @prompt <Video 1>",
                             "task_mode": "ref",
+                            "mods": [{"file_path": "subject.safetensors"}],
                         },
                     },
                     {
@@ -5070,6 +5312,7 @@ def test_multitrack_prompt_enhance_to_project_updates_each_task_in_time_order(
     )
 
     updated_info, prompts = output.values
+    assert "_easy_media_runtime_cache" not in updated_info
     updated_tasks = module._multitrack_task_segments(updated_info)
     assert prompts == ["enhanced-1", "enhanced-2"]
     assert updated_tasks[0]["content"]["user_prompt"] == "enhanced-1"
@@ -5083,7 +5326,7 @@ def test_multitrack_prompt_enhance_to_project_updates_each_task_in_time_order(
     )
     assert [call["user_prompt"] for call in calls] == [
         ["earlier prompt"],
-        ["later prompt"],
+        ["later prompt <Video 1>"],
     ]
     assert [call["type"] for call in calls] == [["i2v"], ["rv2v"]]
     prompt_builder_calls = sys.modules["easy_media.utils.prompt_builder"].calls
@@ -6316,8 +6559,9 @@ def test_multi_images_loader_resizes_ordered_image_list(monkeypatch):
         {"source_type": "input", "file_path": "second.png"},
     ]}
     result = module.MultiImagesLoader.execute(
-        {"resolution": "width x height (longest)", "resize_to_pixel": 120, "resize_method": "crop"},
-        json.dumps(image_data),
+        resolution={"resolution": "width x height (longest)", "resize_to_pixel": 120, "resize_method": "crop"},
+        max_limit=-1,
+        image_data=json.dumps(image_data),
     )
 
     assert calls == [(120, 60, "crop"), (60, 120, "crop")]
@@ -6329,6 +6573,8 @@ def test_multi_images_loader_resizes_ordered_image_list(monkeypatch):
 def test_multi_images_loader_rejects_more_than_25_images():
     module = _load_basic_module()
     with pytest.raises(ValueError, match="at most 25"):
-        module.MultiImagesLoader.execute("width x height (auto)", {
-            "images": [{"source_type": "input", "file_path": "x.png"}] * 26,
-        })
+        module.MultiImagesLoader.execute(
+            resolution="width x height (auto)",
+            max_limit=-1,
+            image_data={"images": [{"source_type": "input", "file_path": "x.png"}] * 26},
+        )

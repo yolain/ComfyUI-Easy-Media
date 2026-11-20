@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils'
 import { useT } from '@/lib/i18n'
 import { $error } from '@/lib/comfy-api'
 import { uploadInputMediaFile } from '@/lib/media-upload'
+import { taskModName } from '@/lib/task-mod-utils'
 import { useDelayedIntersection } from '@/hooks/use-delayed-intersection'
 import type { SlotItem } from '@/lib/timeline-utils'
 import {
@@ -46,10 +47,10 @@ import {
 // ---------------------------------------------------------------------------
 
 export type MediaType = MediaListMediaType
-export type MediaTab = 'inputs' | 'outputs' | 'history' | 'local' | 'url' | 'slot'
+export type MediaTab = 'inputs' | 'outputs' | 'history' | 'local' | 'url' | 'slot' | 'checkpoints'
 type ViewMode = 'grid' | 'list'
 type SortBy = 'name' | 'date' | 'folders'
-type BrowsableMediaTab = Extract<MediaTab, 'inputs' | 'outputs' | 'local'>
+type BrowsableMediaTab = Extract<MediaTab, 'inputs' | 'outputs' | 'local' | 'checkpoints'>
 
 interface MediaSelectorSession {
   activeTab: MediaTab
@@ -93,6 +94,10 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function displayFileName(name: string, mediaType: MediaType): string {
+  return mediaType === 'mod' ? taskModName(name) : name
 }
 
 function getFileIcon(name: string, mediaType: MediaType) {
@@ -225,7 +230,7 @@ function FileThumbnail({
   isSelected,
 }: Readonly<{ file: MediaFileEntry; mediaType: MediaType; isSelected: boolean }>) {
   const Icon = getFileIcon(file.name, mediaType)
-  const showImage = isImageFile(file.name, mediaType) && !!file.url
+  const showImage = (mediaType === 'mod' || isImageFile(file.name, mediaType)) && !!file.url
   const showVideo = !showImage && isVideoFile(file.name, mediaType) && !!file.url
   const isAudio = !showImage && !showVideo && isAudioFile(file.name, mediaType)
 
@@ -237,7 +242,7 @@ function FileThumbnail({
       )}
     >
       {showImage ? (
-        <LazyImage src={file.url} alt={file.name} className="w-full h-full object-cover" />
+        <LazyImage src={file.url} alt={displayFileName(file.name, mediaType)} className="w-full h-full object-cover" />
       ) : showVideo ? (
         <LazyVideo src={file.url} className="w-full h-full object-cover" />
       ) : (
@@ -345,7 +350,7 @@ function RemoteFileList({
   onToggleSelection,
   onVisibleFilesChange,
 }: Readonly<{
-  source: 'inputs' | 'outputs' | 'history' | 'local'
+  source: BrowsableMediaTab | 'history'
   mediaType: MediaType
   localPath: string
   viewMode: ViewMode
@@ -471,6 +476,7 @@ function RemoteFileList({
   }
 
   function renderGridFile(file: MediaFileEntry, selected: boolean) {
+    const name = displayFileName(file.name, mediaType)
     const sourceType = fileSourceType(file)
     const selectionDisabled = multipleSelection && !selected && selectedValues.size >= selectionLimit
     return (
@@ -499,14 +505,14 @@ function RemoteFileList({
           <Checkbox
             checked={selected}
             disabled={selectionDisabled}
-            aria-label={t('mediaSelector.selectFile', { name: file.name })}
+            aria-label={t('mediaSelector.selectFile', { name })}
             className="absolute right-1 top-1 z-10 bg-background/80"
             onClick={(event) => event.stopPropagation()}
             onCheckedChange={() => onToggleSelection(file.path, sourceType === 'temp' ? 'output' : sourceType)}
           />
         )}
-        <span className="text-[10px] truncate leading-tight max-w-full" title={file.name}>
-          {file.name}
+        <span className="text-[10px] truncate leading-tight max-w-full" title={name}>
+          {name}
         </span>
         <span className="text-[10px] text-muted-foreground truncate leading-tight max-w-full">
           {formatMediaInfo(file, mediaType)}
@@ -516,8 +522,9 @@ function RemoteFileList({
   }
 
   function renderListFile(file: MediaFileEntry, selected: boolean) {
+    const name = displayFileName(file.name, mediaType)
     const Icon = getFileIcon(file.name, mediaType)
-    const showThumb = isImageFile(file.name, mediaType) && !!file.url
+    const showThumb = (mediaType === 'mod' || isImageFile(file.name, mediaType)) && !!file.url
     const showVideoThumb = !showThumb && isVideoFile(file.name, mediaType) && !!file.url
     const showAudioIcon = !showThumb && !showVideoThumb && isAudioFile(file.name, mediaType)
     const sourceType = fileSourceType(file)
@@ -549,14 +556,14 @@ function RemoteFileList({
           <Checkbox
             checked={selected}
             disabled={selectionDisabled}
-            aria-label={t('mediaSelector.selectFile', { name: file.name })}
+            aria-label={t('mediaSelector.selectFile', { name })}
             onClick={(event) => event.stopPropagation()}
             onCheckedChange={() => onToggleSelection(file.path, sourceType === 'temp' ? 'output' : sourceType)}
           />
         )}
         {showThumb && (
           <div className="w-4 h-4 rounded overflow-hidden shrink-0 bg-muted">
-            <LazyImage src={file.url} alt={file.name} className="w-full h-full object-cover" />
+            <LazyImage src={file.url} alt={name} className="w-full h-full object-cover" />
           </div>
         )}
         {showVideoThumb && (
@@ -572,8 +579,8 @@ function RemoteFileList({
         {!showThumb && !showVideoThumb && !showAudioIcon && (
           <Icon className="w-4 h-4 text-muted-foreground shrink-0" />
         )}
-        <span className="flex-1 text-xs truncate min-w-0" title={file.name}>
-          {file.name}
+        <span className="flex-1 text-xs truncate min-w-0" title={name}>
+          {name}
         </span>
         <span className="text-[10px] text-muted-foreground shrink-0">
           {formatMediaInfo(file, mediaType)}
@@ -714,13 +721,15 @@ export function MediaSelector({
   maxSelectionCount = 9,
 }: Readonly<MediaSelectorProps>) {
   const t = useT()
+  const isMod = mediaType === 'mod'
+  const preferredTab = isMod ? 'checkpoints' : defaultTab
   const showSlotTab = mediaType === 'image' || mediaType === 'audio' || mediaType === 'video'
   const initialSession = mediaSelectorSessions.get(mediaType)
-  const initialSubfolders = value && ['inputs', 'outputs', 'local'].includes(defaultTab)
-    ? { ...initialSession?.subfolders, [defaultTab]: getSelectedMediaParent(value) }
+  const initialSubfolders = value && ['inputs', 'outputs', 'local', 'checkpoints'].includes(preferredTab)
+    ? { ...initialSession?.subfolders, [preferredTab]: getSelectedMediaParent(value) }
     : initialSession?.subfolders ?? {}
   const [activeTab, setActiveTab] = useState<MediaTab>(
-    historyOnly ? 'history' : value ? defaultTab : initialSession?.activeTab ?? defaultTab,
+    isMod ? 'checkpoints' : historyOnly ? 'history' : value ? defaultTab : initialSession?.activeTab ?? defaultTab,
   )
   const [subfolders, setSubfolders] = useState<Partial<Record<BrowsableMediaTab, string>>>(
     initialSubfolders,
@@ -740,7 +749,7 @@ export function MediaSelector({
   const normalizedSelectionLimit = Number.isFinite(maxSelectionCount)
     ? Math.max(1, Math.floor(maxSelectionCount))
     : 9
-  const supportsMultipleSelection = mediaType === 'image'
+  const supportsMultipleSelection = (mediaType === 'image' || isMod)
     && allowMultipleSelection
   const effectiveValue = multipleSelection
     ? [...draftSelectedValues].join(MULTIPLE_MEDIA_SEPARATOR)
@@ -751,12 +760,12 @@ export function MediaSelector({
 
   // Sync defaultTab when it changes after mount (e.g. a mounted selector targets another segment).
   useEffect(() => {
-    if (historyOnly) return
+    if (historyOnly || isMod) return
     if (previousDefaultTabRef.current === defaultTab) return
     previousDefaultTabRef.current = defaultTab
     setActiveTab(defaultTab)
     setSearchQuery('')
-  }, [defaultTab, historyOnly])
+  }, [defaultTab, historyOnly, isMod])
 
   useEffect(() => () => {
     if (refreshCooldownTimerRef.current !== null) {
@@ -803,7 +812,7 @@ export function MediaSelector({
 
     lastRefreshAtRef.current = now
     setRefreshCoolingDown(true)
-    const source = activeTab === 'outputs' || activeTab === 'history'
+    const source = isMod ? 'checkpoints' : activeTab === 'outputs' || activeTab === 'history'
       ? 'outputs'
       : activeTab === 'local'
         ? 'local'
@@ -872,12 +881,18 @@ export function MediaSelector({
 
   function confirmMultipleSelection() {
     if (draftSelectedValues.size === 0) return
+    const paths = [...draftSelectedValues].join(MULTIPLE_MEDIA_SEPARATOR)
+    if (isMod) {
+      onChange(paths)
+      setMultipleSelection(false)
+      return
+    }
     const source = activeTab === 'outputs' || activeTab === 'history'
       ? 'output'
       : activeTab === 'local'
         ? 'local'
         : 'input'
-    handleFileChange([...draftSelectedValues].join(MULTIPLE_MEDIA_SEPARATOR), source)
+    handleFileChange(paths, source)
     setMultipleSelection(false)
   }
 
@@ -973,7 +988,7 @@ export function MediaSelector({
     <div data-media-selector="" className="flex flex-col w-80 h-80 text-xs select-none">
       <Tabs value={activeTab} onValueChange={(v) => handleTabChange(v as MediaTab)} className="flex flex-col flex-1 overflow-hidden">
         {/* Tab header */}
-        <TabsList className="w-full rounded-none rounded-t-md h-7 p-0.5 gap-0.5 shrink-0">
+        {!isMod && <TabsList className="w-full rounded-none rounded-t-md h-7 p-0.5 gap-0.5 shrink-0">
           {historyOnly ? (
             <TabsTrigger value="history" className="flex-1 h-full text-[11px] px-1">
               {t('mediaSelector.tabHistory')}
@@ -1002,7 +1017,7 @@ export function MediaSelector({
               )}
             </>
           )}
-        </TabsList>
+        </TabsList>}
 
         {/* Search + view controls (shared across inputs/outputs/local) */}
         {activeTab !== 'url' && activeTab !== 'slot' && (
@@ -1096,6 +1111,26 @@ export function MediaSelector({
         )}
 
         {/* Tab panels */}
+        {isMod && (
+          <TabsContent value="checkpoints" className="mt-0 flex-1 overflow-hidden flex flex-col">
+            <RemoteFileList
+              source="checkpoints"
+              mediaType="mod"
+              localPath=""
+              viewMode={viewMode}
+              sortBy={sortBy}
+              searchQuery={searchQuery}
+              value={effectiveValue}
+              onChange={(path) => onChange(path)}
+              initialSubfolder={subfolders.checkpoints}
+              onNavigateSubfolder={(path) => handleSubfolderChange('checkpoints', path)}
+              multipleSelection={multipleSelection}
+              selectionLimit={normalizedSelectionLimit}
+              onToggleSelection={handleToggleSelection}
+              onVisibleFilesChange={handleVisibleFilesChange}
+            />
+          </TabsContent>
+        )}
         <TabsContent value="inputs" className="mt-0 flex-1 overflow-hidden flex flex-col">
           <RemoteFileList
             source="inputs"

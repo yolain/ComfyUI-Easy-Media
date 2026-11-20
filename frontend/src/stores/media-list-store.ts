@@ -1,5 +1,5 @@
-export type MediaListSource = 'inputs' | 'outputs' | 'local'
-export type MediaListMediaType = 'all' | 'image' | 'audio' | 'video'
+export type MediaListSource = 'inputs' | 'outputs' | 'local' | 'checkpoints'
+export type MediaListMediaType = 'all' | 'image' | 'audio' | 'video' | 'mod'
 
 export interface MediaDirEntry {
   type: 'dir'
@@ -58,6 +58,7 @@ const generations: Record<MediaListSource, number> = {
   inputs: 0,
   outputs: 0,
   local: 0,
+  checkpoints: 0,
 }
 
 function requestKey(request: MediaListRequest): string {
