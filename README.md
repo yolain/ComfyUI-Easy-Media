@@ -142,6 +142,12 @@ Connect `PROJECT_NAME` to the combine node to preview saved segments, choose a v
 - The MultiTrack Info Output node outputs video dimensions, total frame count, frame rate, and task count
 - The MultiTrack Task Output node outputs user prompt & system prompt for corresponding segments; users can decide whether to connect LLM nodes for prompt expansion or use images in segments for reverse inference
 
+#### MiniMax H3 RefMods
+
+Install `ComfyUI-MiniMaxH3Mod` and place your `.safetensors` RefMods in `ComfyUI/models/refmods/`. Use **Add Mod** to add up to eight RefMods per task segment, with a separate limit for reference images. Put a thumbnail with the same base filename next to the model and use `@` in the user prompt to select the mod.
+
+MultiTrack Project applies RefMods automatically. For custom workflows, connect the `mods` output of MultiTrack Task Output to `MiniMaxH3RefModApply`. The **Media to H3 RefMod Refs** and **Save H3 RefMods** nodes help prepare media for RefMod creation and save mods with optional thumbnails.
+
 <a id="multitrack-lazy-loading"></a>
 
 #### v1.3.0 Lazy Media Loading and Workflow Migration
@@ -551,6 +557,7 @@ bun run build:release
 - [H3 Motion Context](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context)
 - [Drift Control for h3 motion context](https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop)
 - [MiniMax H3 Latent Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler)
+- [ComfyUI-MiniMaxH3Mod](https://github.com/Luisacaotica/ComfyUI-MiniMaxH3Mod)
 - [SelfLift for H3 Sampling](https://github.com/facok/comfyui-SelfLift)
 - [Nvidia-RTX-VSR for video](https://github.com/glarsson/fast-rtxvsr)
 

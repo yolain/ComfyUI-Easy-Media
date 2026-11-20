@@ -144,6 +144,12 @@ v1.3.0 新增多轨项目流水线，将时间线编排、逐段生成、上下�
 - 在 `多轨信息输出` 节点将输出视频的宽高尺寸、视频总帧数、帧率、任务数量
 - 在 `多轨任务输出` 节点将输出对应片段任务的 用户提示词&系统提示词，用户可自行抉择是否外接LLM节点以进行提示词扩写或结合片段中图像进行反推
 
+#### MiniMax H3 参考模组（RefMod）
+
+安装 `ComfyUI-MiniMaxH3Mod`，将 `.safetensors` 模组放入 `ComfyUI/models/refmods/`。通过 **添加模组** 为每个任务片段添加最多 8 个模组，参考图像单独计数。将同名缩略图放在模组文件旁，即可在用户提示词的 `@` 引用菜单中预览和选择。
+
+多轨项目会自动应用模组。自定义工作流可将多轨任务输出的 `mods` 接到 `MiniMaxH3RefModApply`。**媒体列表转 H3 RefMod 引用** 和 **保存 H3 RefMods 与缩略图** 节点可用于准备创建模组所需的素材，以及保存模组和可选的缩略图。
+
 <a id="multitrack-lazy-loading"></a>
 
 #### v1.3.0 媒体懒加载与旧工作流迁移
@@ -558,6 +564,7 @@ bun run build:release
 - [H3 Motion Context](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context)
 - [Drift Control for H3 motion context](https://github.com/ethanfel/ComfyUI-MiniMaxH3-Context-Loop)
 - [MiniMax H3 Latent Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler)
+- [ComfyUI-MiniMaxH3Mod](https://github.com/Luisacaotica/ComfyUI-MiniMaxH3Mod)
 - [SelfLift for H3 Sampling](https://github.com/facok/comfyui-SelfLift)
 - [Nvidia-RTX-VSR for video](https://github.com/glarsson/fast-rtxvsr)
 
