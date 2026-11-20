@@ -43,6 +43,7 @@ bun run build:release     # production build → dist/release
 
 ### Frontend
 
+- **UI design** — Omit redundant labels and explanatory text. Use layout, spacing, and grouping to convey the hierarchy and relationships between elements.
 - **TypeScript first** — strict mode, no `any` without reason
 - **File naming** — `PascalCase.tsx` for components, `camelCase` for dir, `kebab-case.ts` for modules
 - **Import aliases** — use `@/*` for `src/` paths
