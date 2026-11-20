@@ -80,14 +80,15 @@ def _pack(streams: list[torch.Tensor], nested: bool) -> Any:
 def _prepare_sampling_callback(
     model: Any,
     step_count: int,
-    preview_callback: Callable[[int, Any, Any, int], None] | None,
+    suppress_native_preview: bool,
 ) -> Callable[[int, Any, Any, int], Any]:
-    """Use native preview normally, or progress-only when custom preview is active."""
-    import comfy.utils
-    import latent_preview
+    """Report sampling progress and optionally include native preview images."""
+    if not suppress_native_preview:
+        import latent_preview
 
-    if preview_callback is None:
         return latent_preview.prepare_callback(model, step_count)
+
+    import comfy.utils
 
     progress = comfy.utils.ProgressBar(step_count)
 
@@ -377,6 +378,7 @@ def progressive_sample_h3(
     highres_tiling: bool = False,
     tile_count: int = 0,
     preview_callback: Callable[[int, Any, Any, int], None] | None = None,
+    suppress_native_preview: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Run the original NFE-preserving H3 SelfLift transition and resume flow."""
     import comfy.model_management
@@ -452,7 +454,9 @@ def progressive_sample_h3(
     noise_low = comfy.sample.prepare_noise(
         low_latent, seed, latent_image.get("batch_index")
     )
-    callback = _prepare_sampling_callback(model, step_count, preview_callback)
+    callback = _prepare_sampling_callback(
+        model, step_count, suppress_native_preview or preview_callback is not None
+    )
     disable_pbar = not comfy.utils.PROGRESS_BAR_ENABLED
     positive_low = _resize_keyframes(positive, low_height, low_width)
 

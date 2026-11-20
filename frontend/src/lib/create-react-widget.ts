@@ -57,7 +57,7 @@ interface LiteGraphRuntime {
   vueNodesMode?: boolean
 }
 
-function isVueNodesMode(): boolean {
+export function isVueNodesMode(): boolean {
   const liteGraph = (globalThis as typeof globalThis & { LiteGraph?: LiteGraphRuntime }).LiteGraph
   return Boolean(liteGraph?.vueNodesMode)
 }

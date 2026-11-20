@@ -2535,13 +2535,17 @@ def test_multitrack_h3_project_expands_single_task_sampling_pipeline(monkeypatch
     ]
 
 
-def test_multitrack_project_patches_sampler_when_loader_has_preview_vae(monkeypatch):
+@pytest.mark.parametrize("with_preview_vae", [True, False])
+def test_multitrack_project_routes_both_passes_through_project_sampler(
+    monkeypatch, with_preview_vae
+):
     module = _load_minimax_node(monkeypatch)
     module.comfy_nodes.NODE_CLASS_MAPPINGS["ImageResizeKJv2"] = _ImageResizeKJWithNvidia
     module.EasyMultiTrackProject.hidden = types.SimpleNamespace(unique_id="42")
     inputs = _h3_project_inputs(sampling_mode=_h3_sampling_mode("dual"))
-    preview_vae = object()
-    inputs["model_loader"][0]["preview_vae"] = preview_vae
+    preview_vae = object() if with_preview_vae else None
+    if with_preview_vae:
+        inputs["model_loader"][0]["preview_vae"] = preview_vae
 
     result = module.EasyMultiTrackProject.execute(**inputs)
     preview_samplers = [
@@ -2559,9 +2563,48 @@ def test_multitrack_project_patches_sampler_when_loader_has_preview_vae(monkeypa
         "first",
         "second",
     }
-    assert all(node["inputs"]["preview_vae"] is preview_vae for node in preview_samplers)
+    assert all(node["inputs"].get("preview_vae") is preview_vae for node in preview_samplers)
     assert all(node["inputs"]["preview_node_id"] == "42" for node in preview_samplers)
     assert all(node["inputs"]["preview_fps"] == 24.0 for node in preview_samplers)
+
+
+def test_project_sampler_reports_progress_without_native_preview_or_vae(monkeypatch):
+    module = _load_minimax_node(monkeypatch)
+    comfy = sys.modules["comfy"]
+    sample = types.ModuleType("comfy.sample")
+    sample.fix_empty_latent_channels = lambda _model, samples, *_args: samples
+    monkeypatch.setitem(sys.modules, "comfy.sample", sample)
+    monkeypatch.setattr(comfy, "sample", sample, raising=False)
+    monkeypatch.setattr(comfy.utils, "PROGRESS_BAR_ENABLED", True, raising=False)
+
+    def unexpected_native_preview(*_args):
+        pytest.fail("Project sampling must not prepare a native preview")
+
+    latent_preview = types.ModuleType("latent_preview")
+    latent_preview.prepare_callback = unexpected_native_preview
+    monkeypatch.setitem(sys.modules, "latent_preview", latent_preview)
+
+    samples = torch.zeros(1, 24, 1, 2, 2)
+    denoised = samples + 1
+    model = types.SimpleNamespace(process_latent_out=lambda value: value)
+
+    def run_sample(_noise, latent, _sampler, _sigmas, *, callback, **_kwargs):
+        callback(0, denoised, latent, 1)
+        return latent
+
+    result = module._project_module.EasyH3SamplingPreviewSampler.execute(
+        noise=types.SimpleNamespace(generate_noise=lambda _latent: samples, seed=42),
+        guider=types.SimpleNamespace(
+            model_patcher=types.SimpleNamespace(model=model), sample=run_sample
+        ),
+        sampler=object(),
+        sigmas=torch.tensor([1.0, 0.0]),
+        latent_image={"samples": samples},
+        preview_node_id="42",
+    )
+
+    assert _ProgressBar.instances[0].updates == [(1, 1)]
+    assert result.values[1]["samples"] is denoised
 
 
 def test_h3_sampling_preview_sampler_exposes_optional_tiling(monkeypatch):
@@ -2599,17 +2642,19 @@ def test_multitrack_project_tiles_inside_second_pass_sampler(monkeypatch):
     assert not any(node["class_type"] == "easy h3TiledModel" for node in nodes)
 
 
-def test_multitrack_project_adds_preview_inputs_to_selflift_sampler(monkeypatch):
+@pytest.mark.parametrize("with_preview_vae", [True, False])
+def test_multitrack_project_routes_selflift_preview_to_project(monkeypatch, with_preview_vae):
     module = _load_minimax_node(monkeypatch)
     module.EasyMultiTrackProject.hidden = types.SimpleNamespace(unique_id="84")
     inputs = _h3_project_inputs(sampling_mode=_h3_sampling_mode("selflift"))
-    preview_vae = object()
-    inputs["model_loader"][0]["preview_vae"] = preview_vae
+    preview_vae = object() if with_preview_vae else None
+    if with_preview_vae:
+        inputs["model_loader"][0]["preview_vae"] = preview_vae
 
     result = module.EasyMultiTrackProject.execute(**inputs)
     sampler = _graph_node(result, "easy minimaxH3SelfLiftSampler")
 
-    assert sampler["inputs"]["preview_vae"] is preview_vae
+    assert sampler["inputs"].get("preview_vae") is preview_vae
     assert sampler["inputs"]["preview_node_id"] == "84"
     assert sampler["inputs"]["sampling_pass"] == "selflift"
 
@@ -3121,7 +3166,8 @@ def test_bundled_h3_latent_upscaler_preserves_audio_and_resizes_mask(monkeypatch
     assert output["batch_index"] == [0]
 
 
-def test_selflift_sampler_uses_lowres_scale(monkeypatch):
+@pytest.mark.parametrize("preview_node_id", ["", "84"])
+def test_selflift_sampler_uses_lowres_scale(monkeypatch, preview_node_id):
     module = _load_minimax_node(monkeypatch)
     captured = {}
     sampled = {"samples": object()}
@@ -3148,6 +3194,7 @@ def test_selflift_sampler_uses_lowres_scale(monkeypatch):
         seed=42,
         transition_ratio=0.6,
         lowres_scale=0.6,
+        preview_node_id=preview_node_id,
     )
 
     assert captured["lowres_scale"] == pytest.approx(0.6)
@@ -3156,6 +3203,7 @@ def test_selflift_sampler_uses_lowres_scale(monkeypatch):
     assert captured["w_max"] == 0.7
     assert captured["highres_tiling"] is False
     assert captured["low_context_latent"] is None
+    assert captured["suppress_native_preview"] is bool(preview_node_id)
     assert result.values == (sampled, low_context)
 
 

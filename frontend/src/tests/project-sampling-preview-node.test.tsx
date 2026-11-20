@@ -1,6 +1,6 @@
 import { act } from '@testing-library/react'
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { installProjectSamplingPreview } from '@/lib/project-sampling-preview-node'
 
 const previewState = vi.hoisted(() => ({
@@ -26,6 +26,13 @@ interface TestWidget {
   }
 }
 
+type TestNode = {
+  size: [number, number]
+  onResize: (size: [number, number]) => void
+  onNodeCreated?: () => void
+  onRemoved?: () => void
+}
+
 describe('installProjectSamplingPreview', () => {
   const app = {} as ComfyApp
 
@@ -37,6 +44,10 @@ describe('installProjectSamplingPreview', () => {
     }))
   })
 
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   function createNodeType() {
     const host = document.createElement('div')
     document.body.append(host)
@@ -46,8 +57,9 @@ describe('installProjectSamplingPreview', () => {
       size: [640, 400] as [number, number],
       graph: { setDirtyCanvas: vi.fn() },
       onResize: vi.fn(),
-      setSize: vi.fn(function setSize(this: { size: [number, number] }, size: [number, number]) {
+      setSize: vi.fn(function setSize(this: TestNode, size: [number, number]) {
         this.size = size
+        this.onResize(size)
       }),
       addDOMWidget: vi.fn((
         _name: string,
@@ -69,7 +81,7 @@ describe('installProjectSamplingPreview', () => {
     const { NodeType, node } = createNodeType()
     installProjectSamplingPreview(NodeType, { name: 'easy multitrackEditor' }, app)
 
-    const instance = new NodeType() as typeof node & { onNodeCreated?: () => void }
+    const instance = new NodeType() as TestNode
     act(() => instance.onNodeCreated?.())
 
     expect(node.addDOMWidget).not.toHaveBeenCalled()
@@ -79,7 +91,7 @@ describe('installProjectSamplingPreview', () => {
     const { NodeType, host, node, getWidget } = createNodeType()
     installProjectSamplingPreview(NodeType, { name: 'easy multitrackProject' }, app)
 
-    const instance = new NodeType() as typeof node & { onNodeCreated?: () => void }
+    const instance = new NodeType() as TestNode
     await act(async () => instance.onNodeCreated?.())
 
     const widget = getWidget()
@@ -89,7 +101,7 @@ describe('installProjectSamplingPreview', () => {
     expect(widget?.options.getMaxHeight()).toBe(8)
     expect(container.hidden).toBe(true)
     expect(container.style.position).toBe('relative')
-    expect(container.style.height).toBe('280px')
+    expect(container.style.height).toBe('8px')
     expect(host.style.maxHeight).toBe('8px')
     expect(host.style.pointerEvents).toBe('none')
     expect(previewState.props?.interactive).toBeUndefined()
@@ -99,14 +111,35 @@ describe('installProjectSamplingPreview', () => {
     expect(widget?.options.getMinHeight()).toBe(280)
     expect(widget?.options.getMaxHeight()).toBe(280)
     expect(container.hidden).toBe(false)
+    expect(container.style.height).toBe('280px')
     expect(host.style.maxHeight).toBe('280px')
     expect(host.style.overflow).toBe('hidden')
     expect(host.style.pointerEvents).toBe('auto')
     expect(node.setSize).toHaveBeenCalledWith([640, 672])
     expect(node.onResize).toHaveBeenCalledWith([640, 672])
+    expect(node.onResize).toHaveBeenCalledTimes(1)
     expect(node.graph.setDirtyCanvas).toHaveBeenCalledWith(true, true)
 
     act(() => previewState.props?.onVisibilityChange?.(false))
     expect(node.setSize).toHaveBeenLastCalledWith([640, 400])
+    act(() => instance.onRemoved?.())
+  })
+
+  it('lets Vue size the preview row without changing the stored node height', async () => {
+    vi.stubGlobal('LiteGraph', { vueNodesMode: true })
+    const { NodeType, host, node } = createNodeType()
+    installProjectSamplingPreview(NodeType, { name: 'easy multitrackProject' }, app)
+
+    const instance = new NodeType() as TestNode
+    await act(async () => instance.onNodeCreated?.())
+
+    act(() => previewState.props?.onVisibilityChange?.(true))
+    expect(host.style.maxHeight).toBe('280px')
+    act(() => previewState.props?.onVisibilityChange?.(false))
+    expect(host.style.maxHeight).toBe('8px')
+    expect(instance.size).toEqual([640, 400])
+    expect(node.setSize).not.toHaveBeenCalled()
+    expect(node.onResize).not.toHaveBeenCalled()
+    act(() => instance.onRemoved?.())
   })
 })

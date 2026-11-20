@@ -2163,6 +2163,7 @@ class EasyMiniMaxH3SelfLiftSampler(io.ComfyNode):
                 highres_tiling=tiling_enabled,
                 tile_count=int(tile_count or 0),
                 preview_callback=preview_callback,
+                suppress_native_preview=bool(preview_node_id),
             )
         except (RuntimeError, TypeError, ValueError) as error:
             raise RuntimeError(f"MiniMax H3 SelfLift sampling failed: {error}") from error

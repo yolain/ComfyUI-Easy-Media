@@ -523,13 +523,6 @@ class EasyH3SamplingPreviewSampler(io.ComfyNode):
         import comfy.nested_tensor
         import comfy.sample
         import comfy.utils
-        import latent_preview
-
-        from ..utils.sampling_preview import (
-            create_preview_callback,
-            preview_frame_count,
-            preview_playback_fps,
-        )
 
         latent = latent_image.copy()
         samples = comfy.sample.fix_empty_latent_channels(
@@ -559,23 +552,34 @@ class EasyH3SamplingPreviewSampler(io.ComfyNode):
 
         noise_mask = latent.get("noise_mask")
         x0_output: dict[str, Any] = {}
-        if preview_vae is not None and preview_node_id:
-            preview_callback = create_preview_callback(
-                sampling_guider.model_patcher,
-                preview_vae,
-                node_id=preview_node_id,
-                requested_frames=preview_frame_count(generated_frame_count),
-                fps=preview_playback_fps(generated_frame_count, preview_fps),
-                segment_index=int(segment_index),
-                sampling_pass=sampling_pass,
-            )
+        if preview_node_id:
+            preview_callback = None
+            if preview_vae is not None:
+                from ..utils.sampling_preview import (
+                    create_preview_callback,
+                    preview_frame_count,
+                    preview_playback_fps,
+                )
+
+                preview_callback = create_preview_callback(
+                    sampling_guider.model_patcher,
+                    preview_vae,
+                    node_id=preview_node_id,
+                    requested_frames=preview_frame_count(generated_frame_count),
+                    fps=preview_playback_fps(generated_frame_count, preview_fps),
+                    segment_index=int(segment_index),
+                    sampling_pass=sampling_pass,
+                )
             progress = comfy.utils.ProgressBar(int(sigmas.shape[-1]) - 1)
 
             def callback(step: int, x0: Any, state: Any, total: int) -> None:
                 x0_output["x0"] = x0
-                preview_callback(step, x0, state, total)
+                if preview_callback is not None:
+                    preview_callback(step, x0, state, total)
                 progress.update_absolute(step + 1, total)
         else:
+            import latent_preview
+
             callback = latent_preview.prepare_callback(
                 sampling_guider.model_patcher,
                 int(sigmas.shape[-1]) - 1,
@@ -1089,7 +1093,6 @@ class EasyMultiTrackProject(io.ComfyNode):
                 "",
             )
         )
-        has_sampling_preview = bool(preview_node_id) and (uses_linked_prepare or preview_vae is not None)
         missing_components = [] if uses_linked_prepare else [
             name
             for name, value in (("model", model), ("clip", clip), ("vae", vae))
@@ -1790,6 +1793,17 @@ class EasyMultiTrackProject(io.ComfyNode):
                 report_segment_step(0.22)
 
             report_segment_step(0.28)
+            project_preview_inputs: dict[str, Any] = {}
+            if preview_node_id:
+                project_preview_inputs.update(
+                    preview_node_id=preview_node_id,
+                    generated_frame_count=task_length,
+                    preview_fps=fps,
+                    segment_index=task_index,
+                )
+                if preview_vae is not None:
+                    project_preview_inputs["preview_vae"] = preview_vae
+
             selflift_low_latent: Any | None = None
             if is_selflift:
                 report_segment_step(0.38)
@@ -1814,15 +1828,8 @@ class EasyMultiTrackProject(io.ComfyNode):
                     "enabled_tiling": tiling_enabled,
                     "tile_count": tile_count,
                 }
-                if has_sampling_preview:
-                    selflift_inputs.update({
-                        "preview_vae": preview_vae,
-                        "preview_node_id": preview_node_id,
-                        "generated_frame_count": task_length,
-                        "preview_fps": fps,
-                        "segment_index": task_index,
-                        "sampling_pass": "selflift",
-                    })
+                if preview_node_id:
+                    selflift_inputs.update(project_preview_inputs, sampling_pass="selflift")
                 if (
                     has_context_continuity
                     and previous_low_context_latent is not None
@@ -1878,20 +1885,13 @@ class EasyMultiTrackProject(io.ComfyNode):
                         **sampling_inputs,
                     )
                     preview_inputs = (
-                        {
-                            "preview_vae": preview_vae,
-                            "preview_node_id": preview_node_id,
-                            "generated_frame_count": task_length,
-                            "preview_fps": fps,
-                            "segment_index": task_index,
-                            "sampling_pass": "first",
-                        }
-                        if has_sampling_preview
+                        {**project_preview_inputs, "sampling_pass": "first"}
+                        if preview_node_id
                         else {}
                     )
                     first_pass_sample = graph.node(
                         "easy h3SamplingPreviewSampler"
-                        if has_sampling_preview
+                        if preview_node_id
                         else "SamplerCustomAdvanced",
                         id=f"first_pass_sample_{task_index}",
                         noise=sampling_start.out(0),
@@ -2018,15 +2018,8 @@ class EasyMultiTrackProject(io.ComfyNode):
                     sampling_pass="second",
                 )
                 second_preview_inputs = (
-                    {
-                        "preview_vae": preview_vae,
-                        "preview_node_id": preview_node_id,
-                        "generated_frame_count": task_length,
-                        "preview_fps": fps,
-                        "segment_index": task_index,
-                        "sampling_pass": "second",
-                    }
-                    if has_sampling_preview
+                    {**project_preview_inputs, "sampling_pass": "second"}
+                    if preview_node_id
                     else {}
                 )
                 if tiling_enabled:
@@ -2036,7 +2029,7 @@ class EasyMultiTrackProject(io.ComfyNode):
                     })
                 second_pass_sample = graph.node(
                     "easy h3SamplingPreviewSampler"
-                    if has_sampling_preview or tiling_enabled
+                    if preview_node_id or tiling_enabled
                     else "SamplerCustomAdvanced",
                     id=f"second_pass_sample_{task_index}",
                     noise=second_sampling_start.out(0),

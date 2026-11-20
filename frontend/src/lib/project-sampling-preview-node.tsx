@@ -2,6 +2,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import type { ComfyApp } from '@comfyorg/comfyui-frontend-types'
 import { SamplingPreviewWidget } from '@/components/widgets/SamplingPreviewWidget'
 import { CUSTOM_NODE_CLASS } from '@/lib/constants'
+import { isVueNodesMode } from '@/lib/create-react-widget'
 
 const NODE_NAME = 'easy multitrackProject'
 const WIDGET_NAME = 'easy-media-sampling-preview'
@@ -25,7 +26,6 @@ interface PreviewNode {
     options: Record<string, unknown>,
   ) => PreviewWidget
   setSize?: (size: [number, number]) => void
-  onResize?: (size: [number, number] | undefined) => void
   onNodeCreated?: (...args: unknown[]) => void
   onExecutionStart?: (...args: unknown[]) => void
   onRemoved?: (...args: unknown[]) => void
@@ -49,8 +49,9 @@ function installWidget(node: PreviewNode, app: ComfyApp) {
   container.classList.add('comfyui-react-widget', CUSTOM_NODE_CLASS)
   container.hidden = true
   Object.assign(container.style, {
+    flex: '0 0 auto',
     width: '100%',
-    height: `${PREVIEW_HEIGHT}px`,
+    height: `${COLLAPSED_HEIGHT}px`,
     maxHeight: `${PREVIEW_HEIGHT}px`,
     overflow: 'hidden',
     position: 'relative',
@@ -91,10 +92,12 @@ function installWidget(node: PreviewNode, app: ComfyApp) {
     if (visible === nextVisible) return
     visible = nextVisible
     container.hidden = !visible
+    container.style.height = `${visible ? PREVIEW_HEIGHT : COLLAPSED_HEIGHT}px`
     container.style.pointerEvents = visible ? 'auto' : 'none'
     delete widget.computedHeight
     if (node.size && node.setSize) {
-      if (visible && !previewHeightApplied) {
+      // Vue measures the in-flow DOM widget and expands the node itself.
+      if (visible && !isVueNodesMode()) {
         node.setSize([node.size[0], node.size[1] + PREVIEW_HEIGHT_DELTA])
         previewHeightApplied = true
       } else if (!visible && previewHeightApplied) {
@@ -102,7 +105,6 @@ function installWidget(node: PreviewNode, app: ComfyApp) {
         previewHeightApplied = false
       }
     }
-    node.onResize?.(node.size)
     node.graph?.setDirtyCanvas?.(true, true)
     globalThis.requestAnimationFrame?.(syncHostBounds)
   }
