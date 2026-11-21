@@ -21,7 +21,7 @@ class EasyFaceBeautify(io.ComfyNode):
             description="Interactive face reshaping and skin retouching. Use the connected IMAGE or select a portrait in the editor. Detects one face per image; no face leaves the image unchanged.",
             inputs=[io.Custom(io_type="EASY_FACE_BEAUTY").Input("preset"), io.Image.Input("image", optional=True)],
             outputs=[io.Image.Output("image"), io.String.Output("preset_json")],
-            is_output_node=True,
+            is_output_node=False,
         )
 
     @classmethod
