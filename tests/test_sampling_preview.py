@@ -45,19 +45,17 @@ def test_preview_playback_fps_preserves_source_duration():
     assert sampling_preview.preview_playback_fps(121, 24) == 24 * 60 / 121
 
 
-def test_async_preview_encoder_replaces_oldest_pending_work_when_full():
-    encoder = sampling_preview._AsyncPreviewEncoder.__new__(
-        sampling_preview._AsyncPreviewEncoder
-    )
-    encoder._queue = sampling_preview.queue.Queue(maxsize=2)
+def test_async_preview_encoder_keeps_only_latest_pending_work(monkeypatch):
+    monkeypatch.setattr(sampling_preview.threading.Thread, "start", lambda _thread: None)
+    encoder = sampling_preview._AsyncPreviewEncoder()
     callback = lambda: None
-    encoder._queue.put_nowait((callback, ("oldest",), {}))
-    encoder._queue.put_nowait((callback, ("newer",), {}))
 
+    assert encoder.submit(callback, "oldest") is True
+    assert encoder.submit(callback, "newer") is True
     assert encoder.submit(callback, "latest") is True
 
-    queued = [encoder._queue.get_nowait()[1][0] for _ in range(2)]
-    assert queued == ["newer", "latest"]
+    assert encoder._queue.get_nowait()[1] == ("latest",)
+    assert encoder._queue.empty()
 
 
 def test_decode_preview_frames_accepts_channel_first_tiny_vae_output():
@@ -178,7 +176,7 @@ def test_encode_preview_caps_resolution_and_uses_quality_80(monkeypatch):
 
     assert encoded is not None and encoded[0] == "image/webp"
     result = Image.open(io.BytesIO(encoded[1]))
-    assert result.size == (640, 360)
+    assert result.size == (512, 288)
     assert qualities == [80]
 
 
@@ -257,6 +255,45 @@ def test_send_preview_includes_playback_metadata(monkeypatch):
     assert len(payload["images"]) == 2
 
 
+def test_send_preview_resizes_decoded_pixels_before_interpolating(monkeypatch):
+    sent = []
+    server_module = types.ModuleType("server")
+    server_module.PromptServer = types.SimpleNamespace(
+        instance=types.SimpleNamespace(send_sync=lambda _event, payload, _client: sent.append(payload))
+    )
+    monkeypatch.setitem(sys.modules, "server", server_module)
+    render = sampling_preview._preview_images
+
+    def check_resized_pixels(pixels, requested_frames):
+        assert pixels.shape == (2, 4, 512, 3)
+        assert pixels.dtype == torch.uint8
+        return render(pixels, requested_frames)
+
+    monkeypatch.setattr(sampling_preview, "_preview_images", check_resized_pixels)
+    with torch.inference_mode():
+        pixels = torch.stack([
+            torch.zeros((8, 1024, 3), dtype=torch.uint8),
+            torch.full((8, 1024, 3), 128, dtype=torch.uint8),
+        ])
+
+    sampling_preview.send_preview(
+        pixels,
+        node_id="42",
+        fps=12,
+        step=0,
+        total=8,
+        segment_index=0,
+        sampling_pass="first",
+        client_id="client",
+        prompt_id="prompt-1",
+        requested_frames=3,
+    )
+
+    images = [Image.open(io.BytesIO(base64.b64decode(item))) for item in sent[0]["images"]]
+    assert [image.getpixel((0, 0))[0] for image in images] == [0, 64, 128]
+    assert sent[0]["fps"] == 12
+
+
 def test_send_preview_does_not_broadcast_without_a_client(monkeypatch):
     sent = []
     server_module = types.ModuleType("server")
@@ -280,9 +317,10 @@ def test_send_preview_does_not_broadcast_without_a_client(monkeypatch):
     assert sent == []
 
 
-def test_preview_callback_submits_encoding_without_waiting(monkeypatch):
+def test_preview_callback_queues_pixels_every_other_step_and_on_completion(monkeypatch):
     _install_preview_transport(monkeypatch)
     submitted = []
+    decoded = []
     monkeypatch.setattr(
         sampling_preview._PREVIEW_ENCODER,
         "submit",
@@ -300,8 +338,13 @@ def test_preview_callback_submits_encoding_without_waiting(monkeypatch):
     class PreviewVae:
         @staticmethod
         def decode(latent):
+            decoded.append(latent)
             return torch.zeros((1, 2, 2, 3))
 
+    def fail_if_rendered_inline(*_args):
+        raise AssertionError("Pixel processing belongs to the background encoder")
+
+    monkeypatch.setattr(sampling_preview, "_preview_images", fail_if_rendered_inline)
     callback = sampling_preview.create_preview_callback(
         Model(),
         PreviewVae(),
@@ -311,10 +354,15 @@ def test_preview_callback_submits_encoding_without_waiting(monkeypatch):
         segment_index=0,
         sampling_pass="first",
     )
-    callback(0, torch.zeros((1, 4, 2, 2)), None, 8)
+    latent = torch.zeros((1, 4, 2, 2))
+    for step in range(10):
+        callback(step, latent, None, 10)
 
-    assert len(submitted) == 1
+    assert [meta["step"] for _, _, meta in submitted] == [0, 2, 4, 6, 8, 9]
+    assert len(decoded) == len(submitted)
     assert submitted[0][0] is sampling_preview.send_preview
+    assert isinstance(submitted[0][1][0], torch.Tensor)
+    assert submitted[0][2]["requested_frames"] == 1
     assert submitted[0][2]["client_id"] == "client"
     assert submitted[0][2]["prompt_id"] == "prompt-1"
     assert submitted[0][2]["display_node_id"] == "project-42"
@@ -377,8 +425,8 @@ def test_preview_callback_isolates_optional_preview_errors(monkeypatch):
     _install_preview_transport(monkeypatch)
     monkeypatch.setattr(
         sampling_preview,
-        "decode_preview_frames",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("encode failed")),
+        "_decode_preview_pixels",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("decode failed")),
     )
 
     class Model:

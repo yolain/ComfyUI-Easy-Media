@@ -66,7 +66,7 @@ def _install_nested_tensor(monkeypatch):
     monkeypatch.setattr(comfy, "nested_tensor", nested, raising=False)
 
 
-def test_custom_preview_disables_native_latent_preview_but_keeps_progress(monkeypatch):
+def test_suppress_native_latent_preview_keeps_sampling_progress(monkeypatch):
     prepared = []
     updates = []
     class ProgressBar:
@@ -88,7 +88,7 @@ def test_custom_preview_disables_native_latent_preview_but_keeps_progress(monkey
     monkeypatch.setattr(comfy, "utils", comfy_utils, raising=False)
     monkeypatch.setitem(sys.modules, "latent_preview", latent_preview)
 
-    callback = sampling._prepare_sampling_callback(object(), 4, lambda *args: None)
+    callback = sampling._prepare_sampling_callback(object(), 4, suppress_native_preview=True)
     callback(1, object(), object(), 4)
 
     assert prepared == []

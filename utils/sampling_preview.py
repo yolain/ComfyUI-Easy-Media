@@ -15,14 +15,14 @@ from PIL import Image, ImageOps
 
 
 SAMPLING_PREVIEW_EVENT = "easy_media.sampling_preview"
-SAMPLING_PREVIEW_MAX_RESOLUTION = 640
+SAMPLING_PREVIEW_MAX_RESOLUTION = 512
 SAMPLING_PREVIEW_QUALITY = 80
 
 
 class _AsyncPreviewEncoder:
     """Encode previews off the sampler thread without accumulating stale work."""
 
-    def __init__(self, max_in_flight: int = 2) -> None:
+    def __init__(self, max_in_flight: int = 1) -> None:
         self._queue: queue.Queue[
             tuple[Callable[..., None], tuple[Any, ...], dict[str, Any]]
         ] = queue.Queue(maxsize=max_in_flight)
@@ -65,6 +65,7 @@ class _AsyncPreviewEncoder:
             except Exception as error:  # Preview work must never abort sampling.
                 print(f"[EasyMedia] Sampling preview encode failed: {error}", flush=True)  # noqa: T201
             finally:
+                del callback, args, kwargs
                 self._queue.task_done()
 
 
@@ -150,15 +151,15 @@ def _resample_pixels(pixels: torch.Tensor, requested: int) -> list[torch.Tensor]
     return frames
 
 
-def decode_preview_frames(
+def _decode_preview_pixels(
     preview_vae: Any,
     latent: Any,
     requested_frames: int,
-) -> list[Image.Image]:
-    """Decode evenly spaced video frames from channel-first or channel-last output."""
+) -> torch.Tensor | None:
+    """Decode preview pixels and normalize their layout to CPU [T,H,W,C]."""
     video = _video_stream(latent)
     if not isinstance(video, torch.Tensor):
-        return []
+        return None
 
     requested = max(1, int(requested_frames))
     used_video_decoder = hasattr(preview_vae, "decode_video") and video.ndim == 5
@@ -170,7 +171,7 @@ def decode_preview_frames(
     else:
         decoded = preview_vae.decode(video)
     if not isinstance(decoded, torch.Tensor):
-        return []
+        return None
 
     decoded = decoded.detach().to(device="cpu")
     if decoded.ndim == 5:
@@ -184,21 +185,46 @@ def decode_preview_frames(
         elif decoded.shape[2] in (1, 3, 4):
             pixels_5d = decoded.movedim(2, -1)
         else:
-            return []
+            return None
         decoded = pixels_5d.reshape(-1, *pixels_5d.shape[-3:])
     if decoded.ndim != 4 or decoded.shape[0] == 0:
-        return []
+        return None
     if decoded.shape[-1] in (1, 3, 4):
-        pixels = decoded
-    elif decoded.shape[1] in (1, 3, 4):
-        pixels = decoded.movedim(1, -1)
-    else:
-        return []
+        return decoded
+    if decoded.shape[1] in (1, 3, 4):
+        return decoded.movedim(1, -1)
+    return None
 
+
+def _resize_preview_pixels(pixels: torch.Tensor, max_resolution: int) -> torch.Tensor:
+    """Resize decoded frames in small batches before interpolating the timeline."""
+    frame_count, height, width, channels = pixels.shape
+    longest_side = max(height, width)
+    if longest_side <= max_resolution:
+        return pixels
+
+    ratio = max_resolution / longest_side
+    size = (max(1, round(height * ratio)), max(1, round(width * ratio)))
+    resized = pixels.new_empty((frame_count, *size, channels))
+    # Bound the float32 working batch even for long, high-resolution previews.
+    batch_size = max(1, (32 * 1024**2) // (height * width * channels * 4))
+    for start in range(0, frame_count, batch_size):
+        stop = min(start + batch_size, frame_count)
+        batch = pixels[start:stop].movedim(-1, 1).to(torch.float32)
+        batch = torch.nn.functional.interpolate(
+            batch, size=size, mode="bilinear", align_corners=False, antialias=True,
+        )
+        if pixels.dtype == torch.uint8:
+            batch.round_().clamp_(0, 255)
+        resized[start:stop].copy_(batch.movedim(1, -1))
+    return resized
+
+
+def _preview_images(pixels: torch.Tensor, requested_frames: int) -> list[Image.Image]:
     # A temporal decoder may emit more pixel frames than requested, while a
     # spatial decoder may emit fewer. Resample both cases onto one smooth timeline.
     frames: list[Image.Image] = []
-    for frame in _resample_pixels(pixels, requested):
+    for frame in _resample_pixels(pixels, requested_frames):
         if frame.dtype != torch.uint8:
             frame = frame.to(torch.float32)
             frame = torch.nan_to_num(frame, nan=0.0, posinf=1.0, neginf=0.0)
@@ -208,6 +234,16 @@ def decode_preview_frames(
             array = array[..., 0]
         frames.append(Image.fromarray(array))
     return frames
+
+
+def decode_preview_frames(
+    preview_vae: Any,
+    latent: Any,
+    requested_frames: int,
+) -> list[Image.Image]:
+    """Decode and resample preview frames for synchronous callers."""
+    pixels = _decode_preview_pixels(preview_vae, latent, requested_frames)
+    return _preview_images(pixels, requested_frames) if pixels is not None else []
 
 
 def encode_preview(
@@ -273,8 +309,9 @@ def encode_preview_frames(
     return encoded_frames
 
 
+@torch.inference_mode()
 def send_preview(
-    frames: list[Image.Image],
+    frames: list[Image.Image] | torch.Tensor,
     *,
     node_id: Any,
     fps: float,
@@ -285,11 +322,17 @@ def send_preview(
     client_id: str | None,
     prompt_id: str | None,
     display_node_id: Any | None = None,
+    requested_frames: int | None = None,
 ) -> None:
     """Send one sampling-preview update to the current ComfyUI client."""
     if node_id in (None, "") or client_id in (None, ""):
         return
     try:
+        if isinstance(frames, torch.Tensor):
+            pixels = _resize_preview_pixels(frames, SAMPLING_PREVIEW_MAX_RESOLUTION)
+            frames = _preview_images(
+                pixels, len(pixels) if requested_frames is None else requested_frames,
+            )
         encoded_frames = encode_preview_frames(frames)
         if not encoded_frames:
             return
@@ -348,15 +391,18 @@ def create_preview_callback(
 
     def callback(step: int, x0: Any, _state: Any, total: int) -> None:
         try:
-            if client_id in (None, ""):
+            # Decode every other step and always decode the final state.
+            if client_id in (None, "") or (step % 2 and step + 1 < total):
                 return
             latent_shapes = getattr(model.model, "latent_shapes", None)
             video = _video_stream(x0, latent_shapes)
             processed = model.model.process_latent_out(video.cpu())
-            frames = decode_preview_frames(preview_vae, processed, requested_frames)
+            pixels = _decode_preview_pixels(preview_vae, processed, requested_frames)
+            if pixels is None:
+                return
             _PREVIEW_ENCODER.submit(
                 send_preview,
-                frames,
+                pixels,
                 node_id=node_id,
                 fps=fps,
                 step=step,
@@ -366,6 +412,7 @@ def create_preview_callback(
                 client_id=client_id,
                 prompt_id=prompt_id,
                 display_node_id=display_node_id,
+                requested_frames=requested_frames,
             )
         except Exception as error:  # Preview decoding must never abort sampling.
             print(f"[EasyMedia] Sampling preview decode failed: {error}", flush=True)  # noqa: T201
