@@ -91,6 +91,57 @@ describe('SamplingPreviewWidget', () => {
     expect(screen.getAllByRole('button', { name: 'Pause sampling preview' })).toHaveLength(2)
   })
 
+  it('plays MP4 preview steps and keeps the playback position between steps', () => {
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+    try {
+      render(<SamplingPreviewWidget app={app} nodeId="42" />)
+      publish({ mime: 'video/mp4' })
+
+      const video = screen.getByLabelText('Sampling preview') as HTMLVideoElement
+      expect(video.tagName).toBe('VIDEO')
+      expect(video.src).toBe('blob:preview')
+      expect(video.autoplay).toBe(true)
+      Object.defineProperty(video, 'duration', { configurable: true, value: 10 })
+      fireEvent.loadedMetadata(video)
+      video.currentTime = 4
+      fireEvent.timeUpdate(video)
+      expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('40')
+
+      fireEvent.click(screen.getAllByRole('button', { name: 'Pause sampling preview' })[0])
+      expect(pause).toHaveBeenCalledOnce()
+      publish({ mime: 'video/mp4', image: btoa('next-step'), step: 4 })
+      expect(screen.getByText('Segment 2 · Second pass · 3/8')).not.toBeNull()
+
+      fireEvent.click(screen.getAllByRole('button', { name: 'Resume sampling preview' })[0])
+      expect(play).toHaveBeenCalledOnce()
+      video.currentTime = 0
+      fireEvent.loadedMetadata(video)
+      expect(video.currentTime).toBe(4)
+      expect(screen.getByText('Segment 2 · Second pass · 4/8')).not.toBeNull()
+    } finally {
+      pause.mockRestore()
+      play.mockRestore()
+    }
+  })
+
+  it('shows the current preview step as a JPEG when MP4 playback fails', () => {
+    const logError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      render(<SamplingPreviewWidget app={app} nodeId="42" />)
+      const poster = btoa('first-frame')
+      publish({ mime: 'video/mp4', poster })
+
+      fireEvent.error(screen.getByLabelText('Sampling preview'))
+      expect(screen.getByAltText('Sampling preview').getAttribute('src')).toBe(
+        `data:image/jpeg;base64,${poster}`,
+      )
+      expect(screen.getByText('Segment 2 · Second pass · 3/8')).not.toBeNull()
+    } finally {
+      logError.mockRestore()
+    }
+  })
+
   it('freezes an animated WebP fallback when browser frame decoding is unavailable', () => {
     const drawImage = vi.fn()
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage } as never)

@@ -119,6 +119,12 @@ def _h3_node_mapping(node_id: str) -> Any | None:
     return mappings.get(node_id) if isinstance(mappings, dict) else None
 
 
+def _h3_project_preview_vae(loader: dict[str, Any]) -> Any:
+    from ..utils.sampling_preview import resolve_project_preview_vae
+
+    return resolve_project_preview_vae(loader, _h3_node_mapping("ModelPreviewOverrideKJ"))
+
+
 def _h3_required_node_defaults(node_id: str) -> dict[str, Any]:
     node_class = _h3_node_mapping(node_id)
     if node_class is None:
@@ -820,7 +826,7 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
             if not isinstance(loader, dict):
                 raise TypeError("model_loader must contain a FAST_MODEL_LOADER dictionary")
             model, clip, vae = loader.get("model"), loader.get("clip"), loader.get("vae")
-            audio_vae, preview_vae = loader.get("audio_vae"), loader.get("preview_vae")
+            audio_vae, preview_vae = loader.get("audio_vae"), _h3_project_preview_vae(loader)
             missing = [name for name, value in (("model", model), ("clip", clip),
                        ("vae", vae), ("audio_vae", audio_vae)) if value is None]
             if missing:
@@ -1088,7 +1094,7 @@ class EasyMultiTrackProject(io.ComfyNode):
         clip = None if uses_linked_prepare else selected_model_loader.get("clip")
         vae = None if uses_linked_prepare else selected_model_loader.get("vae")
         audio_vae = None if uses_linked_prepare else selected_model_loader.get("audio_vae")
-        preview_vae = None if uses_linked_prepare else selected_model_loader.get("preview_vae")
+        preview_vae = None if uses_linked_prepare else _h3_project_preview_vae(selected_model_loader)
         preview_node_id = str(
             _first_input(
                 getattr(getattr(cls, "hidden", None), "unique_id", None),

@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import base64
 import io
+import logging
 import math
 import queue
+import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from fractions import Fraction
 from typing import Any
 
 import torch
@@ -17,10 +21,11 @@ from PIL import Image, ImageOps
 SAMPLING_PREVIEW_EVENT = "easy_media.sampling_preview"
 SAMPLING_PREVIEW_MAX_RESOLUTION = 512
 SAMPLING_PREVIEW_QUALITY = 80
+LOGGER = logging.getLogger(__name__)
 
 
 class _AsyncPreviewEncoder:
-    """Encode previews off the sampler thread without accumulating stale work."""
+    """Encode in step order and bound memory when the encoder falls behind."""
 
     def __init__(self, max_in_flight: int = 1) -> None:
         self._queue: queue.Queue[
@@ -38,24 +43,8 @@ class _AsyncPreviewEncoder:
         callback: Callable[..., None],
         *args: Any,
         **kwargs: Any,
-    ) -> bool:
-        try:
-            self._queue.put_nowait((callback, args, kwargs))
-            return True
-        except queue.Full:
-            # Keep the newest denoising state. Retaining the oldest queued
-            # previews can leave the UI showing an early blank/white x0 long
-            # after cleaner sampler steps have completed.
-            try:
-                self._queue.get_nowait()
-                self._queue.task_done()
-            except queue.Empty:
-                pass
-            try:
-                self._queue.put_nowait((callback, args, kwargs))
-                return True
-            except queue.Full:
-                return False
+    ) -> None:
+        self._queue.put((callback, args, kwargs))
 
     def _run(self) -> None:
         while True:
@@ -70,6 +59,25 @@ class _AsyncPreviewEncoder:
 
 
 _PREVIEW_ENCODER = _AsyncPreviewEncoder()
+
+
+def resolve_project_preview_vae(loader: dict[str, Any], kj_node: type | None) -> Any:
+    """Reuse KJNodes' size-aware decoder when the loader exposes its filename."""
+    fallback = loader.get("preview_vae")
+    params = loader.get("params")
+    name = params.get("preview_vae_name") if isinstance(params, dict) else None
+    if not isinstance(name, str) or name in ("", "None", "none") or kj_node is None:
+        return fallback
+    module = sys.modules.get(kj_node.__module__)
+    load_decoder = getattr(module, "load_tiny_vae_decoder", None)
+    if not callable(load_decoder):
+        return fallback
+    try:
+        decoder = load_decoder(name, max_res=SAMPLING_PREVIEW_MAX_RESOLUTION)
+    except Exception as error:
+        LOGGER.warning("Unable to use the KJ sampling preview decoder: %s", error)
+        return fallback
+    return fallback if decoder is None else decoder
 
 
 def preview_frame_count(generated_frames: Any) -> int:
@@ -225,11 +233,7 @@ def _preview_images(pixels: torch.Tensor, requested_frames: int) -> list[Image.I
     # spatial decoder may emit fewer. Resample both cases onto one smooth timeline.
     frames: list[Image.Image] = []
     for frame in _resample_pixels(pixels, requested_frames):
-        if frame.dtype != torch.uint8:
-            frame = frame.to(torch.float32)
-            frame = torch.nan_to_num(frame, nan=0.0, posinf=1.0, neginf=0.0)
-            frame = frame.clamp(0, 1).mul(255).round().to(torch.uint8)
-        array = frame.numpy()
+        array = _preview_uint8(frame).numpy()
         if array.shape[-1] == 1:
             array = array[..., 0]
         frames.append(Image.fromarray(array))
@@ -309,6 +313,44 @@ def encode_preview_frames(
     return encoded_frames
 
 
+def _encode_preview_mp4(pixels: torch.Tensor, fps: float) -> bytes | None:
+    """Encode video on the CPU so it does not compete with denoising for CUDA."""
+    try:
+        import av
+    except ImportError:
+        return None
+
+    _, height, width, channels = pixels.shape
+    if channels != 3 or min(height, width) < 2:
+        return None
+    # H.264 with 4:2:0 chroma requires even dimensions.
+    height, width = height - height % 2, width - width % 2
+    rate = Fraction(fps).limit_denominator(1000)
+    buffer = io.BytesIO()
+    try:
+        # Fragmented MP4 writes forward into BytesIO. faststart requires reopening a file.
+        options = {"movflags": "frag_keyframe+empty_moov+default_base_moof"}
+        with av.open(buffer, "w", format="mp4", options=options) as output:
+            stream = output.add_stream("libx264", rate=rate)
+            stream.width, stream.height, stream.pix_fmt = width, height, "yuv420p"
+            stream.options = {"preset": "ultrafast", "tune": "zerolatency", "crf": "28"}
+            for frame in pixels[:, :height, :width]:
+                rgb = _preview_uint8(frame).contiguous().numpy()
+                output.mux(stream.encode(av.VideoFrame.from_ndarray(rgb, format="rgb24")))
+            output.mux(stream.encode())
+    except (av.FFmpegError, ValueError, OSError) as error:
+        LOGGER.debug("MP4 sampling preview unavailable, using JPEG: %s", error)
+        return None
+    return buffer.getvalue() or None
+
+
+def _preview_uint8(frame: torch.Tensor) -> torch.Tensor:
+    if frame.dtype == torch.uint8:
+        return frame
+    frame = torch.nan_to_num(frame.to(torch.float32), nan=0.0, posinf=1.0, neginf=0.0)
+    return frame.clamp_(0, 1).mul_(255).round_().to(torch.uint8)
+
+
 @torch.inference_mode()
 def send_preview(
     frames: list[Image.Image] | torch.Tensor,
@@ -323,17 +365,31 @@ def send_preview(
     prompt_id: str | None,
     display_node_id: Any | None = None,
     requested_frames: int | None = None,
+    allow_video: bool = False,
 ) -> None:
     """Send one sampling-preview update to the current ComfyUI client."""
     if node_id in (None, "") or client_id in (None, ""):
         return
     try:
+        frame_count = len(frames)
+        if not frame_count:
+            return
+        video = None
+        poster = None
         if isinstance(frames, torch.Tensor):
+            target_count = max(1, requested_frames) if requested_frames is not None else frame_count
+            if frame_count > target_count:
+                frames = frames[_even_indices(frame_count, target_count)]
+            frame_count = len(frames)
+            fps *= frame_count / target_count
             pixels = _resize_preview_pixels(frames, SAMPLING_PREVIEW_MAX_RESOLUTION)
-            frames = _preview_images(
-                pixels, len(pixels) if requested_frames is None else requested_frames,
-            )
-        encoded_frames = encode_preview_frames(frames)
+            if allow_video and frame_count > 1:
+                video = _encode_preview_mp4(pixels, fps)
+            if video is None:
+                frames = _preview_images(pixels, frame_count)
+            else:
+                poster = encode_preview_frames(_preview_images(pixels[:1], 1))[0]
+        encoded_frames = [video] if video is not None else encode_preview_frames(frames)
         if not encoded_frames:
             return
         from server import PromptServer
@@ -348,20 +404,44 @@ def send_preview(
             "display_node_id": str(display_node_id or node_id),
             "prompt_id": str(prompt_id) if prompt_id else None,
             "image": encoded_images[0],
-            "images": encoded_images,
-            "mime": "image/jpeg",
+            "mime": "video/mp4" if video is not None else "image/jpeg",
             "step": int(step) + 1,
             "total": int(total),
-            "fps": float(fps) if len(encoded_frames) > 1 else None,
-            "frame_count": len(encoded_frames),
+            "fps": float(fps) if frame_count > 1 else None,
+            "frame_count": frame_count,
             "segment_index": int(segment_index),
             "sampling_pass": str(sampling_pass),
         }
+        if video is None:
+            payload["images"] = encoded_images
+        elif poster is not None:
+            payload["poster"] = base64.b64encode(poster).decode("ascii")
         # Transport identity is captured on the sampler thread. Reading these
         # mutable server fields here can target a later execution.
         server.send_sync(SAMPLING_PREVIEW_EVENT, payload, client_id)
     except Exception as error:  # Preview transport is optional sampler telemetry.
         print(f"[EasyMedia] Sampling preview unavailable: {error}", flush=True)  # noqa: T201
+
+
+@contextmanager
+def _preview_allocation_scope(video: torch.Tensor, latent_format: Any) -> Iterator[None]:
+    """Follow ComfyUI's preview allocation tracking when the compiler is active."""
+    prefetch = None
+    if video.device.type == "cuda" and getattr(latent_format, "compile_preview", False):
+        try:
+            from comfy import model_prefetch
+
+            if model_prefetch.malloc_graph_enabled(video.device):
+                prefetch = model_prefetch
+        except (ImportError, AttributeError) as error:
+            LOGGER.debug("ComfyUI preview allocation tracking unavailable: %s", error)
+    if prefetch is not None:
+        prefetch.malloc_graph_begin(video.device)
+    try:
+        yield
+    finally:
+        if prefetch is not None:
+            prefetch.malloc_graph_end()
 
 
 def create_preview_callback(
@@ -388,16 +468,27 @@ def create_preview_callback(
         client_id = None
         prompt_id = None
         display_node_id = node_id
+    try:
+        from comfy.cli_args import args as comfy_args
+
+        allow_video = not getattr(comfy_args, "disable_api_nodes", False)
+    except ImportError as error:
+        LOGGER.debug("Unable to inspect ComfyUI preview video settings: %s", error)
+        allow_video = False
 
     def callback(step: int, x0: Any, _state: Any, total: int) -> None:
         try:
-            # Decode every other step and always decode the final state.
-            if client_id in (None, "") or (step % 2 and step + 1 < total):
+            if client_id in (None, ""):
                 return
             latent_shapes = getattr(model.model, "latent_shapes", None)
             video = _video_stream(x0, latent_shapes)
-            processed = model.model.process_latent_out(video.cpu())
-            pixels = _decode_preview_pixels(preview_vae, processed, requested_frames)
+            if not isinstance(video, torch.Tensor):
+                return
+            latent_format = getattr(model.model, "latent_format", None)
+            # x0 is already the video stream, so only apply video latent scaling.
+            process = getattr(latent_format, "process_out", model.model.process_latent_out)
+            with _preview_allocation_scope(video, latent_format):
+                pixels = _decode_preview_pixels(preview_vae, process(video), requested_frames)
             if pixels is None:
                 return
             _PREVIEW_ENCODER.submit(
@@ -413,6 +504,7 @@ def create_preview_callback(
                 prompt_id=prompt_id,
                 display_node_id=display_node_id,
                 requested_frames=requested_frames,
+                allow_video=allow_video,
             )
         except Exception as error:  # Preview decoding must never abort sampling.
             print(f"[EasyMedia] Sampling preview decode failed: {error}", flush=True)  # noqa: T201

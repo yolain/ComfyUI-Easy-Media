@@ -18,6 +18,7 @@ export interface SamplingPreviewPayload {
   prompt_id: string | null
   image: string
   images?: string[]
+  poster?: string
   mime: string
   step: number
   total: number
@@ -99,13 +100,18 @@ function SamplingPreviewWidgetInner({
   const [legacyPreviewUrls, setLegacyPreviewUrls] = useState<string[]>([])
   const [isPlaying, setIsPlaying] = useState(true)
   const [isPreviewVisible, setIsPreviewVisible] = useState(true)
+  const [videoProgress, setVideoProgress] = useState(0)
+  const [failedVideoUrl, setFailedVideoUrl] = useState('')
   const [frozenFallbackUrl, setFrozenFallbackUrl] = useState('')
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const videoPosition = useRef({ revision: '', time: 0 })
   const fallbackImageRef = useRef<HTMLImageElement>(null)
   const frozenFallbackCanvasRef = useRef<HTMLCanvasElement>(null)
   const activePromptIdRef = useRef<string | null>(null)
   const playbackInteractive = interactive && !visibilityControlOnly
   const visibilityInteractive = interactive || visibilityControlOnly
   const displayedPreview = isPlaying ? preview : (pausedPreview ?? preview)
+  const useVideo = displayedPreview?.mime === 'video/mp4'
 
   useEffect(() => {
     const handleExecutionStart = (event: CustomEvent<unknown>) => {
@@ -137,6 +143,9 @@ function SamplingPreviewWidgetInner({
     setPausedPreview(null)
     setIsPlaying(true)
     setFrozenFallbackUrl('')
+    setVideoProgress(0)
+    setFailedVideoUrl('')
+    videoPosition.current = { revision: '', time: 0 }
   }, [executionRevision])
 
   useEffect(() => {
@@ -180,13 +189,13 @@ function SamplingPreviewWidgetInner({
     || displayedPreview?.frame_count
     || decodedFrames.length
   const playbackRevision = displayedPreview
-    ? `${displayedPreview.segment_index}:${displayedPreview.sampling_pass}:${displayedPreview.frame_count}:${displayedPreview.fps}`
+    ? `${displayedPreview.prompt_id}:${displayedPreview.segment_index}:${displayedPreview.sampling_pass}:${displayedPreview.frame_count}:${displayedPreview.fps}`
     : undefined
 
   const { frameIndex, progress: playbackProgress } = useSamplingPreviewPlayback(
     playbackRevision,
     playbackFrameCount,
-    displayedPreview?.fps ?? null,
+    useVideo ? null : (displayedPreview?.fps ?? null),
     isPlaying,
   )
 
@@ -224,14 +233,56 @@ function SamplingPreviewWidgetInner({
   }
   const togglePlayback = () => {
     if (isPlaying) {
+      videoRef.current?.pause()
       freezeAnimatedFallback()
       setPausedPreview(preview)
       setIsPlaying(false)
     } else {
       setPausedPreview(null)
       setIsPlaying(true)
+      void videoRef.current?.play().catch((error: unknown) => {
+        console.error('[SamplingPreviewWidget] Failed to resume video preview:', error)
+      })
     }
   }
+  const posterUrl = displayedPreview.poster ? `data:image/jpeg;base64,${displayedPreview.poster}` : undefined
+  const videoPreview = useVideo && previewUrl && previewUrl !== failedVideoUrl ? (
+    <video
+      ref={videoRef}
+      src={previewUrl}
+      poster={posterUrl}
+      autoPlay={isPlaying}
+      loop
+      muted
+      playsInline
+      aria-label={t('samplingPreview.title')}
+      className="absolute inset-0 h-full w-full object-contain"
+      onLoadedMetadata={({ currentTarget: video }) => {
+        const revision = playbackRevision ?? ''
+        const saved = videoPosition.current
+        const time = saved.revision === revision && saved.time < video.duration ? saved.time : 0
+        videoPosition.current = { revision, time }
+        if (time > 0) video.currentTime = time
+        setVideoProgress(video.duration > 0 ? time / video.duration * 100 : 0)
+      }}
+      onTimeUpdate={({ currentTarget: video }) => {
+        videoPosition.current.time = video.currentTime
+        setVideoProgress(video.duration > 0 ? video.currentTime / video.duration * 100 : 0)
+      }}
+      onError={({ currentTarget: video }) => {
+        console.error('[SamplingPreviewWidget] Failed to display video preview:', video.error)
+        setFailedVideoUrl(previewUrl)
+        setVideoProgress(0)
+      }}
+    />
+  ) : posterUrl ? (
+    <img
+      src={posterUrl}
+      alt={t('samplingPreview.title')}
+      draggable={false}
+      className="absolute inset-0 h-full w-full object-contain"
+    />
+  ) : null
   const playbackLabel = t(isPlaying ? 'samplingPreview.pausePreview' : 'samplingPreview.resumePreview')
   const metaLabel = t('samplingPreview.meta', {
     segment: displayedPreview.segment_index + 1,
@@ -239,18 +290,19 @@ function SamplingPreviewWidgetInner({
     step: displayedPreview.step,
     total: displayedPreview.total,
   })
+  const progress = useVideo ? videoProgress : playbackProgress
   const progressBar = (
     <div
       role="progressbar"
       aria-label={t('samplingPreview.playbackProgress')}
       aria-valuemin={0}
       aria-valuemax={100}
-      aria-valuenow={Math.round(playbackProgress)}
+      aria-valuenow={Math.round(progress)}
       className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
     >
       <div
         className="h-full rounded-full bg-primary"
-        style={{ width: `${playbackProgress}%` }}
+        style={{ width: `${progress}%` }}
       />
     </div>
   )
@@ -266,7 +318,7 @@ function SamplingPreviewWidgetInner({
             onClick={togglePlayback}
             className="relative min-h-0 flex-1 rounded-none p-0 hover:bg-black"
           >
-            {legacyPreviewUrl ? (
+            {useVideo ? videoPreview : legacyPreviewUrl ? (
               <img
                 src={legacyPreviewUrl}
                 alt={t('samplingPreview.title')}
@@ -302,7 +354,7 @@ function SamplingPreviewWidgetInner({
           </Button>
         ) : (
           <div className="relative min-h-0 flex-1">
-            {legacyPreviewUrl ? (
+            {useVideo ? videoPreview : legacyPreviewUrl ? (
               <img
                 src={legacyPreviewUrl}
                 alt={t('samplingPreview.title')}

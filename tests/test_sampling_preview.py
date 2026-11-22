@@ -5,6 +5,7 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
 import torch
 from PIL import Image
 
@@ -45,17 +46,52 @@ def test_preview_playback_fps_preserves_source_duration():
     assert sampling_preview.preview_playback_fps(121, 24) == 24 * 60 / 121
 
 
-def test_async_preview_encoder_keeps_only_latest_pending_work(monkeypatch):
-    monkeypatch.setattr(sampling_preview.threading.Thread, "start", lambda _thread: None)
+def test_async_preview_encoder_preserves_order_when_the_queue_is_full():
+    from threading import Event, Thread
+
     encoder = sampling_preview._AsyncPreviewEncoder()
-    callback = lambda: None
+    first_started, release_first, finished = Event(), Event(), Event()
+    seen = []
 
-    assert encoder.submit(callback, "oldest") is True
-    assert encoder.submit(callback, "newer") is True
-    assert encoder.submit(callback, "latest") is True
+    def encode(step):
+        if step == 1:
+            first_started.set()
+            release_first.wait(5)
+        seen.append(step)
+        if step == 3:
+            finished.set()
 
-    assert encoder._queue.get_nowait()[1] == ("latest",)
-    assert encoder._queue.empty()
+    encoder.submit(encode, 1)
+    try:
+        assert first_started.wait(5)
+        encoder.submit(encode, 2)
+        producer = Thread(target=encoder.submit, args=(encode, 3), daemon=True)
+        producer.start()
+    finally:
+        release_first.set()
+    assert finished.wait(5)
+    producer.join(timeout=5)
+    assert seen == [1, 2, 3]
+
+
+def test_project_preview_uses_kj_size_aware_decoder_when_available(monkeypatch):
+    decoder = object()
+    fallback = object()
+    calls = []
+    kj_module = types.ModuleType("kj_preview_test")
+
+    def load(name, *, max_res):
+        calls.append((name, max_res))
+        return decoder
+
+    kj_module.load_tiny_vae_decoder = load
+    monkeypatch.setitem(sys.modules, kj_module.__name__, kj_module)
+    kj_node = type("ModelPreviewOverrideKJ", (), {"__module__": kj_module.__name__})
+    loader = {"params": {"preview_vae_name": "taeh3.safetensors"}, "preview_vae": fallback}
+
+    assert sampling_preview.resolve_project_preview_vae(loader, kj_node) is decoder
+    assert calls == [("taeh3.safetensors", 512)]
+    assert sampling_preview.resolve_project_preview_vae(loader, None) is fallback
 
 
 def test_decode_preview_frames_accepts_channel_first_tiny_vae_output():
@@ -255,7 +291,7 @@ def test_send_preview_includes_playback_metadata(monkeypatch):
     assert len(payload["images"]) == 2
 
 
-def test_send_preview_resizes_decoded_pixels_before_interpolating(monkeypatch):
+def test_send_preview_resizes_real_frames_without_adding_interpolated_frames(monkeypatch):
     sent = []
     server_module = types.ModuleType("server")
     server_module.PromptServer = types.SimpleNamespace(
@@ -270,6 +306,7 @@ def test_send_preview_resizes_decoded_pixels_before_interpolating(monkeypatch):
         return render(pixels, requested_frames)
 
     monkeypatch.setattr(sampling_preview, "_preview_images", check_resized_pixels)
+    monkeypatch.setattr(sampling_preview, "_encode_preview_mp4", lambda _pixels, _fps: None)
     with torch.inference_mode():
         pixels = torch.stack([
             torch.zeros((8, 1024, 3), dtype=torch.uint8),
@@ -287,11 +324,66 @@ def test_send_preview_resizes_decoded_pixels_before_interpolating(monkeypatch):
         client_id="client",
         prompt_id="prompt-1",
         requested_frames=3,
+        allow_video=True,
     )
 
     images = [Image.open(io.BytesIO(base64.b64decode(item))) for item in sent[0]["images"]]
-    assert [image.getpixel((0, 0))[0] for image in images] == [0, 64, 128]
-    assert sent[0]["fps"] == 12
+    assert [image.getpixel((0, 0))[0] for image in images] == [0, 128]
+    assert sent[0]["fps"] == 8
+
+
+def test_send_preview_uses_one_mp4_payload_and_preserves_clip_duration(monkeypatch):
+    sent = []
+    server_module = types.ModuleType("server")
+    server_module.PromptServer = types.SimpleNamespace(
+        instance=types.SimpleNamespace(send_sync=lambda _event, payload, _client: sent.append(payload))
+    )
+    monkeypatch.setitem(sys.modules, "server", server_module)
+
+    def encode(pixels, fps):
+        assert pixels.shape == (2, 4, 512, 3)
+        assert fps == 8
+        return b"mp4-preview"
+
+    monkeypatch.setattr(sampling_preview, "_encode_preview_mp4", encode)
+    sampling_preview.send_preview(
+        torch.zeros((2, 8, 1024, 3), dtype=torch.uint8),
+        node_id="42",
+        fps=12,
+        step=0,
+        total=8,
+        segment_index=0,
+        sampling_pass="first",
+        client_id="client",
+        prompt_id="prompt-1",
+        requested_frames=3,
+        allow_video=True,
+    )
+
+    assert sent[0]["mime"] == "video/mp4"
+    assert "images" not in sent[0]
+    assert sent[0]["frame_count"] == 2
+    assert sent[0]["fps"] == 8
+    assert base64.b64decode(sent[0]["image"]) == b"mp4-preview"
+    assert Image.open(io.BytesIO(base64.b64decode(sent[0]["poster"]))).size == (512, 4)
+
+
+def test_mp4_preview_can_be_decoded_from_the_in_memory_payload():
+    av = pytest.importorskip("av")
+    try:
+        av.Codec("libx264", "w")
+    except av.FFmpegError:
+        pytest.skip("PyAV was built without libx264")
+
+    frames = torch.zeros((4, 9, 17, 3), dtype=torch.uint8)
+    encoded = sampling_preview._encode_preview_mp4(frames, 8)
+
+    assert encoded is not None
+    with av.open(io.BytesIO(encoded)) as container:
+        stream = container.streams.video[0]
+        assert (stream.width, stream.height) == (16, 8)
+        assert len(list(container.decode(stream))) == 4
+        assert container.duration / av.time_base == pytest.approx(0.5)
 
 
 def test_send_preview_does_not_broadcast_without_a_client(monkeypatch):
@@ -317,7 +409,7 @@ def test_send_preview_does_not_broadcast_without_a_client(monkeypatch):
     assert sent == []
 
 
-def test_preview_callback_queues_pixels_every_other_step_and_on_completion(monkeypatch):
+def test_preview_callback_queues_pixels_for_every_step(monkeypatch):
     _install_preview_transport(monkeypatch)
     submitted = []
     decoded = []
@@ -358,7 +450,7 @@ def test_preview_callback_queues_pixels_every_other_step_and_on_completion(monke
     for step in range(10):
         callback(step, latent, None, 10)
 
-    assert [meta["step"] for _, _, meta in submitted] == [0, 2, 4, 6, 8, 9]
+    assert [meta["step"] for _, _, meta in submitted] == list(range(10))
     assert len(decoded) == len(submitted)
     assert submitted[0][0] is sampling_preview.send_preview
     assert isinstance(submitted[0][1][0], torch.Tensor)
