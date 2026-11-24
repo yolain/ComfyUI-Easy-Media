@@ -128,16 +128,20 @@ def existing_video_project(monkeypatch, tmp_path):
     return node_module, project_video, project_dir, manifest
 
 
-def test_get_project_videos_returns_only_active_generations_in_segment_order(existing_video_project):
+def test_get_project_videos_returns_active_generations_and_input_widget_values(existing_video_project):
     nodes, _, project_dir, _ = existing_video_project
     node = nodes.EasyGetVideosFromProject
-    assert node.define_schema().outputs[0].kwargs["is_output_list"] is True
-    assert [Path(video.path).name for video in node.execute("demo", 1, -1).values[0]] == [
+    outputs = node.define_schema().outputs
+    assert [output.name for output in outputs] == ["VIDEO", "project_name", "segment_start_number", "segment_count"]
+    assert [output.kwargs.get("is_output_list", False) for output in outputs] == [True, False, False, False]
+    videos, *widget_values = node.execute("demo", 1, -1).values
+    assert widget_values == ["demo", 1, -1]
+    assert [Path(video.path).name for video in videos] == [
         "video_0_2.mp4", "video_2_1.mp4",
     ]
-    assert [Path(video.path) for video in node.execute("demo", 2, 2).values[0]] == [
-        project_dir / "video_2_1.mp4",
-    ]
+    videos, *widget_values = node.execute("demo", 2, 2).values
+    assert widget_values == ["demo", 2, 2]
+    assert [Path(video.path) for video in videos] == [project_dir / "video_2_1.mp4"]
 
 
 def test_overwrite_project_video_keeps_generation_and_updates_h3_av_tail(

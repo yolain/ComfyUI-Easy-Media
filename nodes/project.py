@@ -2438,9 +2438,14 @@ class EasyGetVideosFromProject(io.ComfyNode):
             node_id="easy getVideosFromProject",
             display_name="Get Videos from Project",
             category="EasyUse/MultiTrackEditor",
-            description="Output the active H3 project videos in segment order.",
+            description="Output the active H3 project videos in segment order and pass through the project and segment range.",
             inputs=_project_video_range_inputs(),
-            outputs=[io.Video.Output("VIDEO", is_output_list=True)],
+            outputs=[
+                io.Video.Output("VIDEO", is_output_list=True),
+                io.String.Output("project_name"),
+                io.Int.Output("segment_start_number"),
+                io.Int.Output("segment_count"),
+            ],
             not_idempotent=True,
         )
 
@@ -2453,7 +2458,8 @@ class EasyGetVideosFromProject(io.ComfyNode):
         from ..utils.h3_project_video import load_h3_project_video_paths
 
         paths = load_h3_project_video_paths(project_name, segment_start_number, segment_count)
-        return io.NodeOutput([InputImpl.VideoFromFile(str(path)) for path in paths])
+        videos = [InputImpl.VideoFromFile(str(path)) for path in paths]
+        return io.NodeOutput(videos, project_name, segment_start_number, segment_count)
 
 
 class EasySaveVideosToProject(io.ComfyNode):

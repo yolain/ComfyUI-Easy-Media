@@ -1510,13 +1510,18 @@
   },
   "easy getVideosFromProject": {
     "display_name": "从项目获取视频",
-    "description": "按片段编号输出 H3 项目当前选用的视频列表。",
+    "description": "按片段编号输出 H3 项目当前选用的视频列表，并传出项目名称和片段范围。",
     "inputs": {
       "project_name": { "name": "项目名称" },
       "segment_start_number": { "name": "片段开始编号" },
       "segment_count": { "name": "片段最大数量", "tooltip": "从开始编号起覆盖的编号范围，-1 表示读取剩余片段。" }
     },
-    "outputs": { "0": { "name": "视频" } }
+    "outputs": {
+      "0": { "name": "视频" },
+      "1": { "name": "项目名称" },
+      "2": { "name": "片段开始编号" },
+      "3": { "name": "片段最大数量" }
+    }
   },
   "easy saveProjectVideos": {
     "display_name": "保存视频到项目",
