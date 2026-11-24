@@ -392,6 +392,44 @@ describe('ProjectVideoCombineWidget', () => {
     await waitFor(() => expect(props.onChange).toHaveBeenCalledWith(refreshedData))
   })
 
+  it('keeps refreshing the saved project when execution completes during the save refresh', async () => {
+    let refreshHandler: ((event: CustomEvent<unknown>) => void) | undefined
+    let successHandler: (() => void) | undefined
+    const refreshedData: ProjectData = {
+      ...projectData,
+      project_name: 'saved-project',
+      clips: [{
+        ...projectData.clips[0],
+        file_path: 'easy_media/projects/saved-project/video_0_2.mp4',
+        file_name: 'video_0_2.mp4',
+        media_revision: '1000000002',
+      }],
+    }
+    const { props, api } = widgetProps()
+    api.addCustomEventListener.mockImplementation((name: string, handler: (event: CustomEvent<unknown>) => void) => {
+      if (name === 'easy_multitrack_project_refresh') refreshHandler = handler
+    })
+    api.addEventListener.mockImplementation((name: string, handler: () => void) => {
+      if (name === 'execution_success') successHandler = handler
+    })
+    api.fetchApi.mockImplementation(async (url: string) => ({
+      ok: true,
+      json: async () => url.endsWith('saved-project') ? refreshedData : projectData,
+    }))
+
+    render(<ProjectVideoCombineWidget {...props} />)
+    await act(async () => {
+      refreshHandler?.(new CustomEvent('easy_multitrack_project_refresh', {
+        detail: { project_name: 'saved-project', phase: 'after_save', segment_index: 0 },
+      }))
+      successHandler?.()
+    })
+
+    expect(api.fetchApi).toHaveBeenCalledWith('/easy-media/project?project_name=saved-project')
+    expect(api.fetchApi).not.toHaveBeenCalledWith('/easy-media/project?project_name=demo')
+    expect(props.onChange).toHaveBeenLastCalledWith(refreshedData)
+  })
+
   it('does not queue manual combine while ComfyUI has queued work', async () => {
     const { props, api, toast } = widgetProps()
     api.getQueue.mockResolvedValue({ Running: [{ id: 'running' }], Pending: [] })

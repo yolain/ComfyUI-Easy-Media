@@ -4,7 +4,7 @@ import yaml
 import nodes as _nodes
 
 from typing_extensions import override
-from comfy_api.latest import ComfyExtension, io
+from comfy_api.latest import ComfyAPI, ComfyExtension, io
 from aiohttp import web
 from .nodes import *
 from .routes import *
@@ -47,6 +47,16 @@ else:
 
 # Register extension
 class EasyMediaExtension(ComfyExtension):
+    @override
+    async def on_load(self) -> None:
+        widget_ids = ["project_name", "segment_start_number", "segment_count", "project_save"]
+        await ComfyAPI().node_replacement.register(io.NodeReplace(
+            new_node_id=EasySaveVideosToProject.define_schema().node_id,
+            old_node_id="easy overwriteProjectVideos",
+            old_widget_ids=widget_ids,
+            input_mapping=[{"new_id": name, "old_id": name} for name in ("video", "latent", *widget_ids)],
+        ))
+
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
         nodes = [

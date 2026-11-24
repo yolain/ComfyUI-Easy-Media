@@ -2460,8 +2460,7 @@ class EasySaveVideosToProject(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            # Keep the workflow ID so saved workflows resolve the renamed node.
-            node_id="easy overwriteProjectVideos",
+            node_id="easy saveProjectVideos",
             display_name="Save Videos to Project",
             category="EasyUse/MultiTrackEditor",
             description="Save H3 project videos as new versions or overwrite the active versions.",
@@ -2511,5 +2510,6 @@ class EasySaveVideosToProject(io.ComfyNode):
             safe_name, segment_start_number[0], segment_count[0], video,
             project_save=save_modes[0], latents=latent,
         )
+        # The combine widget reloads the whole project once the batch is published.
         _notify_multitrack_project_refresh(safe_name, "after_save", index)
         return io.NodeOutput(safe_name)

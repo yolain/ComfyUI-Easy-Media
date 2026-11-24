@@ -235,7 +235,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
   const playbackUiUpdatedAtRef = useRef(0)
   const playbackRafRef = useRef<number | null>(null)
   const timelineContainerRef = useRef<HTMLDivElement>(null)
-  const refreshRequestRef = useRef(0)
+  const pendingRefreshRef = useRef<{ projectName: string } | null>(null)
   const deletingFileRef = useRef(false)
   const latestDataRef = useRef(data)
   latestDataRef.current = data
@@ -334,7 +334,8 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
 
   const refreshProject = useCallback(async (projectName: string, showError = true) => {
     if (!projectName || deletingFileRef.current) return
-    const requestId = ++refreshRequestRef.current
+    const request = { projectName }
+    pendingRefreshRef.current = request
     setIsRefreshing(true)
     const switchingProject = projectName !== data.project_name
     if (switchingProject) {
@@ -348,15 +349,15 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
       const response = await app.api.fetchApi(`/easy-media/project?project_name=${encodeURIComponent(projectName)}`)
       const payload: unknown = await response.json()
       if (!response.ok && response.status === 404 && projectName === 'default') {
-        if (requestId !== refreshRequestRef.current) return
+        if (pendingRefreshRef.current !== request) return
         onChange({ ...DEFAULT_PROJECT_DATA, project_name: 'default', auto_combine: data.auto_combine })
         return
       }
       if (!response.ok) throw new Error(errorMessage(payload, t('projectVideoCombine.refreshFailed')))
-      if (requestId !== refreshRequestRef.current) return
+      if (pendingRefreshRef.current !== request) return
       onChange({ ...ensureProjectData(payload), auto_combine: data.auto_combine })
     } catch (error) {
-      if (showError && requestId === refreshRequestRef.current) {
+      if (showError && pendingRefreshRef.current === request) {
         app.extensionManager.toast.add({
           severity: 'error',
           summary: t('projectVideoCombine.refreshFailed'),
@@ -365,7 +366,10 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
         })
       }
     } finally {
-      if (requestId === refreshRequestRef.current) setIsRefreshing(false)
+      if (pendingRefreshRef.current === request) {
+        pendingRefreshRef.current = null
+        setIsRefreshing(false)
+      }
     }
   }, [app, data.auto_combine, data.project_name, onChange, t])
 
@@ -399,7 +403,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
         message: t('projectVideoCombine.deleteClipFileConfirm', { file: file.file_name }),
       })
       if (!confirmed) return
-      ++refreshRequestRef.current
+      pendingRefreshRef.current = null
       setIsRefreshing(false)
       const response = await app.api.fetchApi('/easy-media/project/video', {
         method: 'DELETE',
@@ -505,7 +509,7 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
 
     setIsDeleting(true)
     setIsRefreshing(false)
-    ++refreshRequestRef.current
+    pendingRefreshRef.current = null
     try {
       const response = await app.api.fetchApi(
         `/easy-media/project?project_name=${encodeURIComponent(projectName)}`,
@@ -544,10 +548,13 @@ export function ProjectVideoCombineWidget({ value, onChange, app, node }: Readon
   }, [])
 
   useEffect(() => {
-    const handleSuccess = () => void refreshProject(data.project_name || 'default', false)
+    const handleSuccess = () => {
+      const projectName = pendingRefreshRef.current?.projectName || latestDataRef.current.project_name || 'default'
+      void refreshProject(projectName, false)
+    }
     app.api.addEventListener('execution_success', handleSuccess)
     return () => app.api.removeEventListener('execution_success', handleSuccess)
-  }, [app.api, data.project_name, refreshProject])
+  }, [app.api, refreshProject])
 
   useEffect(() => {
     const handleProjectRefresh = (event: CustomEvent<unknown>) => {

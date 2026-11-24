@@ -153,7 +153,7 @@ def test_overwrite_project_video_keeps_generation_and_updates_h3_av_tail(
     node = nodes.EasySaveVideosToProject
     schema = node.define_schema()
     assert schema.is_output_node is True
-    assert schema.node_id == "easy overwriteProjectVideos"
+    assert schema.node_id == "easy saveProjectVideos"
     assert schema.display_name == "Save Videos to Project"
     assert [port.name for port in schema.inputs] == [
         "video", "latent", "project_name", "segment_start_number", "segment_count", "project_save",
@@ -185,6 +185,32 @@ def test_overwrite_project_video_keeps_generation_and_updates_h3_av_tail(
     ).values == ("demo",)
     assert (project_dir / generation["video"]).read_text() == "second replacement"
     assert context_path.stat().st_mtime_ns == context_mtime
+
+
+@pytest.mark.parametrize("project_save", ["new", "override"])
+def test_save_project_videos_refreshes_combine_after_publishing_batch(
+    existing_video_project, monkeypatch, project_save,
+):
+    nodes, project_video, _, _ = existing_video_project
+    monkeypatch.setattr(
+        project_video, "_stage_replacement_video",
+        lambda video, original, locked_audio, staged: staged.write_text(video),
+    )
+    notifications = []
+
+    def send_sync(event, payload):
+        paths = project_video.load_h3_project_video_paths(payload["project_name"], 1, -1)
+        notifications.append((event, payload, [path.read_text() for path in paths]))
+
+    monkeypatch.setattr(sys.modules["server"].PromptServer.instance, "send_sync", send_sync)
+    nodes.EasySaveVideosToProject.execute(
+        ["first replacement", "second replacement"], ["demo"], [1], [-1], project_save=[project_save],
+    )
+    assert notifications == [(
+        "easy_multitrack_project_refresh",
+        {"project_name": "demo", "phase": "after_save", "segment_index": 0},
+        ["first replacement", "second replacement"],
+    )]
 
 
 @pytest.mark.parametrize("project_save", ["new", "override"])

@@ -1518,7 +1518,7 @@
     },
     "outputs": { "0": { "name": "视频" } }
   },
-  "easy overwriteProjectVideos": {
+  "easy saveProjectVideos": {
     "display_name": "保存视频到项目",
     "description": "为 H3 项目片段保存新版本或覆盖当前版本，沿用原始时长和锁定音频。",
     "inputs": {
