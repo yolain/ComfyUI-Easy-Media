@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import math
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import folder_paths
 import nodes as comfy_nodes
@@ -53,6 +53,9 @@ from ..utils.multitrack import (
     MULTITRACK_RUNTIME_CACHE_KEY,
     multitrack_runtime_cache,
 )
+
+if TYPE_CHECKING:
+    from comfy_api.latest import Input
 
 
 TYPE_FAST_MODEL_LOADER = io.Custom(io_type="FAST_MODEL_LOADER")
@@ -2415,3 +2418,90 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
             InputImpl.VideoFromFile(str(composed_path)),
             h3_project_filename_prefix(safe_name),
         )
+
+
+def _project_video_range_inputs() -> list[io.Input]:
+    return [
+        io.String.Input("project_name", default=""),
+        io.Int.Input("segment_start_number", default=1, min=1, max=0x7FFFFFFF, step=1),
+        io.Int.Input(
+            "segment_count", default=-1, min=-1, max=0x7FFFFFFF, step=1,
+            tooltip="Maximum segment range from the start number. Use -1 for all remaining segments.",
+        ),
+    ]
+
+
+class EasyGetVideosFromProject(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy getVideosFromProject",
+            display_name="Get Videos from Project",
+            category="EasyUse/MultiTrackEditor",
+            description="Output the active H3 project videos in segment order.",
+            inputs=_project_video_range_inputs(),
+            outputs=[io.Video.Output("VIDEO", is_output_list=True)],
+            not_idempotent=True,
+        )
+
+    @classmethod
+    def fingerprint_inputs(cls, **kwargs: Any) -> float:
+        return float("nan")
+
+    @classmethod
+    def execute(cls, project_name: str, segment_start_number: int, segment_count: int) -> io.NodeOutput:
+        from ..utils.h3_project_video import load_h3_project_video_paths
+
+        paths = load_h3_project_video_paths(project_name, segment_start_number, segment_count)
+        return io.NodeOutput([InputImpl.VideoFromFile(str(path)) for path in paths])
+
+
+class EasyOverwriteProjectVideos(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy overwriteProjectVideos",
+            display_name="Overwrite Project Videos",
+            category="EasyUse/MultiTrackEditor",
+            description="Replace active H3 project videos in order using their original timing and locked audio.",
+            inputs=[
+                io.Video.Input("video", tooltip="One replacement video per segment, in project order."),
+                io.Latent.Input(
+                    "latent", optional=True,
+                    tooltip=(
+                        "H3 video or joint audiovisual latent per replacement video. "
+                        "A video latent reuses the saved H3 audio context."
+                    ),
+                ),
+                *_project_video_range_inputs(),
+            ],
+            outputs=[io.String.Output("project_name")],
+            is_input_list=True,
+            is_output_node=True,
+            not_idempotent=True,
+        )
+
+    @classmethod
+    def fingerprint_inputs(cls, **kwargs: Any) -> float:
+        return float("nan")
+
+    @classmethod
+    def execute(
+        cls,
+        video: list[Input.Video],
+        project_name: list[str],
+        segment_start_number: list[int],
+        segment_count: list[int],
+        latent: list[dict[str, Any]] | None = None,
+    ) -> io.NodeOutput:
+        from ..utils.h3_project_video import overwrite_h3_project_videos
+        from .minimax import _notify_multitrack_project_refresh
+
+        if any(len(value) != 1 for value in (project_name, segment_start_number, segment_count)):
+            raise ValueError("Overwrite Project Videos accepts one project and segment range per run")
+        safe_name = safe_h3_project_name(project_name[0])
+        index = overwrite_h3_project_videos(
+            safe_name, segment_start_number[0], segment_count[0], video, latents=latent,
+        )
+        _notify_multitrack_project_refresh(safe_name, "after_save", index)
+        return io.NodeOutput(safe_name)

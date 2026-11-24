@@ -1,4 +1,5 @@
 import importlib.util
+from importlib import import_module
 from io import BytesIO
 import json
 import os
@@ -100,6 +101,150 @@ def _h3_conditioning_cache_dir(tmp_path):
 
 def _h3_video_anchor_latent(value: int | float = 0):
     return {"samples": torch.full((1, 24, 2, 2, 2), float(value))}
+
+
+@pytest.fixture
+def existing_video_project(monkeypatch, tmp_path):
+    node_module = _load_minimax_node(monkeypatch)._project_module
+    monkeypatch.delitem(sys.modules, "easy_media.utils.h3_project_video", raising=False)
+    project_video = import_module("easy_media.utils.h3_project_video")
+    project_dir = project_video.h3_project_directory("demo")
+    project_dir.mkdir(parents=True)
+    for name in ("video_0_1.mp4", "video_0_2.mp4", "video_2_1.mp4"):
+        (project_dir / name).write_text(name)
+    manifest = {
+        "segments": {
+            "2": {"active_generation": 1, "generations": {"1": {"video": "video_2_1.mp4"}}},
+            "0": {
+                "active_generation": 2,
+                "generations": {
+                    "1": {"video": "video_0_1.mp4"},
+                    "2": {"video": "video_0_2.mp4", "continuity_mode": "context"},
+                },
+            },
+        },
+    }
+    (project_dir / "project.json").write_text(json.dumps(manifest))
+    return node_module, project_video, project_dir, manifest
+
+
+def test_get_project_videos_returns_only_active_generations_in_segment_order(existing_video_project):
+    nodes, _, project_dir, _ = existing_video_project
+    node = nodes.EasyGetVideosFromProject
+    assert node.define_schema().outputs[0].kwargs["is_output_list"] is True
+    assert [Path(video.path).name for video in node.execute("demo", 1, -1).values[0]] == [
+        "video_0_2.mp4", "video_2_1.mp4",
+    ]
+    assert [Path(video.path) for video in node.execute("demo", 2, 2).values[0]] == [
+        project_dir / "video_2_1.mp4",
+    ]
+
+
+def test_overwrite_project_video_keeps_generation_and_updates_h3_av_tail(
+    existing_video_project, monkeypatch,
+):
+    nodes, project_video, project_dir, manifest = existing_video_project
+    monkeypatch.setattr(
+        project_video, "_stage_replacement_video",
+        lambda video, original, locked_audio, staged: staged.write_text(video),
+    )
+    video, _ = _h3_context_latent(3, 12)["samples"].unbind()
+    _, audio = _h3_context_latent(8, 12)["samples"].unbind()
+    node = nodes.EasyOverwriteProjectVideos
+    schema = node.define_schema()
+    assert schema.is_output_node is True
+    assert [port.name for port in schema.inputs] == [
+        "video", "latent", "project_name", "segment_start_number", "segment_count",
+    ]
+    assert schema.inputs[1].kwargs["optional"] is True
+    assert node.execute(
+        ["replacement"], ["demo"], [1], [1],
+        latent=[{"samples": _NestedTensor((video, audio))}],
+    ).values == ("demo",)
+
+    updated = json.loads((project_dir / "project.json").read_text())["segments"]
+    assert updated["0"]["active_generation"] == 2
+    assert updated["0"]["generations"]["1"] == manifest["segments"]["0"]["generations"]["1"]
+    assert updated["2"] == manifest["segments"]["2"]
+    generation = updated["0"]["generations"]["2"]
+    assert generation["continuity_mode"] == "context"
+    assert (project_dir / generation["video"]).read_text() == "replacement"
+    context_path = project_dir / generation["context_latent"]
+    video_tail, audio_tail = project_video.load_h3_latent(context_path)["samples"].unbind()
+    assert torch.equal(video_tail, video[:, :, -7:])
+    assert torch.equal(audio_tail, audio[..., -37:])
+
+    context_mtime = context_path.stat().st_mtime_ns
+    assert node.execute(["second replacement"], ["demo"], [1], [1]).values == ("demo",)
+    assert (project_dir / generation["video"]).read_text() == "second replacement"
+    assert context_path.stat().st_mtime_ns == context_mtime
+
+
+def test_overwrite_project_videos_restores_media_if_manifest_update_fails(
+    existing_video_project, monkeypatch,
+):
+    _, project_video, project_dir, manifest = existing_video_project
+    monkeypatch.setattr(
+        project_video, "_stage_replacement_video",
+        lambda video, original, locked_audio, staged: staged.write_text(video),
+    )
+    original_replace = Path.replace
+
+    def fail_manifest_update(source, destination):
+        if destination == project_dir / "project.json":
+            raise OSError("manifest blocked")
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(Path, "replace", fail_manifest_update)
+    with pytest.raises(OSError, match="manifest blocked"):
+        project_video.overwrite_h3_project_videos("demo", 1, -1, ["one", "two"])
+    assert json.loads((project_dir / "project.json").read_text()) == manifest
+    for name in ("video_0_2.mp4", "video_2_1.mp4"):
+        assert (project_dir / name).read_text() == name
+
+
+def test_overwrite_project_video_latent_reuses_saved_audio_context(
+    existing_video_project, monkeypatch,
+):
+    nodes, project_video, project_dir, manifest = existing_video_project
+    generation = manifest["segments"]["0"]["generations"]["2"]
+    generation["context_latent"] = "context_latent_0_2.safetensors"
+    generation["context_latent_low"] = "context_latent_low_0_2.safetensors"
+    for field, value in (("context_latent", 1), ("context_latent_low", 2)):
+        project_video.save_h3_latent(_h3_context_latent(value), project_dir / generation[field])
+    (project_dir / "project.json").write_text(json.dumps(manifest))
+    monkeypatch.setattr(
+        project_video, "_stage_replacement_video",
+        lambda video, original, locked_audio, staged: staged.write_text(video),
+    )
+    video, _ = _h3_context_latent(9, 12)["samples"].unbind()
+    _, saved_audio = _h3_context_latent(1)["samples"].unbind()
+    nodes.EasyOverwriteProjectVideos.execute(
+        ["replacement"], ["demo"], [1], [1], latent=[{"samples": video}],
+    )
+    updated = json.loads((project_dir / "project.json").read_text())["segments"]["0"]["generations"]["2"]
+    video_tail, audio_tail = project_video.load_h3_latent(
+        project_dir / updated["context_latent"],
+    )["samples"].unbind()
+    assert torch.equal(video_tail, video[:, :, -7:])
+    assert torch.equal(audio_tail, saved_audio)
+    assert "context_latent_low" not in updated
+
+
+def test_overwrite_project_rejects_audio_only_and_incomplete_joint_latents(existing_video_project, monkeypatch):
+    _, project_video, project_dir, manifest = existing_video_project
+    monkeypatch.setattr(
+        project_video, "_stage_replacement_video",
+        lambda video, original, locked_audio, staged: staged.write_text(video),
+    )
+    _, audio = _h3_context_latent()["samples"].unbind()
+    for samples, message in ((audio, "H3 video stream"), (_NestedTensor((audio,)), "both video and audio")):
+        with pytest.raises(ValueError, match=message):
+            project_video.overwrite_h3_project_videos(
+                "demo", 1, 1, ["replacement"], latents=[{"samples": samples}],
+            )
+    assert json.loads((project_dir / "project.json").read_text()) == manifest
+    assert (project_dir / "video_0_2.mp4").read_text() == "video_0_2.mp4"
 
 
 class _ProgressBar:
