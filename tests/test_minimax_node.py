@@ -2769,13 +2769,30 @@ def test_multitrack_h3_project_expands_single_task_sampling_pipeline(monkeypatch
     ]
 
 
-def test_multitrack_project_patches_sampler_when_loader_has_preview_vae(monkeypatch):
+@pytest.mark.parametrize("recover_with_kj", [False, True])
+def test_multitrack_project_patches_sampler_when_loader_has_preview_vae(monkeypatch, recover_with_kj):
     module = _load_minimax_node(monkeypatch)
     module.comfy_nodes.NODE_CLASS_MAPPINGS["ImageResizeKJv2"] = _ImageResizeKJWithNvidia
     module.EasyMultiTrackProject.hidden = types.SimpleNamespace(unique_id="42")
     inputs = _h3_project_inputs(sampling_mode=_h3_sampling_mode("dual"))
     preview_vae = object()
-    inputs["model_loader"][0]["preview_vae"] = preview_vae
+    loader = inputs["model_loader"][0]
+    if recover_with_kj:
+        kj_module = types.ModuleType("kj_project_preview_test")
+
+        def load_tiny_vae_decoder(filename, max_res=0):
+            assert filename == "taeh3-multiexit.safetensors"
+            assert max_res == 640
+            return preview_vae
+
+        kj_module.load_tiny_vae_decoder = load_tiny_vae_decoder
+        monkeypatch.setitem(sys.modules, kj_module.__name__, kj_module)
+        module.comfy_nodes.NODE_CLASS_MAPPINGS["ModelPreviewOverrideKJ"] = type(
+            "ModelPreviewOverrideKJ", (), {"__module__": kj_module.__name__}
+        )
+        loader["params"] = {"preview_vae_name": "taeh3-multiexit.safetensors"}
+    else:
+        loader["preview_vae"] = preview_vae
 
     result = module.EasyMultiTrackProject.execute(**inputs)
     preview_samplers = [
