@@ -120,7 +120,7 @@ class EasyMediaExtension(ComfyExtension):
             EasyMultiTrackProject,
             EasyMultiTrackProjectVideoCombine,
             EasyGetVideosFromProject,
-            EasyOverwriteProjectVideos,
+            EasySaveVideosToProject,
             EasyMiniMaxH3ToVideo,
             EasyMinimaxPromptOverride,
             EasyMiniMaxH3ReferenceToVideoBridge,

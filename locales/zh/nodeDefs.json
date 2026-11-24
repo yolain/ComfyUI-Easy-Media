@@ -1519,14 +1519,19 @@
     "outputs": { "0": { "name": "视频" } }
   },
   "easy overwriteProjectVideos": {
-    "display_name": "覆盖项目中视频",
-    "description": "按顺序覆盖 H3 项目当前选用的视频，沿用各片段的原始时长和锁定音频。",
+    "display_name": "保存视频到项目",
+    "description": "为 H3 项目片段保存新版本或覆盖当前版本，沿用原始时长和锁定音频。",
     "inputs": {
       "video": { "name": "视频", "tooltip": "按项目片段顺序连接替换视频，每个片段对应一段视频。" },
       "latent": { "name": "潜空间", "tooltip": "每段替换视频对应的 H3 视频潜空间或音视频联合潜空间。接入视频潜空间时，沿用该片段已保存的音频上下文。" },
       "project_name": { "name": "项目名称" },
       "segment_start_number": { "name": "片段开始编号" },
-      "segment_count": { "name": "片段最大数量", "tooltip": "从开始编号起可覆盖的编号范围，-1 表示处理剩余片段。" }
+      "segment_count": { "name": "片段最大数量", "tooltip": "从开始编号起处理的编号范围，-1 表示处理剩余片段。" },
+      "project_save": {
+        "name": "项目保存方式",
+        "tooltip": "新建会保留已有版本，并选中新版本。覆盖会更新当前选用的版本。",
+        "options": { "new": "新建", "override": "覆盖" }
+      }
     },
     "outputs": { "0": { "name": "项目名称" } }
   },

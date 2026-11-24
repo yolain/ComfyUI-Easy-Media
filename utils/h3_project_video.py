@@ -18,6 +18,7 @@ from .h3_project import (
     _frame_value,
     _load_h3_manifest,
     _project_child_path,
+    choose_h3_generation,
     h3_project_directory,
     load_h3_latent,
     save_h3_latent,
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
     from comfy_api.latest import Input
 
 
-_overwrite_lock = Lock()
+_project_video_write_lock = Lock()
 
 
 def _active_video_generations(
@@ -175,14 +176,19 @@ def _stage_replacement_video(
     temporary_source.unlink(missing_ok=True)
 
 
-def overwrite_h3_project_videos(
+def save_h3_project_videos(
     project_name: str,
     segment_start_number: int,
     segment_count: int,
     videos: list[Input.Video],
+    *,
+    project_save: str = "new",
     latents: list[dict[str, Any]] | None = None,
 ) -> int:
-    """Replace active generations in segment order and publish the batch together."""
+    """Save generations in segment order and publish the batch together."""
+    if project_save not in {"new", "override"}:
+        raise ValueError("project_save must be 'new' or 'override'")
+    create_generation = project_save == "new"
     project_dir = h3_project_directory(project_name)
     manifest_path = project_dir / "project.json"
     if project_dir.is_symlink() or manifest_path.is_symlink():
@@ -213,18 +219,33 @@ def overwrite_h3_project_videos(
         if isinstance(generation.get(field), str) and generation[field]
     )
     now = time.time()
-    with tempfile.TemporaryDirectory(prefix=".overwrite-video-", dir=project_dir) as temporary:
+    with tempfile.TemporaryDirectory(prefix=".save-project-video-", dir=project_dir) as temporary:
         staging = Path(temporary)
         artifacts: dict[Path, Path] = {}
-        for position, (index, key, segment, generation) in enumerate(targets[:len(videos)]):
-            original = _project_child_path(project_dir, generation["video"])
+        for position, (index, key, segment, source_generation) in enumerate(targets[:len(videos)]):
+            original = _project_child_path(project_dir, source_generation["video"])
+            generation = source_generation
+            if create_generation:
+                versions = segment["generations"]
+                key = str(choose_h3_generation(
+                    project_dir, index, override=False,
+                    preserve_generations=(int(version) for version in versions if version.isdecimal()),
+                ))
+                generation = {
+                    field: source_generation[field]
+                    for field in ("continuity_mode", "task_mode", "sampling_pass", "seed")
+                    if field in source_generation
+                }
+                versions[key] = generation
+                segment["active_generation"] = int(key)
             filename = f"video_{index}_{key}.mp4"
             destination = project_dir / filename
             resolved_destination = destination.resolve()
-            if artifact_references[resolved_destination] > int(original == resolved_destination):
+            owns_video = not create_generation and original == resolved_destination
+            if artifact_references[resolved_destination] > int(owns_video):
                 raise ValueError(f"Project video {filename} is shared with another generation")
             if index in locked_indices:
-                audio_name = generation.get("locked_audio")
+                audio_name = source_generation.get("locked_audio")
                 audio_source = project_dir / str(audio_name) if audio_name else original
                 locked_audio = original
                 if audio_name and audio_source.is_file():
@@ -239,10 +260,11 @@ def overwrite_h3_project_videos(
             if latents is not None:
                 latent_filename = f"context_latent_{index}_{key}.safetensors"
                 destination = project_dir / latent_filename
-                previous_filename = generation.get("context_latent")
+                previous_filename = source_generation.get("context_latent")
                 previous_path = (project_dir / previous_filename).resolve() if previous_filename else None
                 resolved_destination = destination.resolve()
-                if artifact_references[resolved_destination] > int(previous_path == resolved_destination):
+                owns_context = not create_generation and previous_path == resolved_destination
+                if artifact_references[resolved_destination] > int(owns_context):
                     raise ValueError(f"Project context {latent_filename} is shared with another generation")
                 context = _replacement_context(project_dir, previous_filename, latents[position])
                 save_h3_latent(context, staging / latent_filename)
@@ -252,16 +274,36 @@ def overwrite_h3_project_videos(
                 # The trimmed replacement context cannot resume an old sampling pass.
                 if generation.get("sampling_pass") == "first":
                     generation["sampling_pass"] = "single"
+            elif create_generation:
+                for field in ("context_latent", "context_latent_low"):
+                    previous_filename = source_generation.get(field)
+                    if not previous_filename:
+                        continue
+                    try:
+                        previous_path = _project_child_path(project_dir, previous_filename)
+                    except FileNotFoundError:
+                        continue
+                    filename = f"{field}_{index}_{key}{previous_path.suffix}"
+                    destination = project_dir / filename
+                    if artifact_references[destination.resolve()]:
+                        raise ValueError(f"Project context {filename} is shared with another generation")
+                    shutil.copyfile(previous_path, staging / filename)
+                    artifacts[destination] = staging / filename
+                    generation[field] = filename
             generation["updated_at"] = segment["updated_at"] = now
 
         manifest["updated_at"] = now
         manifest.pop("last_render", None)
         staged_manifest = staging / "project.json"
         staged_manifest.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-        with _overwrite_lock, ExitStack() as rollback:
+        with _project_video_write_lock, ExitStack() as rollback:
             if json.dumps(_load_h3_manifest(project_name)[1]) != original_manifest:
                 raise RuntimeError("The H3 project changed while the replacement videos were being prepared")
             for destination, staged in artifacts.items():
+                if create_generation:
+                    os.link(staged, destination)
+                    rollback.callback(destination.unlink, missing_ok=True)
+                    continue
                 if destination.is_symlink():
                     raise ValueError(f"Project artifact must not be a symbolic link: {destination.name}")
                 if destination.exists():

@@ -2456,14 +2456,15 @@ class EasyGetVideosFromProject(io.ComfyNode):
         return io.NodeOutput([InputImpl.VideoFromFile(str(path)) for path in paths])
 
 
-class EasyOverwriteProjectVideos(io.ComfyNode):
+class EasySaveVideosToProject(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
+            # Keep the workflow ID so saved workflows resolve the renamed node.
             node_id="easy overwriteProjectVideos",
-            display_name="Overwrite Project Videos",
+            display_name="Save Videos to Project",
             category="EasyUse/MultiTrackEditor",
-            description="Replace active H3 project videos in order using their original timing and locked audio.",
+            description="Save H3 project videos as new versions or overwrite the active versions.",
             inputs=[
                 io.Video.Input("video", tooltip="One replacement video per segment, in project order."),
                 io.Latent.Input(
@@ -2474,6 +2475,10 @@ class EasyOverwriteProjectVideos(io.ComfyNode):
                     ),
                 ),
                 *_project_video_range_inputs(),
+                io.Combo.Input(
+                    "project_save", options=["new", "override"], default="new", optional=True,
+                    tooltip="Save a new version or overwrite the active version of each segment.",
+                ),
             ],
             outputs=[io.String.Output("project_name")],
             is_input_list=True,
@@ -2493,15 +2498,18 @@ class EasyOverwriteProjectVideos(io.ComfyNode):
         segment_start_number: list[int],
         segment_count: list[int],
         latent: list[dict[str, Any]] | None = None,
+        project_save: list[str] | None = None,
     ) -> io.NodeOutput:
-        from ..utils.h3_project_video import overwrite_h3_project_videos
+        from ..utils.h3_project_video import save_h3_project_videos
         from .minimax import _notify_multitrack_project_refresh
 
-        if any(len(value) != 1 for value in (project_name, segment_start_number, segment_count)):
-            raise ValueError("Overwrite Project Videos accepts one project and segment range per run")
+        save_modes = ["new"] if project_save is None else project_save
+        if any(len(value) != 1 for value in (project_name, segment_start_number, segment_count, save_modes)):
+            raise ValueError("Save Videos to Project accepts one project, segment range, and save mode per run")
         safe_name = safe_h3_project_name(project_name[0])
-        index = overwrite_h3_project_videos(
-            safe_name, segment_start_number[0], segment_count[0], video, latents=latent,
+        index = save_h3_project_videos(
+            safe_name, segment_start_number[0], segment_count[0], video,
+            project_save=save_modes[0], latents=latent,
         )
         _notify_multitrack_project_refresh(safe_name, "after_save", index)
         return io.NodeOutput(safe_name)
