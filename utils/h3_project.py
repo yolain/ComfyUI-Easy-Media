@@ -8,6 +8,7 @@ import re
 import shutil
 import tempfile
 import time
+from collections.abc import Iterable
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -558,7 +559,14 @@ def safe_h3_project_name(value: Any) -> str:
     return name
 
 
-def choose_h3_generation(project_dir: Path, segment_index: int, override: bool) -> int:
+def choose_h3_generation(
+    project_dir: Path,
+    segment_index: int,
+    override: bool,
+    *,
+    preserve_generations: Iterable[int] | None = None,
+) -> int:
+    """An explicit set of recorded generations opts into saving without recycling a slot."""
     versions: dict[int, float] = {}
     pattern = re.compile(
         rf"^(?:video|audio|locked_audio|context_latent(?:_low)?|anchor_latent(?:_low)?)_{int(segment_index)}_"
@@ -570,7 +578,9 @@ def choose_h3_generation(project_dir: Path, segment_index: int, override: bool) 
             if match is None:
                 continue
             generation = int(match.group(1))
-            if 1 <= generation <= H3_PROJECT_VERSION_LIMIT:
+            if generation >= 1 and (
+                override or preserve_generations is not None or generation <= H3_PROJECT_VERSION_LIMIT
+            ):
                 try:
                     modified = path.stat().st_mtime
                 except OSError:
@@ -585,6 +595,8 @@ def choose_h3_generation(project_dir: Path, segment_index: int, override: bool) 
             if versions
             else 1
         )
+    if preserve_generations is not None:
+        return max(max(versions, default=0), max(preserve_generations, default=0)) + 1
     for generation in range(1, H3_PROJECT_VERSION_LIMIT + 1):
         if generation not in versions:
             return generation

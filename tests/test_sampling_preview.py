@@ -5,6 +5,7 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
 import torch
 from PIL import Image
 
@@ -43,6 +44,29 @@ def test_preview_frame_count_uses_half_with_one_frame_minimum():
 def test_preview_playback_fps_preserves_source_duration():
     assert sampling_preview.preview_playback_fps(120, 24) == 12
     assert sampling_preview.preview_playback_fps(121, 24) == 24 * 60 / 121
+
+
+@pytest.mark.parametrize("supports_max_res", [False, True])
+def test_load_kj_tiny_preview_vae_supports_both_loader_signatures(monkeypatch, supports_max_res):
+    calls = []
+    decoder = object()
+
+    def legacy_loader(filename):
+        calls.append((filename, None))
+        return decoder
+
+    def current_loader(filename, device=None, dtype=None, max_res=0):
+        calls.append((filename, max_res))
+        return decoder
+
+    module = types.ModuleType("kj_preview_test")
+    module.load_tiny_vae_decoder = current_loader if supports_max_res else legacy_loader
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    node = type("ModelPreviewOverrideKJ", (), {"__module__": module.__name__})
+
+    assert sampling_preview.load_kj_tiny_preview_vae("taeh3.safetensors", node) is decoder
+    expected_resolution = sampling_preview.SAMPLING_PREVIEW_MAX_RESOLUTION if supports_max_res else None
+    assert calls == [("taeh3.safetensors", expected_resolution)]
 
 
 def test_async_preview_encoder_replaces_oldest_pending_work_when_full():
@@ -320,9 +344,12 @@ def test_preview_callback_submits_encoding_without_waiting(monkeypatch):
     assert submitted[0][2]["display_node_id"] == "project-42"
 
 
-def test_preview_callback_unpacks_packed_h3_latent_before_decoding(monkeypatch):
+def test_preview_callback_queues_tiny_vae_pixels_for_resizing_and_encoding(monkeypatch):
     _install_preview_transport(monkeypatch)
     submitted = []
+    sent = []
+    monkeypatch.setattr(sys.modules["server"].PromptServer.instance, "send_sync", lambda *args: sent.append(args), raising=False)
+    monkeypatch.setattr(sampling_preview, "SAMPLING_PREVIEW_MAX_RESOLUTION", 12)
     video = torch.zeros((1, 24, 3, 2, 6))
     audio = torch.zeros((1, 8, 4, 2))
     packed = torch.zeros((1, 1, video.numel() + audio.numel()))
@@ -346,38 +373,50 @@ def test_preview_callback_unpacks_packed_h3_latent_before_decoding(monkeypatch):
         class Inner:
             latent_shapes = [tuple(video.shape), tuple(audio.shape)]
 
-            @staticmethod
-            def process_latent_out(latent):
-                assert latent is video
-                return latent
-
         model = Inner()
 
     class PreviewVae:
-        @staticmethod
-        def decode_video(latent, frame_indices=None):
-            assert latent is video
-            return torch.zeros((3, 2, 6, 3))
+        max_res = 24
 
+        def decode_video(self, latent, frame_indices=None):
+            assert latent is video
+            assert self.max_res == 12
+            assert frame_indices == [0, 1, 2]
+            return torch.stack([torch.full((3, 12, 24), value, dtype=torch.uint8) for value in (16, 80, 144)])
+
+    decoder = PreviewVae()
     callback = sampling_preview.create_preview_callback(
         Model(),
-        PreviewVae(),
+        decoder,
         node_id="42",
-        requested_frames=3,
+        requested_frames=5,
         fps=12,
         segment_index=0,
         sampling_pass="first",
     )
     callback(0, packed, None, 8)
 
+    assert decoder.max_res == 24
     assert len(submitted) == 1
+    send, (pixels,), kwargs = submitted[0]
+    assert pixels.shape == (3, 12, 24, 3)
+    assert pixels.dtype == torch.uint8
+    assert sent == []
+
+    send(pixels, **kwargs)
+
+    _, payload, _ = sent[0]
+    assert payload["frame_count"] == 5
+    with Image.open(io.BytesIO(base64.b64decode(payload["images"][1]))) as frame:
+        assert frame.size == (12, 6)
+        assert frame.getpixel((0, 0)) == (48, 48, 48)
 
 
 def test_preview_callback_isolates_optional_preview_errors(monkeypatch):
     _install_preview_transport(monkeypatch)
     monkeypatch.setattr(
         sampling_preview,
-        "decode_preview_frames",
+        "_decode_preview_pixels",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("encode failed")),
     )
 

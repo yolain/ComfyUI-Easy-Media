@@ -7,7 +7,6 @@ const NODE_NAME = 'easy multitrackProject'
 const WIDGET_NAME = 'easy-media-sampling-preview'
 const COLLAPSED_HEIGHT = 8
 const PREVIEW_HEIGHT = 280
-const PREVIEW_HEIGHT_DELTA = PREVIEW_HEIGHT - COLLAPSED_HEIGHT
 
 interface PreviewWidget {
   computedHeight?: number
@@ -24,8 +23,8 @@ interface PreviewNode {
     container: HTMLDivElement,
     options: Record<string, unknown>,
   ) => PreviewWidget
+  computeSize: () => [number, number]
   setSize?: (size: [number, number]) => void
-  onResize?: (size: [number, number] | undefined) => void
   onNodeCreated?: (...args: unknown[]) => void
   onExecutionStart?: (...args: unknown[]) => void
   onRemoved?: (...args: unknown[]) => void
@@ -39,7 +38,6 @@ interface PreviewNodeType {
 
 function installWidget(node: PreviewNode, app: ComfyApp) {
   let visible = false
-  let previewHeightApplied = false
   let executionRevision = 0
   let root: Root | null = null
   let hostObserver: MutationObserver | null = null
@@ -94,15 +92,10 @@ function installWidget(node: PreviewNode, app: ComfyApp) {
     container.style.pointerEvents = visible ? 'auto' : 'none'
     delete widget.computedHeight
     if (node.size && node.setSize) {
-      if (visible && !previewHeightApplied) {
-        node.setSize([node.size[0], node.size[1] + PREVIEW_HEIGHT_DELTA])
-        previewHeightApplied = true
-      } else if (!visible && previewHeightApplied) {
-        node.setSize([node.size[0], Math.max(COLLAPSED_HEIGHT, node.size[1] - PREVIEW_HEIGHT_DELTA)])
-        previewHeightApplied = false
-      }
+      // The saved or measured height can already include the preview.
+      const [, height] = node.computeSize()
+      if (height !== node.size[1]) node.setSize([node.size[0], height])
     }
-    node.onResize?.(node.size)
     node.graph?.setDirtyCanvas?.(true, true)
     globalThis.requestAnimationFrame?.(syncHostBounds)
   }

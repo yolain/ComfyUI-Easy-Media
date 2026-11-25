@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import math
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import folder_paths
 import nodes as comfy_nodes
@@ -53,6 +53,9 @@ from ..utils.multitrack import (
     MULTITRACK_RUNTIME_CACHE_KEY,
     multitrack_runtime_cache,
 )
+
+if TYPE_CHECKING:
+    from comfy_api.latest import Input
 
 
 TYPE_FAST_MODEL_LOADER = io.Custom(io_type="FAST_MODEL_LOADER")
@@ -115,6 +118,20 @@ def _require_minimax_h3_model(model: Any) -> None:
 def _h3_node_mapping(node_id: str) -> Any | None:
     mappings = getattr(comfy_nodes, "NODE_CLASS_MAPPINGS", {})
     return mappings.get(node_id) if isinstance(mappings, dict) else None
+
+
+def _h3_project_preview_vae(loader: dict[str, Any]) -> Any:
+    preview_vae = loader.get("preview_vae")
+    if preview_vae is not None:
+        return preview_vae
+    params = loader.get("params")
+    filename = params.get("preview_vae_name") if isinstance(params, dict) else None
+    if not isinstance(filename, str) or filename.lower() in ("", "none"):
+        return None
+
+    from ..utils.sampling_preview import load_kj_tiny_preview_vae
+
+    return load_kj_tiny_preview_vae(filename, _h3_node_mapping("ModelPreviewOverrideKJ"))
 
 
 def _h3_required_node_defaults(node_id: str) -> dict[str, Any]:
@@ -814,7 +831,7 @@ class EasyH3ProjectStaticPrepare(io.ComfyNode):
             if not isinstance(loader, dict):
                 raise TypeError("model_loader must contain a FAST_MODEL_LOADER dictionary")
             model, clip, vae = loader.get("model"), loader.get("clip"), loader.get("vae")
-            audio_vae, preview_vae = loader.get("audio_vae"), loader.get("preview_vae")
+            audio_vae, preview_vae = loader.get("audio_vae"), _h3_project_preview_vae(loader)
             missing = [name for name, value in (("model", model), ("clip", clip),
                        ("vae", vae), ("audio_vae", audio_vae)) if value is None]
             if missing:
@@ -1082,12 +1099,16 @@ class EasyMultiTrackProject(io.ComfyNode):
         clip = None if uses_linked_prepare else selected_model_loader.get("clip")
         vae = None if uses_linked_prepare else selected_model_loader.get("vae")
         audio_vae = None if uses_linked_prepare else selected_model_loader.get("audio_vae")
-        preview_vae = None if uses_linked_prepare else selected_model_loader.get("preview_vae")
         preview_node_id = str(
             _first_input(
                 getattr(getattr(cls, "hidden", None), "unique_id", None),
                 "",
             )
+        )
+        preview_vae = (
+            _h3_project_preview_vae(selected_model_loader)
+            if not uses_linked_prepare and preview_node_id
+            else None
         )
         has_sampling_preview = bool(preview_node_id) and (uses_linked_prepare or preview_vae is not None)
         missing_components = [] if uses_linked_prepare else [
@@ -2415,3 +2436,104 @@ class EasyMultiTrackProjectVideoCombine(io.ComfyNode):
             InputImpl.VideoFromFile(str(composed_path)),
             h3_project_filename_prefix(safe_name),
         )
+
+
+def _project_video_range_inputs() -> list[io.Input]:
+    return [
+        io.String.Input("project_name", default=""),
+        io.Int.Input("segment_start_number", default=1, min=1, max=0x7FFFFFFF, step=1),
+        io.Int.Input(
+            "segment_count", default=-1, min=-1, max=0x7FFFFFFF, step=1,
+            tooltip="Maximum segment range from the start number. Use -1 for all remaining segments.",
+        ),
+    ]
+
+
+class EasyGetVideosFromProject(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy getVideosFromProject",
+            display_name="Get Videos from Project",
+            category="EasyUse/MultiTrackEditor",
+            description="Output the active H3 project videos in segment order and pass through the project and segment range.",
+            inputs=_project_video_range_inputs(),
+            outputs=[
+                io.Video.Output("VIDEO", is_output_list=True),
+                io.String.Output("project_name"),
+                io.Int.Output("segment_start_number"),
+                io.Int.Output("segment_count"),
+            ],
+            not_idempotent=True,
+        )
+
+    @classmethod
+    def fingerprint_inputs(cls, **kwargs: Any) -> float:
+        return float("nan")
+
+    @classmethod
+    def execute(cls, project_name: str, segment_start_number: int, segment_count: int) -> io.NodeOutput:
+        from ..utils.h3_project_video import load_h3_project_video_paths
+
+        paths = load_h3_project_video_paths(project_name, segment_start_number, segment_count)
+        videos = [InputImpl.VideoFromFile(str(path)) for path in paths]
+        return io.NodeOutput(videos, project_name, segment_start_number, segment_count)
+
+
+class EasySaveVideosToProject(io.ComfyNode):
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="easy saveProjectVideos",
+            display_name="Save Videos to Project",
+            category="EasyUse/MultiTrackEditor",
+            description="Save H3 project videos as new versions or overwrite the active versions.",
+            inputs=[
+                io.Video.Input("video", tooltip="One replacement video per segment, in project order."),
+                io.Latent.Input(
+                    "latent", optional=True,
+                    tooltip=(
+                        "H3 video or joint audiovisual latent per replacement video. "
+                        "A video latent reuses the saved H3 audio context."
+                    ),
+                ),
+                *_project_video_range_inputs(),
+                io.Combo.Input(
+                    "project_save", options=["new", "override"], default="new", optional=True,
+                    tooltip="Save a new version or overwrite the active version of each segment.",
+                ),
+            ],
+            outputs=[io.String.Output("project_name")],
+            is_input_list=True,
+            is_output_node=True,
+            not_idempotent=True,
+        )
+
+    @classmethod
+    def fingerprint_inputs(cls, **kwargs: Any) -> float:
+        return float("nan")
+
+    @classmethod
+    def execute(
+        cls,
+        video: list[Input.Video],
+        project_name: list[str],
+        segment_start_number: list[int],
+        segment_count: list[int],
+        latent: list[dict[str, Any]] | None = None,
+        project_save: list[str] | None = None,
+    ) -> io.NodeOutput:
+        from ..utils.h3_project_video import save_h3_project_videos
+        from .minimax import _notify_multitrack_project_refresh
+
+        save_modes = ["new"] if project_save is None else project_save
+        if any(len(value) != 1 for value in (project_name, segment_start_number, segment_count, save_modes)):
+            raise ValueError("Save Videos to Project accepts one project, segment range, and save mode per run")
+        safe_name = safe_h3_project_name(project_name[0])
+        index = save_h3_project_videos(
+            safe_name, segment_start_number[0], segment_count[0], video,
+            project_save=save_modes[0], latents=latent,
+        )
+        # The combine widget reloads the whole project once the batch is published.
+        _notify_multitrack_project_refresh(safe_name, "after_save", index)
+        return io.NodeOutput(safe_name)

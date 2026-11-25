@@ -339,6 +339,8 @@ def render_single_video_segment_with_ffmpeg(
     *,
     audio_volume_db: float = 0.0,
     audio_muted: bool = False,
+    audio_source: str | None = None,
+    destination: Path | None = None,
 ) -> str | None:
     """Render one task-length clip without a full-timeline overlay graph."""
     ffmpeg = get_ffmpeg_path("ffmpeg")
@@ -351,18 +353,23 @@ def render_single_video_segment_with_ffmpeg(
 
     duration = frame_count / frame_rate
     source_start = max(0, source_start_frame) / frame_rate
-    has_audio = ffprobe_info(source).get("has_audio") is True
-    output_fd, output_path = tempfile.mkstemp(
-        suffix=".mp4", dir=folder_paths.get_temp_directory(),
-    )
-    os.close(output_fd)
+    has_audio = ffprobe_info(audio_source or source).get("has_audio") is True
+    if destination is None:
+        output_fd, output_path = tempfile.mkstemp(
+            suffix=".mp4", dir=folder_paths.get_temp_directory(),
+        )
+        os.close(output_fd)
+    else:
+        output_path = str(destination)
     command = [
         ffmpeg, "-y", "-nostdin", "-loglevel", "error",
         "-ss", str(source_start), "-t", str(duration), "-i", source,
-        "-map", "0:v:0",
     ]
+    if audio_source and has_audio:
+        command.extend(["-i", audio_source])
+    command.extend(["-map", "0:v:0"])
     if has_audio:
-        command.extend(["-map", "0:a:0"])
+        command.extend(["-map", "1:a:0" if audio_source else "0:a:0"])
     command.extend([
         "-vf",
         f"fps=fps={frame_rate}:start_time=0,{resize_filter},"

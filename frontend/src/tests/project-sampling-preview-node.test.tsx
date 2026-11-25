@@ -41,13 +41,19 @@ describe('installProjectSamplingPreview', () => {
     const host = document.createElement('div')
     document.body.append(host)
     let widget: TestWidget | undefined
+    const widgetHeight = 392
     const node = {
       id: 42,
-      size: [640, 400] as [number, number],
+      size: [640, widgetHeight + 8] as [number, number],
       graph: { setDirtyCanvas: vi.fn() },
       onResize: vi.fn(),
-      setSize: vi.fn(function setSize(this: { size: [number, number] }, size: [number, number]) {
+      computeSize: (): [number, number] => [320, widgetHeight + (widget?.options.getMinHeight() ?? 0)],
+      setSize: vi.fn(function setSize(
+        this: { size: [number, number]; onResize: (size: [number, number]) => void },
+        size: [number, number],
+      ) {
         this.size = size
+        this.onResize(size)
       }),
       addDOMWidget: vi.fn((
         _name: string,
@@ -104,9 +110,27 @@ describe('installProjectSamplingPreview', () => {
     expect(host.style.pointerEvents).toBe('auto')
     expect(node.setSize).toHaveBeenCalledWith([640, 672])
     expect(node.onResize).toHaveBeenCalledWith([640, 672])
+    expect(node.onResize).toHaveBeenCalledTimes(1)
     expect(node.graph.setDirtyCanvas).toHaveBeenCalledWith(true, true)
 
     act(() => previewState.props?.onVisibilityChange?.(false))
     expect(node.setSize).toHaveBeenLastCalledWith([640, 400])
+  })
+
+  it('fits the current widget heights when a workflow already has extra room for the preview', () => {
+    const { NodeType, node } = createNodeType()
+    installProjectSamplingPreview(NodeType, { name: 'easy multitrackProject' }, app)
+    const instance = new NodeType() as typeof node & { onNodeCreated: () => void }
+    instance.size = [720, 944]
+    act(() => instance.onNodeCreated())
+
+    act(() => previewState.props?.onVisibilityChange?.(true))
+    expect(instance.size).toEqual([720, 672])
+
+    act(() => previewState.props?.onVisibilityChange?.(false))
+    expect(instance.size).toEqual([720, 400])
+
+    act(() => previewState.props?.onVisibilityChange?.(true))
+    expect(instance.size).toEqual([720, 672])
   })
 })
